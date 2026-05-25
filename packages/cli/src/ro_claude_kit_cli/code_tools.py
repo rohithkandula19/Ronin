@@ -16,10 +16,24 @@ from pathlib import Path
 from ro_claude_kit_agent_patterns import Tool
 
 # Tools that must be approved before they run (write + execute).
-SENSITIVE_TOOLS = {"write_file", "run_command"}
+SENSITIVE_TOOLS = {"write_file", "edit_file", "run_command"}
 
 MAX_READ_BYTES = 100_000
 MAX_LIST_ENTRIES = 500
+
+
+def unified_diff(path: str, before: str, after: str) -> str:
+    """Render a unified diff between two versions of a file (for approval preview)."""
+    import difflib
+
+    lines = list(difflib.unified_diff(
+        before.splitlines(keepends=True),
+        after.splitlines(keepends=True),
+        fromfile=f"a/{path}",
+        tofile=f"b/{path}",
+        n=3,
+    ))
+    return "".join(lines) if lines else "(no change)"
 
 
 def _resolve(root: Path, rel: str) -> Path:
@@ -88,6 +102,26 @@ def build_code_tools(root: Path | str = ".") -> list[Tool]:
         target.write_text(content, encoding="utf-8")
         return f"wrote {len(content)} chars to {path}"
 
+    # ---- edit_file (SENSITIVE) — Claude Code's core primitive: surgical replace ----
+    def edit_file(path: str, old_string: str, new_string: str) -> str:
+        target = _resolve(root_path, path)
+        if not target.is_file():
+            return f"ERROR: {path} does not exist (use write_file to create it)"
+        content = target.read_text(encoding="utf-8")
+        count = content.count(old_string)
+        if count == 0:
+            return (
+                f"ERROR: old_string not found in {path}. Read the file again and match "
+                "the exact text including whitespace."
+            )
+        if count > 1:
+            return (
+                f"ERROR: old_string appears {count} times in {path} — it must be unique. "
+                "Include more surrounding context to disambiguate."
+            )
+        target.write_text(content.replace(old_string, new_string), encoding="utf-8")
+        return f"edited {path}: replaced 1 occurrence ({len(old_string)}→{len(new_string)} chars)"
+
     # ---- run_command (SENSITIVE) ----
     def run_command(command: str) -> str:
         proc = subprocess.run(
@@ -115,9 +149,18 @@ def build_code_tools(root: Path | str = ".") -> list[Tool]:
         _tool("search_files", "Grep for a literal string across files; returns file/line/text hits.",
               {"type": "object", "properties": {"query": {"type": "string"}, "directory": {"type": "string"}}, "required": ["query"]},
               search_files),
-        _tool("write_file", "Write (or overwrite) a file. SENSITIVE — gated by approval.",
+        _tool("write_file", "Create a file or fully overwrite it. SENSITIVE — gated by approval. "
+              "Prefer edit_file for changes to existing files.",
               {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]},
               write_file),
+        _tool("edit_file", "Surgically replace an exact, unique string in an existing file (Claude-Code style). "
+              "old_string must match exactly (incl. whitespace) and appear exactly once. SENSITIVE — gated by approval.",
+              {"type": "object", "properties": {
+                  "path": {"type": "string"},
+                  "old_string": {"type": "string", "description": "Exact text to find — must be unique in the file."},
+                  "new_string": {"type": "string", "description": "Replacement text."},
+              }, "required": ["path", "old_string", "new_string"]},
+              edit_file),
         _tool("run_command", "Run a shell command in the project root. SENSITIVE — gated by approval.",
               {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]},
               run_command),

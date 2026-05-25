@@ -70,7 +70,46 @@ def test_path_traversal_refused(tmp_path: Path) -> None:
 
 
 def test_sensitive_set() -> None:
-    assert SENSITIVE_TOOLS == {"write_file", "run_command"}
+    assert SENSITIVE_TOOLS == {"write_file", "edit_file", "run_command"}
+
+
+# ---------- edit_file (surgical replace, Claude-Code primitive) ----------
+
+def test_edit_file_replaces_unique_string(tmp_path: Path) -> None:
+    (tmp_path / "m.py").write_text("def add(a, b):\n    return a - b\n", encoding="utf-8")
+    tools = {t.name: t for t in build_code_tools(tmp_path)}
+    msg = tools["edit_file"].handler(path="m.py", old_string="return a - b", new_string="return a + b")
+    assert "edited" in msg
+    assert (tmp_path / "m.py").read_text() == "def add(a, b):\n    return a + b\n"
+
+
+def test_edit_file_missing_string_errors(tmp_path: Path) -> None:
+    (tmp_path / "m.py").write_text("x = 1\n", encoding="utf-8")
+    tools = {t.name: t for t in build_code_tools(tmp_path)}
+    msg = tools["edit_file"].handler(path="m.py", old_string="nope", new_string="y")
+    assert "not found" in msg
+    assert (tmp_path / "m.py").read_text() == "x = 1\n"  # unchanged
+
+
+def test_edit_file_ambiguous_string_errors(tmp_path: Path) -> None:
+    (tmp_path / "m.py").write_text("x = 1\nx = 1\n", encoding="utf-8")
+    tools = {t.name: t for t in build_code_tools(tmp_path)}
+    msg = tools["edit_file"].handler(path="m.py", old_string="x = 1", new_string="x = 2")
+    assert "unique" in msg or "appears 2 times" in msg
+    assert (tmp_path / "m.py").read_text() == "x = 1\nx = 1\n"  # unchanged
+
+
+def test_edit_file_on_missing_file(tmp_path: Path) -> None:
+    tools = {t.name: t for t in build_code_tools(tmp_path)}
+    msg = tools["edit_file"].handler(path="ghost.py", old_string="a", new_string="b")
+    assert "does not exist" in msg
+
+
+def test_unified_diff_shows_changes() -> None:
+    from ro_claude_kit_cli.code_tools import unified_diff
+    diff = unified_diff("m.py", "return a - b\n", "return a + b\n")
+    assert "-return a - b" in diff
+    assert "+return a + b" in diff
 
 
 # ---------- run_code_agent ----------
