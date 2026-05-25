@@ -1,19 +1,23 @@
-# RO-Claude-kit
+# RO-Claude-kit — `ro`
 
-> **The Monday-morning founder briefing as a CLI.** One command. Revenue, churn, payment failures, top engineering issues — pulled live from Stripe + Linear + Slack + Notion + Postgres in 10 seconds. Plus ad-hoc questions in plain English.
+> **A Claude agent CLI, three ways.** A Monday-morning founder **briefing** (revenue, churn, failed payments, urgent issues), an autonomous **agent** for ad-hoc data questions, and a **coding agent** (Claude-Code shaped) that reads, edits, and runs your code.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-v0.2.0-blue)](CHANGELOG.md)
-[![Tests](https://img.shields.io/badge/tests-256%20passing-green)](https://github.com/rohithkandula19/RO-Claude-kit/actions)
+[![Tests](https://img.shields.io/badge/tests-347%20passing-green)](https://github.com/rohithkandula19/RO-Claude-kit/actions)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Providers](https://img.shields.io/badge/providers-Claude%20·%20Ollama%20·%20OpenAI%20·%20Together%20·%20Groq%20·%20Fireworks-d4a373)](#-supported-providers)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 ```bash
 $ curl -sSL https://raw.githubusercontent.com/rohithkandula19/RO-Claude-kit/main/install.sh | bash
-$ csk init --demo
-$ csk briefing
+$ ro init --demo
+$ ro briefing                          # the founder briefing
+$ ro agent "why did revenue drop?"     # autonomous data agent
+$ ro code "fix the failing test"       # coding agent
 ```
+
+> The binary is **`ro`**. `csk` still works as a back-compat alias.
 
 ```markdown
 # Founder briefing — 2026-05-11

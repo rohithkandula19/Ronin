@@ -33,8 +33,8 @@ from .saved_queries import QueryStore, default_path as queries_path
 from .tools import build_tools
 
 app = typer.Typer(
-    name="csk",
-    help="Ask Claude questions about your Stripe / Linear / Slack / Notion / Postgres data.",
+    name="ro",
+    help="ro — a Claude agent CLI. Ops briefings, autonomous data questions, and a coding agent.",
     no_args_is_help=True,
     add_completion=False,
 )
@@ -817,7 +817,7 @@ def code(
 @app.command()
 def version() -> None:
     """Print the csk version."""
-    console.print(f"csk {__version__}")
+    console.print(f"ro {__version__}")
 
 
 def _print_result(result: AgentResultRich, *, raw: bool) -> None:

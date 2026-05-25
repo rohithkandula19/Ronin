@@ -19,7 +19,8 @@ dependencies = [
 ]
 
 [project.scripts]
-csk = "ro_claude_kit_cli.main:app"
+ro = "ro_claude_kit_cli.main:app"
+csk = "ro_claude_kit_cli.main:app"  # back-compat alias; prefer `ro`
 
 [project.optional-dependencies]
 postgres = ["psycopg2-binary>=2.9"]
