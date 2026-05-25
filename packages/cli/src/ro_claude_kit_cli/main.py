@@ -767,6 +767,51 @@ def agent(
         sys.stdout.write(result.output + "\n")
 
 
+# ---------- code ----------
+
+@app.command()
+def code(
+    task: list[str] = typer.Argument(..., help="The coding task. Quote multi-word tasks."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory the agent works in."),
+    yolo: bool = typer.Option(False, "--yolo", help="Auto-approve writes + commands (trusted sandboxes only)."),
+    max_steps: int = typer.Option(25, "--max-steps", help="Iteration cap."),
+) -> None:
+    """Coding agent (Claude Code / Cline shaped): reads files, edits code, runs commands.
+
+    Every write and shell command is gated behind your y/N approval by default;
+    read operations run freely. --yolo auto-approves everything.
+    """
+    config = load_config()
+    from .agent_mode import has_real_key
+    from .code_mode import run_code_agent
+
+    if not has_real_key(config):
+        console.print(
+            f"[red]✗[/red] Code mode needs a real LLM. Set credentials for provider "
+            f"[bold]{config.provider}[/bold] (e.g. [bold]export ANTHROPIC_API_KEY=...[/bold])."
+        )
+        raise typer.Exit(2)
+
+    text = " ".join(task)
+    console.print(Panel.fit(
+        f"[bold]Task:[/bold] {text}\n[dim]root: {root.resolve()} · "
+        f"{'YOLO (auto-approve)' if yolo else 'writes + commands need approval'}[/dim]",
+        border_style="cyan", title="csk code",
+    ))
+
+    result = run_code_agent(config, text, root=root, console=console, yolo=yolo, max_iterations=max_steps)
+
+    console.print()
+    if result.blocked:
+        console.print(f"[red]✗[/red] {result.output}")
+        raise typer.Exit(2)
+    console.print(Panel(result.output or "[dim](no summary)[/dim]", title="Done", border_style="green", padding=(1, 2)))
+    meta = f"iterations: {result.iterations}"
+    if result.usage:
+        meta += f" · in: {result.usage.get('input_tokens', 0)} · out: {result.usage.get('output_tokens', 0)}"
+    console.print(f"[dim]{meta}[/dim]")
+
+
 # ---------- version ----------
 
 @app.command()
