@@ -15,7 +15,7 @@ runner = CliRunner()
 def test_version() -> None:
     result = runner.invoke(app, ["version"])
     assert result.exit_code == 0
-    assert "csk" in result.stdout
+    assert "ro" in result.stdout
 
 
 def test_help_lists_subcommands() -> None:
