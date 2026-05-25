@@ -15,7 +15,7 @@ runner = CliRunner()
 def test_version() -> None:
     result = runner.invoke(app, ["version"])
     assert result.exit_code == 0
-    assert "ro" in result.stdout
+    assert "ronin" in result.stdout
 
 
 def test_help_lists_subcommands() -> None:
@@ -62,7 +62,7 @@ def test_ask_without_auth_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 
     result = runner.invoke(app, ["ask", "anything"])
     assert result.exit_code == 2
-    assert "ro init" in result.stdout
+    assert "ronin init" in result.stdout
 
 
 def test_ask_in_demo_mode_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

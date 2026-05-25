@@ -1,6 +1,6 @@
-# RO-Claude-kit — `ro`
+# RO-Claude-kit — `ronin`
 
-> **A Claude agent CLI, three ways.** A Monday-morning founder **briefing** (revenue, churn, failed payments, urgent issues), an autonomous **agent** for ad-hoc data questions, and a **coding agent** (Claude-Code shaped) that reads, edits, and runs your code.
+> **A masterless Claude agent CLI, three ways.** A Monday-morning founder **briefing** (revenue, churn, failed payments, urgent issues), an autonomous **agent** for ad-hoc data questions, and a **coding agent** (Claude-Code shaped) that reads, edits, and runs your code.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-v0.2.0-blue)](CHANGELOG.md)
@@ -11,13 +11,13 @@
 
 ```bash
 $ curl -sSL https://raw.githubusercontent.com/rohithkandula19/RO-Claude-kit/main/install.sh | bash
-$ ro init --demo
-$ ro briefing                          # the founder briefing
-$ ro agent "why did revenue drop?"     # autonomous data agent
-$ ro code "fix the failing test"       # coding agent
+$ ronin init --demo
+$ ronin briefing                          # the founder briefing
+$ ronin agent "why did revenue drop?"     # autonomous data agent
+$ ronin code "fix the failing test"       # coding agent
 ```
 
-> The binary is **`ro`**. `csk` still works as a back-compat alias.
+> The binary is **`ronin`**. `ro` and `csk` also work as aliases.
 
 ```markdown
 # Founder briefing — 2026-05-11
