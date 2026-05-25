@@ -724,6 +724,49 @@ def briefing(
     console.print(Markdown(md))
 
 
+# ---------- agent ----------
+
+@app.command()
+def agent(
+    goal: list[str] = typer.Argument(..., help="The goal for the agent to pursue. Quote multi-word goals."),
+    confirm: bool = typer.Option(False, "--confirm", help="Pause for y/N approval before each tool call (Cline-style)."),
+    max_steps: int = typer.Option(15, "--max-steps", help="Iteration cap for the autonomous loop."),
+    raw: bool = typer.Option(False, "--raw", help="Plain output."),
+) -> None:
+    """Autonomous multi-step agent: give it a goal, it chains tool calls until done.
+
+    Unlike `csk ask` (one-shot) and `csk chat` (turn-by-turn), `agent` runs an
+    autonomous loop, narrating each step live. With --confirm it pauses for your
+    approval before every tool call.
+    """
+    config = load_config()
+    from .agent_mode import has_real_key, run_agent
+
+    if not has_real_key(config):
+        console.print(
+            f"[red]✗[/red] Agent mode needs a real LLM — the offline demo brain can't reason multi-step. "
+            f"Set credentials for provider [bold]{config.provider}[/bold] (e.g. [bold]export ANTHROPIC_API_KEY=...[/bold])."
+        )
+        raise typer.Exit(2)
+
+    text = " ".join(goal)
+    console.print(Panel.fit(f"[bold]Goal:[/bold] {text}", border_style="cyan", title="csk agent"))
+
+    result = run_agent(config, text, console=console, confirm=confirm, max_iterations=max_steps)
+
+    console.print()
+    if result.blocked:
+        console.print(f"[red]✗[/red] {result.output}")
+        raise typer.Exit(2)
+    console.print(Panel(result.output or "[dim](no answer)[/dim]", title="Answer", border_style="green", padding=(1, 2)))
+    meta = f"iterations: {result.iterations}"
+    if result.usage:
+        meta += f" · in: {result.usage.get('input_tokens', 0)} · out: {result.usage.get('output_tokens', 0)}"
+    console.print(f"[dim]{meta}[/dim]")
+    if raw:
+        sys.stdout.write(result.output + "\n")
+
+
 # ---------- version ----------
 
 @app.command()

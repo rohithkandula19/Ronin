@@ -11,5 +11,10 @@
   "scripts": {
     "lint": "echo 'no linter wired yet'",
     "test": "echo 'no tests yet'"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "unrs-resolver"
+    ]
   }
 }
