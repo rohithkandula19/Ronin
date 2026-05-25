@@ -135,6 +135,10 @@ def run_code_agent(
         tools=tools,
         provider=build_provider(config),
         max_iterations=max_iterations,
+        # Long coding sessions read many files; compact old file/command output
+        # so the context window survives a 25-step task.
+        compact_after_tokens=120_000,
+        compact_keep_recent=6,
     )
 
     on_step = _narrate(console) if console is not None else None

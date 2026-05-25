@@ -34,6 +34,12 @@ class ReActAgent(BaseModel):
     max_iterations: int = 10
     max_tokens: int = 4096
 
+    # Context compaction: when the running message history exceeds this estimated
+    # token budget, older tool-result payloads are truncated in place so long
+    # sessions don't blow the context window. None disables it.
+    compact_after_tokens: int | None = None
+    compact_keep_recent: int = 6
+
     # Backward-compat shortcuts (used only if provider is not supplied):
     model: str | None = None
     api_key: str | None = None
@@ -73,6 +79,8 @@ class ReActAgent(BaseModel):
         usage = {"input_tokens": 0, "output_tokens": 0}
 
         for i in range(self.max_iterations):
+            if self.compact_after_tokens is not None:
+                self._maybe_compact(messages, emit)
             response = self.provider.complete(
                 system=self.system,
                 messages=messages,
@@ -151,3 +159,32 @@ class ReActAgent(BaseModel):
             error=f"hit max_iterations={self.max_iterations}",
             usage=usage,
         )
+
+    def _maybe_compact(self, messages: list[Message], emit) -> None:
+        """Shrink old tool-result payloads when the history grows too large.
+
+        Truncates the *content* of old ``tool`` messages in place rather than
+        removing messages — this preserves the assistant↔tool_call_id pairing
+        the API requires (no orphaned tool results), while reclaiming the bulk
+        of the tokens (file dumps, command output). The last
+        ``compact_keep_recent`` messages are left untouched so the model keeps
+        full recent context.
+        """
+        threshold = self.compact_after_tokens
+        if threshold is None:
+            return
+
+        def est_tokens() -> int:
+            return sum(len(m.content or "") for m in messages) // 4
+
+        if est_tokens() <= threshold:
+            return
+
+        marker = " …[truncated by context compaction]"
+        compacted = 0
+        for m in messages[: -self.compact_keep_recent] if self.compact_keep_recent else messages:
+            if m.role == "tool" and m.content and len(m.content) > 240 and marker not in m.content:
+                m.content = m.content[:200] + marker
+                compacted += 1
+        if compacted:
+            emit(Step(kind="thought", content=f"[context compacted: truncated {compacted} old tool result(s)]"))
