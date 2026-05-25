@@ -17,7 +17,7 @@ def test_tui_without_auth_errors(tmp_path, monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     r = runner.invoke(app, ["tui"])
     assert r.exit_code == 2
-    assert "csk init" in r.stdout
+    assert "ro init" in r.stdout
 
 
 def test_tui_imports_cleanly() -> None:

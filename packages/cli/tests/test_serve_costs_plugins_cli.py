@@ -61,4 +61,4 @@ def test_serve_without_auth_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     r = runner.invoke(app, ["serve", "--port", "8123"])
     assert r.exit_code == 2
-    assert "csk init" in r.stdout
+    assert "ro init" in r.stdout

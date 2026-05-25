@@ -62,7 +62,7 @@ def test_ask_without_auth_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 
     result = runner.invoke(app, ["ask", "anything"])
     assert result.exit_code == 2
-    assert "csk init" in result.stdout
+    assert "ro init" in result.stdout
 
 
 def test_ask_in_demo_mode_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

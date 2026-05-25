@@ -1,16 +1,16 @@
-"""csk — Claude-powered CLI for startup ops.
+"""ro — Claude-powered CLI for startup ops.
 
 Subcommands:
-    csk init              — create a config file (interactive or --demo).
-    csk ask "<question>"  — one-shot agent run against your configured tools.
-    csk chat              — interactive REPL (multi-turn with short-term memory).
-    csk tools             — list the tools registered for the current config.
-    csk doctor            — health check.
-    csk save NAME "Q"     — save a question for later recall.
-    csk run NAME          — run a saved question.
-    csk queries           — list saved questions.
-    csk eval ...          — eval suite (golden datasets, drift detection).
-    csk version           — print version.
+    ro init              — create a config file (interactive or --demo).
+    ro ask "<question>"  — one-shot agent run against your configured tools.
+    ro chat              — interactive REPL (multi-turn with short-term memory).
+    ro tools             — list the tools registered for the current config.
+    ro doctor            — health check.
+    ro save NAME "Q"     — save a question for later recall.
+    ro run NAME          — run a saved question.
+    ro queries           — list saved questions.
+    ro eval ...          — eval suite (golden datasets, drift detection).
+    ro version           — print version.
 """
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ def init(
     scope: str = typer.Option("project", "--scope", help="'project' (./.csk/) or 'user' (~/.config/csk/)."),
     yes: bool = typer.Option(False, "-y", "--yes", help="Overwrite existing config without confirmation."),
 ) -> None:
-    """Create a csk config file."""
+    """Create a ro config file."""
     existing = find_config_path()
     if existing and not yes:
         if not Confirm.ask(f"[yellow]A config already exists at[/yellow] {existing}. Overwrite?", default=False):
@@ -62,14 +62,14 @@ def init(
         console.print(Panel.fit(
             f"[green]✓[/green] Demo config written to [cyan]{path}[/cyan]\n\n"
             "Try it now:\n"
-            "  [bold]csk ask[/bold] [cyan]\"how many active subscriptions do we have?\"[/cyan]\n"
-            "  [bold]csk tools[/bold]",
+            "  [bold]ro ask[/bold] [cyan]\"how many active subscriptions do we have?\"[/cyan]\n"
+            "  [bold]ro tools[/bold]",
             title="Ready", border_style="green",
         ))
         return
 
     console.print(Panel.fit(
-        "[bold]csk init[/bold] — pick an LLM provider, then add credentials for the services "
+        "[bold]ro init[/bold] — pick an LLM provider, then add credentials for the services "
         "you want it to query.\n[dim]Values are stored in plaintext at .csk/config.toml — .gitignore "
         "that path.[/dim]",
         border_style="cyan",
@@ -141,7 +141,7 @@ def ask(
     if not config.has_provider_auth():
         console.print(
             f"[red]✗[/red] No credentials for provider [bold]{config.provider}[/bold]. "
-            "Run [bold]csk init[/bold] (or [bold]csk init --demo[/bold]) first."
+            "Run [bold]ro init[/bold] (or [bold]ro init --demo[/bold]) first."
         )
         raise typer.Exit(2)
 
@@ -159,11 +159,11 @@ def chat(
     """Multi-turn REPL with short-term memory. Type :q or Ctrl-D to exit."""
     config = load_config()
     if not config.has_provider_auth():
-        console.print(f"[red]✗[/red] No credentials for provider [bold]{config.provider}[/bold]. Run [bold]csk init[/bold] first.")
+        console.print(f"[red]✗[/red] No credentials for provider [bold]{config.provider}[/bold]. Run [bold]ro init[/bold] first.")
         raise typer.Exit(2)
 
     console.print(Panel.fit(
-        "[bold cyan]csk chat[/bold cyan] — multi-turn. Type [bold]:q[/bold] or Ctrl-D to exit.",
+        "[bold cyan]ro chat[/bold cyan] — multi-turn. Type [bold]:q[/bold] or Ctrl-D to exit.",
         border_style="cyan",
     ))
     start_chat(config, console=console, raw=raw)
@@ -187,7 +187,7 @@ def tools() -> None:
         service = tool.name.split("_", 1)[0]
         table.add_row(service, tool.name, tool.description)
     if not tool_list:
-        table.add_row("[red]none[/red]", "", "Run [bold]csk init[/bold] or [bold]csk init --demo[/bold].")
+        table.add_row("[red]none[/red]", "", "Run [bold]ro init[/bold] or [bold]ro init --demo[/bold].")
 
     console.print(table)
     if config.demo_mode:
@@ -208,7 +208,7 @@ def doctor() -> None:
     table.add_column(style="cyan", no_wrap=True)
     table.add_column()
 
-    table.add_row("config file", str(path) if path else "[red]none[/red] — run csk init")
+    table.add_row("config file", str(path) if path else "[red]none[/red] — run ro init")
     table.add_row("demo mode", "[green]yes[/green]" if config.demo_mode else "[dim]no[/dim]")
     table.add_row("provider", config.provider)
     table.add_row("model", config.resolved_model())
@@ -220,7 +220,7 @@ def doctor() -> None:
     )
     services = config.configured_services()
     table.add_row("services", ", ".join(services) if services else "[red]none[/red]")
-    table.add_row("csk version", __version__)
+    table.add_row("ro version", __version__)
 
     console.print(table)
 
@@ -233,7 +233,7 @@ def save(
     query: list[str] = typer.Argument(..., help="The question to save. Quote multi-word questions."),
     description: str = typer.Option("", "--description", "-d", help="Optional one-line description."),
 ) -> None:
-    """Save a question under NAME for later recall via `csk run NAME`."""
+    """Save a question under NAME for later recall via `ro run NAME`."""
     path = queries_path()
     store = QueryStore.load(path)
     text = " ".join(query)
@@ -244,7 +244,7 @@ def save(
         raise typer.Exit(2)
     store.save(path)
     console.print(f"[green]✓[/green] saved [bold]{name}[/bold]: {text}")
-    console.print(f"[dim]run it with:[/dim] [bold]csk run {name}[/bold]")
+    console.print(f"[dim]run it with:[/dim] [bold]ro run {name}[/bold]")
 
 
 @app.command()
@@ -252,18 +252,18 @@ def run(
     name: str = typer.Argument(..., help="Name of a saved query."),
     raw: bool = typer.Option(False, "--raw", help="Plain output."),
 ) -> None:
-    """Run a saved query as if you typed `csk ask "<saved text>"`."""
+    """Run a saved query as if you typed `ro ask "<saved text>"`."""
     store = QueryStore.load(queries_path())
     try:
         saved = store.get(name)
     except KeyError:
-        console.print(f"[red]✗[/red] no saved query named [bold]{name}[/bold]. See [bold]csk queries[/bold].")
+        console.print(f"[red]✗[/red] no saved query named [bold]{name}[/bold]. See [bold]ro queries[/bold].")
         raise typer.Exit(2)
 
     config = load_config()
     if not config.has_provider_auth():
         console.print(
-            f"[red]✗[/red] No credentials for provider [bold]{config.provider}[/bold]. Run [bold]csk init[/bold] first."
+            f"[red]✗[/red] No credentials for provider [bold]{config.provider}[/bold]. Run [bold]ro init[/bold] first."
         )
         raise typer.Exit(2)
 
@@ -278,7 +278,7 @@ def queries() -> None:
     store = QueryStore.load(queries_path())
     items = store.list_all()
     if not items:
-        console.print("[dim]no saved queries yet. Try:[/dim] [bold]csk save mrr \"what is our MRR right now\"[/bold]")
+        console.print("[dim]no saved queries yet. Try:[/dim] [bold]ro save mrr \"what is our MRR right now\"[/bold]")
         return
     table = Table(title="Saved queries", box=box.ROUNDED)
     table.add_column("name", style="cyan", no_wrap=True)
@@ -301,7 +301,7 @@ def unsave(name: str = typer.Argument(..., help="Name of the saved query to remo
     console.print(f"[green]✓[/green] removed [bold]{name}[/bold]")
 
 
-# ---------- eval (delegates to the csk-eval entry point) ----------
+# ---------- eval (delegates to the eval-suite CLI) ----------
 
 eval_app = typer.Typer(help="Eval suite: golden datasets, judge runs, drift detection.")
 app.add_typer(eval_app, name="eval")
@@ -377,14 +377,14 @@ def serve(
     """Expose the configured agent as a REST API (POST /ask + GET /health)."""
     config = load_config()
     if not config.has_provider_auth():
-        console.print(f"[red]✗[/red] No credentials for provider [bold]{config.provider}[/bold]. Run [bold]csk init[/bold] first.")
+        console.print(f"[red]✗[/red] No credentials for provider [bold]{config.provider}[/bold]. Run [bold]ro init[/bold] first.")
         raise typer.Exit(2)
 
     import uvicorn
     from .server import make_app
 
     console.print(Panel.fit(
-        f"[bold cyan]csk serve[/bold cyan] — agent over HTTP\n"
+        f"[bold cyan]ro serve[/bold cyan] — agent over HTTP\n"
         f"[dim]provider:[/dim] {config.provider} ({config.resolved_model()})\n"
         f"[dim]listening:[/dim] http://{host}:{port}\n\n"
         f"POST /ask     {{\"question\": \"...\"}}\n"
@@ -409,7 +409,7 @@ def costs(
     if not records:
         console.print(
             f"[dim]no usage recorded yet at[/dim] [bold]{path}[/bold]. "
-            "[dim]Run[/dim] [bold]csk ask[/bold] [dim]with a real provider to start tracking.[/dim]"
+            "[dim]Run[/dim] [bold]ro ask[/bold] [dim]with a real provider to start tracking.[/dim]"
         )
         return
     summary = summarize(records)
@@ -481,10 +481,10 @@ def serve(
     host: str = typer.Option("127.0.0.1", "--host"),
     port: int = typer.Option(8000, "--port"),
 ) -> None:
-    """Run csk as an HTTP API. POST /ask, GET /health."""
+    """Run ro as an HTTP API. POST /ask, GET /health."""
     config = load_config()
     if not config.has_provider_auth():
-        console.print(f"[red]✗[/red] No credentials for provider [bold]{config.provider}[/bold]. Run [bold]csk init[/bold] first.")
+        console.print(f"[red]✗[/red] No credentials for provider [bold]{config.provider}[/bold]. Run [bold]ro init[/bold] first.")
         raise typer.Exit(2)
 
     try:
@@ -497,7 +497,7 @@ def serve(
 
     app_obj = make_app(config)
     console.print(Panel.fit(
-        f"[bold cyan]csk serve[/bold cyan]\n"
+        f"[bold cyan]ro serve[/bold cyan]\n"
         f"http://{host}:{port}/health   →   health check\n"
         f"POST http://{host}:{port}/ask  →   {{\"question\": \"...\"}}\n\n"
         f"provider: {config.provider} · model: {config.resolved_model()} · "
@@ -513,14 +513,14 @@ def serve(
 def costs(
     by: str = typer.Option("model", "--by", help="Group by 'model' or 'day'."),
 ) -> None:
-    """Show token + cost usage recorded by previous csk commands."""
+    """Show token + cost usage recorded by previous ro commands."""
     from .usage import load_records, summarize, usage_path
 
     records = load_records()
     if not records:
         console.print(
             f"[dim]no usage recorded yet at[/dim] [cyan]{usage_path()}[/cyan][dim]. "
-            "Run [bold]csk ask[/bold] a few times to populate.[/dim]"
+            "Run [bold]ro ask[/bold] a few times to populate.[/dim]"
         )
         return
 
@@ -559,7 +559,7 @@ def tui() -> None:
     """Launch a full-screen TUI (Textual) — chat pane + live trace + input box."""
     config = load_config()
     if not config.has_provider_auth():
-        console.print(f"[red]✗[/red] No credentials for provider [bold]{config.provider}[/bold]. Run [bold]csk init[/bold] first.")
+        console.print(f"[red]✗[/red] No credentials for provider [bold]{config.provider}[/bold]. Run [bold]ro init[/bold] first.")
         raise typer.Exit(2)
     try:
         from .tui import run_tui
@@ -577,8 +577,8 @@ def tui() -> None:
     config = load_config()
     if not config.has_provider_auth():
         console.print(
-            f"[red]✗[/red] No credentials for provider [bold]{config.provider}[/bold]. Run [bold]csk init[/bold] first "
-            "(or [bold]csk init --demo[/bold] for an offline tour)."
+            f"[red]✗[/red] No credentials for provider [bold]{config.provider}[/bold]. Run [bold]ro init[/bold] first "
+            "(or [bold]ro init --demo[/bold] for an offline tour)."
         )
         raise typer.Exit(2)
 
@@ -627,7 +627,7 @@ def briefing(
         if not snapshots:
             console.print(
                 "[dim]no briefing history yet at[/dim] [cyan].csk/briefings/[/cyan][dim]. "
-                "Run [bold]csk briefing[/bold] once to start the trend.[/dim]"
+                "Run [bold]ro briefing[/bold] once to start the trend.[/dim]"
             )
             return
         table = Table(title="Briefing history", box=box.ROUNDED)
@@ -689,7 +689,7 @@ def briefing(
         bot_token = config.slack_bot_token or os.environ.get("SLACK_BOT_TOKEN")
         if not bot_token:
             console.print(
-                "[red]✗[/red] No SLACK_BOT_TOKEN configured. Run [bold]csk init[/bold] or "
+                "[red]✗[/red] No SLACK_BOT_TOKEN configured. Run [bold]ro init[/bold] or "
                 "set the env var (needs the chat:write scope)."
             )
             raise typer.Exit(2)
@@ -735,7 +735,7 @@ def agent(
 ) -> None:
     """Autonomous multi-step agent: give it a goal, it chains tool calls until done.
 
-    Unlike `csk ask` (one-shot) and `csk chat` (turn-by-turn), `agent` runs an
+    Unlike `ro ask` (one-shot) and `ro chat` (turn-by-turn), `agent` runs an
     autonomous loop, narrating each step live. With --confirm it pauses for your
     approval before every tool call.
     """
@@ -750,7 +750,7 @@ def agent(
         raise typer.Exit(2)
 
     text = " ".join(goal)
-    console.print(Panel.fit(f"[bold]Goal:[/bold] {text}", border_style="cyan", title="csk agent"))
+    console.print(Panel.fit(f"[bold]Goal:[/bold] {text}", border_style="cyan", title="ro agent"))
 
     result = run_agent(config, text, console=console, confirm=confirm, max_iterations=max_steps)
 
@@ -796,7 +796,7 @@ def code(
     console.print(Panel.fit(
         f"[bold]Task:[/bold] {text}\n[dim]root: {root.resolve()} · "
         f"{'YOLO (auto-approve)' if yolo else 'writes + commands need approval'}[/dim]",
-        border_style="cyan", title="csk code",
+        border_style="cyan", title="ro code",
     ))
 
     result = run_code_agent(config, text, root=root, console=console, yolo=yolo, max_iterations=max_steps)
@@ -816,7 +816,7 @@ def code(
 
 @app.command()
 def version() -> None:
-    """Print the csk version."""
+    """Print the ro version."""
     console.print(f"ro {__version__}")
 
 
