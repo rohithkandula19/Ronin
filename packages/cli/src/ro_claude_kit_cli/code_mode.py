@@ -19,7 +19,7 @@ from ro_claude_kit_hardening import InjectionScanner
 from pathlib import Path as _Path
 
 from .agent_mode import _narrate
-from .code_tools import SENSITIVE_TOOLS, build_code_tools, unified_diff
+from .code_tools import SENSITIVE_TOOLS, build_code_tools, undo_last, unified_diff
 from .config import CSKConfig
 from .runner import build_provider
 
@@ -116,6 +116,8 @@ def run_code_agent(
     console: Console | None = None,
     yolo: bool = False,
     max_iterations: int = 25,
+    undo_stack: list | None = None,
+    history_prefix: str = "",
 ) -> CodeRunResult:
     scan = InjectionScanner().scan(task)
     if scan.flagged:
@@ -127,7 +129,7 @@ def run_code_agent(
             blocked=True,
         )
 
-    tools = build_code_tools(root)
+    tools = build_code_tools(root, undo_stack=undo_stack)
     agent = ReActAgent(
         system=CODE_SYSTEM,
         tools=tools,
@@ -138,7 +140,8 @@ def run_code_agent(
     on_step = _narrate(console) if console is not None else None
     before_tool = _selective_gate(console, yolo, _Path(root).resolve())
 
-    result = agent.run(task, on_step=on_step, before_tool=before_tool)
+    prompt = f"{history_prefix}\n\nCurrent request: {task}" if history_prefix else task
+    result = agent.run(prompt, on_step=on_step, before_tool=before_tool)
     return CodeRunResult(
         success=result.success,
         output=result.output,
@@ -147,3 +150,61 @@ def run_code_agent(
         usage=result.usage,
         error=result.error,
     )
+
+
+def run_code_session(
+    config: CSKConfig,
+    *,
+    root: Path | str = ".",
+    console: Console,
+    yolo: bool = False,
+    max_iterations: int = 25,
+) -> None:
+    """Interactive coding session (the Claude Code experience).
+
+    A REPL: you type a request, the agent works (edits + commands gated with
+    diffs), then you go again — steering across turns. Conversation context
+    carries forward. Commands:
+      :q / :quit   exit
+      :undo        revert the most recent file change
+    """
+    from rich.panel import Panel
+
+    console.print(Panel.fit(
+        f"[bold cyan]ronin code[/bold cyan] — interactive session\n"
+        f"[dim]root: {_Path(root).resolve()} · "
+        f"{'YOLO (auto-approve)' if yolo else 'writes + commands need approval'}\n"
+        "type your request · [bold]:undo[/bold] revert last change · [bold]:q[/bold] quit[/dim]",
+        border_style="cyan",
+    ))
+
+    undo_stack: list = []
+    transcript: list[str] = []
+
+    while True:
+        try:
+            user = console.input("[bold cyan]code ›[/bold cyan] ").strip()
+        except (EOFError, KeyboardInterrupt):
+            console.print("\n[dim]bye[/dim]")
+            return
+        if not user:
+            continue
+        if user in (":q", ":quit", "/quit", "/exit"):
+            console.print("[dim]bye[/dim]")
+            return
+        if user in (":undo", "/undo"):
+            console.print(f"[yellow]↩[/yellow] {undo_last(undo_stack)}")
+            continue
+
+        history_prefix = ""
+        if transcript:
+            history_prefix = "Conversation so far:\n" + "\n".join(transcript[-6:])
+
+        result = run_code_agent(
+            config, user, root=root, console=console, yolo=yolo,
+            max_iterations=max_iterations, undo_stack=undo_stack,
+            history_prefix=history_prefix,
+        )
+        transcript.append(f"USER: {user}")
+        transcript.append(f"ASSISTANT: {result.output}")
+        console.print(f"\n[bold green]✅[/bold green] {result.output}\n")

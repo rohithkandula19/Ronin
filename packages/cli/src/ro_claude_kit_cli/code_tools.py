@@ -22,6 +22,24 @@ MAX_READ_BYTES = 100_000
 MAX_LIST_ENTRIES = 500
 
 
+def undo_last(undo_stack: list) -> str:
+    """Restore the most recent file modification recorded on ``undo_stack``.
+
+    Each entry is (path, prior_content | None). None means the file didn't
+    exist before the edit, so undo deletes it.
+    """
+    if not undo_stack:
+        return "nothing to undo"
+    path_str, prior = undo_stack.pop()
+    target = Path(path_str)
+    if prior is None:
+        if target.exists():
+            target.unlink()
+        return f"undid creation of {target.name} (deleted)"
+    target.write_text(prior, encoding="utf-8")
+    return f"reverted {target.name} to its previous contents"
+
+
 def unified_diff(path: str, before: str, after: str) -> str:
     """Render a unified diff between two versions of a file (for approval preview)."""
     import difflib
@@ -45,8 +63,20 @@ def _resolve(root: Path, rel: str) -> Path:
     return target
 
 
-def build_code_tools(root: Path | str = ".") -> list[Tool]:
+def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None) -> list[Tool]:
+    """Build the coding tools rooted at ``root``.
+
+    ``undo_stack``: optional list the write/edit tools push (path, prior_content
+    | None) onto before modifying a file. Pass a list and the interactive
+    session can pop it to restore the previous state (`:undo`).
+    """
     root_path = Path(root).resolve()
+
+    def _record_undo(target: Path) -> None:
+        if undo_stack is None:
+            return
+        prior = target.read_text(encoding="utf-8") if target.is_file() else None
+        undo_stack.append((str(target), prior))
 
     # ---- read_file ----
     def read_file(path: str) -> str:
@@ -98,6 +128,7 @@ def build_code_tools(root: Path | str = ".") -> list[Tool]:
     # ---- write_file (SENSITIVE) ----
     def write_file(path: str, content: str) -> str:
         target = _resolve(root_path, path)
+        _record_undo(target)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
         return f"wrote {len(content)} chars to {path}"
@@ -119,6 +150,7 @@ def build_code_tools(root: Path | str = ".") -> list[Tool]:
                 f"ERROR: old_string appears {count} times in {path} — it must be unique. "
                 "Include more surrounding context to disambiguate."
             )
+        _record_undo(target)
         target.write_text(content.replace(old_string, new_string), encoding="utf-8")
         return f"edited {path}: replaced 1 occurrence ({len(old_string)}→{len(new_string)} chars)"
 

@@ -112,6 +112,56 @@ def test_unified_diff_shows_changes() -> None:
     assert "+return a + b" in diff
 
 
+# ---------- undo ----------
+
+def test_undo_reverts_edit(tmp_path: Path) -> None:
+    from ro_claude_kit_cli.code_tools import undo_last
+    (tmp_path / "m.py").write_text("original\n", encoding="utf-8")
+    undo_stack: list = []
+    tools = {t.name: t for t in build_code_tools(tmp_path, undo_stack=undo_stack)}
+
+    tools["edit_file"].handler(path="m.py", old_string="original", new_string="changed")
+    assert (tmp_path / "m.py").read_text() == "changed\n"
+
+    msg = undo_last(undo_stack)
+    assert "reverted" in msg
+    assert (tmp_path / "m.py").read_text() == "original\n"
+
+
+def test_undo_deletes_newly_created_file(tmp_path: Path) -> None:
+    from ro_claude_kit_cli.code_tools import undo_last
+    undo_stack: list = []
+    tools = {t.name: t for t in build_code_tools(tmp_path, undo_stack=undo_stack)}
+
+    tools["write_file"].handler(path="new.py", content="x = 1\n")
+    assert (tmp_path / "new.py").exists()
+
+    msg = undo_last(undo_stack)
+    assert "deleted" in msg
+    assert not (tmp_path / "new.py").exists()
+
+
+def test_undo_empty_stack() -> None:
+    from ro_claude_kit_cli.code_tools import undo_last
+    assert undo_last([]) == "nothing to undo"
+
+
+def test_undo_stack_records_in_order(tmp_path: Path) -> None:
+    from ro_claude_kit_cli.code_tools import undo_last
+    (tmp_path / "m.py").write_text("v0\n", encoding="utf-8")
+    undo_stack: list = []
+    tools = {t.name: t for t in build_code_tools(tmp_path, undo_stack=undo_stack)}
+
+    tools["edit_file"].handler(path="m.py", old_string="v0", new_string="v1")
+    tools["edit_file"].handler(path="m.py", old_string="v1", new_string="v2")
+    assert (tmp_path / "m.py").read_text() == "v2\n"
+
+    undo_last(undo_stack)  # v2 → v1
+    assert (tmp_path / "m.py").read_text() == "v1\n"
+    undo_last(undo_stack)  # v1 → v0
+    assert (tmp_path / "m.py").read_text() == "v0\n"
+
+
 # ---------- run_code_agent ----------
 
 def _edit_provider() -> FakeProvider:
