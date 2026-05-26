@@ -443,6 +443,10 @@ def _provider_live_check(config: CSKConfig) -> str:
             return "[red]no key set[/red]"
         headers = {"Authorization": f"Bearer {key}"}
 
+    # A non-Python User-Agent: Groq (and other WAF-fronted APIs) 403 the default
+    # "Python-urllib" agent, which would make this check lie about a valid key.
+    headers["User-Agent"] = "ronin (+https://github.com/rohithkandula19/Ronin)"
+
     try:
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310

@@ -97,7 +97,13 @@ class OpenAICompatProvider(LLMProvider):
         return body
 
     def _headers(self) -> dict[str, str]:
-        headers: dict[str, str] = {"Content-Type": "application/json", **self.extra_headers}
+        # A non-Python User-Agent: some providers (e.g. Groq behind a WAF) return
+        # 403 to default "python-httpx"/"Python-urllib" agents.
+        headers: dict[str, str] = {
+            "Content-Type": "application/json",
+            "User-Agent": "ronin (+https://github.com/rohithkandula19/Ronin)",
+            **self.extra_headers,
+        }
         key = self._resolve_api_key()
         if key:
             headers["Authorization"] = f"Bearer {key}"

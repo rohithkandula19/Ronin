@@ -81,7 +81,11 @@ def _openai_vision(config: CSKConfig, b64: str, media_type: str, question: str) 
     req = urllib.request.Request(
         f"{base.rstrip('/')}/chat/completions",
         data=json.dumps(body).encode(),
-        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            "User-Agent": "ronin (+https://github.com/rohithkandula19/Ronin)",
+        },
     )
     with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310
         out = json.loads(resp.read())
