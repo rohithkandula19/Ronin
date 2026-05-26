@@ -35,10 +35,29 @@ from .tools import build_tools
 app = typer.Typer(
     name="ronin",
     help="ronin — a masterless Claude agent CLI. Ops briefings, autonomous data questions, and a coding agent.",
-    no_args_is_help=True,
+    no_args_is_help=False,
     add_completion=False,
 )
 console = Console()
+
+
+def _banner() -> None:
+    """The little face you see on `ronin` with no command — ronin's panda."""
+    from rich.panel import Panel
+
+    console.print(Panel.fit(
+        f"[bold]🐼  ronin[/bold] [dim]v{__version__}[/dim]  ·  [dim]masterless Claude agent[/dim]\n"
+        "[dim]briefing · agent · code · chat · tui[/dim]",
+        border_style="magenta",
+        title="🐼  ʕ•ᴥ•ʔ",
+    ))
+
+
+@app.callback(invoke_without_command=True)
+def _root(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        _banner()
+        console.print(ctx.get_help())
 
 
 # ---------- init ----------
