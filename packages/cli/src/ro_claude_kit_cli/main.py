@@ -1165,6 +1165,40 @@ def version() -> None:
 
 
 @app.command()
+def memory(
+    add: str = typer.Option(None, "--add", help="Add a fact to long-term memory."),
+    clear: bool = typer.Option(False, "--clear", help="Forget everything."),
+) -> None:
+    """Show (or edit) what ronin remembers about you across sessions.
+
+    Memory is persistent and user-global (~/.csk/memory.json): ronin recalls
+    these facts in every future session. The agent also saves facts itself via
+    its `remember` tool when you share durable info.
+    """
+    from .memory_store import add_memory, forget_all, load_memories
+
+    if clear:
+        n = forget_all()
+        console.print(f"[green]✓[/green] forgot {n} memory item(s).")
+        return
+    if add:
+        ok = add_memory(add)
+        console.print(f"[green]✓[/green] remembered: {add}" if ok else "[dim]already in memory[/dim]")
+        return
+
+    mems = load_memories()
+    if not mems:
+        console.print("[dim]no memories yet. ronin will remember durable facts as you chat, "
+                      "or add one: [bold]ronin memory --add \"I prefer Python\"[/bold][/dim]")
+        return
+    from rich.panel import Panel
+    body = "\n".join(f"[#c678dd]•[/#c678dd] {m['text']}" for m in mems)
+    console.print(Panel(body, title=f"🧠 {len(mems)} thing(s) ronin remembers about you",
+                        border_style="#c678dd", padding=(1, 2)))
+    console.print("[dim]clear with [bold]ronin memory --clear[/bold][/dim]")
+
+
+@app.command()
 def panda(
     activity: str = typer.Argument(None, help="dancing | running | playing | sleeping (default: all)"),
     loops: int = typer.Option(3, "--loops", "-n", help="How many times to repeat each activity."),

@@ -222,13 +222,16 @@ def start_chat(config: CSKConfig, *, console: Console, raw: bool = False) -> Non
     from ro_claude_kit_memory import ShortTermMemory
 
     from .media import build_media_tools, show_artifacts
+    from .memory_store import build_remember_tool, load_memories, memory_prompt_block
 
     memory = ShortTermMemory(keep_recent=8, compress_threshold_tokens=6000)
     artifacts: list = []
-    # Data tools + media tools (image / video / speech), all on one agent so a
-    # single plain-language request routes to the right capability.
-    tools = build_tools(config) + build_media_tools(artifacts)
-    agent = _build_agent(config, tools, extra_system=CHAT_CAPABILITIES)
+    # Data + media tools + persistent cross-session memory (the remember tool),
+    # all on one agent so a single plain-language request routes correctly.
+    tools = build_tools(config) + build_media_tools(artifacts) + [build_remember_tool()]
+    agent = _build_agent(config, tools, extra_system=CHAT_CAPABILITIES + memory_prompt_block())
+    if load_memories():
+        console.print(f"[dim]🧠 {len(load_memories())} thing(s) remembered about you[/dim]")
 
     while True:
         try:

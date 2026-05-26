@@ -403,10 +403,17 @@ def handle_slash_command(
         )
         return "handled"
     if cmd == "memory":
-        found = load_project_memory(root)
-        if found is None:
-            console.print("[dim]no project memory file found (RONIN.md / CLAUDE.md / AGENTS.md)[/dim]")
+        # persistent cross-session memory about the user
+        from .memory_store import load_memories
+        mems = load_memories()
+        if mems:
+            body = "\n".join(f"[#c678dd]•[/#c678dd] {m['text']}" for m in mems[-40:])
+            console.print(Panel(body, title=f"🧠 remembers about you ({len(mems)})", border_style="#c678dd"))
         else:
+            console.print("[dim]no long-term memories yet — I'll save durable facts as we talk.[/dim]")
+        # project memory file
+        found = load_project_memory(root)
+        if found is not None:
             name, text = found
             console.print(Panel(text, title=name, border_style="cyan"))
         return "handled"
@@ -515,21 +522,27 @@ def run_unified_session(
     from rich.panel import Panel
 
     from .media import build_media_tools, show_artifacts
+    from .memory_store import build_remember_tool, load_memories, memory_prompt_block
     from .tools import build_tools
 
     undo_stack: list = []
     transcript: list[str] = load_session(root) if continue_session else []
     artifacts: list = []
-    # media (image/video/speech) + data (stripe/linear/…) tools, layered on the
-    # coding agent's machinery (streaming, diffs, approval gate, todos, memory).
+    # media (image/video/speech) + data (stripe/linear/…) + persistent memory,
+    # layered on the coding agent's machinery (streaming, diffs, gate, todos).
     media_tools = build_media_tools(artifacts, root=root)
     data_tools = build_tools(config)
-    extra = media_tools + data_tools
+    extra = media_tools + data_tools + [build_remember_tool()]
+    # cross-session memory: what ronin remembers about the user
+    mem_block = memory_prompt_block()
+    n_mem = len(load_memories())
 
     resumed = " · resumed" if (continue_session and transcript) else ""
     _welcome(console, config, root, yolo,
              title=f"ronin — one assistant for everything{resumed}",
              hint="talk · code · make images/video/voice · query data · @path · /help · /quit")
+    if n_mem:
+        console.print(f"  [#6b7089]🧠 {n_mem} thing(s) remembered about you · [bold]/memory[/bold] to view[/#6b7089]\n")
 
     while True:
         try:
@@ -556,7 +569,7 @@ def run_unified_session(
             config, user, root=root, console=console, yolo=yolo,
             max_iterations=max_iterations, undo_stack=undo_stack,
             history_prefix=history_prefix, extra_tools=extra,
-            extra_system=UNIFIED_SYSTEM, include_image_tool=False,
+            extra_system=UNIFIED_SYSTEM + mem_block, include_image_tool=False,
         )
         transcript.append(f"USER: {user}")
         transcript.append(f"ASSISTANT: {result.output}")

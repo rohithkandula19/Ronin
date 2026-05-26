@@ -3,8 +3,8 @@
 > **A masterless Claude agent CLI.** A Monday-morning founder **briefing** (revenue, churn, failed payments, urgent issues), an autonomous **agent** for ad-hoc data questions, a **coding agent** (Claude-Code shaped) that reads/edits/runs your code, and **media generation** — images, video, and speech, right in the terminal.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-v0.10.0-blue)](CHANGELOG.md)
-[![Tests](https://img.shields.io/badge/tests-487%20passing-green)](https://github.com/rohithkandula19/Ronin/actions)
+[![Status](https://img.shields.io/badge/status-v0.11.0-blue)](CHANGELOG.md)
+[![Tests](https://img.shields.io/badge/tests-494%20passing-green)](https://github.com/rohithkandula19/Ronin/actions)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Providers](https://img.shields.io/badge/providers-Claude%20·%20Ollama%20·%20OpenAI%20·%20Together%20·%20Groq%20·%20Fireworks-d4a373)](#-supported-providers)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)

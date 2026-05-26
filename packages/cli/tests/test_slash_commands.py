@@ -55,9 +55,10 @@ def test_model_shows_provider(tmp_path: Path) -> None:
     assert "anthropic" in out
 
 
-def test_memory_when_absent_and_present(tmp_path: Path) -> None:
+def test_memory_when_absent_and_present(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))  # clean long-term memory store
     action, out = _call("/memory", root=tmp_path)
-    assert action == "handled" and "no project memory" in out
+    assert action == "handled" and "no long-term memories" in out
     (tmp_path / "RONIN.md").write_text("be terse", encoding="utf-8")
     action, out = _call("/memory", root=tmp_path)
     assert "be terse" in out
