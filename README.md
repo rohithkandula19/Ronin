@@ -3,8 +3,8 @@
 > **A masterless Claude agent CLI.** A Monday-morning founder **briefing** (revenue, churn, failed payments, urgent issues), an autonomous **agent** for ad-hoc data questions, a **coding agent** (Claude-Code shaped) that reads/edits/runs your code, and **media generation** — images, video, and speech, right in the terminal.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-v0.7.0-blue)](CHANGELOG.md)
-[![Tests](https://img.shields.io/badge/tests-471%20passing-green)](https://github.com/rohithkandula19/Ronin/actions)
+[![Status](https://img.shields.io/badge/status-v0.8.0-blue)](CHANGELOG.md)
+[![Tests](https://img.shields.io/badge/tests-483%20passing-green)](https://github.com/rohithkandula19/Ronin/actions)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Providers](https://img.shields.io/badge/providers-Claude%20·%20Ollama%20·%20OpenAI%20·%20Together%20·%20Groq%20·%20Fireworks-d4a373)](#-supported-providers)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
@@ -63,17 +63,22 @@ It's also a general-purpose data-question CLI: `ronin ask "..."`, `ronin chat` (
 ## 🛠 `ronin code` — the coding agent (Claude-Code shaped)
 
 ```bash
-ronin code "add a --json flag to the export command and update the tests"
-ronin code                 # no task → interactive session
-ronin code --init          # scaffold a RONIN.md project-memory file
+ronin                      # in a code repo, bare `ronin` IS the coding agent
+ronin code "add a --json flag and update the tests"
+ronin code "explain @main.py and fix the bug in @utils.py"   # @-mention files
+ronin code --plan "refactor the auth module"                 # plan → approve → execute
+ronin code --continue      # resume your last session
 ```
 
 A coding agent that reads, edits, and runs your code — every write and shell command gated behind a diff preview and your approval (read operations run freely). It mirrors the Claude Code experience:
 
 - **Streaming** — the model's reasoning and edits appear token-by-token, with tool activity (`⚙ read_file` / `✓`) inline. No more frozen screen.
+- **@-file mentions** — drop `@path` in your request to pull files into context.
+- **Plan mode** (`--plan`) proposes the steps read-only, you approve, then it executes. **Resume** (`--continue`) picks up your last session.
 - **Live plan tracker** — multi-step tasks show a checklist (`✓ / ▶ / ☐`) the agent keeps current as it works.
+- **Tools**: read / write / `edit` / `multi_edit` / `glob` / search / run — surgical, gated writes.
 - **Project memory** — auto-loads `RONIN.md` / `CLAUDE.md` / `AGENTS.md` from the repo so it follows your conventions.
-- **Interactive session** — steer across turns with slash commands: `/help`, `/diff`, `/undo`, `/memory`, `/model`, `/clear`, `/tools`, `/quit`.
+- **Interactive session** — Markdown-rendered, steer across turns with slash commands: `/help`, `/diff`, `/undo`, `/memory`, `/model`, `/clear`, `/tools`, `/quit`.
 
 And the wedge no pure coding agent has — **`ronin investigate "<symptom>"`** bridges your business data *and* your code to root-cause a problem (e.g. "failed payments spiked the 9th → `stripe_webhook.py` changed in commit `a1b2c3` on the 9th").
 

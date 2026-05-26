@@ -251,6 +251,9 @@ def start_chat(config: CSKConfig, *, console: Console, raw: bool = False) -> Non
         if raw:
             sys.stdout.write(result.output + "\n")
         else:
-            console.print(f"[bold green]ronin ›[/bold green] {result.output}\n")
+            from rich.markdown import Markdown
+            console.print("[bold green]ronin ›[/bold green]")
+            console.print(Markdown(result.output or "_(no output)_"))
+            console.print()
         # Show any media the agent produced this turn (image inline, video opened).
         show_artifacts(artifacts)

@@ -70,7 +70,7 @@ def test_path_traversal_refused(tmp_path: Path) -> None:
 
 
 def test_sensitive_set() -> None:
-    assert SENSITIVE_TOOLS == {"write_file", "edit_file", "run_command"}
+    assert SENSITIVE_TOOLS == {"write_file", "edit_file", "multi_edit", "run_command"}
 
 
 # ---------- edit_file (surgical replace, Claude-Code primitive) ----------

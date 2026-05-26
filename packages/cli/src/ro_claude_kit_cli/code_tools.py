@@ -16,7 +16,7 @@ from pathlib import Path
 from ro_claude_kit_agent_patterns import Tool
 
 # Tools that must be approved before they run (write + execute).
-SENSITIVE_TOOLS = {"write_file", "edit_file", "run_command"}
+SENSITIVE_TOOLS = {"write_file", "edit_file", "multi_edit", "run_command"}
 
 MAX_READ_BYTES = 100_000
 MAX_LIST_ENTRIES = 500
@@ -154,6 +154,41 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None) 
         target.write_text(content.replace(old_string, new_string), encoding="utf-8")
         return f"edited {path}: replaced 1 occurrence ({len(old_string)}→{len(new_string)} chars)"
 
+    # ---- glob (find files by pattern) ----
+    def glob(pattern: str, directory: str = ".") -> list[str]:
+        base = _resolve(root_path, directory)
+        if not base.is_dir():
+            return [f"ERROR: {directory} is not a directory"]
+        out: list[str] = []
+        for p in sorted(base.glob(pattern)):
+            if any(part in {".git", "node_modules", ".venv", "__pycache__", ".next"} for part in p.parts):
+                continue
+            if p.is_file():
+                out.append(str(p.relative_to(root_path)))
+            if len(out) >= MAX_LIST_ENTRIES:
+                break
+        return out
+
+    # ---- multi_edit (SENSITIVE) — several surgical replaces in ONE file/approval ----
+    def multi_edit(path: str, edits: list) -> str:
+        target = _resolve(root_path, path)
+        if not target.is_file():
+            return f"ERROR: {path} does not exist (use write_file to create it)"
+        content = target.read_text(encoding="utf-8")
+        # validate every edit first (all-or-nothing)
+        working = content
+        for i, e in enumerate(edits):
+            old, new = e.get("old_string", ""), e.get("new_string", "")
+            c = working.count(old)
+            if c == 0:
+                return f"ERROR: edit #{i + 1}: old_string not found (after prior edits). Re-read the file."
+            if c > 1:
+                return f"ERROR: edit #{i + 1}: old_string appears {c} times — must be unique. Add context."
+            working = working.replace(old, new, 1)
+        _record_undo(target)
+        target.write_text(working, encoding="utf-8")
+        return f"applied {len(edits)} edit(s) to {path}"
+
     # ---- run_command (SENSITIVE) ----
     def run_command(command: str) -> str:
         proc = subprocess.run(
@@ -181,6 +216,18 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None) 
         _tool("search_files", "Grep for a literal string across files; returns file/line/text hits.",
               {"type": "object", "properties": {"query": {"type": "string"}, "directory": {"type": "string"}}, "required": ["query"]},
               search_files),
+        _tool("glob", "Find files by glob pattern (e.g. '**/*.py', 'src/*.ts') relative to a directory.",
+              {"type": "object", "properties": {"pattern": {"type": "string"}, "directory": {"type": "string"}}, "required": ["pattern"]},
+              glob),
+        _tool("multi_edit", "Apply SEVERAL surgical string replacements to ONE file in a single approved step "
+              "(all-or-nothing; each old_string must be unique when applied). SENSITIVE — gated by approval.",
+              {"type": "object", "properties": {
+                  "path": {"type": "string"},
+                  "edits": {"type": "array", "items": {"type": "object", "properties": {
+                      "old_string": {"type": "string"}, "new_string": {"type": "string"}},
+                      "required": ["old_string", "new_string"]}},
+              }, "required": ["path", "edits"]},
+              multi_edit),
         _tool("write_file", "Create a file or fully overwrite it. SENSITIVE — gated by approval. "
               "Prefer edit_file for changes to existing files.",
               {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]},

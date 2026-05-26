@@ -162,12 +162,35 @@ def _root(ctx: typer.Context) -> None:
         console.print(ctx.get_help())
         return
 
+    # In a code repo, bare `ronin` drops into the coding agent (Claude Code's
+    # default). Outside one, it's the data/media chat. `ronin chat` always
+    # forces the chat; `ronin code` always forces the coding agent.
+    if _is_code_project(Path(".")):
+        console.print(
+            "[dim]Coding agent — I read/edit/run code in this repo (writes need approval). "
+            "Use [bold]@path[/bold] to reference files, [bold]/help[/bold] for commands, "
+            "[bold]/q[/bold] to quit. (Run [bold]ronin chat[/bold] for the data/media assistant.)[/dim]\n"
+        )
+        from .code_mode import run_code_session
+        run_code_session(config, root=Path("."), console=console)
+        return
+
     console.print(
         "[dim]Just ask — query your data, [bold]\"generate me a naruto image\"[/bold], "
         "[bold]\"make a video of a city at night\"[/bold], [bold]\"say hello\"[/bold], and more.\n"
         "Type [bold]:q[/bold] to exit, or [bold]ronin --help[/bold] for one-shot commands.[/dim]\n"
     )
     start_chat(config, console=console)
+
+
+def _is_code_project(path: Path) -> bool:
+    """Heuristic: does ``path`` look like a code repository? (decides whether bare
+    `ronin` opens the coding agent vs. the data/media chat)."""
+    markers = (
+        ".git", "pyproject.toml", "package.json", "go.mod", "Cargo.toml",
+        "pom.xml", "build.gradle", "Gemfile", "RONIN.md", "CLAUDE.md", "AGENTS.md",
+    )
+    return any((path / m).exists() for m in markers)
 
 
 # ---------- init ----------
@@ -1030,6 +1053,8 @@ def code(
     yolo: bool = typer.Option(False, "--yolo", help="Auto-approve writes + commands (trusted sandboxes only)."),
     max_steps: int = typer.Option(25, "--max-steps", help="Iteration cap."),
     init_memory: bool = typer.Option(False, "--init", help="Scaffold a RONIN.md project-memory file and exit."),
+    continue_session: bool = typer.Option(False, "--continue", "-c", help="Resume this repo's last session."),
+    plan: bool = typer.Option(False, "--plan", help="Propose a plan first (read-only), confirm, then execute."),
 ) -> None:
     """Coding agent (Claude Code / Cline shaped): reads files, edits code, runs commands.
 
@@ -1038,8 +1063,9 @@ def code(
     shell command is gated behind your y/N approval by default with a diff
     preview; read operations run freely. --yolo auto-approves everything.
 
-    The agent auto-loads RONIN.md / CLAUDE.md / AGENTS.md from the project root
-    as context. Use --init to scaffold a RONIN.md.
+    Reference files with @path. --plan proposes steps before editing.
+    --continue resumes your last session. Auto-loads RONIN.md / CLAUDE.md /
+    AGENTS.md; --init scaffolds a RONIN.md.
     """
     if init_memory:
         from .project_memory import write_memory_template
@@ -1060,7 +1086,8 @@ def code(
 
     # No task → interactive session (the Claude Code experience).
     if not task:
-        run_code_session(config, root=root, console=console, yolo=yolo, max_iterations=max_steps)
+        run_code_session(config, root=root, console=console, yolo=yolo,
+                         max_iterations=max_steps, continue_session=continue_session)
         return
 
     text = " ".join(task)
@@ -1069,6 +1096,21 @@ def code(
         f"{'YOLO (auto-approve)' if yolo else 'writes + commands need approval'}[/dim]",
         border_style="cyan", title="ronin code",
     ))
+
+    # Plan mode: propose steps (read-only) → confirm → execute.
+    if plan:
+        console.print("[bold magenta]📋 planning (read-only)…[/bold magenta]")
+        plan_res = run_code_agent(
+            config, f"Produce a concise step-by-step PLAN to accomplish: {text}. "
+            "Explore with read-only tools if needed, but DO NOT edit anything — just list the steps.",
+            root=root, console=console, yolo=yolo, max_iterations=max_steps, read_only=True,
+        )
+        console.print()
+        if not Confirm.ask("[bold]Proceed with this plan?[/bold]", default=True):
+            console.print("[dim]aborted — nothing changed[/dim]")
+            return
+        text = f"Follow this plan:\n{plan_res.output}\n\nNow implement it: {text}"
+        console.print()
 
     result = run_code_agent(config, text, root=root, console=console, yolo=yolo, max_iterations=max_steps)
 
@@ -1454,7 +1496,9 @@ def _print_result(result: AgentResultRich, *, raw: bool) -> None:
         return
 
     console.print()
-    console.print(Panel(result.output or "[dim](empty)[/dim]", title="Answer", border_style="green", padding=(1, 2)))
+    from rich.markdown import Markdown
+    body = Markdown(result.output) if result.output else "[dim](empty)[/dim]"
+    console.print(Panel(body, title="Answer", border_style="green", padding=(1, 2)))
     if result.trace:
         table = Table(title=f"Trace ({len(result.trace)} steps)", box=box.SIMPLE, show_lines=False)
         table.add_column("kind", style="bold yellow", no_wrap=True)

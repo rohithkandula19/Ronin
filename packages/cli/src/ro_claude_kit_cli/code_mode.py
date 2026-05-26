@@ -63,6 +63,65 @@ class CodeRunResult:
     streamed: bool = False  # True if the answer already streamed to the console
 
 
+import hashlib as _hashlib
+import json as _json
+import re as _re
+
+_MENTION_RE = _re.compile(r"(?:^|\s)@([\w./\-]+)")
+
+# read-only tool subset (for plan mode — explore but don't mutate)
+_READONLY_CODE_TOOLS = {"read_file", "list_files", "search_files", "glob"}
+
+
+def _session_path(root: Path | str) -> _Path:
+    """Per-repo session file under .csk/sessions/."""
+    key = _hashlib.sha1(str(_Path(root).resolve()).encode()).hexdigest()[:12]
+    return _Path(".csk") / "sessions" / f"code-{key}.json"
+
+
+def save_session(root: Path | str, transcript: list[str]) -> None:
+    p = _session_path(root)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        p.write_text(_json.dumps({"root": str(_Path(root).resolve()), "transcript": transcript[-40:]}),
+                     encoding="utf-8")
+    except OSError:
+        pass
+
+
+def load_session(root: Path | str) -> list[str]:
+    p = _session_path(root)
+    if not p.is_file():
+        return []
+    try:
+        return list(_json.loads(p.read_text(encoding="utf-8")).get("transcript", []))
+    except (OSError, ValueError):
+        return []
+
+
+def expand_file_mentions(task: str, root: Path | str) -> str:
+    """Expand ``@path`` mentions in a request by inlining those files' contents
+    (Claude Code's @-mention). Unknown paths are left as-is."""
+    root_path = _Path(root).resolve()
+    seen: list[str] = []
+    blocks: list[str] = []
+    for rel in _MENTION_RE.findall(task):
+        if rel in seen:
+            continue
+        target = (root_path / rel).resolve()
+        # stay inside the project root; only inline real files
+        if (root_path == target or root_path in target.parents) and target.is_file():
+            seen.append(rel)
+            try:
+                body = target.read_text(encoding="utf-8", errors="ignore")[:4000]
+            except OSError:
+                continue
+            blocks.append(f"--- {rel} ---\n{body}")
+    if not blocks:
+        return task
+    return "Referenced files:\n\n" + "\n\n".join(blocks) + "\n\n---\n\n" + task
+
+
 def _render_diff(console: Console, diff: str) -> None:
     """Print a unified diff with +/- line coloring (Claude-Code style preview)."""
     for line in diff.splitlines():
@@ -130,6 +189,7 @@ def run_code_agent(
     max_iterations: int = 25,
     undo_stack: list | None = None,
     history_prefix: str = "",
+    read_only: bool = False,
 ) -> CodeRunResult:
     scan = InjectionScanner().scan(task)
     if scan.flagged:
@@ -142,11 +202,15 @@ def run_code_agent(
         )
 
     tools = build_code_tools(root, undo_stack=undo_stack)
+    if read_only:
+        # plan mode: explore but never mutate
+        tools = [t for t in tools if t.name in _READONLY_CODE_TOOLS]
     # The live plan tracker: the agent maintains a checklist via update_todos.
     todo_store = TodoStore()
     tools = tools + [build_todo_tool(todo_store)]
     # Media: the agent can generate images into the project (free backend).
-    tools = tools + [build_image_tool(root)]
+    if not read_only:
+        tools = tools + [build_image_tool(root)]
 
     # Project memory: fold RONIN.md / CLAUDE.md / AGENTS.md into the system
     # prompt so the agent follows the repo's conventions. Announce it once (on
@@ -178,6 +242,7 @@ def run_code_agent(
     on_step = renderer.on_step if renderer is not None else None
     on_text = renderer.on_text if renderer is not None else None
 
+    task = expand_file_mentions(task, root)  # inline any @path references
     prompt = f"{history_prefix}\n\nCurrent request: {task}" if history_prefix else task
     result = agent.run(prompt, on_step=on_step, before_tool=before_tool, on_text=on_text)
     if renderer is not None:
@@ -301,25 +366,29 @@ def run_code_session(
     console: Console,
     yolo: bool = False,
     max_iterations: int = 25,
+    continue_session: bool = False,
 ) -> None:
     """Interactive coding session (the Claude Code experience).
 
     A REPL: you type a request, the agent works (edits + commands gated with
     diffs), then you go again — steering across turns. Conversation context
     carries forward. Type [bold]/help[/bold] for in-session commands.
+    ``continue_session`` resumes the last session's history for this repo.
     """
     from rich.panel import Panel
 
+    undo_stack: list = []
+    transcript: list[str] = load_session(root) if continue_session else []
+
+    resumed = " · [green]resumed[/green]" if (continue_session and transcript) else ""
     console.print(Panel.fit(
-        f"[bold cyan]ronin code[/bold cyan] — interactive session\n"
+        f"[bold cyan]ronin code[/bold cyan] — interactive session{resumed}\n"
         f"[dim]root: {_Path(root).resolve()} · "
         f"{'YOLO (auto-approve)' if yolo else 'writes + commands need approval'}\n"
-        "type your request · [bold]/help[/bold] for commands · [bold]/quit[/bold] to exit[/dim]",
+        "type your request · [bold]@path[/bold] to reference files · "
+        "[bold]/help[/bold] for commands · [bold]/quit[/bold] to exit[/dim]",
         border_style="cyan",
     ))
-
-    undo_stack: list = []
-    transcript: list[str] = []
 
     while True:
         try:
@@ -349,6 +418,7 @@ def run_code_session(
         )
         transcript.append(f"USER: {user}")
         transcript.append(f"ASSISTANT: {result.output}")
+        save_session(root, transcript)  # persist so `ronin code --continue` can resume
         # The summary already streamed inline; just show a subtle completion mark
         # instead of re-printing the whole thing.
         if result.streamed:
