@@ -43,8 +43,11 @@ in real time. Conversation memory persists for the lifetime of the session.
 """
 
 
-class CSKApp(App):
+class RoninApp(App):
     """Textual app wrapping the ronin agent."""
+
+    TITLE = "ronin"
+    SUB_TITLE = "one assistant for everything"
 
     CSS = """
     Screen { background: #16161e; }
@@ -201,4 +204,4 @@ class CSKApp(App):
 
 
 def run_tui(config: CSKConfig | None = None) -> None:
-    CSKApp(config=config).run()
+    RoninApp(config=config).run()

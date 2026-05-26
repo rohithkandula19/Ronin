@@ -22,9 +22,9 @@ def test_tui_without_auth_errors(tmp_path, monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_tui_imports_cleanly() -> None:
     """The textual app should at least import + construct without raising."""
-    from ro_claude_kit_cli.tui import CSKApp
+    from ro_claude_kit_cli.tui import RoninApp
     from ro_claude_kit_cli.config import CSKConfig
-    app_obj = CSKApp(config=CSKConfig(demo_mode=True))
+    app_obj = RoninApp(config=CSKConfig(demo_mode=True))
     assert app_obj is not None
 
 
@@ -44,10 +44,10 @@ def test_tui_launches_run_tui(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None
 async def test_app_renders_core_widgets(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Pilot test: app boots, key widgets exist, prompt is focused."""
     from ro_claude_kit_cli.config import CSKConfig
-    from ro_claude_kit_cli.tui import CSKApp
+    from ro_claude_kit_cli.tui import RoninApp
 
     monkeypatch.chdir(tmp_path)
-    csk_app = CSKApp(config=CSKConfig(demo_mode=True, provider="anthropic"))
+    csk_app = RoninApp(config=CSKConfig(demo_mode=True, provider="anthropic"))
 
     async with csk_app.run_test() as pilot:
         await pilot.pause()
@@ -64,10 +64,10 @@ async def test_app_renders_core_widgets(tmp_path, monkeypatch: pytest.MonkeyPatc
 async def test_empty_submit_is_ignored(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Submitting an empty/whitespace prompt should not invoke the agent."""
     from ro_claude_kit_cli.config import CSKConfig
-    from ro_claude_kit_cli.tui import CSKApp
+    from ro_claude_kit_cli.tui import RoninApp
 
     monkeypatch.chdir(tmp_path)
-    csk_app = CSKApp(config=CSKConfig(demo_mode=True, provider="anthropic"))
+    csk_app = RoninApp(config=CSKConfig(demo_mode=True, provider="anthropic"))
 
     called: list[str] = []
 
@@ -76,7 +76,7 @@ async def test_empty_submit_is_ignored(tmp_path, monkeypatch: pytest.MonkeyPatch
 
     async with csk_app.run_test() as pilot:
         await pilot.pause()
-        with patch.object(CSKApp, "_run_agent", fake_run):
+        with patch.object(RoninApp, "_run_agent", fake_run):
             from textual.widgets import Input
             prompt = csk_app.query_one("#prompt", Input)
             # Empty submit
@@ -88,10 +88,10 @@ async def test_empty_submit_is_ignored(tmp_path, monkeypatch: pytest.MonkeyPatch
 @pytest.mark.asyncio
 async def test_action_clear_resets_history(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     from ro_claude_kit_cli.config import CSKConfig
-    from ro_claude_kit_cli.tui import CSKApp
+    from ro_claude_kit_cli.tui import RoninApp
 
     monkeypatch.chdir(tmp_path)
-    csk_app = CSKApp(config=CSKConfig(demo_mode=True, provider="anthropic"))
+    csk_app = RoninApp(config=CSKConfig(demo_mode=True, provider="anthropic"))
     csk_app.history.append(("user", "test"))
 
     async with csk_app.run_test() as pilot:
