@@ -1038,6 +1038,48 @@ def panda(
         _banner(activity=name, loops=loops)
 
 
+@app.command()
+def image(
+    prompt: list[str] = typer.Argument(..., help="What to draw, e.g. \"a red panda coding at night, neon\"."),
+    out: Path = typer.Option(None, "--out", "-o", help="Where to save (default: ./ronin_image_<ts>.png)."),
+    backend: str = typer.Option("pollinations", "--backend", help="pollinations (free, no key) | openai (needs OPENAI_API_KEY)."),
+    size: str = typer.Option("1024x1024", "--size", help="WIDTHxHEIGHT."),
+    seed: int = typer.Option(None, "--seed", help="Seed for reproducible results (pollinations)."),
+    model: str = typer.Option(None, "--model", help="Backend model override (e.g. flux, gpt-image-1)."),
+    show: bool = typer.Option(True, "--show/--no-show", help="Display in the terminal after generating."),
+) -> None:
+    """Generate an image from text and show it in the terminal.
+
+    Free by default (Pollinations — no API key). Displays inline on iTerm2, via
+    chafa/viu/imgcat if installed, otherwise opens it in your image viewer.
+    """
+    from .media import display_image, generate_image
+
+    text = " ".join(prompt)
+    try:
+        width, height = (int(x) for x in size.lower().split("x", 1))
+    except ValueError:
+        console.print(f"[red]✗[/red] --size must look like 1024x1024 (got '{size}')")
+        raise typer.Exit(2)
+
+    with console.status(f"[cyan]drawing[/cyan] [dim]{text[:60]}[/dim] via {backend}…", spinner="dots"):
+        try:
+            path = generate_image(text, backend=backend, out=out, width=width, height=height,
+                                  seed=seed, model=model)
+        except Exception as e:  # noqa: BLE001 — surface any backend/network error cleanly
+            console.print(f"[red]✗ image generation failed:[/red] {e}")
+            raise typer.Exit(1)
+
+    console.print(f"[green]✓[/green] saved [cyan]{path}[/cyan]")
+    if show:
+        how = display_image(path)
+        if how == "none":
+            console.print("[dim]couldn't display inline — open the file above to view it. "
+                          "(tip: `brew install chafa` for in-terminal rendering)[/dim]")
+        elif how == "open":
+            console.print("[dim]opened in your image viewer[/dim]")
+
+
 def _print_result(result: AgentResultRich, *, raw: bool) -> None:
     if raw:
         sys.stdout.write(result.output + "\n")
