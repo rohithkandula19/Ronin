@@ -144,13 +144,14 @@ def _root(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is not None:
         return
 
-    _banner()
-
     import sys
-    # Non-interactive (pipe/test) → just show help and exit, cleanly.
+    # Non-interactive (pipe/test) → just show help and exit, cleanly (no banner).
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         console.print(ctx.get_help())
         return
+
+    from .banner import render_banner
+    render_banner(console)  # the animated gradient RONIN boot
 
     # Interactive terminal: drop into a session, the way `claude` does.
     config = load_config()
