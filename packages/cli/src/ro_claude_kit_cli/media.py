@@ -286,6 +286,109 @@ def generate_video_replicate(
 
 
 # --------------------------------------------------------------------------
+# Conversational media tools — wired into the `ronin` chat so a single natural-
+# language request ("generate me a naruto image") routes to the right action.
+# Each tool produces a file and records it in ``artifacts`` so the chat loop can
+# show it (image inline, video opened) after the turn; speech plays immediately.
+# --------------------------------------------------------------------------
+def build_media_tools(artifacts: list, *, root: Path | str = ".", image_backend: str = "pollinations"):
+    """Return [generate_image, generate_video, speak] tools for the chat agent.
+
+    ``artifacts`` is a list the tools append ``(kind, Path)`` to; the caller
+    displays them after the agent turn (avoids clashing with a live spinner).
+    """
+    from ro_claude_kit_agent_patterns import Tool
+
+    from .audio import speak as _speak
+    from .audio import tts_engine
+
+    root_path = Path(root).resolve()
+
+    def _gen_image(prompt: str, filename: str | None = None) -> str:
+        out = root_path / filename if filename else None
+        try:
+            path = generate_image(prompt, backend=image_backend, out=out)
+        except Exception as e:  # noqa: BLE001
+            return f"ERROR: image generation failed: {e}"
+        artifacts.append(("image", path))
+        return f"Image generated → {path.name}. It is being shown to the user now. Briefly confirm."
+
+    def _gen_video(prompt: str, frames: int = 12) -> str:
+        if not ffmpeg_available():
+            return "ERROR: ffmpeg isn't installed; can't make a video. Tell the user to run `brew install ffmpeg`."
+        try:
+            result = generate_video(prompt, frames=max(2, min(int(frames), 24)))
+        except Exception as e:  # noqa: BLE001
+            return f"ERROR: video generation failed: {e}"
+        artifacts.append(("video", result.path))
+        return f"Video generated → {result.path.name} ({result.frames} frames). Opening it for the user. Briefly confirm."
+
+    def _say(text: str, voice: str | None = None) -> str:
+        if tts_engine() is None:
+            return "ERROR: no text-to-speech engine available on this machine."
+        try:
+            _speak(text, voice=voice)
+        except RuntimeError as e:
+            return f"ERROR: {e}"
+        return "Spoke it aloud to the user. Briefly confirm."
+
+    return [
+        Tool(
+            name="generate_image",
+            description="Generate an image from a text prompt (free). Use whenever the user asks to draw/create/make a picture, logo, art, etc. Args: prompt; optional filename.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "Detailed description of the image."},
+                    "filename": {"type": "string", "description": "Optional save name, e.g. naruto.png."},
+                },
+                "required": ["prompt"],
+            },
+            handler=_gen_image,
+        ),
+        Tool(
+            name="generate_video",
+            description="Generate a short video from a text prompt (free, frame-animation). Use when the user asks for a video/animation/clip. Args: prompt; optional frames (2-24).",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string"},
+                    "frames": {"type": "integer", "description": "How many frames (2-24)."},
+                },
+                "required": ["prompt"],
+            },
+            handler=_gen_video,
+        ),
+        Tool(
+            name="speak",
+            description="Speak text aloud via text-to-speech (free). Use when the user asks you to say/read/voice something. Args: text; optional voice name.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string"},
+                    "voice": {"type": "string"},
+                },
+                "required": ["text"],
+            },
+            handler=_say,
+        ),
+    ]
+
+
+def show_artifacts(artifacts: list) -> None:
+    """Display produced media: images inline, videos opened. Clears the list."""
+    for kind, path in artifacts:
+        try:
+            if kind == "image":
+                display_image(Path(path))
+            elif kind == "video":
+                open_file(Path(path))
+        except Exception:  # noqa: BLE001 — display is best-effort
+            pass
+    artifacts.clear()
+
+
+# --------------------------------------------------------------------------
 # Agent tool: let `ronin code` / `ronin agent` generate images mid-task.
 # --------------------------------------------------------------------------
 def build_image_tool(root: Path | str, *, backend: str = "pollinations"):

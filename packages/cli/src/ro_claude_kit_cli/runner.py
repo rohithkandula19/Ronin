@@ -85,9 +85,11 @@ def _has_real_provider_key(config: CSKConfig) -> bool:
     return bool(config.openai_api_key or os.environ.get("OPENAI_API_KEY"))
 
 
-def _build_agent(config: CSKConfig, tools: list[Tool]) -> ReActAgent:
+def _build_agent(config: CSKConfig, tools: list[Tool], *, extra_system: str = "") -> ReActAgent:
     services = config.configured_services()
     system = SYSTEM_PROMPT_TEMPLATE.format(services=", ".join(services) or "none")
+    if extra_system:
+        system += "\n\n" + extra_system
     provider = build_provider(config)
     return ReActAgent(
         system=system,
@@ -95,6 +97,19 @@ def _build_agent(config: CSKConfig, tools: list[Tool]) -> ReActAgent:
         provider=provider,
         max_iterations=8,
     )
+
+
+# Capabilities note for the conversational front door (`ronin` / `ronin chat`).
+# The base prompt is data-and-read-only; this grants the media tools so the
+# agent doesn't refuse to "create" things.
+CHAT_CAPABILITIES = """Beyond answering data questions, you can DO things for the user via tools:
+- generate_image — draw/create a picture, logo, or art.
+- generate_video — make a short video/animation.
+- speak — read something aloud (text-to-speech).
+When the user asks for any of these in plain language (e.g. "generate me a naruto image",
+"make a video of a city at night", "say hello"), CALL the matching tool — don't say you can't.
+The "no write access" rule applies only to their business data services, NOT to media generation.
+Keep replies short; the media is shown to the user automatically."""
 
 
 def run_ask(config: CSKConfig, question: str, *, console: Console | None = None) -> AgentResultRich:
@@ -162,9 +177,14 @@ def run_ask(config: CSKConfig, question: str, *, console: Console | None = None)
 def start_chat(config: CSKConfig, *, console: Console, raw: bool = False) -> None:
     from ro_claude_kit_memory import ShortTermMemory
 
+    from .media import build_media_tools, show_artifacts
+
     memory = ShortTermMemory(keep_recent=8, compress_threshold_tokens=6000)
-    tools = build_tools(config)
-    agent = _build_agent(config, tools)
+    artifacts: list = []
+    # Data tools + media tools (image / video / speech), all on one agent so a
+    # single plain-language request routes to the right capability.
+    tools = build_tools(config) + build_media_tools(artifacts)
+    agent = _build_agent(config, tools, extra_system=CHAT_CAPABILITIES)
 
     while True:
         try:
@@ -191,4 +211,6 @@ def start_chat(config: CSKConfig, *, console: Console, raw: bool = False) -> Non
         if raw:
             sys.stdout.write(result.output + "\n")
         else:
-            console.print(f"[bold green]csk ›[/bold green] {result.output}\n")
+            console.print(f"[bold green]ronin ›[/bold green] {result.output}\n")
+        # Show any media the agent produced this turn (image inline, video opened).
+        show_artifacts(artifacts)

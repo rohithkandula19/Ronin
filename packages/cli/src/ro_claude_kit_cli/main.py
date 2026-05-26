@@ -163,8 +163,9 @@ def _root(ctx: typer.Context) -> None:
         return
 
     console.print(
-        "[dim]Interactive chat — your configured tools are live. "
-        "Type [bold]:q[/bold] to exit, or run [bold]ronin --help[/bold] for one-shot commands.[/dim]\n"
+        "[dim]Just ask — query your data, [bold]\"generate me a naruto image\"[/bold], "
+        "[bold]\"make a video of a city at night\"[/bold], [bold]\"say hello\"[/bold], and more.\n"
+        "Type [bold]:q[/bold] to exit, or [bold]ronin --help[/bold] for one-shot commands.[/dim]\n"
     )
     start_chat(config, console=console)
 
