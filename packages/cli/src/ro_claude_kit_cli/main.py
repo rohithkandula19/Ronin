@@ -869,6 +869,55 @@ def code(
     console.print(f"[dim]{meta}[/dim]")
 
 
+# ---------- investigate ----------
+
+@app.command()
+def investigate(
+    symptom: list[str] = typer.Argument(..., help="The business symptom to root-cause. Quote it."),
+    root: Path = typer.Option(Path("."), "--root", help="Code repo to inspect for causes."),
+    yolo: bool = typer.Option(False, "--yolo", help="Auto-approve git commands."),
+    max_steps: int = typer.Option(20, "--max-steps", help="Iteration cap."),
+) -> None:
+    """Bridge business + code: root-cause a symptom across your data AND your codebase.
+
+    The thing Claude Code can't do (no business data) and a BI tool can't do
+    (can't read code). Give it a symptom — "failed payments spiked", "churn
+    jumped" — and it pulls the ops data to quantify/timestamp it, then searches
+    the code + git history to find the likely cause, and connects them.
+
+    Read-only: reads data, reads code, runs read-only git commands (gated).
+    """
+    config = load_config()
+    from .agent_mode import has_real_key
+    from .investigate_mode import run_investigate
+
+    if not has_real_key(config):
+        console.print(
+            f"[red]✗[/red] Investigate mode needs a real LLM. Set credentials for provider "
+            f"[bold]{config.provider}[/bold] (e.g. [bold]export ANTHROPIC_API_KEY=...[/bold])."
+        )
+        raise typer.Exit(2)
+
+    text = " ".join(symptom)
+    console.print(Panel.fit(
+        f"[bold]Symptom:[/bold] {text}\n[dim]data: {', '.join(config.configured_services()) or 'none'} · "
+        f"code: {root.resolve()}[/dim]",
+        border_style="cyan", title="ronin investigate",
+    ))
+
+    result = run_investigate(config, text, root=root, console=console, yolo=yolo, max_iterations=max_steps)
+
+    console.print()
+    if result.blocked:
+        console.print(f"[red]✗[/red] {result.output}")
+        raise typer.Exit(2)
+    console.print(Panel(result.output or "[dim](inconclusive)[/dim]", title="Root-cause analysis", border_style="green", padding=(1, 2)))
+    meta = f"iterations: {result.iterations}"
+    if result.usage:
+        meta += f" · in: {result.usage.get('input_tokens', 0)} · out: {result.usage.get('output_tokens', 0)}"
+    console.print(f"[dim]{meta}[/dim]")
+
+
 # ---------- version ----------
 
 @app.command()
