@@ -3,8 +3,8 @@
 > **A masterless Claude agent CLI, three ways.** A Monday-morning founder **briefing** (revenue, churn, failed payments, urgent issues), an autonomous **agent** for ad-hoc data questions, and a **coding agent** (Claude-Code shaped) that reads, edits, and runs your code.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-v0.3.0-blue)](CHANGELOG.md)
-[![Tests](https://img.shields.io/badge/tests-393%20passing-green)](https://github.com/rohithkandula19/RO-Claude-kit/actions)
+[![Status](https://img.shields.io/badge/status-v0.4.0-blue)](CHANGELOG.md)
+[![Tests](https://img.shields.io/badge/tests-408%20passing-green)](https://github.com/rohithkandula19/RO-Claude-kit/actions)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Providers](https://img.shields.io/badge/providers-Claude%20·%20Ollama%20·%20OpenAI%20·%20Together%20·%20Groq%20·%20Fireworks-d4a373)](#-supported-providers)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
@@ -64,6 +64,15 @@ A coding agent that reads, edits, and runs your code — every write and shell c
 - **Interactive session** — steer across turns with slash commands: `/help`, `/diff`, `/undo`, `/memory`, `/model`, `/clear`, `/tools`, `/quit`.
 
 And the wedge no pure coding agent has — **`ronin investigate "<symptom>"`** bridges your business data *and* your code to root-cause a problem (e.g. "failed payments spiked the 9th → `stripe_webhook.py` changed in commit `a1b2c3` on the 9th").
+
+## 🎨 `ronin image` / `ronin video` — media, in the terminal
+
+```bash
+ronin image "a red panda hacking at night, neon, flat vector"   # free, no API key
+ronin video "a red panda surfing a neon wave" --frames 16 --fps 8
+```
+
+Text-to-image that **displays in the terminal** (inline on iTerm2, via `chafa`/`viu`/`imgcat` otherwise, else opens in your viewer). Free by default via **Pollinations** (no key); switch to OpenAI `gpt-image-1` with `--backend openai`. `ronin video` generates AI frames and stitches a real `.mp4` with `ffmpeg` (frame-animation — the free way to make a real video file).
 
 ## 🧠 Supported providers
 
