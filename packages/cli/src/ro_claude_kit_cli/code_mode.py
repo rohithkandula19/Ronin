@@ -20,7 +20,7 @@ from pathlib import Path as _Path
 
 from .code_tools import SENSITIVE_TOOLS, build_code_tools, undo_last, unified_diff
 from .config import CSKConfig
-from .project_memory import memory_system_block
+from .project_memory import load_project_memory, memory_system_block, write_memory_template
 from .runner import build_provider
 from .streaming import LiveRenderer
 from .todo import TodoStore, build_todo_tool
@@ -185,6 +185,107 @@ def run_code_agent(
     )
 
 
+# In-session slash commands (the Claude-Code control surface). Both ``/cmd``
+# and ``:cmd`` are accepted.
+SLASH_COMMANDS: dict[str, str] = {
+    "help": "show this help",
+    "clear": "forget the conversation so far",
+    "undo": "revert the most recent file change",
+    "diff": "show the working-tree git diff",
+    "model": "show the active provider + model",
+    "memory": "show loaded project memory (RONIN.md / CLAUDE.md / AGENTS.md)",
+    "init": "scaffold a RONIN.md project-memory file",
+    "tools": "list the tools the agent can use",
+    "quit": "exit the session",
+}
+
+
+def _show_git_diff(console: Console, root: Path | str) -> None:
+    import subprocess
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(_Path(root).resolve()), "diff", "--no-color"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        console.print(f"[red]git diff failed:[/red] {e}")
+        return
+    diff = out.stdout.strip()
+    if not diff:
+        console.print("[dim]working tree clean (no unstaged changes)[/dim]")
+        return
+    _render_diff(console, diff[:8000])
+    if len(diff) > 8000:
+        console.print("[dim]…(diff truncated)[/dim]")
+
+
+def handle_slash_command(
+    user: str,
+    *,
+    console: Console,
+    root: Path | str,
+    config: CSKConfig,
+    undo_stack: list,
+    transcript: list[str],
+) -> str:
+    """Dispatch an in-session command. Returns:
+    ``"passthrough"`` (not a command → send to the agent),
+    ``"handled"`` (command ran → loop again), or ``"exit"`` (quit the session).
+    """
+    from rich.panel import Panel
+
+    if not (user.startswith("/") or user.startswith(":")):
+        return "passthrough"
+    parts = user[1:].strip().split()
+    if not parts:
+        return "handled"
+    cmd = parts[0].lower()
+
+    if cmd in ("q", "quit", "exit"):
+        console.print("[dim]bye[/dim]")
+        return "exit"
+    if cmd in ("help", "h", "?"):
+        console.print("[bold]commands[/bold]")
+        for name, desc in SLASH_COMMANDS.items():
+            console.print(f"  [cyan]/{name}[/cyan]  [dim]{desc}[/dim]")
+        return "handled"
+    if cmd == "clear":
+        transcript.clear()
+        console.print("[dim]✓ conversation cleared[/dim]")
+        return "handled"
+    if cmd == "undo":
+        console.print(f"[yellow]↩[/yellow] {undo_last(undo_stack)}")
+        return "handled"
+    if cmd == "diff":
+        _show_git_diff(console, root)
+        return "handled"
+    if cmd == "model":
+        console.print(
+            f"[dim]provider[/dim] [bold]{config.provider}[/bold]  ·  "
+            f"[dim]model[/dim] [bold]{config.model or '(provider default)'}[/bold]"
+        )
+        return "handled"
+    if cmd == "memory":
+        found = load_project_memory(root)
+        if found is None:
+            console.print("[dim]no project memory file found (RONIN.md / CLAUDE.md / AGENTS.md)[/dim]")
+        else:
+            name, text = found
+            console.print(Panel(text, title=name, border_style="cyan"))
+        return "handled"
+    if cmd == "init":
+        path = write_memory_template(root)
+        console.print(f"[green]✓[/green] project memory at [cyan]{path}[/cyan]")
+        return "handled"
+    if cmd == "tools":
+        names = [t.name for t in build_code_tools(root)] + ["update_todos"]
+        console.print("[dim]" + ", ".join(names) + "[/dim]")
+        return "handled"
+
+    console.print(f"[yellow]unknown command[/yellow] /{cmd} — try [cyan]/help[/cyan]")
+    return "handled"
+
+
 def run_code_session(
     config: CSKConfig,
     *,
@@ -197,9 +298,7 @@ def run_code_session(
 
     A REPL: you type a request, the agent works (edits + commands gated with
     diffs), then you go again — steering across turns. Conversation context
-    carries forward. Commands:
-      :q / :quit   exit
-      :undo        revert the most recent file change
+    carries forward. Type [bold]/help[/bold] for in-session commands.
     """
     from rich.panel import Panel
 
@@ -207,7 +306,7 @@ def run_code_session(
         f"[bold cyan]ronin code[/bold cyan] — interactive session\n"
         f"[dim]root: {_Path(root).resolve()} · "
         f"{'YOLO (auto-approve)' if yolo else 'writes + commands need approval'}\n"
-        "type your request · [bold]:undo[/bold] revert last change · [bold]:q[/bold] quit[/dim]",
+        "type your request · [bold]/help[/bold] for commands · [bold]/quit[/bold] to exit[/dim]",
         border_style="cyan",
     ))
 
@@ -222,11 +321,13 @@ def run_code_session(
             return
         if not user:
             continue
-        if user in (":q", ":quit", "/quit", "/exit"):
-            console.print("[dim]bye[/dim]")
+        action = handle_slash_command(
+            user, console=console, root=root, config=config,
+            undo_stack=undo_stack, transcript=transcript,
+        )
+        if action == "exit":
             return
-        if user in (":undo", "/undo"):
-            console.print(f"[yellow]↩[/yellow] {undo_last(undo_stack)}")
+        if action == "handled":
             continue
 
         history_prefix = ""
