@@ -41,91 +41,102 @@ app = typer.Typer(
 console = Console()
 
 
-_PANDA_MAP = (
-    # A pixel map. ' ' = transparent, 'W' = white face, 'K' = black
-    # (ears/patches/nose), 'o' = pupil, 'm' = mouth. The panda signature:
-    # big round black ears on top — separated from the eyes by white fur —
-    # and angled teardrop eye-patches that slant inward toward the nose.
-    "     KKKK         KKKK     ",
-    "    KKKKKK       KKKKKK    ",
-    "    KKKKKKWWWWWWWKKKKKK    ",
-    "      WWWWWWWWWWWWWWW      ",
-    "    WWWWWWWWWWWWWWWWWWW    ",
-    "   KKKKKWWWWWWWWWWWKKKKK   ",
-    "  WKKoKKKWWWWWWWWWKKKoKKW  ",
-    "  WWKKKKKKWWWWWWWKKKKKKWW  ",
-    "  WWWKKKKKWWWWWWWKKKKKWWW  ",
-    "   WWWWKKKWWKKKWWKKKWWWW   ",
-    "    WWWWWWWWWKWWWWWWWWW    ",
-    "      WWWWWmmmmmWWWWW      ",
-    "        WWWWWWWWWWW        ",
-    "          WWWWWWW          ",
-)
+# --------------------------------------------------------------------------
+# Panda mascot — a little animated panda that *does things* on launch.
+#
+# Each activity is a list of frames; each frame is a list of text lines. The
+# head is the round-eared bear face ``ʕ•ᴥ•ʔ`` — it renders identically in any
+# terminal (plain text, no colour tricks, no block-art striping), and the
+# motion between frames is what sells "panda running / dancing / …".
+# --------------------------------------------------------------------------
+
+_PANDA_NEUTRAL = [
+    " ʕ•ᴥ•ʔ ",
+    "  (   ) ",
+    "  ‾‾‾‾  ",
+]
+
+_PANDA_ACTIVITIES: dict[str, list[list[str]]] = {
+    "dancing": [
+        [" ♪ \\ʕ•ᴥ•ʔ/", "    (   )  ", "   _/   \\_ "],
+        ["    ƪʕ•ᴥ•ʔʅ ♪", "    (   )  ", "    \\   /  "],
+        ["     \\ʕ•ᴥ•ʔ/ ♪", "    (   )  ", "   _/   \\_ "],
+        [" ♪  ƪʕ•ᴥ•ʔʅ ", "    (   )  ", "    \\   /  "],
+    ],
+    "running": [
+        [" »   ʕ•ᴥ•ʔ ", "    ε(   )϶", "     /   ⌐ "],
+        [" »»  ʕ•ᴥ•ʔ ", "    ε(   )϶", "     ⌐   \\ "],
+        [" »   ʕ•ᴥ•ʔ ", "    ε(   )϶", "     J   L "],
+        [" »»  ʕ•ᴥ•ʔ ", "    ε(   )϶", "     L   J "],
+    ],
+    "playing": [
+        [" ʕ•ᴥ•ʔﾉ      ●", "  (   )  ", "  /   \\  "],
+        [" ʕ•ᴥ•ʔﾉ   ●  ", "  (   )  ", "  /   \\  "],
+        [" ʕ•ᴥ•ʔﾉ ●   ", "  (   )  ", "  /   \\  "],
+        [" ʕ•ᴥ•ʔﾉ●     ", "  (   )  ", "  /   \\  "],
+    ],
+    "sleeping": [
+        [" ʕ-ᴥ-ʔ   z ", "  (   )  ", "  ‾‾‾‾‾  "],
+        [" ʕ-ᴥ-ʔ  Z  ", "  (   )  ", "  ‾‾‾‾‾  "],
+        [" ʕ-ᴥ-ʔ zZ  ", "  (   )  ", "  ‾‾‾‾‾  "],
+        [" ʕ-ᴥ-ʔ Z   ", "  (   )  ", "  ‾‾‾‾‾  "],
+    ],
+}
 
 
-def _panda_art(eyes: str = "●") -> str:
-    """Render the panda pixel-map to Rich markup. ``eyes`` is the pupil glyph.
-
-    Each pixel becomes a background-painted cell so the shapes are crisp on a
-    dark terminal regardless of font: the white face shows as light blocks, the
-    ears / eye-patches / nose as solid-black blocks, pupils + smile as glyphs.
-    """
-    W, K = "on grey93", "on grey15"          # white face / black features
-    PUP = "bold white on grey15"             # white pupil inside a black patch
-    MOUTH = "bold grey15 on grey93"          # dark smile on the white face
-
-    def render_run(ch: str, n: int) -> str:
-        if ch == " ":
-            return " " * n              # transparent → terminal background
-        if ch == "W":
-            return f"[{W}]{' ' * n}[/]"
-        if ch == "K":
-            return f"[{K}]{' ' * n}[/]"
-        if ch == "o":
-            return f"[{PUP}]{eyes * n}[/]"
-        if ch == "m":
-            return f"[{MOUTH}]{'◡' * n}[/]"
-        return " " * n
-
-    lines = []
-    for row in _PANDA_MAP:
-        out, i = [], 0
-        while i < len(row):
-            j = i
-            while j < len(row) and row[j] == row[i]:
-                j += 1
-            out.append(render_run(row[i], j - i))
-            i = j
-        lines.append("".join(out))
-    return "\n".join(lines)
+def _normalize_frames(frames: list[list[str]]) -> list[list[str]]:
+    """Pad every frame to the same line-count and width so the panda doesn't
+    jitter or resize the panel as it animates."""
+    rows = max(len(f) for f in frames)
+    width = max((len(line) for f in frames for line in f), default=0)
+    out = []
+    for f in frames:
+        padded = [line.ljust(width) for line in f]
+        padded += [" " * width] * (rows - len(padded))
+        out.append(padded)
+    return out
 
 
-def _banner(animate: bool = True) -> None:
-    """ronin's panda — blinks a couple times on launch, like a startup animation."""
-    import sys
-    import time
-
+def _panda_panel(frame_lines: list[str], caption: str):
+    """Wrap one mascot frame + the ronin wordmark in a centred panel."""
     from rich.panel import Panel
     from rich.align import Align
 
-    def panel(eyes: str) -> Panel:
-        body = _panda_art(eyes) + (
-            f"\n\n[bold magenta]ronin[/bold magenta] [dim]v{__version__}[/dim]  ·  "
-            "[dim]masterless Claude agent[/dim]\n"
-            "[dim]briefing · agent · code · chat · tui[/dim]"
-        )
-        return Panel.fit(Align.center(body), border_style="magenta", padding=(1, 3))
+    mascot = "\n".join(f"[bold white]{line}[/bold white]" for line in frame_lines)
+    body = (
+        mascot
+        + f"\n\n[bold magenta]ronin[/bold magenta] [dim]v{__version__}[/dim]"
+        + f"  ·  [dim]{caption}[/dim]\n"
+        + "[dim]briefing · agent · code · chat · tui[/dim]"
+    )
+    return Panel.fit(Align.center(body), border_style="magenta", padding=(1, 3))
 
-    # Only animate on a real TTY; otherwise print one static frame (clean for pipes/tests).
+
+def _banner(animate: bool = True, activity: str | None = None, loops: int = 2) -> None:
+    """ronin's panda — a small panda mascot doing a (random) activity on launch.
+
+    On a real TTY it animates frame-by-frame; piped/non-interactive output gets
+    a single still frame so logs and tests stay clean and deterministic.
+    """
+    import random
+    import sys
+    import time
+
+    name = activity or random.choice(list(_PANDA_ACTIVITIES))
+    frames = _normalize_frames(_PANDA_ACTIVITIES[name])
+    caption = f"masterless Claude agent · {name}"
+
     if animate and sys.stdout.isatty():
         from rich.live import Live
-        frames = ["●", "●", "–", "●", "●", "–", "●"]  # open, open, blink, …
-        with Live(panel("●"), console=console, refresh_per_second=20, transient=False) as live:
-            for eye in frames:
-                live.update(panel(eye))
-                time.sleep(0.12)
+        with Live(console=console, refresh_per_second=12, transient=False) as live:
+            for _ in range(loops):
+                for f in frames:
+                    live.update(_panda_panel(f, caption))
+                    time.sleep(0.14)
+            live.update(_panda_panel(frames[0], caption))
     else:
-        console.print(panel("●"))
+        console.print(_panda_panel(_normalize_frames([_PANDA_NEUTRAL])[0],
+                                   "masterless Claude agent"))
 
 
 @app.callback(invoke_without_command=True)
@@ -991,6 +1002,22 @@ def investigate(
 def version() -> None:
     """Print the ronin version."""
     console.print(f"ronin {__version__}")
+
+
+@app.command()
+def panda(
+    activity: str = typer.Argument(None, help="dancing | running | playing | sleeping (default: all)"),
+    loops: int = typer.Option(3, "--loops", "-n", help="How many times to repeat each activity."),
+) -> None:
+    """Watch the ronin panda do its thing. No args = it cycles through them all."""
+    activities = list(_PANDA_ACTIVITIES)
+    if activity:
+        if activity not in _PANDA_ACTIVITIES:
+            console.print(f"[red]unknown activity[/red] '{activity}'. choose: {', '.join(activities)}")
+            raise typer.Exit(2)
+        activities = [activity]
+    for name in activities:
+        _banner(activity=name, loops=loops)
 
 
 def _print_result(result: AgentResultRich, *, raw: bool) -> None:
