@@ -36,6 +36,32 @@ Configured services: {services}.
 """
 
 
+def _friendly_provider_error(e: Exception, config: CSKConfig) -> str:
+    """Turn a provider/network exception into a clean, actionable message
+    (no traceback). Recognises auth failures and connection problems."""
+    provider = config.provider
+    key_env = "ANTHROPIC_API_KEY" if provider == "anthropic" else "OPENAI_API_KEY"
+    status = getattr(getattr(e, "response", None), "status_code", None)
+    name = e.__class__.__name__
+
+    if status in (401, 403):
+        return (
+            f"[red]✗ {provider} rejected the request ({status} Unauthorized).[/red] "
+            f"Your API key is missing or invalid.\n"
+            f"[dim]Fix: set a valid key — [bold]export {key_env}=...[/bold] — or run "
+            f"[bold]ronin init[/bold] to reconfigure. Check status with [bold]ronin doctor[/bold]. "
+            f"To switch back to Claude: [bold]ronin init[/bold] and pick anthropic.[/dim]"
+        )
+    if status == 429:
+        return f"[red]✗ {provider} rate-limited the request (429).[/red] [dim]Wait a moment and retry.[/dim]"
+    if status is not None:
+        return f"[red]✗ {provider} returned HTTP {status}.[/red] [dim]Check your config / model name.[/dim]"
+    if name in ("ConnectError", "ConnectTimeout", "ReadTimeout", "TimeoutException"):
+        return (f"[red]✗ couldn't reach {provider}.[/red] "
+                f"[dim]Check your network or base_url. ({name})[/dim]")
+    return f"[red]✗ provider error ({name}):[/red] [dim]{str(e)[:200]}[/dim]"
+
+
 @dataclass
 class AgentResultRich:
     success: bool
@@ -144,11 +170,20 @@ def run_ask(config: CSKConfig, question: str, *, console: Console | None = None)
         )
 
     agent = _build_agent(config, tools)
-    if console is not None:
-        with Live(Spinner("dots", text="[cyan]thinking…[/cyan]"), console=console, refresh_per_second=10):
+    try:
+        if console is not None:
+            with Live(Spinner("dots", text="[cyan]thinking…[/cyan]"), console=console, refresh_per_second=10):
+                result = agent.run(question)
+        else:
             result = agent.run(question)
-    else:
-        result = agent.run(question)
+    except Exception as e:  # noqa: BLE001 — surface provider/network errors cleanly
+        return AgentResultRich(
+            success=False,
+            output=_friendly_provider_error(e, config),
+            iterations=0,
+            error=f"{e.__class__.__name__}: {e}",
+            demo_mode=config.demo_mode,
+        )
 
     # Record token usage / cost (best-effort; never fail the user's command).
     try:
@@ -202,8 +237,13 @@ def start_chat(config: CSKConfig, *, console: Console, raw: bool = False) -> Non
         prior = "\n\n".join(f"{t.role.upper()}: {t.content}" for t in memory.turns[:-1]) or "(start of conversation)"
         prompt = f"Conversation so far:\n{prior}\n\nUser's new message: {user}"
 
-        with Live(Spinner("dots", text="[cyan]thinking…[/cyan]"), console=console, refresh_per_second=10):
-            result = agent.run(prompt)
+        try:
+            with Live(Spinner("dots", text="[cyan]thinking…[/cyan]"), console=console, refresh_per_second=10):
+                result = agent.run(prompt)
+        except Exception as e:  # noqa: BLE001 — never crash the chat on a provider/network error
+            console.print(_friendly_provider_error(e, config) + "\n")
+            memory.turns.pop()  # drop the unanswered user turn so context stays clean
+            continue
 
         memory.add_turn("assistant", result.output)
         memory.maybe_compress()
