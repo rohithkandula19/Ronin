@@ -210,7 +210,17 @@ def init(
         default="anthropic",
     )
     preset = PROVIDER_PRESETS.get(provider_choice, {})
-    model = Prompt.ask("Model", default=preset.get("model") or "")
+    default_model = preset.get("model") or ""
+    model = Prompt.ask("Model", default=default_model)
+    # Guard: people sometimes answer the Model prompt with "yes"/"y" (as if it
+    # were a confirmation), which silently saves an invalid model and 404s at
+    # runtime. Reject those and fall back to the provider's default.
+    if model.strip().lower() in {"y", "n", "yes", "no", "true", "false", "ok"} and default_model:
+        console.print(
+            f"[yellow]'{model}' isn't a model name[/yellow] — using the default "
+            f"[bold]{default_model}[/bold] instead. (Pass --model or edit .csk/config.toml to change it.)"
+        )
+        model = default_model
     base_url: str | None = None
     if provider_choice == "custom":
         base_url = Prompt.ask("OpenAI-compatible base URL")
@@ -327,9 +337,59 @@ def tools() -> None:
 
 # ---------- doctor ----------
 
+def _provider_live_check(config: CSKConfig) -> str:
+    """Ping the provider's models endpoint to verify the key actually works and
+    the configured model exists. Returns a Rich-markup status string."""
+    import urllib.error
+    import urllib.request
+
+    provider = config.provider
+    model = config.resolved_model()
+    if provider == "anthropic":
+        url = "https://api.anthropic.com/v1/models"
+        key = config.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY")
+        if not key:
+            return "[red]no key set[/red]"
+        headers = {"x-api-key": key, "anthropic-version": "2023-06-01"}
+    elif provider == "ollama":
+        base = config.resolved_base_url() or "http://localhost:11434/v1"
+        url = f"{base.rstrip('/')}/models"
+        headers = {}
+        key = None
+    else:
+        base = config.resolved_base_url() or "https://api.openai.com/v1"
+        url = f"{base.rstrip('/')}/models"
+        key = config.openai_api_key or os.environ.get("OPENAI_API_KEY")
+        if not key:
+            return "[red]no key set[/red]"
+        headers = {"Authorization": f"Bearer {key}"}
+
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
+            import json as _json
+            data = _json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            return f"[red]invalid key ({e.code})[/red]"
+        return f"[red]HTTP {e.code}[/red]"
+    except Exception as e:  # noqa: BLE001
+        return f"[red]unreachable[/red] [dim]({e.__class__.__name__})[/dim]"
+
+    ids = [m.get("id") for m in (data.get("data") or []) if isinstance(m, dict)]
+    if ids and model not in ids:
+        return f"[green]key ok[/green] · [red]model '{model}' not found[/red] [dim](try: {', '.join(ids[:3])}…)[/dim]"
+    return "[green]ok — key + model valid[/green]"
+
+
 @app.command()
-def doctor() -> None:
-    """Health check: config location, Anthropic reachability, configured services."""
+def doctor(
+    check: bool = typer.Option(False, "--check", help="Ping the provider to verify the key + model actually work (network)."),
+) -> None:
+    """Health check: config location, provider auth, configured services.
+
+    Add --check to make a live call that confirms the key is valid and the
+    configured model exists (instead of just checking a key is present)."""
     config = load_config()
     path = find_config_path()
 
@@ -343,15 +403,20 @@ def doctor() -> None:
     table.add_row("model", config.resolved_model())
     if config.resolved_base_url():
         table.add_row("base_url", config.resolved_base_url() or "")
+    # Static check only confirms a key is *present* — say so honestly.
     table.add_row(
-        f"{config.provider} auth",
-        "[green]ok[/green]" if config.has_provider_auth() else "[red]missing[/red]",
+        f"{config.provider} key",
+        "[green]present[/green]" if config.has_provider_auth() else "[red]missing[/red]",
     )
+    if check:
+        table.add_row("live check", _provider_live_check(config))
     services = config.configured_services()
     table.add_row("services", ", ".join(services) if services else "[red]none[/red]")
     table.add_row("ronin version", __version__)
 
     console.print(table)
+    if not check:
+        console.print("[dim]tip: run [bold]ronin doctor --check[/bold] to verify the key + model actually work.[/dim]")
 
 
 # ---------- saved queries ----------
