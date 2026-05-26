@@ -41,42 +41,63 @@ app = typer.Typer(
 console = Console()
 
 
-def _panda_art(eyes: str = "●") -> str:
-    """ASCII-art panda face. ``eyes`` is the pupil glyph ('●' open, '–' blink).
+_PANDA_MAP = (
+    # A pixel map. ' ' = transparent, 'W' = white face, 'K' = black
+    # (ears/patches/nose), 'o' = pupil, 'm' = mouth. The panda signature:
+    # big round black ears on top — separated from the eyes by white fur —
+    # and angled teardrop eye-patches that slant inward toward the nose.
+    "     KKKK         KKKK     ",
+    "    KKKKKK       KKKKKK    ",
+    "    KKKKKKWWWWWWWKKKKKK    ",
+    "      WWWWWWWWWWWWWWW      ",
+    "    WWWWWWWWWWWWWWWWWWW    ",
+    "   KKKKKWWWWWWWWWWWKKKKK   ",
+    "  WKKoKKKWWWWWWWWWKKKoKKW  ",
+    "  WWKKKKKKWWWWWWWKKKKKKWW  ",
+    "  WWWKKKKKWWWWWWWKKKKKWWW  ",
+    "   WWWWKKKWWKKKWWKKKWWWW   ",
+    "    WWWWWWWWWKWWWWWWWWW    ",
+    "      WWWWWmmmmmWWWWW      ",
+    "        WWWWWWWWWWW        ",
+    "          WWWWWWW          ",
+)
 
-    Drawn with *background-painted* cells so it reads as a panda on a dark
-    terminal: W = the white face, K = the solid-black ears / eye-patches /
-    nose. Black ears sit on top, big black eye-patches carry white pupils, and
-    a dark muzzle holds the nose + smile. Spaces are the paint; the colour is
-    in the background, so shapes are crisp regardless of font.
+
+def _panda_art(eyes: str = "●") -> str:
+    """Render the panda pixel-map to Rich markup. ``eyes`` is the pupil glyph.
+
+    Each pixel becomes a background-painted cell so the shapes are crisp on a
+    dark terminal regardless of font: the white face shows as light blocks, the
+    ears / eye-patches / nose as solid-black blocks, pupils + smile as glyphs.
     """
-    e = eyes
-    W = "on grey93"   # white face
-    K = "on grey15"   # black ears / patches / nose
-    P = f"bold white on grey15"  # white pupil inside a black patch
-    sp = " "
-    return (
-        # ears (black), sitting above and overlapping the head
-        f"   [{K}]{sp*5}[/]         [{K}]{sp*5}[/]   \n"
-        f"   [{K}]{sp*5}[/]         [{K}]{sp*5}[/]   \n"
-        # head top — rounded by shaving the corners
-        f"   [{W}]{sp*19}[/]   \n"
-        f"  [{W}]{sp*21}[/]  \n"
-        # eye-patch tops
-        f" [{W}]{sp*2}[/][{K}]{sp*5}[/][{W}]{sp*9}[/][{K}]{sp*5}[/][{W}]{sp*2}[/] \n"
-        # pupils
-        f" [{W}]{sp*2}[/][{K}]{sp*2}[/][{P}]{e}[/][{K}]{sp*2}[/][{W}]{sp*9}[/][{K}]{sp*2}[/][{P}]{e}[/][{K}]{sp*2}[/][{W}]{sp*2}[/] \n"
-        # eye-patch bottoms
-        f" [{W}]{sp*2}[/][{K}]{sp*5}[/][{W}]{sp*9}[/][{K}]{sp*5}[/][{W}]{sp*2}[/] \n"
-        # cheeks
-        f" [{W}]{sp*23}[/] \n"
-        # muzzle: dark nose patch with a white nose-tip
-        f" [{W}]{sp*9}[/][{K}]{sp*2}[/][bold white on grey15]▾[/][{K}]{sp*2}[/][{W}]{sp*9}[/] \n"
-        f" [{W}]{sp*9}[/][{K}] [/][white on grey15]◡◡◡[/][{K}] [/][{W}]{sp*9}[/] \n"
-        # head bottom — rounded
-        f"  [{W}]{sp*21}[/]  \n"
-        f"   [{W}]{sp*19}[/]   "
-    )
+    W, K = "on grey93", "on grey15"          # white face / black features
+    PUP = "bold white on grey15"             # white pupil inside a black patch
+    MOUTH = "bold grey15 on grey93"          # dark smile on the white face
+
+    def render_run(ch: str, n: int) -> str:
+        if ch == " ":
+            return " " * n              # transparent → terminal background
+        if ch == "W":
+            return f"[{W}]{' ' * n}[/]"
+        if ch == "K":
+            return f"[{K}]{' ' * n}[/]"
+        if ch == "o":
+            return f"[{PUP}]{eyes * n}[/]"
+        if ch == "m":
+            return f"[{MOUTH}]{'◡' * n}[/]"
+        return " " * n
+
+    lines = []
+    for row in _PANDA_MAP:
+        out, i = [], 0
+        while i < len(row):
+            j = i
+            while j < len(row) and row[j] == row[i]:
+                j += 1
+            out.append(render_run(row[i], j - i))
+            i = j
+        lines.append("".join(out))
+    return "\n".join(lines)
 
 
 def _banner(animate: bool = True) -> None:
