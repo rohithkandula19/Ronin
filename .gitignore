@@ -60,6 +60,9 @@ htmlcov/
 # SaaS / CLI runtime artifacts
 csk_saas.db
 csk_saas.db-journal
-.csk/briefings/
-.csk/usage.jsonl
-.csk/queries.toml
+# ronin local config — holds plaintext API keys; NEVER commit it
+.csk/
+# generated media (images / videos) dropped in the repo root
+ronin_image_*.png
+ronin_image_*.jpg
+ronin_video_*.mp4
