@@ -20,6 +20,7 @@ from pathlib import Path as _Path
 
 from .code_tools import SENSITIVE_TOOLS, build_code_tools, undo_last, unified_diff
 from .config import CSKConfig
+from .media import build_image_tool
 from .project_memory import load_project_memory, memory_system_block, write_memory_template
 from .runner import build_provider
 from .streaming import LiveRenderer
@@ -38,6 +39,8 @@ Workflow:
 - Explore first: list_files / read_file / search_files to understand the code.
 - Make focused edits with write_file. Preserve existing style.
 - Verify your work with run_command (run the tests / the script / a lint).
+- Need a logo, diagram, illustration, or placeholder art? Call generate_image
+  to create it and save it into the project.
 - When done, summarize exactly what you changed and how you verified it.
 
 Constraints:
@@ -79,8 +82,11 @@ def _selective_gate(console: Console | None, yolo: bool, root: _Path) -> Callabl
     For write_file / edit_file, render a unified diff of the proposed change
     *before* asking — so you approve a visible diff, not a blind action.
     """
+    # generate_image writes a file into the project → gate it like other writes.
+    gated = SENSITIVE_TOOLS | {"generate_image"}
+
     def gate(name: str, args: dict) -> bool:
-        if name not in SENSITIVE_TOOLS:
+        if name not in gated:
             return True  # reads run freely
         if yolo:
             return True
@@ -139,6 +145,8 @@ def run_code_agent(
     # The live plan tracker: the agent maintains a checklist via update_todos.
     todo_store = TodoStore()
     tools = tools + [build_todo_tool(todo_store)]
+    # Media: the agent can generate images into the project (free backend).
+    tools = tools + [build_image_tool(root)]
 
     # Project memory: fold RONIN.md / CLAUDE.md / AGENTS.md into the system
     # prompt so the agent follows the repo's conventions. Announce it once (on

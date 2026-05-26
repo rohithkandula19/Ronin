@@ -215,6 +215,50 @@ def ffmpeg_available() -> bool:
     return shutil.which("ffmpeg") is not None
 
 
+# --------------------------------------------------------------------------
+# Agent tool: let `ronin code` / `ronin agent` generate images mid-task.
+# --------------------------------------------------------------------------
+def build_image_tool(root: Path | str, *, backend: str = "pollinations"):
+    """A Tool the coding agent can call to create an image and save it into the
+    project (e.g. "design a logo and save it to assets/logo.png")."""
+    from ro_claude_kit_agent_patterns import Tool
+
+    root_path = Path(root).resolve()
+
+    def _generate(prompt: str, path: str, width: int = 1024, height: int = 1024) -> str:
+        target = (root_path / path).resolve()
+        # refuse path traversal outside the project root
+        if root_path != target and root_path not in target.parents:
+            return f"ERROR: refusing to write outside the project root: {path}"
+        try:
+            out = generate_image(prompt, backend=backend, out=target, width=width, height=height)
+        except Exception as e:  # noqa: BLE001 — return the error to the agent to reason about
+            return f"ERROR: image generation failed: {e}"
+        rel = out.relative_to(root_path) if root_path in out.parents else out
+        return f"saved generated image to {rel} ({out.stat().st_size} bytes)"
+
+    return Tool(
+        name="generate_image",
+        description=(
+            "Generate an image from a text prompt and save it into the project. "
+            "Use for logos, diagrams, illustrations, placeholder art. "
+            "Args: prompt (what to draw), path (where to save, relative to the "
+            "project root, e.g. 'assets/logo.png'), optional width/height."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "prompt": {"type": "string"},
+                "path": {"type": "string", "description": "Save path relative to the project root."},
+                "width": {"type": "integer"},
+                "height": {"type": "integer"},
+            },
+            "required": ["prompt", "path"],
+        },
+        handler=_generate,
+    )
+
+
 def generate_video(
     prompt: str,
     *,
