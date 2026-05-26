@@ -10,20 +10,22 @@ from rich.console import Console
 # pixel map: ' ' transparent · W white face · K black (ears/patches/nose) ·
 # o pupil · m mouth · P magenta blush
 _MAP = (
-    "     KKKK         KKKK     ",
-    "    KKKKKK       KKKKKK    ",
-    "    KKKKKKWWWWWWWKKKKKK    ",
-    "      WWWWWWWWWWWWWWW      ",
-    "    WWWWWWWWWWWWWWWWWWW    ",
-    "   KKKKKWWWWWWWWWWWKKKKK   ",
-    "  WKKoKKKWWWWWWWWWKKKoKKW  ",
-    "  WWKKKKKKWWWWWWWKKKKKKWW  ",
-    "  WWWKKKKKWWWWWWWKKKKKWWW  ",
-    "   WWWWKKKWWKKKWWKKKWWWW   ",
-    "    WPPWWWWWKWWWWWPPWWW    ",
-    "      WWWWWmmmmmWWWWW      ",
-    "        WWWWWWWWWWW        ",
-    "          WWWWWWW          ",
+    "    KKKKKKK        KKKKKKK    ",
+    "   KKKKKKKWWWWWWWWWWKKKKKKK   ",
+    "   KKKKWWWWWWWWWWWWWWWWKKKK   ",
+    "    KWWWWWWWWWWWWWWWWWWWWK    ",
+    "    WWWWWWWWWWWWWWWWWWWWWW    ",
+    "   WWWKKKKKKWWWWWWKKKKKKWWW   ",
+    "  WWWKKKooKKKWWWWKKKooKKKWWW  ",
+    "  WWWKKKKKKKKWWWWKKKKKKKKWWW  ",
+    "  WWWWKKKKKKWWWWWWKKKKKKWWWW  ",
+    "  WWWPPPWWWWWWWWWWWWWWPPPWWW  ",
+    "  WWWPPPPWWWWKKKKWWWWPPPPWWW  ",
+    "   WWPPPWWWWWWKKWWWWWWPPPWW   ",
+    "    WWWWWWWWWmmmmWWWWWWWWW    ",
+    "     WWWWWWWWWWWWWWWWWWWW     ",
+    "       WWWWWWWWWWWWWWWW       ",
+    "          WWWWWWWWWW          ",
 )
 
 _W = "on grey93"          # white face
