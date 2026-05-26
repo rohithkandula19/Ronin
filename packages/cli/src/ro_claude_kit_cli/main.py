@@ -237,10 +237,16 @@ def init(
         ) or None
     elif provider_choice != "ollama":
         openai_key = Prompt.ask(
-            f"API key for {provider_choice}",
+            f"API key for {provider_choice} (your {provider_choice} key; input is hidden — paste ONCE)",
             default=os.environ.get("OPENAI_API_KEY") or "",
             password=True,
         ) or None
+
+    # The key prompt hides input, so confirm what landed (length + masked preview)
+    # — this is what stops the "did my paste work?" double-paste problem.
+    chosen_key = anthropic_key or openai_key
+    if chosen_key:
+        console.print(f"[dim]key received:[/dim] {_key_preview(chosen_key)}")
 
     console.print()
     stripe = Prompt.ask("Stripe API key (rk_live_... recommended)", default="", password=True)
@@ -266,6 +272,56 @@ def init(
     services = cfg.configured_services()
     console.print(f"[dim]provider:[/dim] {provider_choice} ({cfg.resolved_model()})")
     console.print(f"[dim]configured services:[/dim] {', '.join(services) if services else '[red]none[/red]'}")
+    console.print("[dim]verify with [bold]ronin doctor --check[/bold][/dim]")
+
+
+def _key_preview(key: str) -> str:
+    """A safe, non-revealing confirmation of a pasted key: length + masked ends."""
+    n = len(key)
+    if n == 0:
+        return "[dim](empty)[/dim]"
+    masked = f"{key[:4]}…{key[-4:]}" if n > 10 else "…"
+    if 30 < n < 80:
+        flag = "[green]looks right ✅[/green]"
+    elif n >= 80:
+        flag = "[red]too long — looks double-pasted ❌[/red]"
+    else:
+        flag = "[yellow]short — double-check ⚠️[/yellow]"
+    return f"{n} chars · {masked} · {flag}"
+
+
+@app.command("set-key")
+def set_key(
+    provider: str = typer.Option(None, "--provider", help="Set/override the provider (e.g. groq, anthropic)."),
+    scope: str = typer.Option("project", "--scope", help="'project' (./.csk/) or 'user' (~/.config/csk/)."),
+) -> None:
+    """Set just the LLM API key — masked input with a length/preview confirmation
+    so you can tell the paste actually worked (no more blind double-pasting)."""
+    config = load_config()
+    if provider:
+        config.provider = provider
+    prov = config.provider
+    if prov == "ollama":
+        console.print("[yellow]ollama runs locally and needs no key.[/yellow]")
+        raise typer.Exit(0)
+
+    key = (Prompt.ask(f"API key for {prov} (input hidden — paste ONCE, then Enter)", password=True) or "").strip()
+    if not key:
+        console.print("[yellow]no key entered — nothing changed[/yellow]")
+        raise typer.Exit(1)
+    console.print(f"[dim]received:[/dim] {_key_preview(key)}")
+    if len(key) >= 80:
+        console.print("[red]✗ that looks like the key pasted multiple times — run [bold]ronin set-key[/bold] again and paste ONCE.[/red]")
+        raise typer.Exit(1)
+
+    config.demo_mode = False
+    if prov == "anthropic":
+        config.anthropic_api_key = key
+    else:
+        config.openai_api_key = key
+    path = save_config(config, scope=scope)
+    console.print(f"[green]✓[/green] key saved for [bold]{prov}[/bold] → [cyan]{path}[/cyan]")
+    console.print("[dim]verify it works: [bold]ronin doctor --check[/bold][/dim]")
 
 
 # ---------- ask ----------

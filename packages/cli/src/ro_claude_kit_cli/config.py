@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import tomli_w
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 CONFIG_FILENAME = "config.toml"
@@ -48,6 +48,16 @@ class CSKConfig(BaseModel):
     database_url: str | None = None
 
     extra: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_api_key_alias(cls, data: Any) -> Any:
+        """Allow a provider-neutral ``api_key`` in the TOML as an alias for
+        ``openai_api_key`` — the latter name is confusing for Groq/Together/etc.
+        users. ``openai_api_key`` still works; ``api_key`` just maps onto it."""
+        if isinstance(data, dict) and data.get("api_key") and not data.get("openai_api_key"):
+            data = {**data, "openai_api_key": data["api_key"]}
+        return data
 
     def resolved_model(self) -> str:
         if self.model:
