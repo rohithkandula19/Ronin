@@ -1383,6 +1383,71 @@ def see(
     console.print(Panel(answer or "[dim](no answer)[/dim]", title=f"👁  {image.name}", border_style="green", padding=(1, 2)))
 
 
+@app.command()
+def explain(
+    target: str = typer.Argument(..., help="File, directory, or repo path to explain."),
+    question: list[str] = typer.Argument(None, help="Optional focus, e.g. 'how does auth work'."),
+    diagram: bool = typer.Option(True, "--diagram/--no-diagram", help="Also generate a Mermaid architecture diagram."),
+    speak: bool = typer.Option(False, "--speak", help="Narrate the explanation aloud (text-to-speech)."),
+    out: Path = typer.Option(None, "--out", "-o", help="Write the explanation + diagram to a Markdown file."),
+    root: Path = typer.Option(Path("."), "--root", help="Project root the paths are relative to."),
+    max_steps: int = typer.Option(15, "--max-steps", help="Iteration cap."),
+) -> None:
+    """Explain a codebase — in plain English, with an auto-generated architecture
+    diagram, and optionally narrated aloud. Onboard to any repo in minutes.
+
+    A pure coding agent explains; ronin also *draws* it (Mermaid) and *speaks* it.
+    Read-only — it explores and explains, never edits.
+    """
+    from .agent_mode import has_real_key
+    from .explain_mode import run_explain, strip_code_blocks
+
+    config = load_config()
+    if not has_real_key(config):
+        console.print(f"[red]✗[/red] explain needs an LLM key. Run [bold]ronin set-key[/bold] "
+                      f"(provider: [bold]{config.provider}[/bold]).")
+        raise typer.Exit(2)
+
+    q = " ".join(question) if question else None
+    console.print(Panel.fit(f"[bold]explaining[/bold] [cyan]{target}[/cyan]"
+                            + (f"\n[dim]focus: {q}[/dim]" if q else ""),
+                            border_style="cyan", title="ronin explain"))
+
+    result = run_explain(config, target, q, root=root, diagram=diagram, console=console, max_iterations=max_steps)
+    console.print()
+    if result.blocked:
+        console.print(f"[red]✗[/red] {result.output}")
+        raise typer.Exit(2)
+    if not result.streamed:
+        console.print(Panel(result.output or "[dim](no explanation)[/dim]", title="Explanation", border_style="green", padding=(1, 2)))
+
+    if result.mermaid:
+        console.print("\n[bold]Architecture diagram[/bold] [dim](Mermaid — renders on GitHub):[/dim]")
+        console.print(Panel(f"```mermaid\n{result.mermaid}\n```", border_style="magenta"))
+
+    if out:
+        md = f"# Explanation: {target}\n\n{result.output}\n"
+        out.write_text(md, encoding="utf-8")
+        console.print(f"[green]✓[/green] wrote [cyan]{out}[/cyan]")
+
+    if speak:
+        from .audio import speak as _speak
+        from .audio import tts_engine
+        if tts_engine() is None:
+            console.print("[dim](no text-to-speech engine — skipping --speak)[/dim]")
+        else:
+            console.print("[dim]🔊 narrating…[/dim]")
+            try:
+                _speak(strip_code_blocks(result.output)[:1200])
+            except RuntimeError:
+                pass
+
+    meta = f"iterations: {result.iterations}"
+    if result.usage:
+        meta += f" · in: {result.usage.get('input_tokens', 0)} · out: {result.usage.get('output_tokens', 0)}"
+    console.print(f"[dim]{meta}[/dim]")
+
+
 def _print_result(result: AgentResultRich, *, raw: bool) -> None:
     if raw:
         sys.stdout.write(result.output + "\n")

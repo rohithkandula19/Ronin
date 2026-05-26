@@ -3,8 +3,8 @@
 > **A masterless Claude agent CLI.** A Monday-morning founder **briefing** (revenue, churn, failed payments, urgent issues), an autonomous **agent** for ad-hoc data questions, a **coding agent** (Claude-Code shaped) that reads/edits/runs your code, and **media generation** — images, video, and speech, right in the terminal.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-v0.6.0-blue)](CHANGELOG.md)
-[![Tests](https://img.shields.io/badge/tests-463%20passing-green)](https://github.com/rohithkandula19/Ronin/actions)
+[![Status](https://img.shields.io/badge/status-v0.7.0-blue)](CHANGELOG.md)
+[![Tests](https://img.shields.io/badge/tests-471%20passing-green)](https://github.com/rohithkandula19/Ronin/actions)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Providers](https://img.shields.io/badge/providers-Claude%20·%20Ollama%20·%20OpenAI%20·%20Together%20·%20Groq%20·%20Fireworks-d4a373)](#-supported-providers)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
@@ -76,6 +76,21 @@ A coding agent that reads, edits, and runs your code — every write and shell c
 - **Interactive session** — steer across turns with slash commands: `/help`, `/diff`, `/undo`, `/memory`, `/model`, `/clear`, `/tools`, `/quit`.
 
 And the wedge no pure coding agent has — **`ronin investigate "<symptom>"`** bridges your business data *and* your code to root-cause a problem (e.g. "failed payments spiked the 9th → `stripe_webhook.py` changed in commit `a1b2c3` on the 9th").
+
+## 🧭 `ronin explain` — onboard to any codebase in minutes
+
+```bash
+ronin explain packages/cli              # explain a whole module
+ronin explain main.py "how does auth work" --speak --out notes.md
+```
+
+Point it at any unfamiliar file, module, or repo and ronin makes it make sense — three ways at once:
+
+- **Explains it** in plain English: the big picture, the key pieces, and the data/control flow.
+- **Draws it** — an auto-generated **Mermaid architecture diagram** that renders on GitHub and pastes straight into a README.
+- **Speaks it** (`--speak`) — narrates the explanation aloud.
+
+A pure coding agent *explains*. ronin explains, **draws it**, and **talks** — because it also has a diagram generator and a voice. Read-only: it explores and explains, never edits.
 
 ## 🎨 `ronin image` / `ronin video` / `ronin say` — media, in the terminal
 
@@ -182,6 +197,7 @@ Add `.csk/` to `.gitignore` — the file is plaintext credentials.
 | `ronin eval drift <a> <b>` | Compare two runs; non-zero exit on regression. CI-friendly. |
 | **`ronin code [task]`** | **Coding agent — streaming, plan tracker, project memory, slash commands.** |
 | **`ronin investigate "<symptom>"`** | **Root-cause a problem across your business data AND your code.** |
+| **`ronin explain <path>`** | **Explain a codebase — prose + Mermaid diagram + optional voice.** |
 | `ronin image "<prompt>"` | Text-to-image, shown in the terminal (free Pollinations / OpenAI). |
 | `ronin video "<prompt>"` | Text-to-video — free frames+ffmpeg, or `--engine replicate` (paid). |
 | `ronin say "<text>"` | Text-to-speech — speak aloud or save audio (`--out`). |
