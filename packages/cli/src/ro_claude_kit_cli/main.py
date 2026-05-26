@@ -1346,6 +1346,43 @@ def say(
         console.print("[green]✓[/green] [dim]spoke aloud[/dim]")
 
 
+@app.command()
+def see(
+    image: Path = typer.Argument(..., help="Path to a local image (png/jpg/gif/webp)."),
+    question: list[str] = typer.Argument(None, help="What to ask about it (default: describe it)."),
+) -> None:
+    """Ask the model about a local image — ronin's eyes.
+
+    Uses your configured provider's vision model (Claude, gpt-4o, etc.).
+    Text-only models can't see — switch to a vision-capable model if it refuses.
+    """
+    from .vision import describe_image
+
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] vision needs a provider key. Run [bold]ronin set-key[/bold] "
+                      f"(provider: [bold]{config.provider}[/bold]).")
+        raise typer.Exit(2)
+    q = " ".join(question) if question else None
+    # show the image inline first (nice for the demo), then the answer
+    try:
+        from .media import display_image
+        display_image(image)
+    except Exception:  # noqa: BLE001
+        pass
+    with console.status("[cyan]looking…[/cyan]", spinner="dots"):
+        try:
+            answer = describe_image(config, image, q)
+        except FileNotFoundError as e:
+            console.print(f"[red]✗[/red] {e}")
+            raise typer.Exit(2)
+        except Exception as e:  # noqa: BLE001
+            from .runner import _friendly_provider_error
+            console.print(_friendly_provider_error(e, config))
+            raise typer.Exit(1)
+    console.print(Panel(answer or "[dim](no answer)[/dim]", title=f"👁  {image.name}", border_style="green", padding=(1, 2)))
+
+
 def _print_result(result: AgentResultRich, *, raw: bool) -> None:
     if raw:
         sys.stdout.write(result.output + "\n")
