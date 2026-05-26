@@ -1,6 +1,6 @@
-"""Full-screen Textual TUI for csk.
+"""Full-screen Textual TUI for ronin.
 
-Launch with: ``csk tui``
+Launch with: ``ronin tui``
 
 Layout:
 - Header with provider/model/services
@@ -28,7 +28,7 @@ from .runner import AgentResultRich, run_ask
 
 
 HELP_TEXT = """\
-# csk TUI
+# ronin TUI
 
 | Key | Action |
 | --- | ------ |
@@ -38,39 +38,39 @@ HELP_TEXT = """\
 | F1 | Toggle this help |
 | Up / Down | (focus the input) edit your draft |
 
-Type a question and press Enter. The right pane shows the agent's trace
+Type a request and press Enter. The right pane shows the agent's trace
 in real time. Conversation memory persists for the lifetime of the session.
 """
 
 
 class CSKApp(App):
-    """Textual app wrapping the csk agent."""
+    """Textual app wrapping the ronin agent."""
 
     CSS = """
-    Screen { background: #1a1a1a; }
+    Screen { background: #16161e; }
 
     #main { height: 1fr; }
 
     #chat-pane {
         width: 2fr;
-        border: round #a98467;
+        border: round #c061cb;
         padding: 1 2;
     }
 
     #trace-pane {
         width: 1fr;
-        border: round #555;
+        border: round #444;
         padding: 1 2;
     }
 
-    #trace-title, #chat-title { color: #d4a373; text-style: bold; padding-bottom: 1; }
+    #trace-title, #chat-title { color: #e08fe0; text-style: bold; padding-bottom: 1; }
 
     #input-row {
         height: 3;
         padding: 0 1;
     }
 
-    Input { border: round #a98467; }
+    Input { border: round #c061cb; }
 
     .help { background: #222; padding: 1 2; }
     """
@@ -98,7 +98,7 @@ class CSKApp(App):
                 yield Static("[bold]Trace[/bold]", id="trace-title")
                 yield VerticalScroll(Markdown("_no trace yet — ask a question_"), id="trace-scroll")
         with Horizontal(id="input-row"):
-            yield Input(placeholder="ask me anything about your data…", id="prompt")
+            yield Input(placeholder="ask me anything — your data, a question, anything…", id="prompt")
         yield Footer()
 
     def _initial_chat(self) -> str:
@@ -149,7 +149,7 @@ class CSKApp(App):
 
     def _show_result(self, result: AgentResultRich) -> None:
         self.history.append(("assistant", result.output))
-        self._append_chat(f"**csk ›** {result.output}")
+        self._append_chat(f"**ronin ›** {result.output}")
         self._set_trace(self._render_trace(result))
         meta = f"_iterations: {result.iterations}_"
         if result.usage:
@@ -160,7 +160,7 @@ class CSKApp(App):
         self.busy = False
 
     def _show_error(self, message: str) -> None:
-        self._append_chat(f"**csk ›** _error:_ `{message}`")
+        self._append_chat(f"**ronin ›** _error:_ `{message}`")
         self.busy = False
 
     def _render_trace(self, result: AgentResultRich) -> str:
