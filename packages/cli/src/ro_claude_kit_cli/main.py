@@ -86,9 +86,32 @@ def _banner(animate: bool = True) -> None:
 
 @app.callback(invoke_without_command=True)
 def _root(ctx: typer.Context) -> None:
-    if ctx.invoked_subcommand is None:
-        _banner()
+    if ctx.invoked_subcommand is not None:
+        return
+
+    _banner()
+
+    import sys
+    # Non-interactive (pipe/test) → just show help and exit, cleanly.
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
         console.print(ctx.get_help())
+        return
+
+    # Interactive terminal: drop into a session, the way `claude` does.
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(
+            "[dim]No provider configured yet. Run [bold]ronin init[/bold] "
+            "(or [bold]ronin init --demo[/bold]) to get started, or [bold]ronin --help[/bold] for all commands.[/dim]"
+        )
+        console.print(ctx.get_help())
+        return
+
+    console.print(
+        "[dim]Interactive chat — your configured tools are live. "
+        "Type [bold]:q[/bold] to exit, or run [bold]ronin --help[/bold] for one-shot commands.[/dim]\n"
+    )
+    start_chat(config, console=console)
 
 
 # ---------- init ----------
