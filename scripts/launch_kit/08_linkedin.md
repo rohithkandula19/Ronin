@@ -20,7 +20,7 @@ A few design choices worth calling out:
 
 • Demo mode ships fake-but-realistic data so anyone can `csk init --demo && csk briefing` in 30 seconds without setting up any credentials.
 
-Open source under MIT: https://github.com/rohithkandula19/RO-Claude-kit
+Open source under MIT: https://github.com/rohithkandula19/Ronin
 
 If you're a founder with Stripe and Linear, I'd love a 5-minute look at whether the report matches what you'd write yourself. The interesting feedback is "this is missing X."
 

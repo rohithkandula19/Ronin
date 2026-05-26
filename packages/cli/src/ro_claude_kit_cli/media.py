@@ -27,7 +27,7 @@ from pathlib import Path
 
 IMAGE_BACKENDS = ("pollinations", "openai")
 _POLLINATIONS_URL = "https://image.pollinations.ai/prompt/"
-_USER_AGENT = "ronin/0.3 (+https://github.com/rohithkandula19/RO-Claude-kit)"
+_USER_AGENT = "ronin/0.3 (+https://github.com/rohithkandula19/Ronin)"
 
 
 @dataclass

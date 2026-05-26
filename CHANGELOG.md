@@ -10,7 +10,7 @@ All notable changes to this project will be documented here. Format follows [Kee
 - **`ronin video --engine replicate`** — paid real-motion text-to-video (vs. the free frame-animation engine). Creates a Replicate prediction, polls to completion, downloads the mp4. Needs `REPLICATE_API_TOKEN`; default model `minimax/video-01`, overridable with `--model owner/name`.
 
 ### Changed
-- **Branding sweep**: finished the `csk` → `ronin` rename across user-facing surfaces (README, agent system prompts, web/API titles, package description) and fixed the stale `RO-Claude-kit` → `Ronin` repo links. The `.csk/` config dir, the `csk`/`ro` command aliases, and internal package/module names are unchanged (back-compat).
+- **Branding sweep**: finished the `csk` → `ronin` rename across user-facing surfaces (README, agent system prompts, web/API titles, package description) and fixed the stale old-repo-name links (now point to the `Ronin` repo) across docs, install.sh, and templates. The `.csk/` config dir, the `csk`/`ro` command aliases, and internal package/module names are unchanged (back-compat).
 
 ### Tests
 - +20 tests (audio, agent image tool, Replicate create/poll/download). Repo total: 408 → 427.
@@ -111,5 +111,5 @@ This unblocks the "csk as SaaS, $19/mo" path: hosted scheduling, Slack delivery 
 ### Tests
 - 152 tests across all packages, all passing on every push.
 
-[Unreleased]: https://github.com/rohithkandula19/RO-Claude-kit/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/rohithkandula19/RO-Claude-kit/releases/tag/v0.1.0
+[Unreleased]: https://github.com/rohithkandula19/Ronin/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/rohithkandula19/Ronin/releases/tag/v0.1.0

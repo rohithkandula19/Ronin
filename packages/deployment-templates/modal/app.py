@@ -1,4 +1,4 @@
-"""Modal serverless deployment for an RO-Claude-kit agent.
+"""Modal serverless deployment for an Ronin agent.
 
 Why Modal: Python-native serverless. No Docker config, no Kubernetes. Good for
 compute-heavy agents (long-running tool use, batched evals) that don't fit

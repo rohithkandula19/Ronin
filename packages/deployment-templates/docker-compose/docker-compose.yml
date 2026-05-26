@@ -1,4 +1,4 @@
-# Local dev stack for a Claude agent built with RO-Claude-kit.
+# Local dev stack for a Claude agent built with Ronin.
 # Runs:
 #   - Postgres (so the agent can be wired to a real DB via the Postgres MCP server)
 #   - The agent app itself, with hot-reload

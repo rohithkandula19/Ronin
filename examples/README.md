@@ -1,6 +1,6 @@
 # Examples
 
-End-to-end agents built on RO-Claude-kit. Each example wires multiple modules together (agent-patterns + memory + hardening + mcp-servers + eval-suite) to show what a real product looks like.
+End-to-end agents built on Ronin. Each example wires multiple modules together (agent-patterns + memory + hardening + mcp-servers + eval-suite) to show what a real product looks like.
 
 | Example | What it demonstrates | Key modules |
 |---|---|---|

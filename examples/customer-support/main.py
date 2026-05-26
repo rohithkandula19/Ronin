@@ -1,4 +1,4 @@
-"""End-to-end customer-support agent built on RO-Claude-kit.
+"""End-to-end customer-support agent built on Ronin.
 
 Demonstrates how the kit's modules compose into a real product:
 - ``InjectionScanner`` (hardening) — incoming ticket is scanned first.

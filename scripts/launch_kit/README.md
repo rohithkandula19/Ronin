@@ -24,7 +24,7 @@ See [`DAY_BY_DAY_PLAN.md`](./DAY_BY_DAY_PLAN.md) for the recommended 5-day seque
 
 Before sending *anything*, make sure these are true:
 
-- [ ] `curl -sSL https://raw.githubusercontent.com/rohithkandula19/RO-Claude-kit/main/install.sh | bash` actually works (run `scripts/release.sh 0.2.0` to publish).
+- [ ] `curl -sSL https://raw.githubusercontent.com/rohithkandula19/Ronin/main/install.sh | bash` actually works (run `scripts/release.sh 0.2.0` to publish).
 - [ ] The repo's README hero renders the `csk briefing` output cleanly on github.com (open it and check).
 - [ ] You have a screenshot or GIF of `csk briefing` running. The vhs tape is at `scripts/demo.tape`.
-- [ ] Your LinkedIn and Twitter profiles list "building csk / RO-Claude-kit" so referral-clickers land on something.
+- [ ] Your LinkedIn and Twitter profiles list "building csk / Ronin" so referral-clickers land on something.

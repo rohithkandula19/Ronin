@@ -1,6 +1,6 @@
 # deployment-templates
 
-Drop-in deployment configs for an RO-Claude-kit agent. Pick the target that matches your app's profile.
+Drop-in deployment configs for an Ronin agent. Pick the target that matches your app's profile.
 
 | Target | When to use | Files |
 |---|---|---|

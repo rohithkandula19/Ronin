@@ -1,6 +1,6 @@
 # apps/demo — AgentLab
 
-Interactive playground demonstrating RO-Claude-kit. Pick a pattern, send a message, see the trace.
+Interactive playground demonstrating Ronin. Pick a pattern, send a message, see the trace.
 
 ## Run
 

@@ -10,7 +10,7 @@ Hi <<Name>>,
 
 I'm applying for the Applied AI Engineer (Startups) role. Rather than send the standard "here's my resume" note, here's the artifact I think speaks better:
 
-https://github.com/rohithkandula19/RO-Claude-kit
+https://github.com/rohithkandula19/Ronin
 
 It's an open-source CLI (`csk`) that solves the Monday-morning founder data-gathering problem: pull live from Stripe + Linear + Slack + Notion + Postgres + GitHub, produce a structured briefing. The headline command is `csk briefing` — auto-saves each run, shows week-over-week deltas, posts to Slack. Built on Claude (or any OpenAI-compatible model — Ollama, Together, Groq) with a hand-rolled ReAct loop, not LangChain. Read-only by design, with prompt-injection scanning at the input boundary, approval-gate primitives for any future write paths, and a built-in LLM-as-judge eval suite with drift detection.
 

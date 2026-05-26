@@ -1,6 +1,6 @@
 {
   "$schema": "https://mintlify.com/schema.json",
-  "name": "RO-Claude-kit",
+  "name": "Ronin",
   "colors": {
     "primary": "#a98467",
     "light": "#d4a373",
@@ -9,7 +9,7 @@
   "topbarLinks": [
     {
       "name": "GitHub",
-      "url": "https://github.com/rohithkandula19/RO-Claude-kit"
+      "url": "https://github.com/rohithkandula19/Ronin"
     }
   ],
   "navigation": [
@@ -37,6 +37,6 @@
     }
   ],
   "footerSocials": {
-    "github": "https://github.com/rohithkandula19/RO-Claude-kit"
+    "github": "https://github.com/rohithkandula19/Ronin"
   }
 }

@@ -1,4 +1,4 @@
-# Multi-stage Python build for an RO-Claude-kit agent.
+# Multi-stage Python build for an Ronin agent.
 # Builder stage: install deps with uv (much faster than pip).
 # Runtime stage: copy only the resolved venv + source. Smaller image, no toolchain.
 

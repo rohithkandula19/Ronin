@@ -7,7 +7,7 @@ export default function LandingPage() {
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <span className="font-bold text-lg tracking-tight">csk</span>
           <nav className="flex items-center gap-3">
-            <a href="https://github.com/rohithkandula19/RO-Claude-kit" className="text-sm text-dim hover:text-ink">GitHub</a>
+            <a href="https://github.com/rohithkandula19/Ronin" className="text-sm text-dim hover:text-ink">GitHub</a>
             <Link href="/signin" className="btn btn-primary text-sm">Sign in</Link>
           </nav>
         </div>
@@ -90,7 +90,7 @@ export default function LandingPage() {
       </section>
 
       <footer className="mt-10 border-t border-border py-8 text-center text-sm text-dim">
-        Open source · MIT · Built for Claude · <a href="https://github.com/rohithkandula19/RO-Claude-kit" className="underline hover:text-ink">GitHub</a>
+        Open source · MIT · Built for Claude · <a href="https://github.com/rohithkandula19/Ronin" className="underline hover:text-ink">GitHub</a>
       </footer>
     </main>
   );

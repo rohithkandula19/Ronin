@@ -51,11 +51,11 @@ Honest limitations:
 Try the demo in 60 seconds:
 
 ```
-curl -sSL https://raw.githubusercontent.com/rohithkandula19/RO-Claude-kit/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/rohithkandula19/Ronin/main/install.sh | bash
 csk init --demo
 csk briefing
 ```
 
-Real config takes a Stripe Restricted Key (read-only) and a Linear personal API key. Both revocable in one click. Repo: https://github.com/rohithkandula19/RO-Claude-kit
+Real config takes a Stripe Restricted Key (read-only) and a Linear personal API key. Both revocable in one click. Repo: https://github.com/rohithkandula19/Ronin
 
 Happy to answer anything — and especially want to hear "the briefing should include X" or "X is noise."

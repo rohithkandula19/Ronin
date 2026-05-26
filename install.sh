@@ -3,10 +3,10 @@
 # Install csk from source.
 #
 # Usage:
-#   curl -sSL https://raw.githubusercontent.com/rohithkandula19/RO-Claude-kit/main/install.sh | bash
+#   curl -sSL https://raw.githubusercontent.com/rohithkandula19/Ronin/main/install.sh | bash
 #
 # Or with a pinned version:
-#   curl -sSL https://raw.githubusercontent.com/rohithkandula19/RO-Claude-kit/main/install.sh | bash -s -- --ref v0.2.0
+#   curl -sSL https://raw.githubusercontent.com/rohithkandula19/Ronin/main/install.sh | bash -s -- --ref v0.2.0
 #
 # What it does:
 #   1. Installs `uv` (https://github.com/astral-sh/uv) if it's not on PATH.
@@ -20,7 +20,7 @@
 
 set -euo pipefail
 
-REPO_URL="https://github.com/rohithkandula19/RO-Claude-kit"
+REPO_URL="https://github.com/rohithkandula19/Ronin"
 INSTALL_DIR="${CSK_INSTALL_DIR:-$HOME/.local/share/ro-claude-kit}"
 BIN_DIR="${CSK_BIN_DIR:-$HOME/.local/bin}"
 REF="main"

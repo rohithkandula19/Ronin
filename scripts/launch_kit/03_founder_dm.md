@@ -10,7 +10,7 @@ hey — built a thing I think saves you 15 min every Monday. CLI that takes your
 100% read-only, MIT, runs locally, you own the keys.
 
 ```
-curl -sSL https://raw.githubusercontent.com/rohithkandula19/RO-Claude-kit/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/rohithkandula19/Ronin/main/install.sh | bash
 csk init
 csk briefing
 ```
@@ -20,7 +20,7 @@ need 5 min of your reaction — specifically:
 2. what's missing that you check on mondays
 3. would you keep using it?
 
-owe you a beer. repo: github.com/rohithkandula19/RO-Claude-kit
+owe you a beer. repo: github.com/rohithkandula19/Ronin
 
 happy to screen-share if it's faster — 10 min and i'll do the setup with you.
 

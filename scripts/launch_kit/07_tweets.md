@@ -16,7 +16,7 @@ Attach a screenshot of `csk briefing` running, or the GIF from `scripts/demo.tap
 >
 > One command. Read-only. Open source.
 >
-> `curl -sSL https://raw.githubusercontent.com/rohithkandula19/RO-Claude-kit/main/install.sh | bash && csk briefing`
+> `curl -sSL https://raw.githubusercontent.com/rohithkandula19/Ronin/main/install.sh | bash && csk briefing`
 >
 > 👇 thread
 
@@ -44,7 +44,7 @@ Attach a screenshot of `csk briefing` running, or the GIF from `scripts/demo.tap
 >
 > 242 tests. MIT. No telemetry.
 >
-> github.com/rohithkandula19/RO-Claude-kit
+> github.com/rohithkandula19/Ronin
 
 ---
 
@@ -56,7 +56,7 @@ Attach a screenshot of `csk briefing` running, or the GIF from `scripts/demo.tap
 >
 > `csk briefing`
 >
-> Open-source, read-only, MIT: github.com/rohithkandula19/RO-Claude-kit
+> Open-source, read-only, MIT: github.com/rohithkandula19/Ronin
 
 ---
 
@@ -68,7 +68,7 @@ Attach a screenshot of `csk briefing` running, or the GIF from `scripts/demo.tap
 >
 > Made a CLI that answers it in one command.
 >
-> `csk briefing` → github.com/rohithkandula19/RO-Claude-kit
+> `csk briefing` → github.com/rohithkandula19/Ronin
 
 ---
 

@@ -15,7 +15,7 @@ Estimated total time: 1–2 hours, the first time.
 ## 1. Backend on Railway (`apps/api`) — 20 min
 
 1. Sign up at https://railway.com if you haven't.
-2. New project → "Deploy from GitHub repo" → select `RO-Claude-kit`.
+2. New project → "Deploy from GitHub repo" → select `Ronin`.
 3. In the service settings, set the **Root Directory** to `apps/api`.
 4. Add a **Postgres** plugin to the project. Railway injects `DATABASE_URL` automatically.
 5. Set service variables (Settings → Variables):
@@ -37,7 +37,7 @@ curl https://csk-api-production.up.railway.app/health
 ## 2. Frontend on Vercel (`apps/web`) — 10 min
 
 1. Sign up at https://vercel.com.
-2. "Import Project" → pick `RO-Claude-kit`.
+2. "Import Project" → pick `Ronin`.
 3. **Root Directory**: `apps/web`.
 4. **Framework Preset**: Next.js (auto-detected).
 5. Environment variables:

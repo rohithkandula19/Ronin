@@ -9,7 +9,7 @@ The order matters. Don't fire all of these at once.
 - [ ] **Run the release**: `scripts/release.sh 0.2.0` — bumps, tags, pushes, watches CI.
 - [ ] Once PyPI shows `ro-claude-kit-cli 0.2.0`, **test the install from a fresh shell**:
   ```bash
-  curl -sSL https://raw.githubusercontent.com/rohithkandula19/RO-Claude-kit/main/install.sh | bash
+  curl -sSL https://raw.githubusercontent.com/rohithkandula19/Ronin/main/install.sh | bash
   csk init --demo -y
   csk briefing
   ```

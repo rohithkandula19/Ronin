@@ -10,7 +10,7 @@ $ csk ask "how many active subscriptions do we have?"
    Total MRR from active subs: $78/mo.
 ```
 
-`csk` is the Claude-powered CLI you point at your startup's data. Configure once, then ask questions in plain English. Under the hood: the `RO-Claude-kit` agent loop, hardening, and read-only MCP servers for Stripe / Linear / Slack / Notion / Postgres.
+`csk` is the Claude-powered CLI you point at your startup's data. Configure once, then ask questions in plain English. Under the hood: the `Ronin` agent loop, hardening, and read-only MCP servers for Stripe / Linear / Slack / Notion / Postgres.
 
 ## Why this exists
 

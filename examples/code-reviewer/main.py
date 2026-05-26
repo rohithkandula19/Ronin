@@ -1,4 +1,4 @@
-"""End-to-end code-reviewer agent built on RO-Claude-kit.
+"""End-to-end code-reviewer agent built on Ronin.
 
 Demonstrates the Multi-Agent Supervisor pattern with output validation:
 

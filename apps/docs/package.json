@@ -2,7 +2,7 @@
   "name": "@ro-claude-kit/docs",
   "version": "0.0.1",
   "private": true,
-  "description": "Documentation site for RO-Claude-kit.",
+  "description": "Documentation site for Ronin.",
   "scripts": {
     "dev": "echo 'docs site not scaffolded yet'",
     "build": "echo 'docs site not scaffolded yet'"

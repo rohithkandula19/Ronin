@@ -1,4 +1,4 @@
-"""AgentLab — interactive demo for RO-Claude-kit.
+"""AgentLab — interactive demo for Ronin.
 
 Run:
     export ANTHROPIC_API_KEY=sk-ant-...   # optional; demo mode kicks in if absent
@@ -66,7 +66,7 @@ def _kb_search_tool() -> Tool:
         "claude": "Claude is a family of LLMs by Anthropic.",
         "react": "ReAct combines reasoning and acting via tool use in a loop.",
         "reflexion": "Reflexion adds a critic that triggers retries with feedback.",
-        "ro-claude-kit": "RO-Claude-kit is an opinionated reference implementation for Claude agents.",
+        "ro-claude-kit": "Ronin is an opinionated reference implementation for Claude agents.",
     }
 
     def search(query: str) -> str:
@@ -197,7 +197,7 @@ INDEX_HTML = """<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>AgentLab — RO-Claude-kit</title>
+<title>AgentLab — Ronin</title>
 <style>
 :root { --bg: #fafaf9; --fg: #1a1a1a; --accent: #d4a373; --accent-deep: #a98467; --dim: #888; --card: #fff; --border: #e7e5e4; }
 * { box-sizing: border-box; }
@@ -235,7 +235,7 @@ button.run:disabled { opacity: 0.5; cursor: not-allowed; }
 <div class="wrap">
   <header>
     <h1>🐳 AgentLab</h1>
-    <span class="sub">interactive demo for RO-Claude-kit</span>
+    <span class="sub">interactive demo for Ronin</span>
   </header>
   <div id="banner"></div>
 

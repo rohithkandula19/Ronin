@@ -1,6 +1,6 @@
 # examples/code-reviewer
 
-Multi-agent code review built on RO-Claude-kit. Three specialists review a file independently — a style reviewer, a bug finder, a security auditor — and the orchestrator aggregates their findings into a single Pydantic-typed `CodeReview`.
+Multi-agent code review built on Ronin. Three specialists review a file independently — a style reviewer, a bug finder, a security auditor — and the orchestrator aggregates their findings into a single Pydantic-typed `CodeReview`.
 
 ## Run
 

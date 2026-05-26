@@ -1,6 +1,6 @@
 # examples/customer-support
 
-End-to-end customer-support agent built on RO-Claude-kit. Composes:
+End-to-end customer-support agent built on Ronin. Composes:
 
 - **`SupervisorAgent`** — orchestrator delegating to specialist sub-agents
 - **3 sub-agents** — triage, billing_lookup (Stripe), kb_lookup (in-process KB), eng_lookup (Linear)

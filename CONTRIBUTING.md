@@ -1,12 +1,12 @@
-# Contributing to RO-Claude-kit
+# Contributing to Ronin
 
 Glad you're here. This is a small, opinionated project — contributions are welcome, but please read this once before opening a PR so we don't waste each other's time.
 
 ## Quick start
 
 ```bash
-git clone https://github.com/rohithkandula19/RO-Claude-kit
-cd RO-Claude-kit
+git clone https://github.com/rohithkandula19/Ronin
+cd Ronin
 uv sync --all-packages --all-groups
 uv run pytest packages/agent-patterns packages/eval-suite packages/memory \
     packages/hardening packages/mcp-servers packages/cli apps/demo -q
@@ -65,7 +65,7 @@ Maintainer-only:
 
 ## Getting help
 
-Open a [discussion](https://github.com/rohithkandula19/RO-Claude-kit/discussions) for questions, an [issue](https://github.com/rohithkandula19/RO-Claude-kit/issues) for bugs.
+Open a [discussion](https://github.com/rohithkandula19/Ronin/discussions) for questions, an [issue](https://github.com/rohithkandula19/Ronin/issues) for bugs.
 
 ## Code of conduct
 

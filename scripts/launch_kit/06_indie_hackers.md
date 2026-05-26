@@ -11,7 +11,7 @@ Long-form post. Optimized for "how I built it" energy + a clear ask.
 **The product**: a CLI called `csk` whose headline command is `csk briefing`. Pulls from your configured services (Stripe, Linear, Slack, Notion, Postgres, GitHub — all read-only) and produces a Markdown report: MRR, new/churned subs, failed payments, urgent engineering issues, action items. Auto-saves each run; subsequent runs show "vs last week" deltas inline.
 
 ```
-curl -sSL https://raw.githubusercontent.com/rohithkandula19/RO-Claude-kit/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/rohithkandula19/Ronin/main/install.sh | bash
 csk init --demo        # ships fake data — zero-config tour
 csk briefing
 ```
@@ -36,7 +36,7 @@ csk briefing
 
 5. The eval suite was a forcing function for finishing. "Drift detection" sounds fancy but is just `if criterion_score_delta < -0.5: exit 1`. Wire it into CI and you can never silently regress.
 
-**Open source under MIT**, no telemetry, no signup. PyPI: `ro-claude-kit-cli`. Repo: https://github.com/rohithkandula19/RO-Claude-kit
+**Open source under MIT**, no telemetry, no signup. PyPI: `ro-claude-kit-cli`. Repo: https://github.com/rohithkandula19/Ronin
 
 **Looking for two things from this crowd**:
 1. What's the briefing missing that you'd check first thing Monday?

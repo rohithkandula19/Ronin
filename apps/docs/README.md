@@ -1,6 +1,6 @@
 # apps/docs
 
-Mintlify-powered documentation site for RO-Claude-kit.
+Mintlify-powered documentation site for Ronin.
 
 ## Run locally
 

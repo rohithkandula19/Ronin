@@ -12,9 +12,9 @@ Wrote it as a portfolio piece for my @AnthropicAI Applied AI Engineer (Startups)
 
 Built in 6 weeks of evenings. MIT. Demo runs zero-config.
 
-`curl -sSL https://raw.githubusercontent.com/rohithkandula19/RO-Claude-kit/main/install.sh | bash && csk briefing`
+`curl -sSL https://raw.githubusercontent.com/rohithkandula19/Ronin/main/install.sh | bash && csk briefing`
 
-github.com/rohithkandula19/RO-Claude-kit
+github.com/rohithkandula19/Ronin
 
 cc <<insert two Anthropic technical-staff handles you've engaged with before, e.g. @AlexAlbert__, @erikschluntz>>
 
