@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.10.0] — 2026-05-26
+
+### Changed — soft, premium UI
+- A **gradient `✦ ronin` wordmark** (magenta→violet→indigo) and a **soft pastel palette** (muted rose/green/teal/slate instead of hard ANSI) across the CLI.
+- The interactive session opens with a **soft rounded welcome card** (gradient mark · cwd · model · mode · hint).
+- A gentle **"thinking…" spinner** animates until the first token, replies are headed by the gradient ronin avatar, and turns are separated by a soft divider.
+- `theme.py` gained `gradient_text()`; tool/result lines use the soft palette.
+
 ## [0.9.0] — 2026-05-26
 
 ### Changed — one unified front door

@@ -1,18 +1,48 @@
 """Shared visual theme for ronin's terminal UI — one place for colors, glyphs,
-and how tool calls are labelled, so every surface looks consistent."""
+and how tool calls are labelled, so every surface looks consistent.
+
+The palette is intentionally *soft*: muted pastels over hard ANSI colors, with a
+signature magenta→violet gradient for the ronin wordmark."""
 from __future__ import annotations
 
 from typing import Any
 
-# --- palette -----------------------------------------------------------------
-ACCENT = "magenta"          # ronin brand
-ACCENT2 = "bright_magenta"
-TOOL = "cyan"               # tool activity
-OK = "green"
-WARN = "yellow"
-ERR = "red"
-MUTE = "grey50"
-BULLET = f"[{ACCENT}]●[/{ACCENT}]"   # Claude-Code-style action bullet
+# --- soft palette (hex pastels, not hard ANSI) -------------------------------
+ACCENT = "#c678dd"          # soft magenta — ronin brand
+ACCENT2 = "#a86ce0"         # violet
+TOOL = "#7fd1c8"            # soft teal — tool activity
+OK = "#9ece6a"              # soft green
+WARN = "#e0af68"            # soft amber
+ERR = "#f7768e"             # soft rose
+MUTE = "#6b7089"            # muted slate
+SOFT = "#9aa0b8"            # soft foreground for secondary text
+BULLET = f"[{ACCENT}]●[/{ACCENT}]"   # soft action bullet
+
+# gradient stops for the ronin wordmark (magenta → violet → indigo)
+GRADIENT = ((0xC6, 0x78, 0xDD), (0x8A, 0x7C, 0xF0), (0x6A, 0x8B, 0xF5))
+
+
+def gradient_text(text: str, *, bold: bool = True):
+    """Return a Rich Text with each character coloured along the ronin gradient
+    — the soft, premium wordmark look."""
+    from rich.text import Text
+
+    stops = GRADIENT
+    seg = max(len(text) - 1, 1)
+    t = Text()
+    for i, ch in enumerate(text):
+        pos = i / seg * (len(stops) - 1)
+        lo = int(pos)
+        hi = min(lo + 1, len(stops) - 1)
+        f = pos - lo
+        r = int(stops[lo][0] + (stops[hi][0] - stops[lo][0]) * f)
+        g = int(stops[lo][1] + (stops[hi][1] - stops[lo][1]) * f)
+        b = int(stops[lo][2] + (stops[hi][2] - stops[lo][2]) * f)
+        style = f"#{r:02x}{g:02x}{b:02x}"
+        if bold:
+            style = "bold " + style
+        t.append(ch, style=style)
+    return t
 
 
 def short(value: Any, limit: int = 72) -> str:

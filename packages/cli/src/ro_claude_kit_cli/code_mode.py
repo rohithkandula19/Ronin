@@ -29,18 +29,42 @@ from .todo import TodoStore, build_todo_tool
 
 
 def _welcome(console: "Console", config: CSKConfig, root, yolo: bool, *, title: str, hint: str) -> None:
-    """A clean, consistent welcome header for the interactive sessions."""
+    """A soft, premium welcome header with the gradient ronin wordmark."""
+    from rich.console import Group
     from rich.panel import Panel
+    from rich.text import Text
 
-    mode = "[yellow]YOLO — auto-approve[/yellow]" if yolo else "edits + commands need approval"
-    body = (
-        f"[bold {_ACCENT}]✻ {title}[/bold {_ACCENT}]\n\n"
-        f"[grey50]cwd[/grey50]    {_Path(root).resolve()}\n"
-        f"[grey50]model[/grey50]  {config.provider} · {config.resolved_model()}\n"
-        f"[grey50]mode[/grey50]   {mode}\n\n"
-        f"[grey50]{hint}[/grey50]"
+    from .theme import ACCENT, MUTE, SOFT, gradient_text
+
+    head = Text()
+    head.append_text(gradient_text("✦ ronin"))
+    sub = title
+    for p in ("ronin — ", "ronin "):
+        if sub.startswith(p):
+            sub = sub[len(p):]
+            break
+    if sub:
+        head.append("  ")
+        head.append(sub, style=SOFT)
+
+    def row(label: str, value: str) -> Text:
+        t = Text("  ")
+        t.append(f"{label:<6}", style=MUTE)
+        t.append(value, style=SOFT)
+        return t
+
+    mode = "auto-approve (YOLO)" if yolo else "edits + commands need approval"
+    body = Group(
+        head,
+        Text(""),
+        row("cwd", str(_Path(root).resolve())),
+        row("model", f"{config.provider} · {config.resolved_model()}"),
+        row("mode", mode),
+        Text(""),
+        Text("  " + hint, style=MUTE),
     )
-    console.print(Panel.fit(body, border_style=_ACCENT, padding=(1, 2)))
+    console.print(Panel.fit(body, border_style=ACCENT, padding=(1, 2)))
+    console.print()
 
 
 CODE_SYSTEM = """You are ronin in code mode — an autonomous coding agent working in a project directory.
@@ -271,6 +295,8 @@ def run_code_agent(
 
     task = expand_file_mentions(task, root)  # inline any @path references
     prompt = f"{history_prefix}\n\nCurrent request: {task}" if history_prefix else task
+    if renderer is not None:
+        renderer.start()  # soft "thinking…" spinner until the first token
     try:
         result = agent.run(prompt, on_step=on_step, before_tool=before_tool, on_text=on_text)
     except Exception as e:  # noqa: BLE001 — never crash the session on a provider/network error

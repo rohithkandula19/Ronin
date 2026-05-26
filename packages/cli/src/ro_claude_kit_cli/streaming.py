@@ -17,16 +17,40 @@ from rich.console import Console
 
 from ro_claude_kit_agent_patterns import Step
 
-from .theme import ACCENT, BULLET, ERR, MUTE, OK, TOOL, short as _short
+from .theme import ACCENT, BULLET, ERR, MUTE, OK, SOFT, TOOL, gradient_text, short as _short
 
 
 class LiveRenderer:
-    """Streams assistant text and renders tool steps as they happen."""
+    """Streams assistant text and renders tool steps as they happen, with a soft
+    'thinking…' spinner before the first token and a gradient ronin avatar."""
 
     def __init__(self, console: Console) -> None:
         self.console = console
         self._dirty = False        # text written to the current line, no newline yet
         self.streamed_text = False  # any assistant text streamed this run?
+        self._status = None         # the thinking spinner (Rich Status)
+        self._avatar_shown = False
+
+    # --- thinking spinner ----------------------------------------------------
+    def start(self) -> None:
+        """Begin the soft 'thinking…' animation (only on a real terminal)."""
+        if not getattr(self.console, "is_terminal", False):
+            return
+        try:
+            from rich.text import Text
+            self._status = self.console.status(
+                Text(" thinking…", style=SOFT), spinner="dots", spinner_style=ACCENT)
+            self._status.start()
+        except Exception:  # noqa: BLE001
+            self._status = None
+
+    def _stop_status(self) -> None:
+        if self._status is not None:
+            try:
+                self._status.stop()
+            except Exception:  # noqa: BLE001
+                pass
+            self._status = None
 
     def _flush_line(self) -> None:
         if self._dirty:
@@ -35,6 +59,10 @@ class LiveRenderer:
 
     # --- agent hooks ---------------------------------------------------------
     def on_text(self, delta: str) -> None:
+        self._stop_status()
+        if not self._avatar_shown:
+            self.console.print(gradient_text("✦ ronin"))
+            self._avatar_shown = True
         # markup=False so model output like "[x]" can't blow up Rich markup.
         self.console.print(delta, end="", markup=False, highlight=False, soft_wrap=True)
         self._dirty = True
@@ -44,6 +72,7 @@ class LiveRenderer:
         # The model's text is streamed via on_text; don't reprint it here.
         if step.kind in ("thought", "final"):
             return
+        self._stop_status()
         self._flush_line()
         c = step.content
         if step.kind == "tool_call" and isinstance(c, dict):
@@ -73,5 +102,8 @@ class LiveRenderer:
             self.console.print(f"  [{OK}]🔎 {_short(c, 160)}[/{OK}]")
 
     def finish(self) -> None:
-        """Call once the run is over to terminate any dangling streamed line."""
+        """Call once the run is over: stop the spinner, end the line, soft divider."""
+        self._stop_status()
         self._flush_line()
+        if self.streamed_text and getattr(self.console, "is_terminal", False):
+            self.console.rule(style=MUTE)
