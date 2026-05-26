@@ -18,6 +18,7 @@ from .providers import (
     Message,
     OllamaProvider,
     OpenAICompatProvider,
+    StreamEvent,
     ToolCall,
 )
 from .react import ReActAgent
@@ -40,6 +41,7 @@ __all__ = [
     "ReActAgent",
     "ReflexionAgent",
     "Step",
+    "StreamEvent",
     "SubAgent",
     "SupervisorAgent",
     "Tool",

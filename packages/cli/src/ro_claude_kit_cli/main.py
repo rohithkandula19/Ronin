@@ -886,7 +886,11 @@ def agent(
     if result.blocked:
         console.print(f"[red]✗[/red] {result.output}")
         raise typer.Exit(2)
-    console.print(Panel(result.output or "[dim](no answer)[/dim]", title="Answer", border_style="green", padding=(1, 2)))
+    # If the answer already streamed inline, don't re-box it.
+    if result.streamed:
+        console.print("[bold green]✅ done[/bold green]")
+    else:
+        console.print(Panel(result.output or "[dim](no answer)[/dim]", title="Answer", border_style="green", padding=(1, 2)))
     meta = f"iterations: {result.iterations}"
     if result.usage:
         meta += f" · in: {result.usage.get('input_tokens', 0)} · out: {result.usage.get('output_tokens', 0)}"
@@ -940,7 +944,11 @@ def code(
     if result.blocked:
         console.print(f"[red]✗[/red] {result.output}")
         raise typer.Exit(2)
-    console.print(Panel(result.output or "[dim](no summary)[/dim]", title="Done", border_style="green", padding=(1, 2)))
+    # If the summary already streamed inline, don't re-box it — just confirm.
+    if result.streamed:
+        console.print("[bold green]✅ done[/bold green]")
+    else:
+        console.print(Panel(result.output or "[dim](no summary)[/dim]", title="Done", border_style="green", padding=(1, 2)))
     meta = f"iterations: {result.iterations}"
     if result.usage:
         meta += f" · in: {result.usage.get('input_tokens', 0)} · out: {result.usage.get('output_tokens', 0)}"

@@ -5,8 +5,32 @@ from typing import Any
 
 import anthropic
 
+from typing import Iterator
+
 from ..types import Tool
-from .base import LLMProvider, LLMResponse, Message, ToolCall
+from .base import LLMProvider, LLMResponse, Message, StreamEvent, ToolCall
+
+
+def _parse_anthropic_message(message: Any) -> LLMResponse:
+    """Turn an Anthropic Message (from create() or get_final_message()) into our
+    neutral ``LLMResponse``."""
+    text_parts: list[str] = []
+    tool_calls: list[ToolCall] = []
+    for block in message.content:
+        block_type = getattr(block, "type", None)
+        if block_type == "text":
+            text_parts.append(block.text)
+        elif block_type == "tool_use":
+            tool_calls.append(ToolCall(id=block.id, name=block.name, arguments=block.input or {}))
+    return LLMResponse(
+        text="\n".join(text_parts).strip(),
+        tool_calls=tool_calls,
+        stop_reason="tool_use" if tool_calls else "end_turn",
+        usage={
+            "input_tokens": message.usage.input_tokens,
+            "output_tokens": message.usage.output_tokens,
+        },
+    )
 
 
 def _to_anthropic_messages(messages: list[Message]) -> list[dict[str, Any]]:
@@ -82,26 +106,28 @@ class AnthropicProvider(LLMProvider):
             kwargs["tools"] = [t.to_anthropic() for t in tools]
 
         response = self._client().messages.create(**kwargs)
+        return _parse_anthropic_message(response)
 
-        text_parts: list[str] = []
-        tool_calls: list[ToolCall] = []
-        for block in response.content:
-            block_type = getattr(block, "type", None)
-            if block_type == "text":
-                text_parts.append(block.text)
-            elif block_type == "tool_use":
-                tool_calls.append(ToolCall(
-                    id=block.id,
-                    name=block.name,
-                    arguments=block.input or {},
-                ))
+    def stream(
+        self,
+        *,
+        system: str,
+        messages: list[Message],
+        tools: list[Tool],
+        max_tokens: int = 4096,
+    ) -> Iterator[StreamEvent]:
+        kwargs: dict[str, Any] = {
+            "model": self.model,
+            "system": system,
+            "messages": _to_anthropic_messages(messages),
+            "max_tokens": max_tokens,
+        }
+        if tools:
+            kwargs["tools"] = [t.to_anthropic() for t in tools]
 
-        return LLMResponse(
-            text="\n".join(text_parts).strip(),
-            tool_calls=tool_calls,
-            stop_reason="tool_use" if tool_calls else "end_turn",
-            usage={
-                "input_tokens": response.usage.input_tokens,
-                "output_tokens": response.usage.output_tokens,
-            },
-        )
+        with self._client().messages.stream(**kwargs) as stream:
+            for delta in stream.text_stream:
+                if delta:
+                    yield StreamEvent(type="text", text=delta)
+            final = stream.get_final_message()
+        yield StreamEvent(type="done", response=_parse_anthropic_message(final))

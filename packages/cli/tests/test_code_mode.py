@@ -223,6 +223,44 @@ def test_run_code_agent_blocks_injection(monkeypatch: pytest.MonkeyPatch) -> Non
     assert result.blocked
 
 
+def test_run_code_agent_streams_text_to_console(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """With a console, the model's text streams inline and result.streamed is set."""
+    import io
+    from rich.console import Console
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+    (tmp_path / "target.py").write_text("fixed = False\n", encoding="utf-8")
+    config = CSKConfig(provider="anthropic")
+    buf = io.StringIO()
+    console = Console(file=buf, force_terminal=False, width=100)
+
+    with patch("ro_claude_kit_cli.code_mode.build_provider", return_value=_edit_provider()):
+        result = run_code_agent(config, "set fixed to True", root=tmp_path,
+                                console=console, yolo=True)
+
+    assert result.success
+    assert result.streamed is True
+    out = buf.getvalue()
+    # streamed reasoning + summary text appears in the rendered output
+    assert "Reading the file first." in out
+    assert "Done" in out and "fixed=True" in out
+    # tool activity rendered inline
+    assert "read_file" in out and "write_file" in out
+
+
+def test_run_code_agent_no_console_does_not_stream(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without a console, the blocking path is used and streamed stays False."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+    (tmp_path / "target.py").write_text("fixed = False\n", encoding="utf-8")
+    config = CSKConfig(provider="anthropic")
+
+    with patch("ro_claude_kit_cli.code_mode.build_provider", return_value=_edit_provider()):
+        result = run_code_agent(config, "set fixed to True", root=tmp_path, console=None, yolo=True)
+
+    assert result.success
+    assert result.streamed is False
+
+
 # ---------- CLI ----------
 
 def test_code_cli_without_key_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

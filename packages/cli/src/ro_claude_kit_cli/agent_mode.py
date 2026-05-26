@@ -47,6 +47,7 @@ class AgentRunResult:
     usage: dict[str, int] = field(default_factory=dict)
     error: str | None = None
     blocked: bool = False
+    streamed: bool = False  # True if the answer already streamed to the console
 
 
 def _narrate(console: Console) -> Callable[[Step], None]:
@@ -130,10 +131,17 @@ def run_agent(
         max_iterations=max_iterations,
     )
 
-    on_step = _narrate(console) if console is not None else None
     before_tool = _approval_gate(console, auto=not confirm) if console is not None else None
 
-    result = agent.run(goal, on_step=on_step, before_tool=before_tool)
+    # Stream tokens live when we have a console (Claude-Code feel).
+    from .streaming import LiveRenderer
+    renderer = LiveRenderer(console) if console is not None else None
+    on_step = renderer.on_step if renderer is not None else None
+    on_text = renderer.on_text if renderer is not None else None
+
+    result = agent.run(goal, on_step=on_step, before_tool=before_tool, on_text=on_text)
+    if renderer is not None:
+        renderer.finish()
     return AgentRunResult(
         success=result.success,
         output=result.output,
@@ -141,6 +149,7 @@ def run_agent(
         steps=result.trace,
         usage=result.usage,
         error=result.error,
+        streamed=bool(renderer and renderer.streamed_text),
     )
 
 

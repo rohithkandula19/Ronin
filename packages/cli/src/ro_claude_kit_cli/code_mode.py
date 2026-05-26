@@ -18,10 +18,10 @@ from ro_claude_kit_hardening import InjectionScanner
 
 from pathlib import Path as _Path
 
-from .agent_mode import _narrate
 from .code_tools import SENSITIVE_TOOLS, build_code_tools, undo_last, unified_diff
 from .config import CSKConfig
 from .runner import build_provider
+from .streaming import LiveRenderer
 
 
 CODE_SYSTEM = """You are csk in code mode — an autonomous coding agent working in a project directory.
@@ -52,6 +52,7 @@ class CodeRunResult:
     usage: dict[str, int] = field(default_factory=dict)
     error: str | None = None
     blocked: bool = False
+    streamed: bool = False  # True if the answer already streamed to the console
 
 
 def _render_diff(console: Console, diff: str) -> None:
@@ -141,11 +142,18 @@ def run_code_agent(
         compact_keep_recent=6,
     )
 
-    on_step = _narrate(console) if console is not None else None
     before_tool = _selective_gate(console, yolo, _Path(root).resolve())
 
+    # Stream the model's reasoning + summary live (the Claude-Code feel) when we
+    # have a console; fall back to the step-narrator for non-interactive runs.
+    renderer = LiveRenderer(console) if console is not None else None
+    on_step = renderer.on_step if renderer is not None else None
+    on_text = renderer.on_text if renderer is not None else None
+
     prompt = f"{history_prefix}\n\nCurrent request: {task}" if history_prefix else task
-    result = agent.run(prompt, on_step=on_step, before_tool=before_tool)
+    result = agent.run(prompt, on_step=on_step, before_tool=before_tool, on_text=on_text)
+    if renderer is not None:
+        renderer.finish()
     return CodeRunResult(
         success=result.success,
         output=result.output,
@@ -153,6 +161,7 @@ def run_code_agent(
         steps=result.trace,
         usage=result.usage,
         error=result.error,
+        streamed=bool(renderer and renderer.streamed_text),
     )
 
 
@@ -211,4 +220,9 @@ def run_code_session(
         )
         transcript.append(f"USER: {user}")
         transcript.append(f"ASSISTANT: {result.output}")
-        console.print(f"\n[bold green]✅[/bold green] {result.output}\n")
+        # The summary already streamed inline; just show a subtle completion mark
+        # instead of re-printing the whole thing.
+        if result.streamed:
+            console.print("\n[bold green]✅[/bold green] [dim]done[/dim]\n")
+        else:
+            console.print(f"\n[bold green]✅[/bold green] {result.output}\n")

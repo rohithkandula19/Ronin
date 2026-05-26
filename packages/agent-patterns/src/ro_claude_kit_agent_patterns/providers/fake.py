@@ -1,10 +1,12 @@
 """In-memory provider for tests. Returns a queue of canned ``LLMResponse``s in order."""
 from __future__ import annotations
 
+from typing import Iterator
+
 from pydantic import Field, PrivateAttr
 
 from ..types import Tool
-from .base import LLMProvider, LLMResponse, Message
+from .base import LLMProvider, LLMResponse, Message, StreamEvent
 
 
 class FakeProvider(LLMProvider):
@@ -45,3 +47,23 @@ class FakeProvider(LLMProvider):
         response = self.responses[self._index]
         self._index += 1
         return response
+
+    def stream(
+        self,
+        *,
+        system: str,
+        messages: list[Message],
+        tools: list[Tool],
+        max_tokens: int = 4096,
+    ) -> Iterator[StreamEvent]:
+        """Simulate token streaming by emitting the response text word-by-word,
+        then a final ``done`` event — exercises the agent's delta-forwarding path
+        without a network."""
+        response = self.complete(
+            system=system, messages=messages, tools=tools, max_tokens=max_tokens
+        )
+        if response.text:
+            words = response.text.split(" ")
+            for i, w in enumerate(words):
+                yield StreamEvent(type="text", text=(w if i == 0 else " " + w))
+        yield StreamEvent(type="done", response=response)

@@ -14,12 +14,12 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any
+from typing import Any, Iterator
 
 import httpx
 
 from ..types import Tool
-from .base import LLMProvider, LLMResponse, Message, ToolCall
+from .base import LLMProvider, LLMResponse, Message, StreamEvent, ToolCall
 
 
 OPENAI_BASE_URL = "https://api.openai.com/v1"
@@ -75,14 +75,8 @@ class OpenAICompatProvider(LLMProvider):
             return self.api_key
         return os.environ.get("OPENAI_API_KEY")
 
-    def complete(
-        self,
-        *,
-        system: str,
-        messages: list[Message],
-        tools: list[Tool],
-        max_tokens: int = 4096,
-    ) -> LLMResponse:
+    def _build_body(self, system: str, messages: list[Message], tools: list[Tool],
+                    max_tokens: int) -> dict[str, Any]:
         body: dict[str, Any] = {
             "model": self.model,
             "messages": _to_openai_messages(system, messages),
@@ -100,18 +94,44 @@ class OpenAICompatProvider(LLMProvider):
                 }
                 for t in tools
             ]
+        return body
 
+    def _headers(self) -> dict[str, str]:
         headers: dict[str, str] = {"Content-Type": "application/json", **self.extra_headers}
         key = self._resolve_api_key()
         if key:
             headers["Authorization"] = f"Bearer {key}"
+        return headers
 
+    def _url(self) -> str:
+        return f"{self.base_url.rstrip('/')}/chat/completions"
+
+    @staticmethod
+    def _parse_args(args_raw: Any) -> dict[str, Any]:
+        if isinstance(args_raw, str):
+            try:
+                return json.loads(args_raw)
+            except json.JSONDecodeError:
+                return {}
+        return args_raw or {}
+
+    @staticmethod
+    def _stop_reason(finish: str, tool_calls: list[ToolCall]) -> str:
+        if tool_calls:
+            return "tool_use"
+        return "end_turn" if finish in ("stop", "end_turn") else (finish or "end_turn")
+
+    def complete(
+        self,
+        *,
+        system: str,
+        messages: list[Message],
+        tools: list[Tool],
+        max_tokens: int = 4096,
+    ) -> LLMResponse:
+        body = self._build_body(system, messages, tools, max_tokens)
         with httpx.Client(timeout=self.timeout) as client:
-            response = client.post(
-                f"{self.base_url.rstrip('/')}/chat/completions",
-                json=body,
-                headers=headers,
-            )
+            response = client.post(self._url(), json=body, headers=self._headers())
             response.raise_for_status()
             data = response.json()
 
@@ -121,35 +141,87 @@ class OpenAICompatProvider(LLMProvider):
 
         tool_calls: list[ToolCall] = []
         for tc in msg.get("tool_calls") or []:
-            args_raw = tc.get("function", {}).get("arguments", "{}")
-            if isinstance(args_raw, str):
-                try:
-                    args = json.loads(args_raw)
-                except json.JSONDecodeError:
-                    args = {}
-            else:
-                args = args_raw or {}
             tool_calls.append(ToolCall(
                 id=tc.get("id", ""),
                 name=tc.get("function", {}).get("name", ""),
-                arguments=args,
+                arguments=self._parse_args(tc.get("function", {}).get("arguments", "{}")),
             ))
-
-        finish = choice.get("finish_reason") or "end_turn"
-        stop_reason = "tool_use" if tool_calls else (
-            "end_turn" if finish in ("stop", "end_turn") else finish
-        )
 
         usage = data.get("usage") or {}
         return LLMResponse(
             text=text,
             tool_calls=tool_calls,
-            stop_reason=stop_reason,
+            stop_reason=self._stop_reason(choice.get("finish_reason") or "end_turn", tool_calls),
             usage={
                 "input_tokens": usage.get("prompt_tokens", 0),
                 "output_tokens": usage.get("completion_tokens", 0),
             },
         )
+
+    def stream(
+        self,
+        *,
+        system: str,
+        messages: list[Message],
+        tools: list[Tool],
+        max_tokens: int = 4096,
+    ) -> Iterator[StreamEvent]:
+        body = self._build_body(system, messages, tools, max_tokens)
+        body["stream"] = True
+
+        text_parts: list[str] = []
+        # Tool-call deltas arrive piecemeal across chunks, keyed by index; we
+        # accumulate id / name / argument-string fragments and assemble at the end.
+        acc: dict[int, dict[str, str]] = {}
+        finish = "end_turn"
+        usage: dict[str, Any] = {}
+
+        with httpx.Client(timeout=self.timeout) as client:
+            with client.stream("POST", self._url(), json=body, headers=self._headers()) as r:
+                r.raise_for_status()
+                for line in r.iter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
+                    payload = line[len("data:"):].strip()
+                    if payload == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(payload)
+                    except json.JSONDecodeError:
+                        continue
+                    if chunk.get("usage"):
+                        usage = chunk["usage"]
+                    for choice in chunk.get("choices", []):
+                        delta = choice.get("delta") or {}
+                        if delta.get("content"):
+                            text_parts.append(delta["content"])
+                            yield StreamEvent(type="text", text=delta["content"])
+                        for tcd in delta.get("tool_calls") or []:
+                            idx = tcd.get("index", 0)
+                            slot = acc.setdefault(idx, {"id": "", "name": "", "args": ""})
+                            if tcd.get("id"):
+                                slot["id"] = tcd["id"]
+                            fn = tcd.get("function") or {}
+                            if fn.get("name"):
+                                slot["name"] = fn["name"]
+                            if fn.get("arguments"):
+                                slot["args"] += fn["arguments"]
+                        if choice.get("finish_reason"):
+                            finish = choice["finish_reason"]
+
+        tool_calls = [
+            ToolCall(id=slot["id"], name=slot["name"], arguments=self._parse_args(slot["args"] or "{}"))
+            for _, slot in sorted(acc.items())
+        ]
+        yield StreamEvent(type="done", response=LLMResponse(
+            text="".join(text_parts).strip(),
+            tool_calls=tool_calls,
+            stop_reason=self._stop_reason(finish, tool_calls),
+            usage={
+                "input_tokens": usage.get("prompt_tokens", 0),
+                "output_tokens": usage.get("completion_tokens", 0),
+            },
+        ))
 
 
 class OllamaProvider(OpenAICompatProvider):

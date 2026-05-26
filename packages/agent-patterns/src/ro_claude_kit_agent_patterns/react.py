@@ -12,6 +12,8 @@ from .types import AgentResult, Step, Tool
 OnStep = Callable[[Step], None]
 # Pre-tool approval hook: (tool_name, arguments) -> bool. Return False to deny.
 BeforeTool = Callable[[str, dict], bool]
+# Token-streaming hook: called with each text delta as the model generates it.
+OnText = Callable[[str], None]
 
 
 class ReActAgent(BaseModel):
@@ -57,6 +59,7 @@ class ReActAgent(BaseModel):
         *,
         on_step: OnStep | None = None,
         before_tool: BeforeTool | None = None,
+        on_text: OnText | None = None,
     ) -> AgentResult:
         """Run the agent.
 
@@ -65,6 +68,9 @@ class ReActAgent(BaseModel):
         ``before_tool``: optional gate called with (tool_name, arguments) before
         each tool runs. Return False to deny — the agent sees a "denied by user"
         result and reasons around it (human-in-the-loop, Cline-style).
+        ``on_text``: optional hook fired with each text delta as the model
+        generates it. When supplied, the provider is driven in streaming mode so
+        the answer appears token-by-token (the Claude-Code feel).
         """
         assert self.provider is not None  # set by model_post_init
         tools_by_name = {t.name: t for t in self.tools}
@@ -81,12 +87,28 @@ class ReActAgent(BaseModel):
         for i in range(self.max_iterations):
             if self.compact_after_tokens is not None:
                 self._maybe_compact(messages, emit)
-            response = self.provider.complete(
-                system=self.system,
-                messages=messages,
-                tools=self.tools,
-                max_tokens=self.max_tokens,
-            )
+            if on_text is not None:
+                # Streaming mode: forward text deltas live, then take the final
+                # assembled response from the terminal ``done`` event.
+                response = None
+                for ev in self.provider.stream(
+                    system=self.system,
+                    messages=messages,
+                    tools=self.tools,
+                    max_tokens=self.max_tokens,
+                ):
+                    if ev.type == "text" and ev.text:
+                        on_text(ev.text)
+                    elif ev.type == "done":
+                        response = ev.response
+                assert response is not None, "stream ended without a 'done' event"
+            else:
+                response = self.provider.complete(
+                    system=self.system,
+                    messages=messages,
+                    tools=self.tools,
+                    max_tokens=self.max_tokens,
+                )
             usage["input_tokens"] += response.usage.get("input_tokens", 0)
             usage["output_tokens"] += response.usage.get("output_tokens", 0)
 

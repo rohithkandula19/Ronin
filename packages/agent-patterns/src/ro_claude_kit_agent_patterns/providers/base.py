@@ -1,7 +1,7 @@
 """Provider-neutral message/tool-call types used by every agent pattern."""
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Iterator, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -42,6 +42,19 @@ class LLMResponse(BaseModel):
     usage: dict[str, int] = Field(default_factory=dict)
 
 
+class StreamEvent(BaseModel):
+    """One event from a provider's token stream.
+
+    - ``type="text"``  → ``text`` carries a text delta (a chunk of the answer).
+    - ``type="done"``  → ``response`` carries the fully-assembled ``LLMResponse``
+      (text + tool_calls + usage), which the agent loop uses to continue.
+    """
+
+    type: Literal["text", "done"]
+    text: str = ""
+    response: LLMResponse | None = None
+
+
 class LLMProvider(BaseModel):
     """Base class. Subclass and implement ``complete``.
 
@@ -63,3 +76,25 @@ class LLMProvider(BaseModel):
         max_tokens: int = 4096,
     ) -> LLMResponse:
         raise NotImplementedError
+
+    def stream(
+        self,
+        *,
+        system: str,
+        messages: list[Message],
+        tools: list[Tool],
+        max_tokens: int = 4096,
+    ) -> Iterator[StreamEvent]:
+        """Yield text deltas as they arrive, then a final ``done`` event.
+
+        Default implementation wraps ``complete`` (no real streaming) so every
+        provider works through the streaming code path. Providers that support
+        native streaming (Anthropic, OpenAI-compatible) override this to emit
+        tokens as they're generated.
+        """
+        resp = self.complete(
+            system=system, messages=messages, tools=tools, max_tokens=max_tokens
+        )
+        if resp.text:
+            yield StreamEvent(type="text", text=resp.text)
+        yield StreamEvent(type="done", response=resp)
