@@ -54,6 +54,12 @@ def _http_post_json(url: str, body: dict, headers: dict, timeout: float = 180.0)
         return json.loads(resp.read())
 
 
+def _http_get_json(url: str, headers: dict, timeout: float = 60.0) -> dict:
+    req = urllib.request.Request(url, headers={**headers, "User-Agent": _USER_AGENT})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+        return json.loads(resp.read())
+
+
 # --------------------------------------------------------------------------
 # Backends → raw image bytes
 # --------------------------------------------------------------------------
@@ -213,6 +219,70 @@ class VideoResult:
 
 def ffmpeg_available() -> bool:
     return shutil.which("ffmpeg") is not None
+
+
+# --------------------------------------------------------------------------
+# Real-motion video via Replicate (paid). Generates an actual motion clip
+# (not frame-animation). Needs REPLICATE_API_TOKEN; costs money per clip.
+# --------------------------------------------------------------------------
+DEFAULT_REPLICATE_VIDEO_MODEL = "minimax/video-01"
+_REPLICATE_API = "https://api.replicate.com/v1"
+
+
+def generate_video_replicate(
+    prompt: str,
+    *,
+    out: Path | str | None = None,
+    model: str = DEFAULT_REPLICATE_VIDEO_MODEL,
+    api_key: str | None = None,
+    poll_timeout: float = 600.0,
+    on_status=None,  # callback(status:str)
+) -> VideoResult:
+    """Generate a real-motion clip on Replicate and download the mp4.
+
+    ``model`` is an ``owner/name`` slug (runs its latest version). Returns the
+    saved mp4 (no poster). Raises RuntimeError on missing key / failure / timeout.
+    """
+    key = api_key or os.environ.get("REPLICATE_API_TOKEN")
+    if not key:
+        raise RuntimeError("replicate engine needs REPLICATE_API_TOKEN (set it in your shell).")
+    headers = {"Authorization": f"Bearer {key}"}
+
+    pred = _http_post_json(
+        f"{_REPLICATE_API}/models/{model}/predictions",
+        {"input": {"prompt": prompt}}, headers,
+    )
+    get_url = (pred.get("urls") or {}).get("get") or f"{_REPLICATE_API}/predictions/{pred.get('id')}"
+    status = pred.get("status", "starting")
+    if on_status:
+        on_status(status)
+
+    start = time.time()
+    while status not in ("succeeded", "failed", "canceled"):
+        if time.time() - start > poll_timeout:
+            raise RuntimeError(f"replicate timed out after {int(poll_timeout)}s (status={status})")
+        time.sleep(2.0)
+        pred = _http_get_json(get_url, headers)
+        new_status = pred.get("status", status)
+        if on_status and new_status != status:
+            on_status(new_status)
+        status = new_status
+
+    if status != "succeeded":
+        raise RuntimeError(f"replicate prediction {status}: {pred.get('error') or 'no detail'}")
+
+    output = pred.get("output")
+    url = output[-1] if isinstance(output, list) and output else output
+    if not isinstance(url, str):
+        raise RuntimeError("replicate succeeded but returned no video URL")
+    raw, _ = _http_get(url)
+
+    if out is None:
+        out = Path.cwd() / f"ronin_video_{int(time.time())}.mp4"
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(raw)
+    return VideoResult(path=out, poster=None, frames=0, fps=0)
 
 
 # --------------------------------------------------------------------------

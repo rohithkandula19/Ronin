@@ -1086,24 +1086,61 @@ def video(
     out: Path = typer.Option(None, "--out", "-o", help="Where to save the mp4 (default: ./ronin_video_<ts>.mp4)."),
     frames: int = typer.Option(12, "--frames", "-n", help="Number of AI-generated frames."),
     fps: int = typer.Option(8, "--fps", help="Frames per second of the output video."),
-    backend: str = typer.Option("pollinations", "--backend", help="Per-frame image backend: pollinations (free) | openai."),
-    size: str = typer.Option("512x512", "--size", help="WIDTHxHEIGHT (even numbers)."),
-    seed: int = typer.Option(None, "--seed", help="Base seed; each frame uses seed+i."),
-    model: str = typer.Option(None, "--model", help="Backend model override."),
+    backend: str = typer.Option("pollinations", "--backend", help="Per-frame image backend (frames engine): pollinations (free) | openai."),
+    engine: str = typer.Option("frames", "--engine", help="frames (free, ffmpeg) | replicate (paid, real-motion; needs REPLICATE_API_TOKEN)."),
+    size: str = typer.Option("512x512", "--size", help="WIDTHxHEIGHT (even numbers; frames engine)."),
+    seed: int = typer.Option(None, "--seed", help="Base seed; each frame uses seed+i (frames engine)."),
+    model: str = typer.Option(None, "--model", help="Model override (frames: image model; replicate: owner/name slug)."),
     show: bool = typer.Option(True, "--show/--no-show", help="Preview first frame inline + open the mp4."),
 ) -> None:
     """Generate a short video from text and open it.
 
-    Free path: generates N AI frames (Pollinations, no key) and stitches them
-    into a real .mp4 with ffmpeg. This is frame-animation, not Sora-grade motion
-    — you can't play video *in* a terminal, so ronin previews the first frame
-    inline and opens the mp4 in your player. Needs ffmpeg (`brew install ffmpeg`).
+    Two engines:
+    - frames (default, FREE): generates N AI frames (Pollinations, no key) and
+      stitches them into a real .mp4 with ffmpeg. Frame-animation, not Sora-grade.
+    - replicate (PAID, real-motion): runs a text-to-video model on Replicate.
+      Needs REPLICATE_API_TOKEN and costs money per clip.
+
+    You can't play video *in* a terminal, so ronin previews the first frame
+    (frames engine) and opens the mp4 in your player.
     """
     from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 
-    from .media import display_image, ffmpeg_available, generate_video, open_file
+    from .media import (
+        DEFAULT_REPLICATE_VIDEO_MODEL,
+        display_image,
+        ffmpeg_available,
+        generate_video,
+        generate_video_replicate,
+        open_file,
+    )
 
     text = " ".join(prompt)
+
+    # --- paid real-motion path ------------------------------------------------
+    if engine == "replicate":
+        rep_model = model or DEFAULT_REPLICATE_VIDEO_MODEL
+        console.print(f"[dim]generating real-motion video on Replicate "
+                      f"([bold]{rep_model}[/bold]) — this costs money and can take minutes…[/dim]")
+        with console.status("[cyan]submitting…[/cyan]", spinner="dots") as status:
+            def on_status(s: str) -> None:
+                status.update(f"[cyan]replicate:[/cyan] {s}…")
+            try:
+                result = generate_video_replicate(text, out=out, model=rep_model, on_status=on_status)
+            except Exception as e:  # noqa: BLE001
+                console.print(f"[red]✗ video generation failed:[/red] {e}")
+                raise typer.Exit(1)
+        console.print(f"[green]✓[/green] saved [cyan]{result.path}[/cyan] [dim](real-motion · {rep_model})[/dim]")
+        if show:
+            open_file(result.path)
+            console.print("[dim]opened the video in your player[/dim]")
+        return
+
+    if engine != "frames":
+        console.print(f"[red]✗[/red] unknown --engine '{engine}' (choose: frames | replicate)")
+        raise typer.Exit(2)
+
+    # --- free frames path -----------------------------------------------------
     if not ffmpeg_available():
         console.print("[red]✗[/red] ffmpeg not found — install it to build videos "
                       "([bold]brew install ffmpeg[/bold]).")
