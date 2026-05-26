@@ -838,24 +838,6 @@ def tui() -> None:
     run_tui(config=config)
 
 
-# ---------- tui ----------
-
-@app.command()
-def tui() -> None:
-    """Full-screen Textual UI: chat pane (multi-turn) + live trace pane, with Ctrl-L to clear and F1 for help."""
-    config = load_config()
-    if not config.has_provider_auth():
-        console.print(
-            f"[red]✗[/red] No credentials for provider [bold]{config.provider}[/bold]. Run [bold]ronin init[/bold] first "
-            "(or [bold]ronin init --demo[/bold] for an offline tour)."
-        )
-        raise typer.Exit(2)
-
-    from .tui import run_tui
-
-    run_tui(config=config)
-
-
 # ---------- briefing ----------
 
 @app.command()
