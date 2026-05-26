@@ -52,8 +52,17 @@ class LiveRenderer:
         self._flush_line()
         c = step.content
         if step.kind == "tool_call" and isinstance(c, dict):
+            # The todo tool gets a dedicated checklist render instead of a raw
+            # tool line — this is the live plan tracker.
+            if c.get("name") == "update_todos":
+                from .todo import render_todos
+                todos = (c.get("input") or {}).get("todos") or []
+                render_todos(self.console, todos)
+                return
             self.console.print(f"  [cyan]⚙[/cyan] [bold cyan]{c.get('name')}[/bold cyan] [dim]{_short(c.get('input'))}[/dim]")
         elif step.kind == "tool_result" and isinstance(c, dict):
+            if c.get("name") == "update_todos":
+                return  # the checklist was already drawn on the tool_call
             mark = "[red]✗[/red]" if c.get("is_error") else "[green]✓[/green]"
             self.console.print(f"  {mark} [dim]{_short(c.get('result', ''), 160)}[/dim]")
         elif step.kind == "error":

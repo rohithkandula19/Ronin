@@ -22,6 +22,7 @@ from .code_tools import SENSITIVE_TOOLS, build_code_tools, undo_last, unified_di
 from .config import CSKConfig
 from .runner import build_provider
 from .streaming import LiveRenderer
+from .todo import TodoStore, build_todo_tool
 
 
 CODE_SYSTEM = """You are csk in code mode — an autonomous coding agent working in a project directory.
@@ -30,6 +31,9 @@ You are given a TASK. Pursue it by reading files, searching, editing, and runnin
 commands — one step at a time — until the task is done and verified.
 
 Workflow:
+- For any task with 3+ steps, FIRST call update_todos to lay out a short plan,
+  then keep it current: exactly one item 'in_progress' at a time, flip items to
+  'completed' as you finish them. Skip the todo list for trivial one-step tasks.
 - Explore first: list_files / read_file / search_files to understand the code.
 - Make focused edits with write_file. Preserve existing style.
 - Verify your work with run_command (run the tests / the script / a lint).
@@ -131,6 +135,9 @@ def run_code_agent(
         )
 
     tools = build_code_tools(root, undo_stack=undo_stack)
+    # The live plan tracker: the agent maintains a checklist via update_todos.
+    todo_store = TodoStore()
+    tools = tools + [build_todo_tool(todo_store)]
     agent = ReActAgent(
         system=CODE_SYSTEM,
         tools=tools,
