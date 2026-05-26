@@ -27,7 +27,7 @@ from .streaming import LiveRenderer
 from .todo import TodoStore, build_todo_tool
 
 
-CODE_SYSTEM = """You are csk in code mode — an autonomous coding agent working in a project directory.
+CODE_SYSTEM = """You are ronin in code mode — an autonomous coding agent working in a project directory.
 
 You are given a TASK. Pursue it by reading files, searching, editing, and running
 commands — one step at a time — until the task is done and verified.

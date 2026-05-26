@@ -99,7 +99,7 @@ def make_app() -> FastAPI:
     settings = get_settings()
     init_db()
     app = FastAPI(
-        title="csk — hosted briefings API",
+        title="ronin — hosted briefings API",
         version="0.0.1",
         description="Per-user storage + scheduled execution of csk briefings.",
         debug=settings.debug,

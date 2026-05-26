@@ -24,7 +24,7 @@ from .runner import build_provider
 from .tools import build_tools
 
 
-AGENT_SYSTEM = """You are csk in agent mode — an autonomous operations analyst for a startup founder.
+AGENT_SYSTEM = """You are ronin in agent mode — an autonomous operations analyst for a startup founder.
 
 You are given a GOAL. Pursue it by calling the read-only tools available to you,
 one reasoning step at a time, until you can give a complete, specific answer.

@@ -24,7 +24,7 @@ from .demo_brain import demo_answer
 from .tools import build_tools
 
 
-SYSTEM_PROMPT_TEMPLATE = """You are csk — a CLI agent that helps a startup founder query their own data.
+SYSTEM_PROMPT_TEMPLATE = """You are ronin — a CLI agent that helps a startup founder query their own data.
 You have read-only tools for the configured services. You do NOT have write access; refuse politely
 if asked to mutate state.
 

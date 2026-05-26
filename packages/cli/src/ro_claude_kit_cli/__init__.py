@@ -1,2 +1,2 @@
-"""csk — the Claude-powered CLI for startup ops."""
-__version__ = "0.4.0"
+"""ronin — the Claude-powered agent CLI for startup ops, code, and media."""
+__version__ = "0.5.0"

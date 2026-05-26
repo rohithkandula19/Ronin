@@ -1,16 +1,16 @@
-# RO-Claude-kit — `ronin`
+# ronin 🐼
 
-> **A masterless Claude agent CLI, three ways.** A Monday-morning founder **briefing** (revenue, churn, failed payments, urgent issues), an autonomous **agent** for ad-hoc data questions, and a **coding agent** (Claude-Code shaped) that reads, edits, and runs your code.
+> **A masterless Claude agent CLI.** A Monday-morning founder **briefing** (revenue, churn, failed payments, urgent issues), an autonomous **agent** for ad-hoc data questions, a **coding agent** (Claude-Code shaped) that reads/edits/runs your code, and **media generation** — images, video, and speech, right in the terminal.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-v0.4.0-blue)](CHANGELOG.md)
-[![Tests](https://img.shields.io/badge/tests-408%20passing-green)](https://github.com/rohithkandula19/RO-Claude-kit/actions)
+[![Status](https://img.shields.io/badge/status-v0.5.0-blue)](CHANGELOG.md)
+[![Tests](https://img.shields.io/badge/tests-427%20passing-green)](https://github.com/rohithkandula19/Ronin/actions)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Providers](https://img.shields.io/badge/providers-Claude%20·%20Ollama%20·%20OpenAI%20·%20Together%20·%20Groq%20·%20Fireworks-d4a373)](#-supported-providers)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 ```bash
-$ curl -sSL https://raw.githubusercontent.com/rohithkandula19/RO-Claude-kit/main/install.sh | bash
+$ curl -sSL https://raw.githubusercontent.com/rohithkandula19/Ronin/main/install.sh | bash
 $ ronin init --demo
 $ ronin briefing                          # the founder briefing
 $ ronin agent "why did revenue drop?"     # autonomous data agent
@@ -42,11 +42,11 @@ $ ronin code "fix the failing test"       # coding agent
 - Unblock or escalate every Urgent (P1) issue
 ```
 
-## What is `csk`?
+## What is `ronin`?
 
-`csk` is the CLI you point at your startup's data. The **headline command is `csk briefing`** — a one-line replacement for the Monday-morning "let me check Stripe, then Linear, then Slack" ritual.
+`ronin` is the CLI you point at your startup's data. The **headline command is `ronin briefing`** — a one-line replacement for the Monday-morning "let me check Stripe, then Linear, then Slack" ritual.
 
-It's also a general-purpose data-question CLI: `csk ask "..."`, `csk chat` (multi-turn), `csk tui` (full-screen), and 11 more subcommands. Read-only by design — no path to mutate your data through the agent.
+It's also a general-purpose data-question CLI: `ronin ask "..."`, `ronin chat` (multi-turn), `ronin tui` (full-screen), and 11 more subcommands. Read-only by design — no path to mutate your data through the agent.
 
 ## 🛠 `ronin code` — the coding agent (Claude-Code shaped)
 
@@ -65,18 +65,23 @@ A coding agent that reads, edits, and runs your code — every write and shell c
 
 And the wedge no pure coding agent has — **`ronin investigate "<symptom>"`** bridges your business data *and* your code to root-cause a problem (e.g. "failed payments spiked the 9th → `stripe_webhook.py` changed in commit `a1b2c3` on the 9th").
 
-## 🎨 `ronin image` / `ronin video` — media, in the terminal
+## 🎨 `ronin image` / `ronin video` / `ronin say` — media, in the terminal
 
 ```bash
 ronin image "a red panda hacking at night, neon, flat vector"   # free, no API key
 ronin video "a red panda surfing a neon wave" --frames 16 --fps 8
+ronin say   "your weekly briefing is ready"                      # speak aloud / --out clip.m4a
 ```
 
-Text-to-image that **displays in the terminal** (inline on iTerm2, via `chafa`/`viu`/`imgcat` otherwise, else opens in your viewer). Free by default via **Pollinations** (no key); switch to OpenAI `gpt-image-1` with `--backend openai`. `ronin video` generates AI frames and stitches a real `.mp4` with `ffmpeg` (frame-animation — the free way to make a real video file).
+- **`ronin image`** — text-to-image that **displays in the terminal** (inline on iTerm2, via `chafa`/`viu`/`imgcat` otherwise, else opens in your viewer). Free by default via **Pollinations** (no key); `--backend openai` for `gpt-image-1`.
+- **`ronin video`** — generates AI frames and stitches a real `.mp4` with `ffmpeg` (free frame-animation). `--engine replicate` runs a paid real-motion text-to-video model (needs `REPLICATE_API_TOKEN`).
+- **`ronin say`** — text-to-speech via your OS engine (free; macOS `say`, Linux espeak). Speaks aloud or saves audio with `--out`.
+
+The coding agent can make media too: `ronin code` has a **`generate_image`** tool, so "design a logo and drop it in `assets/`" just works.
 
 ## 🧠 Supported providers
 
-`csk` works with any LLM — proprietary or open-source. Switch providers with one config change.
+`ronin` works with any LLM — proprietary or open-source. Switch providers with one config change.
 
 | Provider | Backend | Default model | Auth |
 |---|---|---|---|
@@ -99,8 +104,8 @@ model = "llama3.1"
 
 ```bash
 # one-liner: installs uv if missing, clones the repo, syncs the workspace,
-# drops a 'csk' shim in ~/.local/bin
-curl -sSL https://raw.githubusercontent.com/rohithkandula19/RO-Claude-kit/main/install.sh | bash
+# drops a 'ronin' shim in ~/.local/bin (with ro / csk aliases)
+curl -sSL https://raw.githubusercontent.com/rohithkandula19/Ronin/main/install.sh | bash
 ```
 
 Pin a tag: append `-s -- --ref v0.2.0`. PyPI publish is wired (`.github/workflows/release.yml`) and lands `pip install ro-claude-kit-cli` once `PYPI_TOKEN` is set as a repo secret.
@@ -110,10 +115,10 @@ For Postgres support after install: `(cd ~/.local/share/ro-claude-kit && uv pip 
 ## 30-second quickstart (no real credentials)
 
 ```bash
-csk init --demo                                 # ships fake Stripe + Linear data
-csk ask "what ENG issues are in progress?"
-csk ask "which customers have active subscriptions?"
-csk chat                                        # multi-turn REPL
+ronin init --demo                                 # ships fake Stripe + Linear data
+ronin ask "what ENG issues are in progress?"
+ronin ask "which customers have active subscriptions?"
+ronin chat                                        # multi-turn REPL
 ```
 
 Demo mode is wired so you can play with the CLI before connecting any real services. Without an API key, an offline keyword router answers — set a key for full natural-language responses.
@@ -121,7 +126,7 @@ Demo mode is wired so you can play with the CLI before connecting any real servi
 ## Real config
 
 ```bash
-csk init                                        # interactive — picks provider + service creds
+ronin init                                        # interactive — picks provider + service creds
 ```
 
 Or write `.csk/config.toml`:
@@ -144,29 +149,34 @@ Add `.csk/` to `.gitignore` — the file is plaintext credentials.
 
 | Command | What it does |
 |---|---|
-| `csk init [--demo]` | Create a config file (interactive or demo). |
-| **`csk briefing`** | **Weekly founder briefing — auto-saved + shows week-over-week deltas inline.** |
-| `csk briefing --slack <#chan>` | Post the briefing to Slack via `chat.postMessage`. |
-| `csk briefing --history` | Trend table of all past briefings (MRR / new / churn / failed / urgent over time). |
-| `csk briefing --out file.md` | Write briefing to a Markdown file. |
-| `csk ask "<question>"` | One-shot — print answer + typed trace. |
-| `csk chat` | Multi-turn REPL with short-term memory. |
-| `csk tui` | Full-screen Textual UI: chat + live trace, F1 help. |
-| `csk save NAME "..."` | Save a question for later (turns ad-hoc into reusable). |
-| `csk run NAME` | Run a saved query. |
-| `csk queries` / `csk unsave NAME` | List or remove saved queries. |
-| `csk serve --port 8000` | Expose the agent as an HTTP API (`POST /ask`). |
-| `csk plugins` | List user plugins discovered in `.csk/plugins/`. |
-| `csk costs [--by model\|day]` | Token + cost usage recorded by previous runs. |
-| `csk tools` | List the tools registered for the current config. |
-| `csk doctor` | Health check: provider, auth, services. |
-| `csk eval run <dataset>` | LLM-as-judge eval over a golden dataset (HTML report optional). |
-| `csk eval drift <a> <b>` | Compare two runs; non-zero exit on regression. CI-friendly. |
-| `csk version` | Print the version. |
+| `ronin init [--demo]` | Create a config file (interactive or demo). |
+| **`ronin briefing`** | **Weekly founder briefing — auto-saved + shows week-over-week deltas inline.** |
+| `ronin briefing --slack <#chan>` | Post the briefing to Slack via `chat.postMessage`. |
+| `ronin briefing --history` | Trend table of all past briefings (MRR / new / churn / failed / urgent over time). |
+| `ronin briefing --out file.md` | Write briefing to a Markdown file. |
+| `ronin ask "<question>"` | One-shot — print answer + typed trace. |
+| `ronin chat` | Multi-turn REPL with short-term memory. |
+| `ronin tui` | Full-screen Textual UI: chat + live trace, F1 help. |
+| `ronin save NAME "..."` | Save a question for later (turns ad-hoc into reusable). |
+| `ronin run NAME` | Run a saved query. |
+| `ronin queries` / `ronin unsave NAME` | List or remove saved queries. |
+| `ronin serve --port 8000` | Expose the agent as an HTTP API (`POST /ask`). |
+| `ronin plugins` | List user plugins discovered in `.csk/plugins/`. |
+| `ronin costs [--by model\|day]` | Token + cost usage recorded by previous runs. |
+| `ronin tools` | List the tools registered for the current config. |
+| `ronin doctor` | Health check: provider, auth, services. |
+| `ronin eval run <dataset>` | LLM-as-judge eval over a golden dataset (HTML report optional). |
+| `ronin eval drift <a> <b>` | Compare two runs; non-zero exit on regression. CI-friendly. |
+| **`ronin code [task]`** | **Coding agent — streaming, plan tracker, project memory, slash commands.** |
+| **`ronin investigate "<symptom>"`** | **Root-cause a problem across your business data AND your code.** |
+| `ronin image "<prompt>"` | Text-to-image, shown in the terminal (free Pollinations / OpenAI). |
+| `ronin video "<prompt>"` | Text-to-video — free frames+ffmpeg, or `--engine replicate` (paid). |
+| `ronin say "<text>"` | Text-to-speech — speak aloud or save audio (`--out`). |
+| `ronin version` | Print the version. |
 
 ## Hosted SaaS (`apps/api`)
 
-`csk` is the CLI. For founders who want the briefing to **run automatically every Monday and post to Slack without anyone opening a terminal**, there's a FastAPI backend at `apps/api/`. Sign up, upload encrypted credentials, schedule. Same briefing engine under the hood — the CLI and the hosted version share the aggregator code in `packages/cli/.../briefing.py`.
+`ronin` is the CLI. For founders who want the briefing to **run automatically every Monday and post to Slack without anyone opening a terminal**, there's a FastAPI backend at `apps/api/`. Sign up, upload encrypted credentials, schedule. Same briefing engine under the hood — the CLI and the hosted version share the aggregator code in `packages/cli/.../briefing.py`.
 
 ```bash
 # run the API
@@ -190,9 +200,9 @@ The repo ships two operational bits for whoever's running the project, not just 
 - **`scripts/release.sh <version>`** — bumps the CLI version, runs the test suite, updates the CHANGELOG, tags `vX.Y.Z`, pushes, and watches the tag-triggered PyPI publish workflow in `.github/workflows/release.yml`. Adds the version to PyPI in ~2 minutes. One-time setup: add a `PYPI_TOKEN` repo secret.
 - **`scripts/launch_kit/`** — 9 numbered, copy-paste-ready messages (Anthropic email/DM, founder DM, Show HN title + first comment, Indie Hackers, Twitter variants, LinkedIn, public Anthropic tag) + a 5-day plan at `DAY_BY_DAY_PLAN.md`. Start there once `release.sh` succeeds.
 
-## Why csk vs ...
+## Why ronin vs ...
 
-| | csk | aider | langchain | crewai |
+| | ronin | aider | langchain | crewai |
 |---|---|---|---|---|
 | Built specifically for startup ops (Stripe / Linear / Slack / Notion / Postgres) | ✅ | ❌ | ❌ | ❌ |
 | Read-only by default for every integration | ✅ | n/a | ❌ | ❌ |
@@ -202,17 +212,17 @@ The repo ships two operational bits for whoever's running the project, not just 
 | Hand-rolled agent loop (no LangChain dependency) | ✅ | ✅ | n/a | ❌ |
 | LLM-as-judge eval suite included | ✅ | ❌ | ❌ | ❌ |
 
-aider is the gold standard for *coding* agents. CrewAI / LangChain are agent frameworks — useful but heavyweight. `csk` is a focused product for one thing: asking your operational data questions.
+aider is the gold standard for *coding* agents. CrewAI / LangChain are agent frameworks — useful but heavyweight. `ronin` is a focused product for one thing: asking your operational data questions.
 
 ## Safety by default
 
-Every input passes through a prompt-injection scanner before reaching the LLM. Every tool is read-only. There is no path through `csk` to mutate your data — even if the LLM tries, the kit's `ToolAllowlist` blocks it. Adding write paths is a deliberate fork-and-wrap operation through `ApprovalGate`.
+Every input passes through a prompt-injection scanner before reaching the LLM. Every tool is read-only. There is no path through `ronin` to mutate your data — even if the LLM tries, the kit's `ToolAllowlist` blocks it. Adding write paths is a deliberate fork-and-wrap operation through `ApprovalGate`.
 
 PII (emails, SSNs, credit cards, API keys) is redacted from traces before anything leaves your process.
 
 ## What's under the hood
 
-`csk` is the user-facing wrapper. The substance lives in seven packages you can also use independently:
+`ronin` is the user-facing wrapper. The substance lives in seven packages you can also use independently:
 
 | Package | What it does | Tests |
 |---|---|---|
@@ -221,11 +231,11 @@ PII (emails, SSNs, credit cards, API keys) is redacted from traces before anythi
 | `memory` | Short-term (rolling summary), long-term (pluggable vector store), user preferences | 11 |
 | `hardening` | Prompt-injection scanner, tool allowlist, approval gates, output validator | 20 |
 | `mcp-servers` | Read-only Postgres, Stripe, Linear, Slack, Notion, Tavily, GitHub templates | 67 |
-| `cli` | The `csk` binary | 36 |
+| `cli` | The `ronin` binary | 36 |
 | `deployment-templates` | Docker Compose, Modal, Vercel, Railway | — |
 | `apps/demo` | AgentLab — interactive FastAPI playground | 5 |
 
-**152 tests** across all packages, green on every push (see CI).
+**400+ tests** across all packages, green on every push (see CI).
 
 ## Use the modules without the CLI
 
@@ -286,8 +296,8 @@ uv run python examples/code-reviewer/main.py examples/code-reviewer/sample_buggy
 A FastAPI app that lets you click through all four agent patterns side-by-side:
 
 ```bash
-git clone https://github.com/rohithkandula19/RO-Claude-kit
-cd RO-Claude-kit
+git clone https://github.com/rohithkandula19/Ronin
+cd Ronin
 uv sync --all-packages --all-groups
 uv run uvicorn app.main:app --port 8000 --app-dir apps/demo
 ```
@@ -297,9 +307,9 @@ Open http://localhost:8000.
 ## Repository layout
 
 ```
-RO-Claude-kit/
+Ronin/
 ├── packages/
-│   ├── cli/                  # the csk binary
+│   ├── cli/                  # the ronin binary
 │   ├── agent-patterns/       # core loop patterns + provider abstraction
 │   ├── eval-suite/           # LLM-as-a-judge
 │   ├── memory/               # 3-layer memory

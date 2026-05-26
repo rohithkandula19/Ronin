@@ -1,7 +1,7 @@
 [project]
 name = "ro-claude-kit-cli"
-version = "0.4.0"
-description = "csk — the Claude-powered CLI for startup ops. Ask questions across your Stripe / Linear / Slack / Notion / Postgres in one shot."
+version = "0.5.0"
+description = "ronin — a masterless Claude agent CLI: founder briefings, a coding agent, and terminal-native image/video/speech generation."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

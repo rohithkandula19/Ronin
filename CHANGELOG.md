@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] — 2026-05-25
+
+### Added
+- **`ronin say "..."`** — text-to-speech via the OS engine (free, no key: macOS `say`, Linux espeak). Speaks aloud or saves audio with `--out`. Completes the media trio: image / video / audio.
+- **`generate_image` agent tool** — `ronin code` can create images (logos, diagrams, placeholder art) and save them into the project mid-task. Free Pollinations backend, path-traversal guarded, gated like other writes.
+- **`ronin video --engine replicate`** — paid real-motion text-to-video (vs. the free frame-animation engine). Creates a Replicate prediction, polls to completion, downloads the mp4. Needs `REPLICATE_API_TOKEN`; default model `minimax/video-01`, overridable with `--model owner/name`.
+
+### Changed
+- **Branding sweep**: finished the `csk` → `ronin` rename across user-facing surfaces (README, agent system prompts, web/API titles, package description) and fixed the stale `RO-Claude-kit` → `Ronin` repo links. The `.csk/` config dir, the `csk`/`ro` command aliases, and internal package/module names are unchanged (back-compat).
+
+### Tests
+- +20 tests (audio, agent image tool, Replicate create/poll/download). Repo total: 408 → 427.
+
 ## [0.4.0] — 2026-05-25
 
 ### Added — media generation (terminal-native)
