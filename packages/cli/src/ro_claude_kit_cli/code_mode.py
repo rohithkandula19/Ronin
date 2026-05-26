@@ -141,12 +141,11 @@ def _selective_gate(console: Console | None, yolo: bool, root: _Path) -> Callabl
     For write_file / edit_file, render a unified diff of the proposed change
     *before* asking — so you approve a visible diff, not a blind action.
     """
-    # generate_image writes a file into the project → gate it like other writes.
-    gated = SENSITIVE_TOOLS | {"generate_image"}
-
+    # Only real mutations (file edits + shell) are gated. Image generation is a
+    # free, low-risk creative action — it runs without an approval prompt.
     def gate(name: str, args: dict) -> bool:
-        if name not in gated:
-            return True  # reads run freely
+        if name not in SENSITIVE_TOOLS:
+            return True  # reads + media generation run freely
         if yolo:
             return True
         if console is None:
@@ -190,6 +189,9 @@ def run_code_agent(
     undo_stack: list | None = None,
     history_prefix: str = "",
     read_only: bool = False,
+    extra_tools: list | None = None,
+    extra_system: str = "",
+    include_image_tool: bool = True,
 ) -> CodeRunResult:
     scan = InjectionScanner().scan(task)
     if scan.flagged:
@@ -209,13 +211,18 @@ def run_code_agent(
     todo_store = TodoStore()
     tools = tools + [build_todo_tool(todo_store)]
     # Media: the agent can generate images into the project (free backend).
-    if not read_only:
+    if not read_only and include_image_tool:
         tools = tools + [build_image_tool(root)]
+    # Extra tools (e.g. the unified agent's media + data tools).
+    if extra_tools and not read_only:
+        tools = tools + list(extra_tools)
 
     # Project memory: fold RONIN.md / CLAUDE.md / AGENTS.md into the system
     # prompt so the agent follows the repo's conventions. Announce it once (on
     # the first turn of a session / a one-shot run), not on every turn.
     system = CODE_SYSTEM
+    if extra_system:
+        system += "\n\n" + extra_system
     mem = memory_system_block(root)
     if mem is not None:
         block, mem_name = mem
@@ -425,3 +432,90 @@ def run_code_session(
             console.print("\n[bold green]✅[/bold green] [dim]done[/dim]\n")
         else:
             console.print(f"\n[bold green]✅[/bold green] {result.output}\n")
+
+
+UNIFIED_SYSTEM = """You are ronin — one assistant that does everything in a single conversation.
+
+Beyond reading/editing/running code, you can:
+- generate_image / generate_video — create pictures or short videos when asked.
+- speak — read text aloud (text-to-speech).
+- query the user's connected data services (Stripe / Linear / …) when configured.
+
+Pick the right capability for what the user actually asks:
+- "make/generate/draw a … image" → generate_image.  "video of …" → generate_video.  "say/read … aloud" → speak.
+- "write code that …", "fix …", "add a feature", "run the tests" → use the file + run tools (edits and commands are shown for approval).
+- "how many …", "what's our …" (their data) → the data tools.
+Don't confuse them — e.g. "write code to make an image" means WRITE CODE, not generate_image.
+Media you generate is shown to the user automatically. Keep replies tight."""
+
+
+def run_unified_session(
+    config: CSKConfig,
+    *,
+    root: Path | str = ".",
+    console: Console,
+    yolo: bool = False,
+    max_iterations: int = 25,
+    continue_session: bool = False,
+) -> None:
+    """The single front door: one conversation that talks, generates media, AND
+    writes/runs code (edits + commands gated). Bare ``ronin`` opens this."""
+    from rich.panel import Panel
+
+    from .media import build_media_tools, show_artifacts
+    from .tools import build_tools
+
+    undo_stack: list = []
+    transcript: list[str] = load_session(root) if continue_session else []
+    artifacts: list = []
+    # media (image/video/speech) + data (stripe/linear/…) tools, layered on the
+    # coding agent's machinery (streaming, diffs, approval gate, todos, memory).
+    media_tools = build_media_tools(artifacts, root=root)
+    data_tools = build_tools(config)
+    extra = media_tools + data_tools
+
+    resumed = " · [green]resumed[/green]" if (continue_session and transcript) else ""
+    console.print(Panel.fit(
+        f"[bold magenta]ronin[/bold magenta] — one assistant for everything{resumed}\n"
+        f"[dim]root: {_Path(root).resolve()} · "
+        f"{'YOLO (auto-approve)' if yolo else 'edits + commands need approval'}\n"
+        "talk · code · [bold]\"generate a panda image\"[/bold] · [bold]@path[/bold] refs · "
+        "[bold]/help[/bold] · [bold]/quit[/bold][/dim]",
+        border_style="magenta",
+    ))
+
+    while True:
+        try:
+            user = console.input("[bold magenta]ronin ›[/bold magenta] ").strip()
+        except (EOFError, KeyboardInterrupt):
+            console.print("\n[dim]bye[/dim]")
+            return
+        if not user:
+            continue
+        action = handle_slash_command(
+            user, console=console, root=root, config=config,
+            undo_stack=undo_stack, transcript=transcript,
+        )
+        if action == "exit":
+            return
+        if action == "handled":
+            continue
+
+        history_prefix = ""
+        if transcript:
+            history_prefix = "Conversation so far:\n" + "\n".join(transcript[-6:])
+
+        result = run_code_agent(
+            config, user, root=root, console=console, yolo=yolo,
+            max_iterations=max_iterations, undo_stack=undo_stack,
+            history_prefix=history_prefix, extra_tools=extra,
+            extra_system=UNIFIED_SYSTEM, include_image_tool=False,
+        )
+        transcript.append(f"USER: {user}")
+        transcript.append(f"ASSISTANT: {result.output}")
+        save_session(root, transcript)
+        if result.streamed:
+            console.print("\n[bold green]✅[/bold green] [dim]done[/dim]\n")
+        else:
+            console.print(f"\n[bold green]✅[/bold green] {result.output}\n")
+        show_artifacts(artifacts)  # display any image/video produced

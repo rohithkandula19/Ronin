@@ -3,8 +3,8 @@
 > **A masterless Claude agent CLI.** A Monday-morning founder **briefing** (revenue, churn, failed payments, urgent issues), an autonomous **agent** for ad-hoc data questions, a **coding agent** (Claude-Code shaped) that reads/edits/runs your code, and **media generation** — images, video, and speech, right in the terminal.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-v0.8.0-blue)](CHANGELOG.md)
-[![Tests](https://img.shields.io/badge/tests-483%20passing-green)](https://github.com/rohithkandula19/Ronin/actions)
+[![Status](https://img.shields.io/badge/status-v0.9.0-blue)](CHANGELOG.md)
+[![Tests](https://img.shields.io/badge/tests-486%20passing-green)](https://github.com/rohithkandula19/Ronin/actions)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Providers](https://img.shields.io/badge/providers-Claude%20·%20Ollama%20·%20OpenAI%20·%20Together%20·%20Groq%20·%20Fireworks-d4a373)](#-supported-providers)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
@@ -12,6 +12,7 @@
 ```bash
 $ curl -sSL https://raw.githubusercontent.com/rohithkandula19/Ronin/main/install.sh | bash
 $ ronin init --demo
+$ ronin                                    # ONE assistant: talk · code · generate images/video/voice · query data
 $ ronin briefing                          # the founder briefing
 $ ronin agent "why did revenue drop?"     # autonomous data agent
 $ ronin code "fix the failing test"       # coding agent
@@ -56,14 +57,13 @@ brew install vhs && vhs docs/demo/demo.tape   # → docs/demo/ronin.gif
 
 ## What is `ronin`?
 
-`ronin` is the CLI you point at your startup's data. The **headline command is `ronin briefing`** — a one-line replacement for the Monday-morning "let me check Stripe, then Linear, then Slack" ritual.
+**One front door:** just type **`ronin`** and you get a single assistant that does everything in one conversation — talk, write & run code (edits/commands gated for approval), generate images/video/speech, and query your connected data. Ask for anything in plain language; it picks the right capability. (`ronin chat` is the talk/media-only surface; `ronin code` is the pure coding agent — both still available when you want a focused mode.)
 
-It's also a general-purpose data-question CLI: `ronin ask "..."`, `ronin chat` (multi-turn), `ronin tui` (full-screen), and 11 more subcommands. Read-only by design — no path to mutate your data through the agent.
+It's also a focused ops tool: the **headline command `ronin briefing`** replaces the Monday-morning "check Stripe, then Linear, then Slack" ritual, with `ronin ask`, `ronin tui`, `investigate`, `explain`, and more as one-shot subcommands.
 
 ## 🛠 `ronin code` — the coding agent (Claude-Code shaped)
 
 ```bash
-ronin                      # in a code repo, bare `ronin` IS the coding agent
 ronin code "add a --json flag and update the tests"
 ronin code "explain @main.py and fix the bug in @utils.py"   # @-mention files
 ronin code --plan "refactor the auth module"                 # plan → approve → execute

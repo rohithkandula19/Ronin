@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.9.0] — 2026-05-26
+
+### Changed — one unified front door
+- **Bare `ronin` is now ONE assistant that does everything** in a single conversation: talk, write & run code (edits + shell commands gated with diffs/approval), generate images/video/speech, and query connected data — all on the same agent. No more choosing between "chat" and "code"; ask for anything in plain language and it routes to the right capability.
+- `ronin chat` (talk + media only) and `ronin code` (pure coding agent) remain as focused modes.
+- `run_code_agent` gained `extra_tools` / `extra_system` / `include_image_tool` so the unified session layers media + data tools onto the coding agent's machinery (streaming, diffs, approval gate, todo tracker, project memory, `@`-mentions, `/`-commands).
+
+### Fixed
+- Image generation no longer triggers an approval prompt — making a picture is a free, low-risk action; only file edits and shell commands are gated.
+- The chat no longer generates an image when asked to *write code* about images (tightened intent routing).
+
+### Tests
+- +3 tests (unified session has code+media+data tools, generates images, writes code). Repo total: 483 → 486.
+
 ## [0.8.0] — 2026-05-26
 
 ### Added — Claude-Code parity for the coding loop

@@ -162,25 +162,17 @@ def _root(ctx: typer.Context) -> None:
         console.print(ctx.get_help())
         return
 
-    # In a code repo, bare `ronin` drops into the coding agent (Claude Code's
-    # default). Outside one, it's the data/media chat. `ronin chat` always
-    # forces the chat; `ronin code` always forces the coding agent.
-    if _is_code_project(Path(".")):
-        console.print(
-            "[dim]Coding agent — I read/edit/run code in this repo (writes need approval). "
-            "Use [bold]@path[/bold] to reference files, [bold]/help[/bold] for commands, "
-            "[bold]/q[/bold] to quit. (Run [bold]ronin chat[/bold] for the data/media assistant.)[/dim]\n"
-        )
-        from .code_mode import run_code_session
-        run_code_session(config, root=Path("."), console=console)
-        return
-
+    # Bare `ronin` = one assistant that does everything: talk, generate media,
+    # AND read/edit/run code (edits + commands gated). `ronin chat` is the
+    # narrower talk/media surface; `ronin code` is the pure coding agent.
     console.print(
-        "[dim]Just ask — query your data, [bold]\"generate me a naruto image\"[/bold], "
-        "[bold]\"make a video of a city at night\"[/bold], [bold]\"say hello\"[/bold], and more.\n"
-        "Type [bold]:q[/bold] to exit, or [bold]ronin --help[/bold] for one-shot commands.[/dim]\n"
+        "[dim]One assistant for everything — talk, [bold]\"generate a panda image\"[/bold], "
+        "[bold]\"write code to …\"[/bold] (edits need approval), query your data, and more.\n"
+        "[bold]@path[/bold] to reference files · [bold]/help[/bold] for commands · "
+        "[bold]/q[/bold] to quit.[/dim]\n"
     )
-    start_chat(config, console=console)
+    from .code_mode import run_unified_session
+    run_unified_session(config, root=Path("."), console=console)
 
 
 def _is_code_project(path: Path) -> bool:
