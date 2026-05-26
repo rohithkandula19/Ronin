@@ -57,5 +57,5 @@ def render_banner(console: Console, *, animate: bool = True) -> None:
             live.update(_banner_text(_W))
     else:
         console.print(_banner_text(_W))
-    console.print(Text("  masterless Claude agent · one assistant for everything",
+    console.print(Text("  ʕ•ᴥ•ʔ  masterless Claude agent · one assistant for everything",
                        style=_col_color(_W // 2)))
