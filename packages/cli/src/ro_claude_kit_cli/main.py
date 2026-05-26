@@ -907,6 +907,7 @@ def code(
     root: Path = typer.Option(Path("."), "--root", help="Project directory the agent works in."),
     yolo: bool = typer.Option(False, "--yolo", help="Auto-approve writes + commands (trusted sandboxes only)."),
     max_steps: int = typer.Option(25, "--max-steps", help="Iteration cap."),
+    init_memory: bool = typer.Option(False, "--init", help="Scaffold a RONIN.md project-memory file and exit."),
 ) -> None:
     """Coding agent (Claude Code / Cline shaped): reads files, edits code, runs commands.
 
@@ -914,7 +915,16 @@ def code(
     session (steer across turns, :undo to revert, :q to quit). Every write and
     shell command is gated behind your y/N approval by default with a diff
     preview; read operations run freely. --yolo auto-approves everything.
+
+    The agent auto-loads RONIN.md / CLAUDE.md / AGENTS.md from the project root
+    as context. Use --init to scaffold a RONIN.md.
     """
+    if init_memory:
+        from .project_memory import write_memory_template
+        path = write_memory_template(root)
+        console.print(f"[green]✓[/green] project memory at [cyan]{path}[/cyan] — edit it, then run [bold]ronin code[/bold].")
+        return
+
     config = load_config()
     from .agent_mode import has_real_key
     from .code_mode import run_code_agent, run_code_session

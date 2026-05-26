@@ -20,6 +20,7 @@ from pathlib import Path as _Path
 
 from .code_tools import SENSITIVE_TOOLS, build_code_tools, undo_last, unified_diff
 from .config import CSKConfig
+from .project_memory import memory_system_block
 from .runner import build_provider
 from .streaming import LiveRenderer
 from .todo import TodoStore, build_todo_tool
@@ -138,8 +139,20 @@ def run_code_agent(
     # The live plan tracker: the agent maintains a checklist via update_todos.
     todo_store = TodoStore()
     tools = tools + [build_todo_tool(todo_store)]
+
+    # Project memory: fold RONIN.md / CLAUDE.md / AGENTS.md into the system
+    # prompt so the agent follows the repo's conventions. Announce it once (on
+    # the first turn of a session / a one-shot run), not on every turn.
+    system = CODE_SYSTEM
+    mem = memory_system_block(root)
+    if mem is not None:
+        block, mem_name = mem
+        system += block
+        if console is not None and not history_prefix:
+            console.print(f"[dim]📄 loaded project memory from [bold]{mem_name}[/bold][/dim]")
+
     agent = ReActAgent(
-        system=CODE_SYSTEM,
+        system=system,
         tools=tools,
         provider=build_provider(config),
         max_iterations=max_iterations,
