@@ -41,16 +41,47 @@ app = typer.Typer(
 console = Console()
 
 
-def _banner() -> None:
-    """The little face you see on `ronin` with no command — ronin's panda."""
-    from rich.panel import Panel
+def _panda_art(eyes: str = "●") -> str:
+    """ASCII-art panda. ``eyes`` is the glyph for the pupils ('●' open, '–' blink)."""
+    e = eyes
+    return (
+        "        [bold]▟██▙[/bold]            [bold]▟██▙[/bold]\n"
+        "     [bold]▟██████▙[/bold]        [bold]▟██████▙[/bold]\n"
+        "   [bold]▟██████████████████████▙[/bold]\n"
+        "  [bold]████[/bold]  [white on grey15]▟▀▀▙[/]        [white on grey15]▟▀▀▙[/]  [bold]████[/bold]\n"
+        f"  [bold]███[/bold]   [white on grey15]█ {e}█[/]        [white on grey15]█{e} █[/]   [bold]███[/bold]\n"
+        "  [bold]████[/bold]  [white on grey15]▜▄▄▛[/]   [bold]▼[/bold]    [white on grey15]▜▄▄▛[/]  [bold]████[/bold]\n"
+        "   [bold]▜██████████[/bold] [bold]◡◡[/bold] [bold]██████████▛[/bold]\n"
+        "     [bold]▜██████████████████▛[/bold]"
+    )
 
-    console.print(Panel.fit(
-        f"[bold]🐼  ronin[/bold] [dim]v{__version__}[/dim]  ·  [dim]masterless Claude agent[/dim]\n"
-        "[dim]briefing · agent · code · chat · tui[/dim]",
-        border_style="magenta",
-        title="🐼  ʕ•ᴥ•ʔ",
-    ))
+
+def _banner(animate: bool = True) -> None:
+    """ronin's panda — blinks a couple times on launch, like a startup animation."""
+    import sys
+    import time
+
+    from rich.panel import Panel
+    from rich.align import Align
+
+    def panel(eyes: str) -> Panel:
+        body = _panda_art(eyes) + (
+            f"\n\n[bold magenta]ronin[/bold magenta] [dim]v{__version__}[/dim]  ·  "
+            "[dim]masterless Claude agent[/dim]\n"
+            "[dim]briefing · agent · code · chat · tui[/dim]"
+        )
+        return Panel.fit(Align.center(body), border_style="magenta", padding=(1, 3))
+
+    # Only animate on a real TTY; otherwise print one static frame (clean for pipes/tests).
+    if animate and sys.stdout.isatty():
+        from rich.live import Live
+        frames = ["●", "●", "–", "●", "●", "–", "●"]  # open, open, blink, …
+        with Live(panel("●"), console=console, refresh_per_second=20, transient=False) as live:
+            for eye in frames:
+                live.update(panel(eye))
+                time.sleep(0.12)
+    else:
+        console.print(panel("●"))
 
 
 @app.callback(invoke_without_command=True)
