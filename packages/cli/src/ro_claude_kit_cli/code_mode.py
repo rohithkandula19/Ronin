@@ -574,6 +574,10 @@ def run_unified_session(
         transcript.append(f"USER: {user}")
         transcript.append(f"ASSISTANT: {result.output}")
         save_session(root, transcript)
+        if result.success:
+            # auto-remember durable facts from this exchange (background, best-effort)
+            from .memory_store import auto_extract_background
+            auto_extract_background(config, f"USER: {user}\nASSISTANT: {result.output}")
         if not result.success:
             console.print(f"\n{result.output}\n")   # clean error (e.g. rate-limit), session continues
         elif result.streamed:

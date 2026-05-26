@@ -78,6 +78,55 @@ def memory_prompt_block(limit: int = _INJECT_RECENT) -> str:
     )
 
 
+_EXTRACT_SYSTEM = (
+    "You extract DURABLE facts about the USER worth remembering across future "
+    "sessions — their name, role, tech stack, the projects/repos they work in, "
+    "preferences, recurring goals. IGNORE ephemeral or one-off details, greetings, "
+    "questions, and anything about the assistant. Output ONLY a JSON array of short "
+    "fact strings (e.g. [\"User's name is Rohith\", \"Prefers Python\"]). Use [] if nothing durable."
+)
+
+
+def _parse_json_list(text: str) -> list[str]:
+    import json as _json
+    import re
+    m = re.search(r"\[.*\]", text or "", re.DOTALL)
+    if not m:
+        return []
+    try:
+        data = _json.loads(m.group(0))
+    except ValueError:
+        return []
+    return [str(x).strip() for x in data if isinstance(x, (str,)) and str(x).strip()]
+
+
+def auto_extract(config, exchange: str) -> int:
+    """Best-effort: ask the model to pull durable user facts from one exchange and
+    save them. Returns the number of new facts stored. Silent on any failure
+    (rate limits, parse errors) — memory is never allowed to break a turn."""
+    try:
+        from ro_claude_kit_agent_patterns import Message
+
+        from .runner import build_provider
+        provider = build_provider(config)
+        resp = provider.complete(
+            system=_EXTRACT_SYSTEM,
+            messages=[Message(role="user", content=f"Exchange:\n{exchange[:4000]}")],
+            tools=[],
+            max_tokens=300,
+        )
+        facts = _parse_json_list(resp.text)
+    except Exception:  # noqa: BLE001 — best-effort, never raise
+        return 0
+    return sum(1 for f in facts if add_memory(f))
+
+
+def auto_extract_background(config, exchange: str) -> None:
+    """Run auto_extract in a daemon thread so it never adds latency to a turn."""
+    import threading
+    threading.Thread(target=auto_extract, args=(config, exchange), daemon=True).start()
+
+
 def build_remember_tool() -> Tool:
     """A tool the agent calls to persist a durable fact about the user."""
 

@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.12.0] — 2026-05-26
+
+### Added — automatic memory (remembers everything, no prompting)
+- After every turn, ronin now **auto-extracts durable facts about you** from the exchange (name, stack, projects, preferences, goals) and saves them to long-term memory — in a **background thread**, so it never adds latency. You no longer have to say "remember this"; it just remembers.
+- Best-effort and crash-proof: extraction failures (rate limits, parse errors) are swallowed silently — memory can never break a turn.
+- Wired into both the unified `ronin` and `ronin chat`, on top of the explicit `remember` tool and the `ronin memory` view/clear command.
+- 4 tests (JSON parse, saves facts, silent-on-error, empty list). Repo total: 494 → 498.
+
 ## [0.11.0] — 2026-05-26
 
 ### Added — persistent cross-session memory

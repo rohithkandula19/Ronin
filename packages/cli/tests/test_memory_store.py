@@ -96,3 +96,41 @@ def test_unified_session_persists_memory(home: Path, monkeypatch: pytest.MonkeyP
     # the fact persists to disk for the NEXT session
     texts = [m["text"] for m in memory_store.load_memories()]
     assert any("Rohith" in t for t in texts)
+
+
+# ---------- automatic extraction (remembers everything) ----------
+
+def test_parse_json_list() -> None:
+    assert memory_store._parse_json_list('here: ["a", "b"] done') == ["a", "b"]
+    assert memory_store._parse_json_list("no json") == []
+    assert memory_store._parse_json_list('[]') == []
+
+
+def test_auto_extract_saves_facts(home: Path) -> None:
+    from ro_claude_kit_agent_patterns import FakeProvider, LLMResponse
+    fake = FakeProvider(responses=[LLMResponse(
+        text='["User\'s name is Rohith", "User uses Groq"]', stop_reason="end_turn", usage={})])
+    with patch("ro_claude_kit_cli.runner.build_provider", return_value=fake):
+        n = memory_store.auto_extract(CSKConfig(provider="anthropic"),
+                                      "USER: hi I'm Rohith and I use Groq\nASSISTANT: hello")
+    assert n == 2
+    texts = [m["text"] for m in memory_store.load_memories()]
+    assert "User's name is Rohith" in texts and "User uses Groq" in texts
+
+
+def test_auto_extract_silent_on_error(home: Path) -> None:
+    class Boom:
+        model = "x"
+        def complete(self, **kw): raise RuntimeError("rate limited")
+    with patch("ro_claude_kit_cli.runner.build_provider", return_value=Boom()):
+        n = memory_store.auto_extract(CSKConfig(provider="groq"), "USER: x\nASSISTANT: y")
+    assert n == 0  # never raises, just returns 0
+    assert memory_store.load_memories() == []
+
+
+def test_auto_extract_empty_list(home: Path) -> None:
+    from ro_claude_kit_agent_patterns import FakeProvider, LLMResponse
+    fake = FakeProvider(responses=[LLMResponse(text="[]", stop_reason="end_turn", usage={})])
+    with patch("ro_claude_kit_cli.runner.build_provider", return_value=fake):
+        n = memory_store.auto_extract(CSKConfig(provider="anthropic"), "USER: what time is it\nASSISTANT: ...")
+    assert n == 0
