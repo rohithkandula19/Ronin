@@ -236,6 +236,7 @@ def run_code_agent(
     extra_tools: list | None = None,
     extra_system: str = "",
     include_image_tool: bool = True,
+    base_system: str | None = None,
 ) -> CodeRunResult:
     scan = InjectionScanner().scan(task)
     if scan.flagged:
@@ -264,7 +265,7 @@ def run_code_agent(
     # Project memory: fold RONIN.md / CLAUDE.md / AGENTS.md into the system
     # prompt so the agent follows the repo's conventions. Announce it once (on
     # the first turn of a session / a one-shot run), not on every turn.
-    system = CODE_SYSTEM
+    system = base_system or CODE_SYSTEM
     if extra_system:
         system += "\n\n" + extra_system
     mem = memory_system_block(root)
@@ -493,19 +494,23 @@ def run_code_session(
             console.print(f"\n[bold green]✅[/bold green] {result.output}\n")
 
 
-UNIFIED_SYSTEM = """You are ronin — one assistant that does everything in a single conversation.
+UNIFIED_SYSTEM = """You are ronin — one helpful assistant living in the user's terminal.
 
-Beyond reading/editing/running code, you can:
-- generate_image / generate_video — create pictures or short videos when asked.
-- speak — read text aloud (text-to-speech).
-- query the user's connected data services (Stripe / Linear / …) when configured.
+FIRST AND ALWAYS: reply to the user. Be conversational and direct. NEVER return an
+empty response. If it's a question or chit-chat ("hey", "what is groq", "how are you"),
+just ANSWER it in plain text — do not call any tool and do not go silent.
 
-Pick the right capability for what the user actually asks:
-- "make/generate/draw a … image" → generate_image.  "video of …" → generate_video.  "say/read … aloud" → speak.
-- "write code that …", "fix …", "add a feature", "run the tests" → use the file + run tools (edits and commands are shown for approval).
-- "how many …", "what's our …" (their data) → the data tools.
-Don't confuse them — e.g. "write code to make an image" means WRITE CODE, not generate_image.
-Media you generate is shown to the user automatically. Keep replies tight."""
+You ALSO have tools. Use them ONLY when the request clearly needs them:
+- Coding — read_file / write_file / edit_file / multi_edit / glob / search_files / run_command:
+  for reading, editing, or running code. Explore first, make focused edits, then verify by
+  running tests/commands. Edits and shell commands are shown to the user for approval.
+- Media — generate_image / generate_video / speak: when asked to make a picture, video, or speech.
+- Data — the configured service tools (Stripe / Linear / …): for questions about their business data.
+- remember — save a durable fact about the user for future sessions.
+
+Pick the right capability and don't confuse them (e.g. "write code to make an image" means
+WRITE CODE, not generate_image). For multi-step coding tasks, use update_todos to plan.
+Keep replies tight. Media you generate is shown to the user automatically."""
 
 
 def run_unified_session(
@@ -569,13 +574,14 @@ def run_unified_session(
             config, user, root=root, console=console, yolo=yolo,
             max_iterations=max_iterations, undo_stack=undo_stack,
             history_prefix=history_prefix, extra_tools=extra,
-            extra_system=UNIFIED_SYSTEM + mem_block, include_image_tool=False,
+            base_system=UNIFIED_SYSTEM, extra_system=mem_block, include_image_tool=False,
         )
         transcript.append(f"USER: {user}")
         transcript.append(f"ASSISTANT: {result.output}")
         save_session(root, transcript)
-        if result.success:
-            # auto-remember durable facts from this exchange (background, best-effort)
+        # auto-remember durable facts — only on substantive turns (saves rate limit
+        # on trivial ones like "hey", which never yield facts anyway)
+        if result.success and len(user) > 20:
             from .memory_store import auto_extract_background
             auto_extract_background(config, f"USER: {user}\nASSISTANT: {result.output}")
         if not result.success:

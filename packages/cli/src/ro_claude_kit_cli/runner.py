@@ -259,9 +259,10 @@ def start_chat(config: CSKConfig, *, console: Console, raw: bool = False) -> Non
 
         memory.add_turn("assistant", result.output)
         memory.maybe_compress()
-        # auto-remember durable facts from this exchange (background, best-effort)
-        from .memory_store import auto_extract_background
-        auto_extract_background(config, f"USER: {user}\nASSISTANT: {result.output}")
+        # auto-remember durable facts — only on substantive turns (saves rate limit)
+        if len(user) > 20:
+            from .memory_store import auto_extract_background
+            auto_extract_background(config, f"USER: {user}\nASSISTANT: {result.output}")
 
         if raw:
             sys.stdout.write(result.output + "\n")

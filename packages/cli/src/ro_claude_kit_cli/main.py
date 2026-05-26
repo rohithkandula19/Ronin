@@ -151,7 +151,8 @@ def _root(ctx: typer.Context) -> None:
         return
 
     from .banner import render_banner
-    render_banner(console)  # the animated gradient RONIN boot
+    render_banner(console)  # the animated gradient RONIN wordmark
+    _banner()               # …and the panda mascot 🐼
 
     # Interactive terminal: drop into a session, the way `claude` does.
     config = load_config()
