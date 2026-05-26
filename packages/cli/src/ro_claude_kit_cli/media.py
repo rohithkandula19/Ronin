@@ -251,18 +251,20 @@ def generate_video(
     import tempfile
 
     poster_path: Path | None = None
+    frame_ext = ".png"  # set from the first frame's real content-type
     with tempfile.TemporaryDirectory(prefix="ronin_frames_") as td:
         tdp = Path(td)
         for i in range(frames):
-            raw, _ = _image_bytes(prompt, backend, width, height, base_seed + i, model, api_key)
+            raw, ctype = _image_bytes(prompt, backend, width, height, base_seed + i, model, api_key)
             if not raw:
                 raise RuntimeError(f"frame {i + 1} came back empty")
-            frame_file = tdp / f"frame_{i:04d}.png"
-            frame_file.write_bytes(raw)
             if i == 0:
-                # persist the first frame as a poster outside the temp dir
-                poster_path = Path(tempfile.gettempdir()) / f"ronin_poster_{int(time.time())}.png"
+                # ffmpeg's image2 demuxer picks the decoder by file extension, so
+                # the frame files MUST carry the real type (Pollinations → jpeg).
+                frame_ext = _ext_for(ctype)
+                poster_path = Path(tempfile.gettempdir()) / f"ronin_poster_{int(time.time())}{frame_ext}"
                 poster_path.write_bytes(raw)
+            (tdp / f"frame_{i:04d}{frame_ext}").write_bytes(raw)
             if on_frame is not None:
                 on_frame(i + 1, frames)
 
@@ -272,7 +274,9 @@ def generate_video(
         out.parent.mkdir(parents=True, exist_ok=True)
         cmd = [
             "ffmpeg", "-y", "-framerate", str(fps),
-            "-i", str(tdp / "frame_%04d.png"),
+            "-i", str(tdp / f"frame_%04d{frame_ext}"),
+            # scale to even dims defensively, then yuv420p for broad player support
+            "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
             "-c:v", "libx264", "-pix_fmt", "yuv420p",
             str(out),
         ]
