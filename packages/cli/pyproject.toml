@@ -1,6 +1,6 @@
 [project]
 name = "ro-claude-kit-cli"
-version = "0.2.0"
+version = "0.3.0"
 description = "csk — the Claude-powered CLI for startup ops. Ask questions across your Stripe / Linear / Slack / Notion / Postgres in one shot."
 readme = "README.md"
 requires-python = ">=3.11"

@@ -3,8 +3,8 @@
 > **A masterless Claude agent CLI, three ways.** A Monday-morning founder **briefing** (revenue, churn, failed payments, urgent issues), an autonomous **agent** for ad-hoc data questions, and a **coding agent** (Claude-Code shaped) that reads, edits, and runs your code.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-v0.2.0-blue)](CHANGELOG.md)
-[![Tests](https://img.shields.io/badge/tests-347%20passing-green)](https://github.com/rohithkandula19/RO-Claude-kit/actions)
+[![Status](https://img.shields.io/badge/status-v0.3.0-blue)](CHANGELOG.md)
+[![Tests](https://img.shields.io/badge/tests-393%20passing-green)](https://github.com/rohithkandula19/RO-Claude-kit/actions)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Providers](https://img.shields.io/badge/providers-Claude%20·%20Ollama%20·%20OpenAI%20·%20Together%20·%20Groq%20·%20Fireworks-d4a373)](#-supported-providers)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
@@ -47,6 +47,23 @@ $ ronin code "fix the failing test"       # coding agent
 `csk` is the CLI you point at your startup's data. The **headline command is `csk briefing`** — a one-line replacement for the Monday-morning "let me check Stripe, then Linear, then Slack" ritual.
 
 It's also a general-purpose data-question CLI: `csk ask "..."`, `csk chat` (multi-turn), `csk tui` (full-screen), and 11 more subcommands. Read-only by design — no path to mutate your data through the agent.
+
+## 🛠 `ronin code` — the coding agent (Claude-Code shaped)
+
+```bash
+ronin code "add a --json flag to the export command and update the tests"
+ronin code                 # no task → interactive session
+ronin code --init          # scaffold a RONIN.md project-memory file
+```
+
+A coding agent that reads, edits, and runs your code — every write and shell command gated behind a diff preview and your approval (read operations run freely). It mirrors the Claude Code experience:
+
+- **Streaming** — the model's reasoning and edits appear token-by-token, with tool activity (`⚙ read_file` / `✓`) inline. No more frozen screen.
+- **Live plan tracker** — multi-step tasks show a checklist (`✓ / ▶ / ☐`) the agent keeps current as it works.
+- **Project memory** — auto-loads `RONIN.md` / `CLAUDE.md` / `AGENTS.md` from the repo so it follows your conventions.
+- **Interactive session** — steer across turns with slash commands: `/help`, `/diff`, `/undo`, `/memory`, `/model`, `/clear`, `/tools`, `/quit`.
+
+And the wedge no pure coding agent has — **`ronin investigate "<symptom>"`** bridges your business data *and* your code to root-cause a problem (e.g. "failed payments spiked the 9th → `stripe_webhook.py` changed in commit `a1b2c3` on the 9th").
 
 ## 🧠 Supported providers
 
