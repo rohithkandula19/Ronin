@@ -1080,6 +1080,69 @@ def image(
             console.print("[dim]opened in your image viewer[/dim]")
 
 
+@app.command()
+def video(
+    prompt: list[str] = typer.Argument(..., help="What to animate, e.g. \"a red panda surfing a neon wave\"."),
+    out: Path = typer.Option(None, "--out", "-o", help="Where to save the mp4 (default: ./ronin_video_<ts>.mp4)."),
+    frames: int = typer.Option(12, "--frames", "-n", help="Number of AI-generated frames."),
+    fps: int = typer.Option(8, "--fps", help="Frames per second of the output video."),
+    backend: str = typer.Option("pollinations", "--backend", help="Per-frame image backend: pollinations (free) | openai."),
+    size: str = typer.Option("512x512", "--size", help="WIDTHxHEIGHT (even numbers)."),
+    seed: int = typer.Option(None, "--seed", help="Base seed; each frame uses seed+i."),
+    model: str = typer.Option(None, "--model", help="Backend model override."),
+    show: bool = typer.Option(True, "--show/--no-show", help="Preview first frame inline + open the mp4."),
+) -> None:
+    """Generate a short video from text and open it.
+
+    Free path: generates N AI frames (Pollinations, no key) and stitches them
+    into a real .mp4 with ffmpeg. This is frame-animation, not Sora-grade motion
+    — you can't play video *in* a terminal, so ronin previews the first frame
+    inline and opens the mp4 in your player. Needs ffmpeg (`brew install ffmpeg`).
+    """
+    from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
+
+    from .media import display_image, ffmpeg_available, generate_video, open_file
+
+    text = " ".join(prompt)
+    if not ffmpeg_available():
+        console.print("[red]✗[/red] ffmpeg not found — install it to build videos "
+                      "([bold]brew install ffmpeg[/bold]).")
+        raise typer.Exit(2)
+    try:
+        width, height = (int(x) for x in size.lower().split("x", 1))
+    except ValueError:
+        console.print(f"[red]✗[/red] --size must look like 512x512 (got '{size}')")
+        raise typer.Exit(2)
+
+    console.print(f"[dim]generating {frames} frames via {backend} (this is frame-animation, "
+                  "not real-motion video)…[/dim]")
+    with Progress(
+        SpinnerColumn(), TextColumn("[cyan]frame[/cyan] {task.completed}/{task.total}"),
+        BarColumn(), console=console, transient=True,
+    ) as progress:
+        task_id = progress.add_task("frames", total=frames)
+
+        def on_frame(done: int, total: int) -> None:
+            progress.update(task_id, completed=done)
+
+        try:
+            result = generate_video(text, out=out, frames=frames, fps=fps, width=width,
+                                    height=height, seed=seed, backend=backend, model=model,
+                                    on_frame=on_frame)
+        except Exception as e:  # noqa: BLE001
+            console.print(f"[red]✗ video generation failed:[/red] {e}")
+            raise typer.Exit(1)
+
+    console.print(f"[green]✓[/green] saved [cyan]{result.path}[/cyan] "
+                  f"[dim]({result.frames} frames @ {result.fps}fps)[/dim]")
+    if show:
+        if result.poster is not None:
+            console.print("[dim]first frame:[/dim]")
+            display_image(result.poster)
+        open_file(result.path)
+        console.print("[dim]opened the video in your player[/dim]")
+
+
 def _print_result(result: AgentResultRich, *, raw: bool) -> None:
     if raw:
         sys.stdout.write(result.output + "\n")

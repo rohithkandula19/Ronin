@@ -87,6 +87,16 @@ def _openai_bytes(prompt: str, *, width: int, height: int, model: str | None,
     raise RuntimeError("openai image response had neither b64_json nor url")
 
 
+def _image_bytes(prompt: str, backend: str, width: int, height: int,
+                 seed: int | None, model: str | None, api_key: str | None) -> tuple[bytes, str]:
+    """Dispatch to the chosen backend → (raw bytes, content-type)."""
+    if backend == "pollinations":
+        return _pollinations_bytes(prompt, width=width, height=height, seed=seed, model=model)
+    if backend == "openai":
+        return _openai_bytes(prompt, width=width, height=height, model=model, api_key=api_key)
+    raise ValueError(f"unknown image backend '{backend}' (choose: {', '.join(IMAGE_BACKENDS)})")
+
+
 def _ext_for(content_type: str) -> str:
     if "png" in content_type:
         return ".png"
@@ -109,12 +119,7 @@ def generate_image(
     api_key: str | None = None,
 ) -> Path:
     """Generate an image and write it to disk; returns the file path."""
-    if backend == "pollinations":
-        raw, ctype = _pollinations_bytes(prompt, width=width, height=height, seed=seed, model=model)
-    elif backend == "openai":
-        raw, ctype = _openai_bytes(prompt, width=width, height=height, model=model, api_key=api_key)
-    else:
-        raise ValueError(f"unknown image backend '{backend}' (choose: {', '.join(IMAGE_BACKENDS)})")
+    raw, ctype = _image_bytes(prompt, backend, width, height, seed, model, api_key)
 
     if not raw:
         raise RuntimeError("image backend returned no data")
@@ -185,3 +190,94 @@ def display_image(path: Path) -> str:
     if _open_in_viewer(path):
         return "open"
     return "none"
+
+
+def open_file(path: Path) -> bool:
+    """Open any file (e.g. an mp4) in the system default app."""
+    return _open_in_viewer(path)
+
+
+# --------------------------------------------------------------------------
+# Video: free path = generate frames, stitch with ffmpeg into a real mp4.
+# True real-motion text-to-video needs a paid provider (Replicate/Runway/fal);
+# the ``backend`` here is the per-frame image backend, kept pluggable so a
+# motion provider can slot in later.
+# --------------------------------------------------------------------------
+@dataclass
+class VideoResult:
+    path: Path
+    poster: Path | None
+    frames: int
+    fps: int
+
+
+def ffmpeg_available() -> bool:
+    return shutil.which("ffmpeg") is not None
+
+
+def generate_video(
+    prompt: str,
+    *,
+    out: Path | str | None = None,
+    frames: int = 12,
+    fps: int = 8,
+    width: int = 512,
+    height: int = 512,
+    seed: int | None = None,
+    backend: str = "pollinations",
+    model: str | None = None,
+    api_key: str | None = None,
+    on_frame=None,  # callback(done:int, total:int)
+) -> VideoResult:
+    """Generate ``frames`` AI images (incrementing the seed) and stitch them
+    into an mp4 with ffmpeg. Returns the mp4 path + a poster (first frame).
+
+    This is frame-animation, not real-motion text-to-video — the honest free
+    way to produce an actual video file. Swap in a paid motion provider for
+    Sora-grade results.
+    """
+    if not ffmpeg_available():
+        raise RuntimeError(
+            "ffmpeg not found — install it to stitch frames into a video "
+            "(macOS: `brew install ffmpeg`)."
+        )
+    if frames < 2:
+        raise ValueError("need at least 2 frames for a video")
+    # libx264 + yuv420p require even dimensions.
+    width -= width % 2
+    height -= height % 2
+    base_seed = seed if seed is not None else 1000
+
+    import tempfile
+
+    poster_path: Path | None = None
+    with tempfile.TemporaryDirectory(prefix="ronin_frames_") as td:
+        tdp = Path(td)
+        for i in range(frames):
+            raw, _ = _image_bytes(prompt, backend, width, height, base_seed + i, model, api_key)
+            if not raw:
+                raise RuntimeError(f"frame {i + 1} came back empty")
+            frame_file = tdp / f"frame_{i:04d}.png"
+            frame_file.write_bytes(raw)
+            if i == 0:
+                # persist the first frame as a poster outside the temp dir
+                poster_path = Path(tempfile.gettempdir()) / f"ronin_poster_{int(time.time())}.png"
+                poster_path.write_bytes(raw)
+            if on_frame is not None:
+                on_frame(i + 1, frames)
+
+        if out is None:
+            out = Path.cwd() / f"ronin_video_{int(time.time())}.mp4"
+        out = Path(out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        cmd = [
+            "ffmpeg", "-y", "-framerate", str(fps),
+            "-i", str(tdp / "frame_%04d.png"),
+            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            str(out),
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+        if res.returncode != 0:
+            raise RuntimeError(f"ffmpeg failed: {res.stderr[-400:]}")
+
+    return VideoResult(path=out, poster=poster_path, frames=frames, fps=fps)
