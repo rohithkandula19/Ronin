@@ -150,15 +150,12 @@ def _root(ctx: typer.Context) -> None:
         console.print(ctx.get_help())
         return
 
-    from .panda_art import render_panda
-    from .theme import gradient_text
-    render_panda(console)                          # the panda — the highlighted hero 🐼
     from rich.text import Text
-    line = Text("  ")
-    line.append_text(gradient_text("ronin"))
-    line.append("  ·  masterless Claude agent · one assistant for everything",
-                style="#6b7089")
-    console.print(line)                            # small ronin wordmark beneath
+
+    from .panda_art import render_panda
+    render_panda(console)   # panda 🐼 beside the RONIN wordmark (logo lockup)
+    console.print(Text("  masterless Claude agent · one assistant for everything",
+                       style="#6b7089"))
 
     # Interactive terminal: drop into a session, the way `claude` does.
     config = load_config()

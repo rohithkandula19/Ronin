@@ -64,15 +64,29 @@ def _render(eyes: str) -> str:
     return "\n".join(out_lines)
 
 
+def _lockup(eyes: str):
+    """Panda on the left, the RONIN gradient wordmark beside it, vertically centred."""
+    from rich.table import Table
+    from rich.text import Text
+
+    from .banner import _W as _RW, _banner_text
+
+    grid = Table.grid(padding=(0, 3))
+    grid.add_column(vertical="middle")
+    grid.add_column(vertical="middle")
+    grid.add_row(Text.from_markup(_render(eyes)), _banner_text(_RW))
+    return grid
+
+
 def render_panda(console: Console, *, animate: bool = True) -> None:
-    """Print the big panda; blink a couple of times on a real TTY."""
+    """Print the panda + RONIN lockup; blink a couple of times on a real TTY."""
     if animate and getattr(console, "is_terminal", False) and sys.stdout.isatty():
         from rich.live import Live
-        frames = ["●", "●", "●", "–", "●", "●", "●", "–", "●"]  # open, open, …, blink
-        with Live(_render("●"), console=console, refresh_per_second=12, transient=False) as live:
+        frames = ["●", "●", "●", "–", "●", "●", "●", "–", "●"]
+        with Live(_lockup("●"), console=console, refresh_per_second=12, transient=False) as live:
             for e in frames:
-                live.update(_render(e))
+                live.update(_lockup(e))
                 time.sleep(0.13)
-            live.update(_render("●"))
+            live.update(_lockup("●"))
     else:
-        console.print(_render("●"))
+        console.print(_lockup("●"))
