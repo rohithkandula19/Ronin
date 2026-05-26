@@ -244,8 +244,9 @@ def test_run_code_agent_streams_text_to_console(tmp_path: Path, monkeypatch: pyt
     # streamed reasoning + summary text appears in the rendered output
     assert "Reading the file first." in out
     assert "Done" in out and "fixed=True" in out
-    # tool activity rendered inline
-    assert "read_file" in out and "write_file" in out
+    # tool activity rendered inline (Claude-Code-style ● Read / Write lines)
+    assert "Read" in out and "Write" in out
+    assert "target.py" in out
 
 
 def test_run_code_agent_no_console_does_not_stream(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

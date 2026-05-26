@@ -13,16 +13,11 @@ re-printing the final output in a panel.
 """
 from __future__ import annotations
 
-from typing import Any
-
 from rich.console import Console
 
 from ro_claude_kit_agent_patterns import Step
 
-
-def _short(value: Any, limit: int = 80) -> str:
-    s = str(value).replace("\n", " ")
-    return s if len(s) <= limit else s[: limit - 1] + "…"
+from .theme import ACCENT, BULLET, ERR, MUTE, OK, TOOL, short as _short
 
 
 class LiveRenderer:
@@ -52,25 +47,30 @@ class LiveRenderer:
         self._flush_line()
         c = step.content
         if step.kind == "tool_call" and isinstance(c, dict):
-            # The todo tool gets a dedicated checklist render instead of a raw
-            # tool line — this is the live plan tracker.
-            if c.get("name") == "update_todos":
+            name = c.get("name", "")
+            # The todo tool gets a dedicated checklist render (the live plan tracker).
+            if name == "update_todos":
                 from .todo import render_todos
-                todos = (c.get("input") or {}).get("todos") or []
-                render_todos(self.console, todos)
+                render_todos(self.console, (c.get("input") or {}).get("todos") or [])
                 return
-            self.console.print(f"  [cyan]⚙[/cyan] [bold cyan]{c.get('name')}[/bold cyan] [dim]{_short(c.get('input'))}[/dim]")
+            from .theme import tool_label
+            verb, target = tool_label(name, c.get("input"))
+            tgt = f" [{MUTE}]{target}[/{MUTE}]" if target else ""
+            self.console.print(f"{BULLET} [bold {TOOL}]{verb}[/bold {TOOL}]{tgt}")
         elif step.kind == "tool_result" and isinstance(c, dict):
             if c.get("name") == "update_todos":
                 return  # the checklist was already drawn on the tool_call
-            mark = "[red]✗[/red]" if c.get("is_error") else "[green]✓[/green]"
-            self.console.print(f"  {mark} [dim]{_short(c.get('result', ''), 160)}[/dim]")
+            preview = _short(c.get("result", ""), 100)
+            if c.get("is_error"):
+                self.console.print(f"  [{ERR}]└ ✗ {preview}[/{ERR}]")
+            elif preview:
+                self.console.print(f"  [{MUTE}]└ {preview}[/{MUTE}]")
         elif step.kind == "error":
-            self.console.print(f"  [red]⚠[/red] [dim]{_short(c, 200)}[/dim]")
+            self.console.print(f"  [{ERR}]⚠ {_short(c, 160)}[/{ERR}]")
         elif step.kind == "plan":
-            self.console.print(f"  [magenta]🗂[/magenta] [dim]{_short(c, 200)}[/dim]")
+            self.console.print(f"  [{ACCENT}]🗂 {_short(c, 160)}[/{ACCENT}]")
         elif step.kind == "reflection":
-            self.console.print(f"  [yellow]🔎[/yellow] [dim]{_short(c, 200)}[/dim]")
+            self.console.print(f"  [{OK}]🔎 {_short(c, 160)}[/{OK}]")
 
     def finish(self) -> None:
         """Call once the run is over to terminate any dangling streamed line."""

@@ -24,7 +24,23 @@ from .media import build_image_tool
 from .project_memory import load_project_memory, memory_system_block, write_memory_template
 from .runner import build_provider
 from .streaming import LiveRenderer
+from .theme import ACCENT as _ACCENT
 from .todo import TodoStore, build_todo_tool
+
+
+def _welcome(console: "Console", config: CSKConfig, root, yolo: bool, *, title: str, hint: str) -> None:
+    """A clean, consistent welcome header for the interactive sessions."""
+    from rich.panel import Panel
+
+    mode = "[yellow]YOLO — auto-approve[/yellow]" if yolo else "edits + commands need approval"
+    body = (
+        f"[bold {_ACCENT}]✻ {title}[/bold {_ACCENT}]\n\n"
+        f"[grey50]cwd[/grey50]    {_Path(root).resolve()}\n"
+        f"[grey50]model[/grey50]  {config.provider} · {config.resolved_model()}\n"
+        f"[grey50]mode[/grey50]   {mode}\n\n"
+        f"[grey50]{hint}[/grey50]"
+    )
+    console.print(Panel.fit(body, border_style=_ACCENT, padding=(1, 2)))
 
 
 CODE_SYSTEM = """You are ronin in code mode — an autonomous coding agent working in a project directory.
@@ -151,7 +167,7 @@ def _selective_gate(console: Console | None, yolo: bool, root: _Path) -> Callabl
         if console is None:
             return False  # no way to ask → deny by default
 
-        # Show what's actually about to happen.
+        # Show what's actually about to happen, then ask.
         if name in ("write_file", "edit_file"):
             rel = args.get("path", "?")
             target = (root / rel)
@@ -161,14 +177,18 @@ def _selective_gate(console: Console | None, yolo: bool, root: _Path) -> Callabl
             else:  # edit_file
                 old, new = args.get("old_string", ""), args.get("new_string", "")
                 after = before.replace(old, new, 1) if old in before else before
-            console.print(f"[yellow]?[/yellow] [bold]{name}[/bold] [cyan]{rel}[/cyan]:")
+            verb = "Write" if name == "write_file" else "Edit"
+            console.print(f"  [yellow]›[/yellow] [bold]{verb}[/bold] [cyan]{rel}[/cyan]")
             _render_diff(console, unified_diff(rel, before, after))
         elif name == "run_command":
-            console.print(f"[yellow]?[/yellow] [bold]run[/bold]: [cyan]{args.get('command')}[/cyan]")
+            console.print(f"  [yellow]›[/yellow] [bold]Run[/bold] [cyan]{args.get('command')}[/cyan]")
+        elif name == "multi_edit":
+            console.print(f"  [yellow]›[/yellow] [bold]Edit[/bold] [cyan]{args.get('path', '?')}[/cyan] "
+                          f"[grey50]({len(args.get('edits', []))} change(s))[/grey50]")
         else:
-            console.print(f"[yellow]?[/yellow] {name}({args})")
+            console.print(f"  [yellow]›[/yellow] [bold]{name}[/bold] [grey50]{args}[/grey50]")
 
-        console.print("approve? [y/N] ", end="")
+        console.print("    [yellow]approve?[/yellow] [grey50]y / N[/grey50] ", end="")
         try:
             answer = input().strip().lower()
         except (EOFError, KeyboardInterrupt):
@@ -393,24 +413,17 @@ def run_code_session(
     carries forward. Type [bold]/help[/bold] for in-session commands.
     ``continue_session`` resumes the last session's history for this repo.
     """
-    from rich.panel import Panel
-
     undo_stack: list = []
     transcript: list[str] = load_session(root) if continue_session else []
 
-    resumed = " · [green]resumed[/green]" if (continue_session and transcript) else ""
-    console.print(Panel.fit(
-        f"[bold cyan]ronin code[/bold cyan] — interactive session{resumed}\n"
-        f"[dim]root: {_Path(root).resolve()} · "
-        f"{'YOLO (auto-approve)' if yolo else 'writes + commands need approval'}\n"
-        "type your request · [bold]@path[/bold] to reference files · "
-        "[bold]/help[/bold] for commands · [bold]/quit[/bold] to exit[/dim]",
-        border_style="cyan",
-    ))
+    resumed = " · resumed" if (continue_session and transcript) else ""
+    _welcome(console, config, root, yolo,
+             title=f"ronin code{resumed}",
+             hint="your request · @path to reference files · /help · /undo · /quit")
 
     while True:
         try:
-            user = console.input("[bold cyan]code ›[/bold cyan] ").strip()
+            user = console.input(f"[bold {_ACCENT}]code ›[/bold {_ACCENT}] ").strip()
         except (EOFError, KeyboardInterrupt):
             console.print("\n[dim]bye[/dim]")
             return
@@ -487,15 +500,10 @@ def run_unified_session(
     data_tools = build_tools(config)
     extra = media_tools + data_tools
 
-    resumed = " · [green]resumed[/green]" if (continue_session and transcript) else ""
-    console.print(Panel.fit(
-        f"[bold magenta]ronin[/bold magenta] — one assistant for everything{resumed}\n"
-        f"[dim]root: {_Path(root).resolve()} · "
-        f"{'YOLO (auto-approve)' if yolo else 'edits + commands need approval'}\n"
-        "talk · code · [bold]\"generate a panda image\"[/bold] · [bold]@path[/bold] refs · "
-        "[bold]/help[/bold] · [bold]/quit[/bold][/dim]",
-        border_style="magenta",
-    ))
+    resumed = " · resumed" if (continue_session and transcript) else ""
+    _welcome(console, config, root, yolo,
+             title=f"ronin — one assistant for everything{resumed}",
+             hint="talk · code · make images/video/voice · query data · @path · /help · /quit")
 
     while True:
         try:
