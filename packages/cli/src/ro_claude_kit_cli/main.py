@@ -1143,6 +1143,50 @@ def video(
         console.print("[dim]opened the video in your player[/dim]")
 
 
+@app.command()
+def say(
+    text: list[str] = typer.Argument(None, help="What to speak."),
+    voice: str = typer.Option(None, "--voice", "-v", help="Voice name (see --list-voices)."),
+    rate: int = typer.Option(None, "--rate", "-r", help="Words per minute."),
+    out: Path = typer.Option(None, "--out", "-o", help="Save audio to a file instead of speaking aloud."),
+    list_voices: bool = typer.Option(False, "--list-voices", help="List installed voices and exit."),
+) -> None:
+    """Speak text aloud — or save it as an audio file with --out.
+
+    Free, no API key: uses your OS speech engine (macOS `say`, Linux espeak).
+    """
+    from .audio import list_voices as _list_voices
+    from .audio import speak, tts_engine
+
+    if list_voices:
+        voices = _list_voices()
+        if not voices:
+            console.print("[dim]no voices found (macOS only for now)[/dim]")
+        else:
+            console.print("[bold]voices[/bold] [dim](use with --voice)[/dim]")
+            console.print("  " + ", ".join(voices))
+        return
+
+    if tts_engine() is None:
+        console.print("[red]✗[/red] no text-to-speech engine "
+                      "(macOS has `say`; on Linux install [bold]espeak-ng[/bold]).")
+        raise typer.Exit(2)
+    if not text:
+        console.print("[red]✗[/red] give me something to say, e.g. [cyan]ronin say \"hello\"[/cyan]")
+        raise typer.Exit(2)
+
+    spoken = " ".join(text)
+    try:
+        path = speak(spoken, voice=voice, rate=rate, out=out)
+    except RuntimeError as e:
+        console.print(f"[red]✗ {e}[/red]")
+        raise typer.Exit(1)
+    if path is not None:
+        console.print(f"[green]✓[/green] saved audio to [cyan]{path}[/cyan]")
+    else:
+        console.print("[green]✓[/green] [dim]spoke aloud[/dim]")
+
+
 def _print_result(result: AgentResultRich, *, raw: bool) -> None:
     if raw:
         sys.stdout.write(result.output + "\n")
