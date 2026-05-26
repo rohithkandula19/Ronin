@@ -79,6 +79,24 @@ def test_chat_does_not_crash_on_401(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "bye" in out  # reached :q cleanly
 
 
+def test_run_code_agent_clean_on_429(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A provider 429 (rate limit) during code mode returns a clean result, no traceback."""
+    monkeypatch.setenv("OPENAI_API_KEY", "x")
+    from ro_claude_kit_cli.code_mode import run_code_agent
+
+    class _RateLimited(_BoomProvider):
+        def complete(self, **kw):
+            raise _HTTPStatusError(429)
+        def stream(self, **kw):
+            raise _HTTPStatusError(429)
+
+    config = CSKConfig(provider="groq", openai_api_key="x")
+    with patch("ro_claude_kit_cli.code_mode.build_provider", return_value=_RateLimited()):
+        result = run_code_agent(config, "do something", root=tmp_path, console=None, yolo=True)
+    assert result.success is False
+    assert "rate-limited" in result.output  # friendly message, not a traceback
+
+
 def test_run_ask_returns_clean_error_on_401(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "bad")
     config = CSKConfig(provider="groq")

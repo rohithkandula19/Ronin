@@ -251,7 +251,18 @@ def run_code_agent(
 
     task = expand_file_mentions(task, root)  # inline any @path references
     prompt = f"{history_prefix}\n\nCurrent request: {task}" if history_prefix else task
-    result = agent.run(prompt, on_step=on_step, before_tool=before_tool, on_text=on_text)
+    try:
+        result = agent.run(prompt, on_step=on_step, before_tool=before_tool, on_text=on_text)
+    except Exception as e:  # noqa: BLE001 — never crash the session on a provider/network error
+        if renderer is not None:
+            renderer.finish()
+        from .runner import _friendly_provider_error
+        return CodeRunResult(
+            success=False,
+            output=_friendly_provider_error(e, config),
+            iterations=0,
+            error=f"{e.__class__.__name__}: {e}",
+        )
     if renderer is not None:
         renderer.finish()
     return CodeRunResult(
@@ -428,7 +439,9 @@ def run_code_session(
         save_session(root, transcript)  # persist so `ronin code --continue` can resume
         # The summary already streamed inline; just show a subtle completion mark
         # instead of re-printing the whole thing.
-        if result.streamed:
+        if not result.success:
+            console.print(f"\n{result.output}\n")   # clean error (e.g. rate-limit), session continues
+        elif result.streamed:
             console.print("\n[bold green]✅[/bold green] [dim]done[/dim]\n")
         else:
             console.print(f"\n[bold green]✅[/bold green] {result.output}\n")
@@ -514,7 +527,9 @@ def run_unified_session(
         transcript.append(f"USER: {user}")
         transcript.append(f"ASSISTANT: {result.output}")
         save_session(root, transcript)
-        if result.streamed:
+        if not result.success:
+            console.print(f"\n{result.output}\n")   # clean error (e.g. rate-limit), session continues
+        elif result.streamed:
             console.print("\n[bold green]✅[/bold green] [dim]done[/dim]\n")
         else:
             console.print(f"\n[bold green]✅[/bold green] {result.output}\n")
