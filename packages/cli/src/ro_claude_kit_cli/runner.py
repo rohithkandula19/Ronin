@@ -129,13 +129,22 @@ def _build_agent(config: CSKConfig, tools: list[Tool], *, extra_system: str = ""
 # The base prompt is data-and-read-only; this grants the media tools so the
 # agent doesn't refuse to "create" things.
 CHAT_CAPABILITIES = """Beyond answering data questions, you can DO things for the user via tools:
-- generate_image — draw/create a picture, logo, or art.
+- generate_image — draw/create an actual picture, logo, or art.
 - generate_video — make a short video/animation.
 - speak — read something aloud (text-to-speech).
-When the user asks for any of these in plain language (e.g. "generate me a naruto image",
+When the user clearly wants media in plain language (e.g. "generate me a naruto image",
 "make a video of a city at night", "say hello"), CALL the matching tool — don't say you can't.
+
+IMPORTANT — don't confuse media with code:
+- Only call generate_image when the user wants an actual IMAGE produced.
+- If the user asks you to WRITE or SHOW CODE — even code that creates an image
+  (e.g. "write code to generate a panda image") — respond with the CODE as text.
+  Do NOT call generate_image in that case.
+- You cannot edit files or run code here. For real coding tasks (editing a project,
+  running commands), tell the user to use `ronin code "<task>"`.
+
 The "no write access" rule applies only to their business data services, NOT to media generation.
-Keep replies short; the media is shown to the user automatically."""
+Keep replies short; any media you generate is shown to the user automatically."""
 
 
 def run_ask(config: CSKConfig, question: str, *, console: Console | None = None) -> AgentResultRich:
