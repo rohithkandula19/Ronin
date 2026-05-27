@@ -27,7 +27,7 @@ PROVIDER_PRESETS: dict[str, dict[str, str]] = {
     "groq": {"model": "llama-3.3-70b-versatile", "base_url": "https://api.groq.com/openai/v1"},
     "fireworks": {"model": "accounts/fireworks/models/llama-v3p3-70b-instruct", "base_url": "https://api.fireworks.ai/inference/v1"},
     # Free tiers, no credit card — a real quality bump over llama at $0:
-    "gemini": {"model": "gemini-2.0-flash", "base_url": "https://generativelanguage.googleapis.com/v1beta/openai"},
+    "gemini": {"model": "gemini-flash-latest", "base_url": "https://generativelanguage.googleapis.com/v1beta/openai"},
     "cerebras": {"model": "llama-3.3-70b", "base_url": "https://api.cerebras.ai/v1"},
     # OpenRouter: one key, many models. Default is a strong free, tool-calling
     # model; override with `--model` (e.g. qwen/qwen3-coder:free).

@@ -423,10 +423,15 @@ def handle_slash_command(
         from rich.prompt import Prompt
 
         from .config import PROVIDER_PRESETS, save_config
+        old_provider = config.provider
         prov = parts[1].lower() if len(parts) > 1 else config.provider
+        config.provider = prov
         if len(parts) > 2:
             config.model = parts[2]
-        config.provider = prov
+        elif prov != old_provider:
+            # Switching providers: drop the old provider's model so the new
+            # provider's default applies (a Gemini login shouldn't keep a Qwen model).
+            config.model = None
         known = ", ".join(PROVIDER_PRESETS)
         if prov not in PROVIDER_PRESETS and prov != "custom":
             console.print(f"  [yellow]unknown provider[/yellow] '{prov}' — known: {known}, custom")
