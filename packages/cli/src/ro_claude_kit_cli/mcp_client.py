@@ -152,6 +152,23 @@ def add_mcp_server(name: str, command: str, args: list[str], root: str | Path = 
     return p
 
 
+def remove_mcp_server(name: str, root: str | Path = ".") -> bool:
+    """Remove a server from ``.csk/mcp.json``. Returns True if it was present."""
+    p = mcp_config_path(root)
+    if not p.is_file():
+        return False
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except ValueError:
+        return False
+    servers = data.get("mcpServers", {})
+    if name not in servers:
+        return False
+    del servers[name]
+    p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return True
+
+
 def _wrap_tool(client: MCPClient, spec: dict):
     from ro_claude_kit_agent_patterns import Tool
 

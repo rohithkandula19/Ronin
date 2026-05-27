@@ -687,6 +687,15 @@ def mcp_list() -> None:
     console.print(f"[green]✓[/green] {len(tools)} tool(s) available to the agent.")
 
 
+@mcp_app.command("remove", help="Remove a configured MCP server by name.")
+def mcp_remove(name: str = typer.Argument(..., help="The server name to remove.")) -> None:
+    from .mcp_client import remove_mcp_server
+    if remove_mcp_server(name, "."):
+        console.print(f"[green]✓[/green] removed MCP server [bold]{name}[/bold].")
+    else:
+        console.print(f"[yellow]no MCP server named[/yellow] [bold]{name}[/bold] [yellow]configured.[/yellow]")
+
+
 @mcp_app.command("add", help="Add an MCP server: ronin mcp add NAME COMMAND [ARGS...]",
                  context_settings={"ignore_unknown_options": True})
 def mcp_add(

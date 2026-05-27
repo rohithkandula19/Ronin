@@ -781,7 +781,11 @@ def run_code_session(
             console.print(f"  [#6b7089]→ now working in[/#6b7089] [bold]{root}[/bold]")
             if not rest:
                 continue
-            user = rest
+            # Ground the agent in THIS directory so it doesn't drift to a
+            # remembered project or a differently-scoped MCP tool.
+            user = (f"(Your working directory is {root}. Use your file tools "
+                    f"(list_files / read_file / search_files) here; ignore any other "
+                    f"project paths mentioned earlier or in memory.)\n\n{rest}")
 
         history_prefix = ""
         if transcript:
@@ -916,7 +920,11 @@ def run_unified_session(
             console.print(f"  [#6b7089]→ now working in[/#6b7089] [bold]{root}[/bold]")
             if not rest:
                 continue
-            user = rest
+            # Ground the agent in THIS directory so it doesn't drift to a
+            # remembered project or a differently-scoped MCP tool.
+            user = (f"(Your working directory is {root}. Use your file tools "
+                    f"(list_files / read_file / search_files) here; ignore any other "
+                    f"project paths mentioned earlier or in memory.)\n\n{rest}")
 
         history_prefix = ""
         if transcript:

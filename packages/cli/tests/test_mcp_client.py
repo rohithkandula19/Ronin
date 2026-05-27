@@ -56,3 +56,12 @@ def test_build_mcp_tools_from_config(tmp_path: Path) -> None:
     by_name = {t.name: t for t in tools}
     assert "echo__echo" in by_name              # namespaced by server
     assert by_name["echo__echo"].handler(text="yo") == "echo: yo"
+
+
+def test_add_then_remove_server(tmp_path: Path) -> None:
+    from ro_claude_kit_cli.mcp_client import add_mcp_server, load_mcp_servers, remove_mcp_server
+    add_mcp_server("fs", "npx", ["-y", "x", "."], root=tmp_path)
+    assert "fs" in load_mcp_servers(tmp_path)
+    assert remove_mcp_server("fs", tmp_path) is True
+    assert "fs" not in load_mcp_servers(tmp_path)
+    assert remove_mcp_server("fs", tmp_path) is False   # already gone
