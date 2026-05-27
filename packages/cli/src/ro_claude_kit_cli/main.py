@@ -355,10 +355,16 @@ def set_key(
 
 @app.command()
 def ask(
-    question: list[str] = typer.Argument(..., help="The question to ask. Wrap multi-word questions in quotes."),
+    question: list[str] = typer.Argument(None, help="The question to ask. Wrap multi-word questions in quotes."),
     raw: bool = typer.Option(False, "--raw", help="Print plain output instead of rich panels."),
 ) -> None:
-    """One-shot: send a question to Claude with your configured tools, print answer + trace."""
+    """One-shot Q&A — also reads piped stdin, so ronin composes in shell pipelines.
+
+    Examples:
+      ronin ask "which customers churned?"
+      cat error.log | ronin ask "what's the root cause?"
+      git diff | ronin ask "write release notes for these changes"
+    """
     config = load_config()
     if not config.has_provider_auth():
         console.print(
@@ -367,7 +373,20 @@ def ask(
         )
         raise typer.Exit(2)
 
-    text = " ".join(question)
+    text = " ".join(question) if question else ""
+    # Pipe support: fold piped stdin in as context (cat file | ronin ask "…").
+    if not sys.stdin.isatty():
+        try:
+            piped = sys.stdin.read().strip()
+        except Exception:  # noqa: BLE001
+            piped = ""
+        if piped:
+            text = f"{text}\n\n--- piped input ---\n{piped}" if text else piped
+    if not text.strip():
+        console.print("[red]✗[/red] nothing to ask — give a question or pipe input "
+                      "([dim]cat file | ronin ask \"...\"[/dim]).")
+        raise typer.Exit(2)
+
     result = run_ask(config, text, console=console)
     _print_result(result, raw=raw)
 
