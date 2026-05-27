@@ -1,15 +1,23 @@
-"""The ronin launch panda — a clean, simple ASCII panda face (the ʕ•ᴥ•ʔ style),
-shown beside the gradient RONIN wordmark. Plain text, no image rendering."""
+"""The ronin launch panda — a clean, hand-crafted ASCII/block-art panda face
+(round ears, two eye patches, a nose), shown beside the gradient RONIN wordmark.
+Plain block characters — deliberate shapes, not image noise."""
 from __future__ import annotations
 
 from rich.console import Console
 
-# A simple, clean ASCII panda — round ears, the ʕ•ᴥ•ʔ face, a chunky body.
 PANDA = r"""
- ▟▛   ▜▙
-ʕ •ᴥ• ʔ
- (     )
-  ╰───╯
+  ▄███▄          ▄███▄
+ ███████        ███████
+  ████████████████████
+ ██                  ██
+ █    ████    ████    █
+ █   ██████  ██████   █
+ █    ████    ████    █
+ █         ██         █
+ █        ████        █
+ ██                  ██
+  ███▄          ▄███
+     ▀██████████▀
 """
 
 
@@ -32,5 +40,5 @@ def _lockup():
 
 
 def render_panda(console: Console) -> None:
-    """Print the simple ASCII panda + RONIN wordmark lockup."""
+    """Print the ASCII panda + RONIN wordmark lockup."""
     console.print(_lockup())

@@ -172,20 +172,28 @@ def _root(ctx: typer.Context) -> None:
         console.print(ctx.get_help())
         return
 
-    # Bare `ronin` = one assistant that does everything: talk, generate media,
-    # AND read/edit/run code (edits + commands gated). `ronin chat` is the
-    # narrower talk/media surface; `ronin code` is the pure coding agent.
+    root = Path(".")
+    from .code_mode import run_code_session, run_unified_session
+
+    if _is_code_project(root):
+        console.print(
+            "[dim]Code project detected — launching the coding agent.\n"
+            "[bold]@path[/bold] to reference files · [bold]/help[/bold], [bold]/undo[/bold], "
+            "[bold]/diff[/bold] · [bold]/q[/bold] to quit.\n"
+            "Reads run freely; edits and commands need approval.[/dim]\n"
+        )
+        run_code_session(config, root=root, console=console)
+        return
+
+    # Bare `ronin` outside a code repo = one assistant that does everything:
+    # talk, generate media, query data, and write/run code when asked.
     console.print(
         "[dim]One assistant for everything — talk, [bold]\"generate a panda image\"[/bold], "
         "[bold]\"write code to …\"[/bold] (edits need approval), query your data, and more.\n"
         "[bold]@path[/bold] to reference files · [bold]/help[/bold] for commands · "
         "[bold]/q[/bold] to quit.[/dim]\n"
     )
-    if _is_code_project(Path(".")):
-        console.print("[#6b7089]📁 code project detected here — I can read, edit & run "
-                      "code in this repo (edits gated).[/#6b7089]\n")
-    from .code_mode import run_unified_session
-    run_unified_session(config, root=Path("."), console=console)
+    run_unified_session(config, root=root, console=console)
 
 
 def _is_code_project(path: Path) -> bool:
