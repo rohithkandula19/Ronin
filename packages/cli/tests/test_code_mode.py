@@ -303,3 +303,19 @@ def test_split_leading_dir_switches_into_folder(tmp_path: Path) -> None:
 
     # a normal message is left alone
     assert split_leading_dir("fix the bug", root=tmp_path) == (None, "fix the bug")
+
+
+def test_task_tool_delegates_to_readonly_subagent(tmp_path: Path) -> None:
+    """The 'task' tool runs a sub-agent and returns its result; it's read-only."""
+    from ro_claude_kit_cli.code_mode import build_task_tool
+    config = CSKConfig(provider="groq", openai_api_key="x")
+    tool = build_task_tool(config, tmp_path)
+    assert tool.name == "task"
+    provider = FakeProvider(responses=[
+        LLMResponse(text="found 3 usages of X", stop_reason="end_turn", usage={})])
+    with patch("ro_claude_kit_cli.code_mode.build_provider", return_value=provider):
+        out = tool.handler(description="find usages", prompt="find all uses of X")
+    assert "found 3 usages" in out
+    # sub-agent must only ever see read-only tools (no write_file/run_command)
+    offered = set(provider.calls[0]["tool_names"])
+    assert "write_file" not in offered and "run_command" not in offered

@@ -397,6 +397,50 @@ def run_code_agent(
     )
 
 
+_SUBAGENT_SYSTEM = """You are a focused sub-agent spawned to handle ONE delegated
+task. Work read-only: explore the codebase (read_file / list_files / search_files
+/ glob) and reason. Do NOT attempt to edit or run anything. Return a concise,
+self-contained result — the findings or answer the parent agent asked for, nothing
+else. Be thorough but tight."""
+
+
+def build_task_tool(config: CSKConfig, root: Path | str, *, max_iterations: int = 12):
+    """A 'task' tool: delegate a sub-job to a read-only sub-agent (Claude Code's
+    Task tool). The sub-agent explores and reports back; it can't mutate anything,
+    and it has no 'task' tool of its own, so there's no runaway recursion."""
+    from ro_claude_kit_agent_patterns import Tool
+
+    def _task(description: str, prompt: str) -> str:
+        res = run_code_agent(
+            config, prompt, root=root, console=None, yolo=True, read_only=True,
+            max_iterations=max_iterations, base_system=_SUBAGENT_SYSTEM,
+            include_image_tool=False,
+        )
+        if not res.success:
+            return f"sub-agent error: {res.error or res.output}"
+        return res.output or "(sub-agent returned no output)"
+
+    return Tool(
+        name="task",
+        description=(
+            "Delegate a focused sub-task to a read-only sub-agent — e.g. 'research how "
+            "auth works across these files', 'find every place X is used', 'summarise "
+            "this module'. The sub-agent explores the codebase and returns a concise "
+            "result. Use it to parallelise or scope big multi-part jobs. Args: "
+            "description (short label), prompt (the full instruction for the sub-agent)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "description": {"type": "string", "description": "Short label for the sub-task."},
+                "prompt": {"type": "string", "description": "Full instruction for the sub-agent."},
+            },
+            "required": ["description", "prompt"],
+        },
+        handler=_task,
+    )
+
+
 # In-session slash commands (the Claude-Code control surface). Both ``/cmd``
 # and ``:cmd`` are accepted.
 SLASH_COMMANDS: dict[str, str] = {
@@ -660,6 +704,7 @@ You ALSO have tools. Use them ONLY when the request clearly needs them:
   running tests/commands. Edits and shell commands are shown to the user for approval.
 - Media — generate_image / generate_video / speak: when asked to make a picture, video, or speech.
 - Web — web_search / fetch_url: to look up current information online or read a page/URL.
+- task — delegate a focused, read-only sub-job (research, "find all uses of X", summarise a module) to a sub-agent that reports back. Use for big multi-part work.
 - Data — the configured service tools (Stripe / Linear / …): for questions about their business data.
 - remember — save a durable fact about the user for future sessions.
 
@@ -694,7 +739,8 @@ def run_unified_session(
 
     media_tools = build_media_tools(artifacts, root=root)
     data_tools = build_tools(config)
-    extra = media_tools + data_tools + build_web_tools() + [build_remember_tool()]
+    extra = (media_tools + data_tools + build_web_tools()
+             + [build_task_tool(config, root), build_remember_tool()])
     # cross-session memory: what ronin remembers about the user
     mem_block = memory_prompt_block()
     n_mem = len(load_memories())
