@@ -646,6 +646,41 @@ def eval_drift(
     raise typer.Exit(eval_main(argv))
 
 
+# ---------- mcp ----------
+
+mcp_app = typer.Typer(help="Connect MCP servers (Anthropic's tool protocol) — their tools join the agent.")
+app.add_typer(mcp_app, name="mcp")
+
+
+@mcp_app.command("list", help="List configured MCP servers and their tools.")
+def mcp_list() -> None:
+    from .mcp_client import build_mcp_tools, load_mcp_servers
+    servers = load_mcp_servers(".")
+    if not servers:
+        console.print("[dim]no MCP servers configured. Add one:[/dim]\n"
+                      "  [cyan]ronin mcp add fs npx -y @modelcontextprotocol/server-filesystem .[/cyan]")
+        return
+    for name, spec in servers.items():
+        console.print(f"[bold]{name}[/bold]  [dim]{spec.get('command', '')} "
+                      f"{' '.join(spec.get('args', []))}[/dim]")
+    console.print("\n[dim]connecting to verify…[/dim]")
+    tools = build_mcp_tools(".", console=console)
+    console.print(f"[green]✓[/green] {len(tools)} tool(s) available to the agent.")
+
+
+@mcp_app.command("add", help="Add an MCP server: ronin mcp add NAME COMMAND [ARGS...]")
+def mcp_add(
+    name: str = typer.Argument(..., help="A short name, e.g. 'fs'."),
+    command: str = typer.Argument(..., help="The server command, e.g. 'npx'."),
+    args: Optional[list[str]] = typer.Argument(None, help="Args for the server command."),
+) -> None:
+    from .mcp_client import add_mcp_server
+    path = add_mcp_server(name, command, list(args or []), ".")
+    console.print(f"[green]✓[/green] added MCP server [bold]{name}[/bold] → [cyan]{path}[/cyan]")
+    console.print("[dim]its tools load automatically next time you run [bold]ronin[/bold]. "
+                  "Verify now with [bold]ronin mcp list[/bold].[/dim]")
+
+
 # ---------- plugins ----------
 
 @app.command()

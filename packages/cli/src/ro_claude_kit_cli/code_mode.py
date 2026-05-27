@@ -735,11 +735,13 @@ def run_unified_session(
     artifacts: list = []
     # media (image/video/speech) + data (stripe/linear/…) + persistent memory,
     # layered on the coding agent's machinery (streaming, diffs, gate, todos).
+    from .mcp_client import build_mcp_tools
     from .web_tools import build_web_tools
 
     media_tools = build_media_tools(artifacts, root=root)
     data_tools = build_tools(config)
-    extra = (media_tools + data_tools + build_web_tools()
+    mcp_tools = build_mcp_tools(root, console=console)  # tools from .csk/mcp.json servers
+    extra = (media_tools + data_tools + build_web_tools() + mcp_tools
              + [build_task_tool(config, root), build_remember_tool()])
     # cross-session memory: what ronin remembers about the user
     mem_block = memory_prompt_block()
