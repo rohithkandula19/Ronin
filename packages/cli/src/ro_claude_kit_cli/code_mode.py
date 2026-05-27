@@ -659,6 +659,7 @@ You ALSO have tools. Use them ONLY when the request clearly needs them:
   for reading, editing, or running code. Explore first, make focused edits, then verify by
   running tests/commands. Edits and shell commands are shown to the user for approval.
 - Media — generate_image / generate_video / speak: when asked to make a picture, video, or speech.
+- Web — web_search / fetch_url: to look up current information online or read a page/URL.
 - Data — the configured service tools (Stripe / Linear / …): for questions about their business data.
 - remember — save a durable fact about the user for future sessions.
 
@@ -689,9 +690,11 @@ def run_unified_session(
     artifacts: list = []
     # media (image/video/speech) + data (stripe/linear/…) + persistent memory,
     # layered on the coding agent's machinery (streaming, diffs, gate, todos).
+    from .web_tools import build_web_tools
+
     media_tools = build_media_tools(artifacts, root=root)
     data_tools = build_tools(config)
-    extra = media_tools + data_tools + [build_remember_tool()]
+    extra = media_tools + data_tools + build_web_tools() + [build_remember_tool()]
     # cross-session memory: what ronin remembers about the user
     mem_block = memory_prompt_block()
     n_mem = len(load_memories())
