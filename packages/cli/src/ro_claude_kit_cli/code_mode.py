@@ -487,6 +487,7 @@ SLASH_COMMANDS: dict[str, str] = {
     "model": "show the model, or switch it: /model <name> (no key re-entry)",
     "models": "list the models available for the current provider",
     "route": "smart routing: /route <fast-model> <strong-model> (or /route off)",
+    "voice": "speak your request: /voice [seconds] — records the mic and transcribes it",
     "memory": "show loaded project memory (RONIN.md / CLAUDE.md / AGENTS.md)",
     "init": "scaffold a RONIN.md project-memory file",
     "tools": "list the tools the agent can use",
@@ -715,18 +716,37 @@ def run_code_session(
             return
         if not user:
             continue
-        expanded = expand_custom_command(user, root)
-        if expanded is not None:
-            user = expanded  # custom /command → run its prompt template through the agent
-        else:
-            action = handle_slash_command(
-                user, console=console, root=root, config=config,
-                undo_stack=undo_stack, transcript=transcript,
-            )
-            if action == "exit":
-                return
-            if action == "handled":
+        # /voice [seconds] → record the mic, transcribe, run the transcript as the message
+        if user.split()[0].lower() in ("/voice", "/v"):
+            from .audio import listen
+            secs, tok = 6.0, user.split()
+            if len(tok) > 1:
+                try:
+                    secs = float(tok[1])
+                except ValueError:
+                    pass
+            try:
+                user = listen(config, seconds=secs, console=console)
+            except Exception as e:  # noqa: BLE001
+                console.print(f"[yellow]voice input failed:[/yellow] {e}")
                 continue
+            if not user:
+                console.print("[dim]heard nothing — try again[/dim]")
+                continue
+            console.print(f"[#6b7089]heard:[/#6b7089] {user}")
+        else:
+            expanded = expand_custom_command(user, root)
+            if expanded is not None:
+                user = expanded  # custom /command → run its prompt template through the agent
+            else:
+                action = handle_slash_command(
+                    user, console=console, root=root, config=config,
+                    undo_stack=undo_stack, transcript=transcript,
+                )
+                if action == "exit":
+                    return
+                if action == "handled":
+                    continue
 
         # Start a message with a folder path → switch into it (like cd'ing into a repo).
         new_root, rest = split_leading_dir(user, root)
@@ -830,18 +850,37 @@ def run_unified_session(
             return
         if not user:
             continue
-        expanded = expand_custom_command(user, root)
-        if expanded is not None:
-            user = expanded  # custom /command → run its prompt template through the agent
-        else:
-            action = handle_slash_command(
-                user, console=console, root=root, config=config,
-                undo_stack=undo_stack, transcript=transcript,
-            )
-            if action == "exit":
-                return
-            if action == "handled":
+        # /voice [seconds] → record the mic, transcribe, run the transcript as the message
+        if user.split()[0].lower() in ("/voice", "/v"):
+            from .audio import listen
+            secs, tok = 6.0, user.split()
+            if len(tok) > 1:
+                try:
+                    secs = float(tok[1])
+                except ValueError:
+                    pass
+            try:
+                user = listen(config, seconds=secs, console=console)
+            except Exception as e:  # noqa: BLE001
+                console.print(f"[yellow]voice input failed:[/yellow] {e}")
                 continue
+            if not user:
+                console.print("[dim]heard nothing — try again[/dim]")
+                continue
+            console.print(f"[#6b7089]heard:[/#6b7089] {user}")
+        else:
+            expanded = expand_custom_command(user, root)
+            if expanded is not None:
+                user = expanded  # custom /command → run its prompt template through the agent
+            else:
+                action = handle_slash_command(
+                    user, console=console, root=root, config=config,
+                    undo_stack=undo_stack, transcript=transcript,
+                )
+                if action == "exit":
+                    return
+                if action == "handled":
+                    continue
 
         # Start a message with a folder path → switch into it (like cd'ing into a
         # repo). The agent's tools are then rooted in that project.
