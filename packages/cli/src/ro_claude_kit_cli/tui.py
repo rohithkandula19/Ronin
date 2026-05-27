@@ -40,6 +40,9 @@ HELP_TEXT = """\
 
 Type a request and press Enter. The right pane shows the agent's trace
 in real time. Conversation memory persists for the lifetime of the session.
+
+**You can keep typing while it works** — messages you send mid-task are
+queued and run in order as soon as the current one finishes.
 """
 
 
@@ -90,6 +93,7 @@ class RoninApp(App):
         self.show_help = False
         self.busy = False
         self.history: list[tuple[str, str]] = []  # (role, text) — for memory across turns
+        self.queue: list[str] = []  # messages typed while the agent is busy
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -118,16 +122,26 @@ class RoninApp(App):
 
     @on(Input.Submitted, "#prompt")
     def handle_submit(self, event: Input.Submitted) -> None:
-        if self.busy:
-            return
         text = (event.value or "").strip()
         if not text:
             return
-        prompt = self.query_one("#prompt", Input)
-        prompt.value = ""
+        self.query_one("#prompt", Input).value = ""
+        if self.busy:
+            # type-ahead: queue it and run it when the current turn finishes
+            self.queue.append(text)
+            self._append_chat(f"**queued ›** {text}  _(runs after the current task)_")
+            return
+        self._start_turn(text)
+
+    def _start_turn(self, text: str) -> None:
         self._append_chat(f"**you ›** {text}")
         self.history.append(("user", text))
         self._run_agent(text)
+
+    def _drain_queue(self) -> None:
+        """After a turn finishes, run the next queued message (if any)."""
+        if self.queue and not self.busy:
+            self._start_turn(self.queue.pop(0))
 
     def _run_agent(self, question: str) -> None:
         """Run the agent in a thread; updates UI on completion."""
@@ -161,10 +175,12 @@ class RoninApp(App):
             meta += " · _demo mode_"
         self._append_chat(meta)
         self.busy = False
+        self._drain_queue()
 
     def _show_error(self, message: str) -> None:
         self._append_chat(f"**ronin ›** _error:_ `{message}`")
         self.busy = False
+        self._drain_queue()
 
     def _render_trace(self, result: AgentResultRich) -> str:
         if not result.trace:
