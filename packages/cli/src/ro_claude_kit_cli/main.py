@@ -156,9 +156,11 @@ def _root(ctx: typer.Context) -> None:
         console.print(ctx.get_help())
         return
 
-    # Animated panda mascot doing an activity — dancing / running / playing /
-    # sleeping — in a panel on launch. It actually *moves*, frame by frame.
-    _banner()
+    # The real panda — a photoreal cutie rendered as truecolor half-block art,
+    # beside the gradient RONIN wordmark. (The little ASCII activity mascot still
+    # lives in _banner() if we ever want the animated version back.)
+    from .panda_art import render_panda
+    render_panda(console)
 
     # Interactive terminal: drop into a session, the way `claude` does.
     config = load_config()
