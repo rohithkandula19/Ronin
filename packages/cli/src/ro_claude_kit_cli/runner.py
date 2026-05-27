@@ -53,7 +53,23 @@ def _friendly_provider_error(e: Exception, config: CSKConfig) -> str:
             f"To switch back to Claude: [bold]ronin init[/bold] and pick anthropic.[/dim]"
         )
     if status == 429:
-        return f"[red]✗ {provider} rate-limited the request (429).[/red] [dim]Wait a moment and retry.[/dim]"
+        # Surface the provider's actual reason (e.g. "free-models-per-day").
+        detail = ""
+        resp = getattr(e, "response", None)
+        if resp is not None:
+            try:
+                body = resp.json()
+                if isinstance(body, dict):
+                    detail = str((body.get("error") or {}).get("message") or "")
+            except Exception:  # noqa: BLE001 - streamed/empty bodies
+                detail = ""
+        detail = f" [dim]({detail[:160]})[/dim]" if detail else ""
+        return (
+            f"[red]✗ {provider} rate-limited the request (429).[/red]{detail}\n"
+            f"[dim]Free tiers cap usage per-minute and per-day. Wait and retry, or switch to a "
+            f"provider with a separate free quota — in-session: [bold]/login gemini[/bold] or "
+            f"[bold]/login groq[/bold].[/dim]"
+        )
     if status is not None:
         return f"[red]✗ {provider} returned HTTP {status}.[/red] [dim]Check your config / model name.[/dim]"
     if name in ("ConnectError", "ConnectTimeout", "ReadTimeout", "TimeoutException"):
