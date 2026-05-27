@@ -487,6 +487,7 @@ SLASH_COMMANDS: dict[str, str] = {
     "model": "show the model, or switch it: /model <name> (no key re-entry)",
     "models": "list the models available for the current provider",
     "route": "smart routing: /route <fast-model> <strong-model> (or /route off)",
+    "verify": "self-verify mode: /verify on|off — after edits, the agent checks + fixes its own work",
     "voice": "speak your request: /voice [seconds] — records the mic and transcribes it",
     "memory": "show loaded project memory (RONIN.md / CLAUDE.md / AGENTS.md)",
     "init": "scaffold a RONIN.md project-memory file",
@@ -622,6 +623,20 @@ def handle_slash_command(
             f"[dim]model[/dim] [bold]{config.resolved_model()}[/bold]"
         )
         console.print("[dim]switch with [bold]/model <name>[/bold] · list with [bold]/models[/bold][/dim]")
+        return "handled"
+    if cmd == "verify":
+        from .config import save_config
+        if len(parts) >= 2 and parts[1].lower() in ("on", "true", "yes"):
+            config.verify = True
+        elif len(parts) >= 2 and parts[1].lower() in ("off", "false", "no"):
+            config.verify = False
+        else:
+            console.print(f"  [dim]self-verify is [bold]{'on' if config.verify else 'off'}[/bold] · "
+                          "toggle with [bold]/verify on|off[/bold][/dim]")
+            return "handled"
+        save_config(config)
+        console.print(f"  [green]✓[/green] self-verify [bold]{'on' if config.verify else 'off'}[/bold]"
+                      + (" — the agent will review & fix its own work after edits." if config.verify else ""))
         return "handled"
     if cmd == "route":
         from .config import save_config
@@ -910,6 +925,26 @@ def run_unified_session(
             base_system=UNIFIED_SYSTEM, extra_system=mem_block, include_image_tool=False,
         )
         _elapsed = _time.time() - _t0
+
+        # smarter agent: opt-in self-verification after a turn that made changes
+        if config.verify and result.success and any(
+                getattr(s, "kind", None) == "tool_call" for s in result.steps):
+            console.print("[#6b7089]🔎 self-verifying…[/#6b7089]")
+            _vprompt = (
+                "Review your work on the request above. Inspect the current project state "
+                "(read files / run tests as needed) and check it FULLY and CORRECTLY "
+                "satisfies the request. If anything is missing, broken, or wrong, fix it "
+                "now. If it is complete and correct, reply briefly with 'Verified.'")
+            _vres = run_code_agent(
+                turn_cfg, _vprompt, root=root, console=console, yolo=yolo,
+                max_iterations=max_iterations, undo_stack=undo_stack,
+                history_prefix=f"USER: {user}\nASSISTANT: {result.output}",
+                extra_tools=extra, base_system=UNIFIED_SYSTEM, extra_system=mem_block,
+                include_image_tool=False,
+            )
+            if _vres.success and _vres.output:
+                result.output = f"{result.output}\n\n[verified] {_vres.output}"
+
         transcript.append(f"USER: {user}")
         transcript.append(f"ASSISTANT: {result.output}")
         save_session(root, transcript)

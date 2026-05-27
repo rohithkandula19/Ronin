@@ -46,6 +46,9 @@ class CSKConfig(BaseModel):
     # simple turns and the strong model for complex ones (same provider).
     route_fast: str | None = None
     route_strong: str | None = None
+    # Self-verification: after a turn that made changes, the agent reviews its own
+    # work against the request and fixes gaps (Reflexion-style). Opt-in via /verify.
+    verify: bool = False
 
     anthropic_api_key: str | None = None
     openai_api_key: str | None = None  # used for openai/together/groq/fireworks/custom

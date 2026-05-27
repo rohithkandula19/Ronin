@@ -85,3 +85,27 @@ def test_unified_can_write_code(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         code_mode.run_unified_session(config, root=tmp_path, console=console, yolo=True)
 
     assert (tmp_path / "panda.py").read_text() == "print('panda')\n"
+
+
+def test_verify_runs_a_second_self_check_pass(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """With /verify on, a turn that uses a tool triggers a second verification pass."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+    config = CSKConfig(provider="anthropic", verify=True)
+
+    buf = io.StringIO()
+    console = Console(file=buf, force_terminal=False, width=100)
+    _queue(console, ["create note.txt with hi", "/q"])
+    provider = FakeProvider(responses=[
+        LLMResponse(text="", tool_calls=[ToolCall(id="t1", name="write_file",
+                    arguments={"path": "note.txt", "content": "hi"})],
+                    stop_reason="tool_use", usage={}),
+        LLMResponse(text="created note.txt", stop_reason="end_turn", usage={}),
+        LLMResponse(text="Verified.", stop_reason="end_turn", usage={}),  # the verify pass
+    ])
+    with patch("ro_claude_kit_cli.code_mode.build_provider", return_value=provider):
+        code_mode.run_unified_session(config, root=tmp_path, console=console, yolo=True)
+
+    assert len(provider.calls) >= 3            # main turn (2 calls) + verify pass
+    assert "self-verifying" in buf.getvalue()
+    assert (tmp_path / "note.txt").exists()
