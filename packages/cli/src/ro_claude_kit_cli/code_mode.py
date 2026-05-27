@@ -476,6 +476,8 @@ SLASH_COMMANDS: dict[str, str] = {
     "clear": "forget the conversation so far",
     "undo": "revert the most recent file change",
     "diff": "show the working-tree git diff",
+    "commit": "draft a commit message from the diff and commit it (gated)",
+    "pr": "push the branch and open a PR (title/body drafted, gated)",
     "model": "show the model, or switch it: /model <name> (no key re-entry)",
     "models": "list the models available for the current provider",
     "memory": "show loaded project memory (RONIN.md / CLAUDE.md / AGENTS.md)",
@@ -590,6 +592,14 @@ def handle_slash_command(
         return "handled"
     if cmd == "diff":
         _show_git_diff(console, root)
+        return "handled"
+    if cmd == "commit":
+        from .git_helper import commit as _commit
+        _commit(console, root, config)
+        return "handled"
+    if cmd == "pr":
+        from .git_helper import open_pr
+        open_pr(console, root, config)
         return "handled"
     if cmd == "model":
         if len(parts) > 1:  # /model <name> → switch model in place, no key re-entry
