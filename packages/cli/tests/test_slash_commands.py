@@ -101,3 +101,34 @@ def test_leading_absolute_path_is_not_a_command(tmp_path: Path) -> None:
     assert action == "passthrough"
     action, _ = _call("/home/x/project explain it", root=tmp_path)
     assert action == "passthrough"
+
+
+def test_login_sets_provider_key_and_model(tmp_path: Path, monkeypatch) -> None:
+    from unittest.mock import patch
+    from ro_claude_kit_cli.code_mode import handle_slash_command
+    monkeypatch.chdir(tmp_path)
+    console, buf = _console()
+    config = CSKConfig(provider="groq")
+    with patch("rich.prompt.Prompt.ask", return_value="sk-or-v1-abc123"):
+        action = handle_slash_command(
+            "/login openrouter qwen/qwen3-coder:free", console=console, root=tmp_path,
+            config=config, undo_stack=[], transcript=[],
+        )
+    assert action == "handled"
+    assert config.provider == "openrouter"
+    assert config.openai_api_key == "sk-or-v1-abc123"
+    assert config.resolved_model() == "qwen/qwen3-coder:free"
+
+
+def test_login_rejects_double_paste(tmp_path: Path, monkeypatch) -> None:
+    from unittest.mock import patch
+    from ro_claude_kit_cli.code_mode import handle_slash_command
+    monkeypatch.chdir(tmp_path)
+    console, buf = _console()
+    config = CSKConfig(provider="groq")
+    dbl = "sk-or-v1-aaaa" + "sk-or-v1-bbbb"  # two keys concatenated
+    with patch("rich.prompt.Prompt.ask", return_value=dbl):
+        handle_slash_command("/login openrouter", console=console, root=tmp_path,
+                             config=config, undo_stack=[], transcript=[])
+    assert config.openai_api_key is None          # rejected, not saved
+    assert "pasted more than once" in buf.getvalue()

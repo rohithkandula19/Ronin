@@ -350,6 +350,7 @@ def run_code_agent(
 # and ``:cmd`` are accepted.
 SLASH_COMMANDS: dict[str, str] = {
     "help": "show this help",
+    "login": "set the LLM provider + API key (e.g. /login openrouter) — masked, saved locally",
     "clear": "forget the conversation so far",
     "undo": "revert the most recent file change",
     "diff": "show the working-tree git diff",
@@ -415,6 +416,42 @@ def handle_slash_command(
         console.print("[bold]commands[/bold]")
         for name, desc in SLASH_COMMANDS.items():
             console.print(f"  [cyan]/{name}[/cyan]  [dim]{desc}[/dim]")
+        return "handled"
+    if cmd in ("login", "key"):
+        # Switch provider + set its key from inside the session — masked input,
+        # saved to local config, applied immediately. Usage: /login [provider] [model]
+        from rich.prompt import Prompt
+
+        from .config import PROVIDER_PRESETS, save_config
+        prov = parts[1].lower() if len(parts) > 1 else config.provider
+        if len(parts) > 2:
+            config.model = parts[2]
+        config.provider = prov
+        known = ", ".join(PROVIDER_PRESETS)
+        if prov not in PROVIDER_PRESETS and prov != "custom":
+            console.print(f"  [yellow]unknown provider[/yellow] '{prov}' — known: {known}, custom")
+            return "handled"
+        if prov == "ollama":
+            config.demo_mode = False
+            path = save_config(config)
+            console.print(f"  [green]✓[/green] provider → [bold]ollama[/bold] [dim](local, no key)[/dim] · {path}")
+            return "handled"
+        key = (Prompt.ask(f"  API key for [bold]{prov}[/bold] (input hidden — paste ONCE, then Enter)",
+                          password=True, console=console) or "").strip()
+        if not key:
+            console.print("  [yellow]no key entered — nothing changed[/yellow]")
+            return "handled"
+        if key.count("sk-") >= 2 or len(key) > 400:
+            console.print("  [red]✗ that looks pasted more than once — run [bold]/login[/bold] again and paste it once[/red]")
+            return "handled"
+        config.demo_mode = False
+        if prov == "anthropic":
+            config.anthropic_api_key = key
+        else:
+            config.openai_api_key = key
+        path = save_config(config)
+        console.print(f"  [green]✓[/green] [bold]{prov}[/bold] [dim]({config.resolved_model()})[/dim] "
+                      f"— saved to [cyan]{path}[/cyan]; using it from your next message.")
         return "handled"
     if cmd == "clear":
         transcript.clear()
