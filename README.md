@@ -119,7 +119,7 @@ ronin eval  ·  cerebras · gpt-oss-120b
   6/6 passed (100%)  ·  8,678 tokens
 ```
 
-Swap providers with `/login` and re-run to compare them on the exact same bar — the "how do you know it works?" artifact, built in.
+Swap providers with `/login` and re-run to compare them on the exact same bar — the "how do you know it works?" artifact, built in. Full results + methodology: **[docs/BENCHMARK.md](docs/BENCHMARK.md)**.
 
 ## 🎨 `ronin image` / `ronin video` / `ronin say` — media, in the terminal
 
