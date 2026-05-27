@@ -1,12 +1,14 @@
-"""Live streaming renderer — the Claude-Code feel for ``ronin code``/``agent``.
+"""Live streaming renderer — the Claude-Code feel for ``ronin``.
 
 The agent loop streams the model's text token-by-token via ``on_text`` and
-reports tool activity via ``on_step``. ``LiveRenderer`` ties the two together:
+reports tool activity via ``on_step``. ``LiveRenderer`` ties them together:
 
-- assistant text prints inline as it arrives (no waiting for the whole turn),
-- tool calls / results render as compact, indented lines between text,
-- the duplicate ``thought`` / ``final`` steps (whose text already streamed) are
-  suppressed so nothing prints twice.
+- on a real terminal, assistant text streams into a **live Markdown view** so
+  **bold**, headings, bullet lists and ```code``` blocks render properly
+  (syntax-highlighted) instead of showing raw ``**`` / ``#`` symbols,
+- tool calls / results render as compact ``●`` / ``↳`` lines between text,
+- on a non-terminal (pipes, tests) it falls back to plain inline streaming so
+  output stays deterministic.
 
 Because the answer streams inline, callers check ``streamed`` and skip
 re-printing the final output in a panel.
@@ -21,20 +23,27 @@ from .theme import ACCENT, BULLET, ERR, MUTE, OK, SOFT, TOOL, gradient_text, sho
 
 
 class LiveRenderer:
-    """Streams assistant text and renders tool steps as they happen, with a soft
-    'thinking…' spinner before the first token and a gradient ronin avatar."""
+    """Streams assistant text (as live Markdown on a TTY) and renders tool steps
+    as they happen, with a soft 'thinking…' spinner before the first token."""
 
     def __init__(self, console: Console) -> None:
         self.console = console
-        self._dirty = False        # text written to the current line, no newline yet
-        self.streamed_text = False  # any assistant text streamed this run?
-        self._status = None         # the thinking spinner (Rich Status)
+        self.streamed_text = False   # any assistant text streamed this run?
+        self._status = None          # the thinking spinner (Rich Status)
         self._avatar_shown = False
+        # terminal path: a live Markdown block accumulating the current text
+        self._live = None
+        self._buf = ""
+        # non-terminal path: track an unterminated inline line
+        self._dirty = False
+
+    def _is_term(self) -> bool:
+        return bool(getattr(self.console, "is_terminal", False))
 
     # --- thinking spinner ----------------------------------------------------
     def start(self) -> None:
         """Begin the soft 'thinking…' animation (only on a real terminal)."""
-        if not getattr(self.console, "is_terminal", False):
+        if not self._is_term():
             return
         try:
             from rich.text import Text
@@ -52,28 +61,58 @@ class LiveRenderer:
                 pass
             self._status = None
 
-    def _flush_line(self) -> None:
-        if self._dirty:
-            self.console.print()  # terminate the streamed line
+    # --- text block (live Markdown on a TTY) ---------------------------------
+    def _markdown(self):
+        from rich.markdown import Markdown
+        return Markdown(self._buf, code_theme="monokai")
+
+    def _end_text(self) -> None:
+        """Finalise the current streamed block so tool lines / dividers follow it."""
+        if self._live is not None:
+            try:
+                self._live.update(self._markdown())
+                self._live.stop()
+            except Exception:  # noqa: BLE001
+                pass
+            self._live = None
+            self._buf = ""
+        elif self._dirty:
+            self.console.print()  # terminate a plain inline line
             self._dirty = False
 
     # --- agent hooks ---------------------------------------------------------
     def on_text(self, delta: str) -> None:
         self._stop_status()
-        if not self._avatar_shown:
-            self.console.print(gradient_text("✦ ronin"))
-            self._avatar_shown = True
-        # markup=False so model output like "[x]" can't blow up Rich markup.
-        self.console.print(delta, end="", markup=False, highlight=False, soft_wrap=True)
-        self._dirty = True
         self.streamed_text = True
+
+        if not self._is_term():
+            # deterministic plain streaming for pipes/tests
+            if not self._avatar_shown:
+                self.console.print(gradient_text("✦ ronin"))
+                self._avatar_shown = True
+            self.console.print(delta, end="", markup=False, highlight=False, soft_wrap=True)
+            self._dirty = True
+            return
+
+        if self._live is None:
+            if not self._avatar_shown:
+                self.console.print(gradient_text("✦ ronin"))
+                self._avatar_shown = True
+            from rich.live import Live
+            self._buf = ""
+            self._live = Live(self._markdown(), console=self.console,
+                              refresh_per_second=8, vertical_overflow="visible",
+                              transient=False)
+            self._live.start()
+        self._buf += delta
+        self._live.update(self._markdown())
 
     def on_step(self, step: Step) -> None:
         # The model's text is streamed via on_text; don't reprint it here.
         if step.kind in ("thought", "final"):
             return
         self._stop_status()
-        self._flush_line()
+        self._end_text()
         c = step.content
         if step.kind == "tool_call" and isinstance(c, dict):
             name = c.get("name", "")
@@ -102,8 +141,8 @@ class LiveRenderer:
             self.console.print(f"  [{OK}]🔎 {_short(c, 160)}[/{OK}]")
 
     def finish(self) -> None:
-        """Call once the run is over: stop the spinner, end the line, soft divider."""
+        """Call once the run is over: stop the spinner, close the text block, divider."""
         self._stop_status()
-        self._flush_line()
-        if self.streamed_text and getattr(self.console, "is_terminal", False):
+        self._end_text()
+        if self.streamed_text and self._is_term():
             self.console.rule(style=MUTE)
