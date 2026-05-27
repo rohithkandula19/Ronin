@@ -204,3 +204,26 @@ def test_openai_compat_translates_tool_messages() -> None:
     assert [m["role"] for m in sent] == ["system", "user", "assistant", "tool"]
     assert sent[2]["tool_calls"][0]["function"]["name"] == "search"
     assert sent[3]["tool_call_id"] == "t1"
+
+
+def test_openai_compat_retries_on_429(monkeypatch) -> None:
+    """A transient 429 is retried (with backoff) instead of failing the turn."""
+    import ro_claude_kit_agent_patterns.providers.openai_compat as oc
+    monkeypatch.setattr(oc.time, "sleep", lambda *_a, **_k: None)  # no real waiting
+
+    r429 = MagicMock(spec=httpx.Response)
+    r429.status_code = 429
+    r429.headers = {"retry-after": "0"}
+    ok = _openai_response(content="recovered")
+
+    fake_client = MagicMock()
+    fake_client.__enter__.return_value = fake_client
+    fake_client.__exit__.return_value = False
+    fake_client.post.side_effect = [r429, r429, ok]  # two limits, then success
+
+    with patch("ro_claude_kit_agent_patterns.providers.openai_compat.httpx.Client", return_value=fake_client):
+        provider = OpenAICompatProvider(model="m", api_key="sk-x")
+        result = provider.complete(system="s", messages=[Message(role="user", content="hi")], tools=[])
+
+    assert result.text == "recovered"
+    assert fake_client.post.call_count == 3

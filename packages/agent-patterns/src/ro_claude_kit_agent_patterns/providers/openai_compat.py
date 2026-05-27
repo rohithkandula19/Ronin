@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from typing import Any, Iterator
 
 import httpx
@@ -24,6 +25,22 @@ from .base import LLMProvider, LLMResponse, Message, StreamEvent, ToolCall
 
 OPENAI_BASE_URL = "https://api.openai.com/v1"
 OLLAMA_BASE_URL = "http://localhost:11434/v1"
+
+# Transient statuses worth retrying — free tiers 429 constantly, and an agent
+# loop fires several calls per task, so one retry often saves the whole turn.
+_RETRY_STATUSES = {429, 500, 502, 503, 529}
+_MAX_RETRIES = 4
+
+
+def _retry_wait(attempt: int, retry_after: str | None) -> float:
+    """Seconds to wait before retry ``attempt`` (0-based). Honour a numeric
+    Retry-After header when present, else exponential backoff (1,2,4,8,16s)."""
+    if retry_after:
+        try:
+            return min(float(retry_after), 30.0)
+        except ValueError:
+            pass
+    return float(min(2 ** attempt, 16))
 
 
 def _to_openai_messages(system: str, messages: list[Message]) -> list[dict[str, Any]]:
@@ -137,7 +154,12 @@ class OpenAICompatProvider(LLMProvider):
     ) -> LLMResponse:
         body = self._build_body(system, messages, tools, max_tokens)
         with httpx.Client(timeout=self.timeout) as client:
-            response = client.post(self._url(), json=body, headers=self._headers())
+            for attempt in range(_MAX_RETRIES + 1):
+                response = client.post(self._url(), json=body, headers=self._headers())
+                if response.status_code in _RETRY_STATUSES and attempt < _MAX_RETRIES:
+                    time.sleep(_retry_wait(attempt, response.headers.get("retry-after")))
+                    continue
+                break
             response.raise_for_status()
             data = response.json()
 
@@ -183,37 +205,44 @@ class OpenAICompatProvider(LLMProvider):
         usage: dict[str, Any] = {}
 
         with httpx.Client(timeout=self.timeout) as client:
-            with client.stream("POST", self._url(), json=body, headers=self._headers()) as r:
-                r.raise_for_status()
-                for line in r.iter_lines():
-                    if not line or not line.startswith("data:"):
+            for attempt in range(_MAX_RETRIES + 1):
+                with client.stream("POST", self._url(), json=body, headers=self._headers()) as r:
+                    # Retry transient statuses before we start consuming the body.
+                    if r.status_code in _RETRY_STATUSES and attempt < _MAX_RETRIES:
+                        r.read()  # drain so the connection can be reused
+                        time.sleep(_retry_wait(attempt, r.headers.get("retry-after")))
                         continue
-                    payload = line[len("data:"):].strip()
-                    if payload == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(payload)
-                    except json.JSONDecodeError:
-                        continue
-                    if chunk.get("usage"):
-                        usage = chunk["usage"]
-                    for choice in chunk.get("choices", []):
-                        delta = choice.get("delta") or {}
-                        if delta.get("content"):
-                            text_parts.append(delta["content"])
-                            yield StreamEvent(type="text", text=delta["content"])
-                        for tcd in delta.get("tool_calls") or []:
-                            idx = tcd.get("index", 0)
-                            slot = acc.setdefault(idx, {"id": "", "name": "", "args": ""})
-                            if tcd.get("id"):
-                                slot["id"] = tcd["id"]
-                            fn = tcd.get("function") or {}
-                            if fn.get("name"):
-                                slot["name"] = fn["name"]
-                            if fn.get("arguments"):
-                                slot["args"] += fn["arguments"]
-                        if choice.get("finish_reason"):
-                            finish = choice["finish_reason"]
+                    r.raise_for_status()
+                    for line in r.iter_lines():
+                        if not line or not line.startswith("data:"):
+                            continue
+                        payload = line[len("data:"):].strip()
+                        if payload == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(payload)
+                        except json.JSONDecodeError:
+                            continue
+                        if chunk.get("usage"):
+                            usage = chunk["usage"]
+                        for choice in chunk.get("choices", []):
+                            delta = choice.get("delta") or {}
+                            if delta.get("content"):
+                                text_parts.append(delta["content"])
+                                yield StreamEvent(type="text", text=delta["content"])
+                            for tcd in delta.get("tool_calls") or []:
+                                idx = tcd.get("index", 0)
+                                slot = acc.setdefault(idx, {"id": "", "name": "", "args": ""})
+                                if tcd.get("id"):
+                                    slot["id"] = tcd["id"]
+                                fn = tcd.get("function") or {}
+                                if fn.get("name"):
+                                    slot["name"] = fn["name"]
+                                if fn.get("arguments"):
+                                    slot["args"] += fn["arguments"]
+                            if choice.get("finish_reason"):
+                                finish = choice["finish_reason"]
+                break  # streamed successfully; leave the retry loop
 
         tool_calls = [
             ToolCall(id=slot["id"], name=slot["name"], arguments=self._parse_args(slot["args"] or "{}"))
