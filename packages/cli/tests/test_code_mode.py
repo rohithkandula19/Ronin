@@ -319,3 +319,17 @@ def test_task_tool_delegates_to_readonly_subagent(tmp_path: Path) -> None:
     # sub-agent must only ever see read-only tools (no write_file/run_command)
     offered = set(provider.calls[0]["tool_names"])
     assert "write_file" not in offered and "run_command" not in offered
+
+
+def test_expand_custom_command(tmp_path: Path) -> None:
+    from ro_claude_kit_cli.code_mode import expand_custom_command
+    cmds = tmp_path / ".csk" / "commands"
+    cmds.mkdir(parents=True)
+    (cmds / "review.md").write_text("Review $ARGUMENTS for bugs.")
+    (cmds / "standup.md").write_text("Summarise today's changes.")
+
+    assert expand_custom_command("/review app.py", tmp_path) == "Review app.py for bugs."
+    assert expand_custom_command("/standup", tmp_path) == "Summarise today's changes."
+    assert expand_custom_command("/help", tmp_path) is None        # builtin wins
+    assert expand_custom_command("/missing", tmp_path) is None     # no such file
+    assert expand_custom_command("plain text", tmp_path) is None

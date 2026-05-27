@@ -164,6 +164,33 @@ def expand_file_mentions(task: str, root: Path | str) -> str:
     return "Referenced files:\n\n" + "\n\n".join(blocks) + "\n\n---\n\n" + task
 
 
+def expand_custom_command(user: str, root: Path | str) -> str | None:
+    """Custom slash commands: a file ``.csk/commands/NAME.md`` makes ``/NAME``
+    available. Its contents are a prompt template sent to the agent, with
+    ``$ARGUMENTS`` replaced by whatever follows ``/NAME`` (or appended if absent).
+
+    Returns the expanded prompt, or ``None`` when this isn't a custom command
+    (builtins and plain text fall through untouched)."""
+    if not user.startswith("/"):
+        return None
+    parts = user[1:].split(maxsplit=1)
+    if not parts:
+        return None
+    name, rest = parts[0], (parts[1] if len(parts) > 1 else "")
+    if "/" in name or "\\" in name or name.lower() in SLASH_COMMANDS:
+        return None  # a path, or a builtin command — not a custom one
+    cmd_file = _Path(root) / ".csk" / "commands" / f"{name}.md"
+    if not cmd_file.is_file():
+        return None
+    try:
+        template = cmd_file.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if "$ARGUMENTS" in template:
+        return template.replace("$ARGUMENTS", rest)
+    return f"{template}\n\n{rest}".strip() if rest else template
+
+
 def _list_provider_models(config: CSKConfig) -> list[str]:
     """Best-effort list of model ids for the active provider.
 
@@ -651,14 +678,18 @@ def run_code_session(
             return
         if not user:
             continue
-        action = handle_slash_command(
-            user, console=console, root=root, config=config,
-            undo_stack=undo_stack, transcript=transcript,
-        )
-        if action == "exit":
-            return
-        if action == "handled":
-            continue
+        expanded = expand_custom_command(user, root)
+        if expanded is not None:
+            user = expanded  # custom /command → run its prompt template through the agent
+        else:
+            action = handle_slash_command(
+                user, console=console, root=root, config=config,
+                undo_stack=undo_stack, transcript=transcript,
+            )
+            if action == "exit":
+                return
+            if action == "handled":
+                continue
 
         # Start a message with a folder path → switch into it (like cd'ing into a repo).
         new_root, rest = split_leading_dir(user, root)
@@ -762,14 +793,18 @@ def run_unified_session(
             return
         if not user:
             continue
-        action = handle_slash_command(
-            user, console=console, root=root, config=config,
-            undo_stack=undo_stack, transcript=transcript,
-        )
-        if action == "exit":
-            return
-        if action == "handled":
-            continue
+        expanded = expand_custom_command(user, root)
+        if expanded is not None:
+            user = expanded  # custom /command → run its prompt template through the agent
+        else:
+            action = handle_slash_command(
+                user, console=console, root=root, config=config,
+                undo_stack=undo_stack, transcript=transcript,
+            )
+            if action == "exit":
+                return
+            if action == "handled":
+                continue
 
         # Start a message with a folder path → switch into it (like cd'ing into a
         # repo). The agent's tools are then rooted in that project.
