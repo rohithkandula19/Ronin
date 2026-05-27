@@ -1,24 +1,27 @@
-"""The ronin launch panda — a clean, hand-crafted ASCII/block-art panda face
-(round ears, two eye patches, a nose), shown beside the gradient RONIN wordmark.
-Plain block characters — deliberate shapes, not image noise."""
+"""The ronin launch panda — a real panda face rendered in half-block art:
+a round white head, two ears, the signature dark eye-patches (with eyes),
+and a nose. Generated from shapes (see tools/build_panda.py), not typed by
+hand, so it actually reads as a panda. Shown beside the gradient RONIN wordmark."""
 from __future__ import annotations
 
 from rich.console import Console
 
-PANDA = r"""
-  ▄███▄          ▄███▄
- ███████        ███████
-  ████████████████████
- ██                  ██
- █    ████    ████    █
- █   ██████  ██████   █
- █    ████    ████    █
- █         ██         █
- █        ████        █
- ██                  ██
-  ███▄          ▄███
-     ▀██████████▀
-"""
+PANDA = (
+    "    ▄▄▄▄▄               ▄▄▄▄▄\n"
+    "  ▄███████▄           ▄███████▄\n"
+    "  █████████▄▄▄▄▄█▄▄▄▄▄█████████\n"
+    "  █████████████████████████████\n"
+    "   ▀█████████████████████████▀\n"
+    "    █████▀   ▀█████▀   ▀█████\n"
+    "   █████       ███       █████\n"
+    "   ████     ▄   █   ▄     ████\n"
+    "  ▀████▄   ▀█▀ ▄█▄ ▀█▀   ▄████▀\n"
+    "   █████▄     ▄███▄     ▄█████\n"
+    "   ▀██████▄▄▄██▀▀▀██▄▄▄██████▀\n"
+    "    ▀█████████▄   ▄█████████▀\n"
+    "      ▀███████████████████▀\n"
+    "         ▀▀███████████▀▀"
+)
 
 
 def _panda_text():
