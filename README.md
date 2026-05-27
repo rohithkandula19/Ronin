@@ -73,13 +73,13 @@ ronin code --continue      # resume your last session
 
 A coding agent that reads, edits, and runs your code — every write and shell command gated behind a diff preview and your approval (read operations run freely). It mirrors the Claude Code experience:
 
-- **Streaming** — the model's reasoning and edits appear token-by-token, with tool activity (`⚙ read_file` / `✓`) inline. No more frozen screen.
-- **@-file mentions** — drop `@path` in your request to pull files into context.
+- **Bordered input box + streaming Markdown** — type inside a rounded prompt (↑/↓ history, `/`+TAB completion); replies stream as rendered Markdown with tool activity inline (`● Read(file)` / `↳ result`), edits shown as syntax-highlighted diffs you approve.
+- **@-file mentions** — drop `@path` in your request to pull files into context. Start a message with a folder path to `cd` into it.
 - **Plan mode** (`--plan`) proposes the steps read-only, you approve, then it executes. **Resume** (`--continue`) picks up your last session.
 - **Live plan tracker** — multi-step tasks show a checklist (`✓ / ▶ / ☐`) the agent keeps current as it works.
-- **Tools**: read / write / `edit` / `multi_edit` / `glob` / search / run — surgical, gated writes.
+- **Tools**: read / write / `edit` / `multi_edit` / `glob` / search / run — plus **`web_search` / `fetch_url`**, a **`task`** subagent, and any **MCP** server's tools (`ronin mcp add …`).
 - **Project memory** — auto-loads `RONIN.md` / `CLAUDE.md` / `AGENTS.md` from the repo so it follows your conventions.
-- **Interactive session** — Markdown-rendered, steer across turns with slash commands: `/help`, `/diff`, `/undo`, `/memory`, `/model`, `/clear`, `/tools`, `/quit`.
+- **Interactive session** — steer across turns with slash commands: `/help`, `/login`, `/model`, `/models`, `/diff`, `/undo`, `/memory`, `/clear`, `/tools`, `/quit`. A per-turn status line shows provider · model · tokens · time.
 
 And the wedge no pure coding agent has — **`ronin investigate "<symptom>"`** bridges your business data *and* your code to root-cause a problem (e.g. "failed payments spiked the 9th → `stripe_webhook.py` changed in commit `a1b2c3` on the 9th").
 
@@ -290,16 +290,16 @@ PII (emails, SSNs, credit cards, API keys) is redacted from traces before anythi
 
 | Package | What it does | Tests |
 |---|---|---|
-| `agent-patterns` | ReAct, Planner-Executor, Multi-Agent Supervisor, Reflexion + LLM provider abstraction | 20 |
+| `agent-patterns` | ReAct, Planner-Executor, Multi-Agent Supervisor, Reflexion + provider abstraction (streaming, 429 retry, MCP-style metadata) | 29 |
 | `eval-suite` | LLM-as-a-judge, golden datasets, drift detection, HTML reports | 11 |
 | `memory` | Short-term (rolling summary), long-term (pluggable vector store), user preferences | 11 |
-| `hardening` | Prompt-injection scanner, tool allowlist, approval gates, output validator | 20 |
+| `hardening` | Prompt-injection scanner, tool allowlist, approval gates, output validator | 40 |
 | `mcp-servers` | Read-only Postgres, Stripe, Linear, Slack, Notion, Tavily, GitHub templates | 67 |
-| `cli` | The `ronin` binary | 36 |
+| `cli` | The `ronin` binary — agent loop, MCP client, web tools, subagents, eval, media | 319 |
 | `deployment-templates` | Docker Compose, Modal, Vercel, Railway | — |
 | `apps/demo` | AgentLab — interactive FastAPI playground | 5 |
 
-**400+ tests** across all packages, green on every push (see CI).
+**515+ tests** across all packages, green on every push (see CI).
 
 ## Use the modules without the CLI
 

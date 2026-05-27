@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.13.0 – 0.24.0] — 2026-05-27
+
+A large pass turning ronin into a Claude-Code-grade agent that runs on free models.
+
+### Added — Claude-Code-grade session UI
+- **Bordered input box** you type inside, with `↑/↓` history and `/`+TAB slash-command completion.
+- **Streaming Markdown** — replies render live (bold, headings, lists, syntax-highlighted code) instead of raw `**`/`#`.
+- **`● Verb(target)` / `↳ result`** tool lines, **syntax-highlighted diffs** in approval prompts, a per-turn **status line** (provider · model · tokens · time).
+- Animated activity panda on launch (dancing / running / playing / playing football / sleeping) + a real half-block panda renderer.
+
+### Added — providers & resilience
+- **Free providers**: Gemini, Cerebras, OpenRouter (plus Groq) — no credit card. **`/login <provider>`** (masked, in-session), **`/model` / `/models`** to switch models without re-entering the key.
+- **429/5xx auto-retry** with backoff (rides over free per-minute caps); Gemini thinking-model `thought_signature` round-tripping so tool calls work.
+- Start a message with a folder path to switch the working directory into it.
+
+### Added — capabilities
+- **`ronin eval`** — objective agent-quality scoring across providers (no LLM judge); golden-dataset `run`/`drift` kept as subcommands.
+- **MCP client** — connect any MCP server (`ronin mcp add/list`); discovered tools auto-join the agent.
+- **`web_search` / `fetch_url`** tools (free, no key) and a read-only **`task` subagent** tool.
+
 ## [0.12.0] — 2026-05-26
 
 ### Added — automatic memory (remembers everything, no prompting)
