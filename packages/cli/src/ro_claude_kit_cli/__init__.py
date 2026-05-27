@@ -1,2 +1,2 @@
 """ronin — the Claude-powered agent CLI for startup ops, code, and media."""
-__version__ = "0.38.1"
+__version__ = "0.39.0"

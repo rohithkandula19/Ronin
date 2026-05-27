@@ -111,11 +111,11 @@ def _panda_panel(frame_lines: list[str], caption: str):
     mascot = "\n".join(f"[bold white]{line}[/bold white]" for line in frame_lines)
     body = (
         mascot
-        + f"\n\n[bold magenta]ronin[/bold magenta] [dim]v{__version__}[/dim]"
+        + f"\n\n[bold #2dd4bf]ronin[/bold #2dd4bf] [dim]v{__version__}[/dim]"
         + f"  ·  [dim]{caption}[/dim]\n"
         + "[dim]briefing · agent · code · chat · tui[/dim]"
     )
-    return Panel.fit(Align.center(body), border_style="magenta", padding=(1, 3))
+    return Panel.fit(Align.center(body), border_style="#2dd4bf", padding=(1, 3))
 
 
 def _banner(animate: bool = True, activity: str | None = None, loops: int = 2) -> None:
@@ -1077,7 +1077,7 @@ def code(
 
     # Plan mode: propose steps (read-only) → confirm → execute.
     if plan:
-        console.print("[bold magenta]📋 planning (read-only)…[/bold magenta]")
+        console.print("[bold #2dd4bf]📋 planning (read-only)…[/bold #2dd4bf]")
         plan_res = run_code_agent(
             config, f"Produce a concise step-by-step PLAN to accomplish: {text}. "
             "Explore with read-only tools if needed, but DO NOT edit anything — just list the steps.",
@@ -1237,9 +1237,9 @@ def memory(
                       "or add one: [bold]ronin memory --add \"I prefer Python\"[/bold][/dim]")
         return
     from rich.panel import Panel
-    body = "\n".join(f"[#c678dd]•[/#c678dd] {m['text']}" for m in mems)
+    body = "\n".join(f"[#2dd4bf]•[/#2dd4bf] {m['text']}" for m in mems)
     console.print(Panel(body, title=f"🧠 {len(mems)} thing(s) ronin remembers about you",
-                        border_style="#c678dd", padding=(1, 2)))
+                        border_style="#2dd4bf", padding=(1, 2)))
     console.print("[dim]clear with [bold]ronin memory --clear[/bold][/dim]")
 
 
@@ -1522,7 +1522,7 @@ def explain(
 
     if result.mermaid:
         console.print("\n[bold]Architecture diagram[/bold] [dim](Mermaid — renders on GitHub):[/dim]")
-        console.print(Panel(f"```mermaid\n{result.mermaid}\n```", border_style="magenta"))
+        console.print(Panel(f"```mermaid\n{result.mermaid}\n```", border_style="#2dd4bf"))
 
     if out:
         md = f"# Explanation: {target}\n\n{result.output}\n"

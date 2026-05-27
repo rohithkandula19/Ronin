@@ -56,7 +56,7 @@ def _narrate(console: Console) -> Callable[[Step], None]:
         "thought": "[dim]🤔[/dim]",
         "tool_call": "[cyan]🔧[/cyan]",
         "tool_result": "[green]📥[/green]",
-        "plan": "[magenta]🗂[/magenta]",
+        "plan": "[#2dd4bf]🗂[/#2dd4bf]",
         "reflection": "[yellow]🔎[/yellow]",
         "final": "[bold green]✅[/bold green]",
         "error": "[red]⚠️[/red]",

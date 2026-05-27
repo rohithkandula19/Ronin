@@ -59,7 +59,7 @@ class RoninApp(App):
 
     #chat-pane {
         width: 2fr;
-        border: round #c061cb;
+        border: round #2dd4bf;
         padding: 1 2;
     }
 
@@ -69,14 +69,14 @@ class RoninApp(App):
         padding: 1 2;
     }
 
-    #trace-title, #chat-title { color: #e08fe0; text-style: bold; padding-bottom: 1; }
+    #trace-title, #chat-title { color: #5eead4; text-style: bold; padding-bottom: 1; }
 
     #input-row {
         height: 3;
         padding: 0 1;
     }
 
-    Input { border: round #c061cb; }
+    Input { border: round #2dd4bf; }
 
     .help { background: #222; padding: 1 2; }
     """

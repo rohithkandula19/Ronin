@@ -2,15 +2,15 @@
 and how tool calls are labelled, so every surface looks consistent.
 
 The palette is intentionally *soft*: muted pastels over hard ANSI colors, with a
-signature magenta→violet gradient for the ronin wordmark."""
+signature cyan→teal gradient for the ronin wordmark."""
 from __future__ import annotations
 
 from typing import Any
 
 # --- soft palette (hex pastels, not hard ANSI) -------------------------------
-ACCENT = "#c678dd"          # soft magenta — ronin brand
-ACCENT2 = "#a86ce0"         # violet
-TOOL = "#7fd1c8"            # soft teal — tool activity
+ACCENT = "#2dd4bf"          # teal — ronin brand
+ACCENT2 = "#22d3ee"         # cyan
+TOOL = "#7dd3fc"            # soft sky — tool activity (distinct from the teal accent)
 OK = "#9ece6a"              # soft green
 WARN = "#e0af68"            # soft amber
 ERR = "#f7768e"             # soft rose
@@ -18,8 +18,8 @@ MUTE = "#6b7089"            # muted slate
 SOFT = "#9aa0b8"            # soft foreground for secondary text
 BULLET = f"[{ACCENT}]●[/{ACCENT}]"   # soft action bullet
 
-# gradient stops for the ronin wordmark (magenta → violet → indigo)
-GRADIENT = ((0xC6, 0x78, 0xDD), (0x8A, 0x7C, 0xF0), (0x6A, 0x8B, 0xF5))
+# gradient stops for the ronin wordmark (cyan → teal → mint)
+GRADIENT = ((0x22, 0xD3, 0xEE), (0x2D, 0xD4, 0xBF), (0x34, 0xD3, 0x99))
 
 
 def gradient_text(text: str, *, bold: bool = True):

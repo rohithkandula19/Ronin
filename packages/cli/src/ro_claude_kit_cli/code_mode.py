@@ -687,8 +687,8 @@ def handle_slash_command(
         from .memory_store import load_memories
         mems = load_memories()
         if mems:
-            body = "\n".join(f"[#c678dd]•[/#c678dd] {m['text']}" for m in mems[-40:])
-            console.print(Panel(body, title=f"🧠 remembers about you ({len(mems)})", border_style="#c678dd"))
+            body = "\n".join(f"[#2dd4bf]•[/#2dd4bf] {m['text']}" for m in mems[-40:])
+            console.print(Panel(body, title=f"🧠 remembers about you ({len(mems)})", border_style="#2dd4bf"))
         else:
             console.print("[dim]no long-term memories yet — I'll save durable facts as we talk.[/dim]")
         # project memory file
