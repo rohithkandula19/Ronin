@@ -204,7 +204,7 @@ def apply_webhook_event(session: Session, event: dict[str, Any]) -> str:
         # Stash the Stripe customer ID so we can open Customer Portal later.
         customer_id = obj.get("customer")
         if user_id is not None and customer_id:
-            user = session.query(User).get(user_id)
+            user = session.get(User, user_id)
             if user is not None and isinstance(customer_id, str):
                 user.stripe_customer_id = customer_id
                 session.flush()
@@ -257,7 +257,7 @@ def _plan_from_subscription(obj: dict[str, Any]) -> Plan:
 def _set_user_plan(session: Session, user_id: int | None, plan: Plan) -> str:
     if user_id is None:
         return "no user_id on event — skipped"
-    user = session.query(User).get(user_id)
+    user = session.get(User, user_id)
     if user is None:
         return f"user_id={user_id} not found"
     prior = user.plan

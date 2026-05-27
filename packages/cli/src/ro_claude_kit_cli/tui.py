@@ -94,6 +94,7 @@ class RoninApp(App):
         self.busy = False
         self.history: list[tuple[str, str]] = []  # (role, text) — for memory across turns
         self.queue: list[str] = []  # messages typed while the agent is busy
+        self.chat_md = self._initial_chat()  # we own the chat markdown (no private API)
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -196,9 +197,9 @@ class RoninApp(App):
         return "\n\n".join(lines)
 
     def _append_chat(self, md_chunk: str) -> None:
+        self.chat_md = (self.chat_md + "\n\n" + md_chunk).strip()
         scroll = self.query_one("#chat-scroll", VerticalScroll)
-        existing: Markdown = scroll.query_one(Markdown)
-        existing.update((existing._markdown or "") + "\n\n" + md_chunk)  # type: ignore[attr-defined]
+        scroll.query_one(Markdown).update(self.chat_md)
         scroll.scroll_end(animate=False)
 
     def _set_trace(self, md: str) -> None:
@@ -208,7 +209,10 @@ class RoninApp(App):
 
     def action_clear(self) -> None:
         self.history.clear()
-        self.query_one("#chat-scroll", VerticalScroll).query_one(Markdown).update(self._initial_chat())
+        self.queue.clear()
+        self.busy = False
+        self.chat_md = self._initial_chat()
+        self.query_one("#chat-scroll", VerticalScroll).query_one(Markdown).update(self.chat_md)
         self._set_trace("_no trace yet — ask a question_")
 
     def action_toggle_help(self) -> None:

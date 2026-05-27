@@ -319,8 +319,18 @@ def _selective_gate(console: Console | None, yolo: bool, root: _Path) -> Callabl
         elif name == "run_command":
             console.print(f"  [yellow]›[/yellow] [bold]Run[/bold] [cyan]{args.get('command')}[/cyan]")
         elif name == "multi_edit":
-            console.print(f"  [yellow]›[/yellow] [bold]Edit[/bold] [cyan]{args.get('path', '?')}[/cyan] "
-                          f"[grey50]({len(args.get('edits', []))} change(s))[/grey50]")
+            rel = args.get("path", "?")
+            target = (root / rel)
+            before = target.read_text(encoding="utf-8") if target.is_file() else ""
+            after = before
+            for e in args.get("edits", []):
+                old, new = e.get("old_string", ""), e.get("new_string", "")
+                if old and old in after:
+                    after = after.replace(old, new, 1)
+            edits_n = len(args.get("edits", []))
+            console.print(f"  [yellow]›[/yellow] [bold]Edit[/bold] [cyan]{rel}[/cyan] "
+                          f"[grey50]({edits_n} change(s))[/grey50]")
+            _render_diff(console, unified_diff(rel, before, after))
         else:
             console.print(f"  [yellow]›[/yellow] [bold]{name}[/bold] [grey50]{args}[/grey50]")
 

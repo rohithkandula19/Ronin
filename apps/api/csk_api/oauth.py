@@ -183,7 +183,7 @@ def exchange_code(
     # Look up the user the state token claimed
     from .db import User
 
-    user = session.query(User).get(user_id)
+    user = session.get(User, user_id)
     if user is None:
         raise ValueError(f"user {user_id} not found")
 

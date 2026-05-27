@@ -6,7 +6,7 @@ the briefing on a cron without anyone opening a terminal.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -169,7 +169,7 @@ def due_users(session: Session, now: datetime | None = None) -> list[User]:
     """
     from datetime import timedelta
 
-    now = now or datetime.utcnow()
+    now = now or datetime.now(timezone.utc).replace(tzinfo=None)
     threshold = now - timedelta(days=6, hours=23)
     users: list[User] = []
     for schedule in session.query(Schedule).filter_by(enabled=1).all():
@@ -181,5 +181,5 @@ def due_users(session: Session, now: datetime | None = None) -> list[User]:
 def mark_schedule_ran(session: Session, user: User) -> None:
     schedule = session.query(Schedule).filter_by(user_id=user.id).first()
     if schedule is not None:
-        schedule.last_run_at = datetime.utcnow()
+        schedule.last_run_at = datetime.now(timezone.utc).replace(tzinfo=None)
         session.flush()

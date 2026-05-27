@@ -18,3 +18,10 @@ members = [
     "apps/demo",
     "apps/api",
 ]
+
+# Root pytest config so `pytest` / `uv run pytest` works from the monorepo root
+# (collecting every package). asyncio_mode=auto lets async tests — e.g. the
+# Textual TUI queue test — run without a per-test marker.
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["packages", "apps"]

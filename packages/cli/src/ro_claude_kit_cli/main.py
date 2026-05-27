@@ -181,13 +181,16 @@ def _root(ctx: typer.Context) -> None:
         "[bold]@path[/bold] to reference files · [bold]/help[/bold] for commands · "
         "[bold]/q[/bold] to quit.[/dim]\n"
     )
+    if _is_code_project(Path(".")):
+        console.print("[#6b7089]📁 code project detected here — I can read, edit & run "
+                      "code in this repo (edits gated).[/#6b7089]\n")
     from .code_mode import run_unified_session
     run_unified_session(config, root=Path("."), console=console)
 
 
 def _is_code_project(path: Path) -> bool:
-    """Heuristic: does ``path`` look like a code repository? (decides whether bare
-    `ronin` opens the coding agent vs. the data/media chat)."""
+    """Heuristic: does ``path`` look like a code repository? Used to greet you
+    with a code-aware hint when you launch bare ``ronin`` inside a repo."""
     markers = (
         ".git", "pyproject.toml", "package.json", "go.mod", "Cargo.toml",
         "pom.xml", "build.gradle", "Gemfile", "RONIN.md", "CLAUDE.md", "AGENTS.md",
