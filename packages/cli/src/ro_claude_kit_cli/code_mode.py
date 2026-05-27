@@ -407,6 +407,17 @@ def run_code_agent(
     try:
         result = agent.run(prompt, on_step=on_step, before_tool=before_tool,
                            on_text=on_text, after_tool=after_tool)
+    except KeyboardInterrupt:
+        # Ctrl-C during a turn → stop THIS turn, keep the session alive.
+        if renderer is not None:
+            renderer.finish()
+        return CodeRunResult(
+            success=False,
+            output="[#e0af68]⊘ interrupted — back to you.[/#e0af68]",
+            iterations=0,
+            error="interrupted",
+            blocked=True,
+        )
     except Exception as e:  # noqa: BLE001 — never crash the session on a provider/network error
         if renderer is not None:
             renderer.finish()
@@ -725,7 +736,7 @@ def run_code_session(
 
     while True:
         try:
-            user = read_prompt(console, hint="/help · @path to add files · ⌃c to quit").strip()
+            user = read_prompt(console, hint="/help · @path to add files · ⌃c interrupt · /q quit").strip()
         except (EOFError, KeyboardInterrupt):
             console.print("\n[dim]bye[/dim]")
             return
@@ -859,7 +870,7 @@ def run_unified_session(
 
     while True:
         try:
-            user = read_prompt(console, hint="/ for commands · @ for files · ⌃c to quit").strip()
+            user = read_prompt(console, hint="/ for commands · @ for files · ⌃c interrupt · /q quit").strip()
         except (EOFError, KeyboardInterrupt):
             console.print("\n[dim]bye[/dim]")
             return

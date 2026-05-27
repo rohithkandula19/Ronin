@@ -333,3 +333,17 @@ def test_expand_custom_command(tmp_path: Path) -> None:
     assert expand_custom_command("/help", tmp_path) is None        # builtin wins
     assert expand_custom_command("/missing", tmp_path) is None     # no such file
     assert expand_custom_command("plain text", tmp_path) is None
+
+
+def test_keyboard_interrupt_stops_turn_not_session(tmp_path: Path) -> None:
+    """Ctrl-C during a turn returns a clean 'interrupted' result, never propagates."""
+    from ro_claude_kit_cli.code_mode import run_code_agent
+    config = CSKConfig(provider="groq", openai_api_key="x")
+
+    def boom(*a, **k):
+        raise KeyboardInterrupt
+
+    with patch("ro_claude_kit_cli.code_mode.ReActAgent.run", side_effect=boom):
+        res = run_code_agent(config, "do a thing", root=tmp_path, console=None)
+    assert res.success is False
+    assert res.error == "interrupted"
