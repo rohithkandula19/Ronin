@@ -285,3 +285,21 @@ def test_code_cli_runs_with_fake_provider(tmp_path: Path, monkeypatch: pytest.Mo
 
     assert r.exit_code == 0, r.stdout
     assert (tmp_path / "target.py").read_text() == "fixed = True\n"
+
+
+def test_split_leading_dir_switches_into_folder(tmp_path: Path) -> None:
+    """Starting a message with a folder path switches the session into it."""
+    from ro_claude_kit_cli.code_mode import split_leading_dir
+    proj = tmp_path / "ro-ecg-sentinel"
+    proj.mkdir()
+
+    new_root, rest = split_leading_dir(f"{proj} tell me about this project", root=tmp_path)
+    assert new_root == proj.resolve()
+    assert rest == "tell me about this project"
+
+    # relative path under root works too
+    new_root, rest = split_leading_dir("ro-ecg-sentinel explain it", root=tmp_path)
+    assert new_root == proj.resolve() and rest == "explain it"
+
+    # a normal message is left alone
+    assert split_leading_dir("fix the bug", root=tmp_path) == (None, "fix the bug")

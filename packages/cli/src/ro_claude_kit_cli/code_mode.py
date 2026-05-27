@@ -163,6 +163,28 @@ def expand_file_mentions(task: str, root: Path | str) -> str:
     return "Referenced files:\n\n" + "\n\n".join(blocks) + "\n\n---\n\n" + task
 
 
+def split_leading_dir(user: str, root: Path | str) -> tuple[_Path | None, str]:
+    """If a message *starts* with a path to an existing directory, return
+    ``(resolved_dir, rest_of_message)`` so the session can switch into that
+    folder — the way you'd ``cd`` into a repo before launching Claude Code.
+
+    Returns ``(None, user)`` when there's no leading directory.
+    """
+    text = user.strip()
+    if not text:
+        return None, user
+    tok = text.split()[0]
+    cand = _Path(tok).expanduser()
+    if not cand.is_absolute():
+        cand = _Path(root) / tok
+    try:
+        if cand.is_dir():
+            return cand.resolve(), text[len(tok):].strip()
+    except OSError:
+        return None, user
+    return None, user
+
+
 def _render_diff(console: Console, diff: str) -> None:
     """Print a unified diff with +/- line coloring (Claude-Code style preview)."""
     for line in diff.splitlines():
@@ -479,6 +501,15 @@ def run_code_session(
         if action == "handled":
             continue
 
+        # Start a message with a folder path → switch into it (like cd'ing into a repo).
+        new_root, rest = split_leading_dir(user, root)
+        if new_root is not None:
+            root = new_root
+            console.print(f"  [#6b7089]→ now working in[/#6b7089] [bold]{root}[/bold]")
+            if not rest:
+                continue
+            user = rest
+
         history_prefix = ""
         if transcript:
             history_prefix = "Conversation so far:\n" + "\n".join(transcript[-6:])
@@ -572,6 +603,16 @@ def run_unified_session(
             return
         if action == "handled":
             continue
+
+        # Start a message with a folder path → switch into it (like cd'ing into a
+        # repo). The agent's tools are then rooted in that project.
+        new_root, rest = split_leading_dir(user, root)
+        if new_root is not None:
+            root = new_root
+            console.print(f"  [#6b7089]→ now working in[/#6b7089] [bold]{root}[/bold]")
+            if not rest:
+                continue
+            user = rest
 
         history_prefix = ""
         if transcript:
