@@ -42,6 +42,10 @@ class CSKConfig(BaseModel):
     provider: str = "anthropic"  # anthropic | ollama | openai | together | groq | fireworks | gemini | cerebras | openrouter | custom
     model: str | None = None  # None → use the preset default for the chosen provider
     base_url: str | None = None  # required for 'custom'; optional override otherwise
+    # Smart routing: when both are set, ronin picks the cheap/fast model for
+    # simple turns and the strong model for complex ones (same provider).
+    route_fast: str | None = None
+    route_strong: str | None = None
 
     anthropic_api_key: str | None = None
     openai_api_key: str | None = None  # used for openai/together/groq/fireworks/custom

@@ -486,6 +486,7 @@ SLASH_COMMANDS: dict[str, str] = {
     "pr": "push the branch and open a PR (title/body drafted, gated)",
     "model": "show the model, or switch it: /model <name> (no key re-entry)",
     "models": "list the models available for the current provider",
+    "route": "smart routing: /route <fast-model> <strong-model> (or /route off)",
     "memory": "show loaded project memory (RONIN.md / CLAUDE.md / AGENTS.md)",
     "init": "scaffold a RONIN.md project-memory file",
     "tools": "list the tools the agent can use",
@@ -620,6 +621,26 @@ def handle_slash_command(
             f"[dim]model[/dim] [bold]{config.resolved_model()}[/bold]"
         )
         console.print("[dim]switch with [bold]/model <name>[/bold] · list with [bold]/models[/bold][/dim]")
+        return "handled"
+    if cmd == "route":
+        from .config import save_config
+        if len(parts) >= 2 and parts[1].lower() in ("off", "none"):
+            config.route_fast = config.route_strong = None
+            save_config(config)
+            console.print("  [green]✓[/green] routing off — using a single model.")
+            return "handled"
+        if len(parts) >= 3:
+            config.route_fast, config.route_strong = parts[1], parts[2]
+            save_config(config)
+            console.print(f"  [green]✓[/green] routing on · simple→[bold]{parts[1]}[/bold] · "
+                          f"complex→[bold]{parts[2]}[/bold]")
+            return "handled"
+        if config.route_fast and config.route_strong:
+            console.print(f"  [dim]routing on · simple→[bold]{config.route_fast}[/bold] · "
+                          f"complex→[bold]{config.route_strong}[/bold][/dim]")
+        else:
+            console.print("  [dim]routing off. Enable: [bold]/route <fast-model> <strong-model>[/bold] "
+                          "(e.g. /route llama3.1-8b gpt-oss-120b)[/dim]")
         return "handled"
     if cmd == "models":
         names = _list_provider_models(config)
@@ -836,10 +857,15 @@ def run_unified_session(
         if transcript:
             history_prefix = "Conversation so far:\n" + "\n".join(transcript[-6:])
 
+        # smart routing: cheap model for simple turns, strong for complex ones
+        from .routing import pick_model
+        _chosen = pick_model(config, user)
+        turn_cfg = config.model_copy(update={"model": _chosen}) if _chosen else config
+
         import time as _time
         _t0 = _time.time()
         result = run_code_agent(
-            config, user, root=root, console=console, yolo=yolo,
+            turn_cfg, user, root=root, console=console, yolo=yolo,
             max_iterations=max_iterations, undo_stack=undo_stack,
             history_prefix=history_prefix, extra_tools=extra,
             base_system=UNIFIED_SYSTEM, extra_system=mem_block, include_image_tool=False,
@@ -858,5 +884,5 @@ def run_unified_session(
         else:
             if not result.streamed:
                 console.print(f"\n{result.output}")
-            console.print(_status_line(config, result, _elapsed) + "\n")
+            console.print(_status_line(turn_cfg, result, _elapsed) + "\n")
         show_artifacts(artifacts)  # display any image/video produced
