@@ -85,31 +85,20 @@ def read_prompt(console: Console, *, symbol: str = "›", hint: str = "") -> str
 
 
 def _boxed_read(console: Console, *, symbol: str, hint: str) -> str:
-    width = max(24, min(console.width, 100) - 2)   # inner width between the corners
-    lead = f" {symbol} "                            # "│ › " minus the borders
-    pad = " " * (width - len(lead))
+    """Robust bordered prompt — no cursor gymnastics, so the borders never drop:
 
-    top = "╭" + "─" * width + "╮"
-    bot = "╰" + "─" * width + "╯"
+        ╭──────────────────────────────╮
+        │ › your text (any length)
+        ╰──────────────────────────────╯
+          hint…
 
-    console.print(f"[{ACCENT}]{top}[/{ACCENT}]")
-    console.print(
-        f"[{ACCENT}]│[/{ACCENT}][{SOFT}]{lead}[/{SOFT}]{pad}[{ACCENT}]│[/{ACCENT}]"
-    )
-    console.print(f"[{ACCENT}]{bot}[/{ACCENT}]")
+    A thin top rule, the live ``│ ›`` prompt read inline (left border only, so a
+    long line can't break a right border), then the bottom rule after you submit.
+    """
+    width = max(24, min(console.width, 100) - 2)
+    console.print(f"[{ACCENT}]╭{'─' * width}╮[/{ACCENT}]")
+    line = console.input(f"[{ACCENT}]│[/{ACCENT}] [{SOFT}]{symbol}[/{SOFT}] ")
+    console.print(f"[{ACCENT}]╰{'─' * width}╯[/{ACCENT}]")
     if hint:
         console.print(f"  [{MUTE}]{hint}[/{MUTE}]")
-
-    # Hop the cursor back up into the box, just past "│ › ".
-    up = 3 if hint else 2
-    col = 1 + len(lead) + 1            # 1-based column right after the prompt symbol
-    sys.stdout.write(f"\x1b[{up}A\x1b[{col}G")
-    sys.stdout.flush()
-
-    try:
-        line = input("")
-    finally:
-        # Whatever happened (Enter, EOF, ⌃c), drop the cursor cleanly below the box.
-        sys.stdout.write(f"\x1b[{up - 1}B\r")
-        sys.stdout.flush()
     return line
