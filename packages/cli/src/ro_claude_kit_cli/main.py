@@ -668,11 +668,12 @@ def mcp_list() -> None:
     console.print(f"[green]✓[/green] {len(tools)} tool(s) available to the agent.")
 
 
-@mcp_app.command("add", help="Add an MCP server: ronin mcp add NAME COMMAND [ARGS...]")
+@mcp_app.command("add", help="Add an MCP server: ronin mcp add NAME COMMAND [ARGS...]",
+                 context_settings={"ignore_unknown_options": True})
 def mcp_add(
     name: str = typer.Argument(..., help="A short name, e.g. 'fs'."),
     command: str = typer.Argument(..., help="The server command, e.g. 'npx'."),
-    args: Optional[list[str]] = typer.Argument(None, help="Args for the server command."),
+    args: Optional[list[str]] = typer.Argument(None, help="Args for the server command (flags like -y are passed through)."),
 ) -> None:
     from .mcp_client import add_mcp_server
     path = add_mcp_server(name, command, list(args or []), ".")
