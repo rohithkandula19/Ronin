@@ -84,16 +84,16 @@ class LiveRenderer:
                 return
             from .theme import tool_label
             verb, target = tool_label(name, c.get("input"))
-            tgt = f" [{MUTE}]{target}[/{MUTE}]" if target else ""
+            tgt = f"[{MUTE}]({target})[/{MUTE}]" if target else ""
             self.console.print(f"{BULLET} [bold {TOOL}]{verb}[/bold {TOOL}]{tgt}")
         elif step.kind == "tool_result" and isinstance(c, dict):
             if c.get("name") == "update_todos":
                 return  # the checklist was already drawn on the tool_call
             preview = _short(c.get("result", ""), 100)
             if c.get("is_error"):
-                self.console.print(f"  [{ERR}]└ ✗ {preview}[/{ERR}]")
+                self.console.print(f"  [{ERR}]↳ ✗ {preview}[/{ERR}]")
             elif preview:
-                self.console.print(f"  [{MUTE}]└ {preview}[/{MUTE}]")
+                self.console.print(f"  [{MUTE}]↳ {preview}[/{MUTE}]")
         elif step.kind == "error":
             self.console.print(f"  [{ERR}]⚠ {_short(c, 160)}[/{ERR}]")
         elif step.kind == "plan":

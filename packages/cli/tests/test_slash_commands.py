@@ -91,3 +91,13 @@ def test_colon_prefix_also_works(tmp_path: Path) -> None:
 def test_unknown_command(tmp_path: Path) -> None:
     action, out = _call("/bogus", root=tmp_path)
     assert action == "handled" and "unknown command" in out
+
+
+def test_leading_absolute_path_is_not_a_command(tmp_path: Path) -> None:
+    # A message that starts with a filesystem path must reach the agent, not be
+    # swallowed as a slash command (regression: "/Users/me/proj tell me…").
+    action, _ = _call("/Users/rohithkandula/Desktop/ro-ecg-sentinel tell me about this project",
+                      root=tmp_path)
+    assert action == "passthrough"
+    action, _ = _call("/home/x/project explain it", root=tmp_path)
+    assert action == "passthrough"

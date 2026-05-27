@@ -75,6 +75,12 @@ _PANDA_ACTIVITIES: dict[str, list[list[str]]] = {
         [" ʕ•ᴥ•ʔﾉ ●   ", "  (   )  ", "  /   \\  "],
         [" ʕ•ᴥ•ʔﾉ●     ", "  (   )  ", "  /   \\  "],
     ],
+    "playing football": [
+        [" ʕ•ᴥ•ʔ     ", "  (   )    ", "  /  L ●   "],
+        [" ʕ•ᴥ•ʔ  ●  ", "  (   )    ", "  /   ⌐    "],
+        [" ʕ•ᴥ•ʔ    ●", "  (   )    ", "  /   \\    "],
+        [" ʕ•ᴥ•ʔ  ●  ", "  (   )    ", "  /   ⌐    "],
+    ],
     "sleeping": [
         [" ʕ-ᴥ-ʔ   z ", "  (   )  ", "  ‾‾‾‾‾  "],
         [" ʕ-ᴥ-ʔ  Z  ", "  (   )  ", "  ‾‾‾‾‾  "],
@@ -150,12 +156,9 @@ def _root(ctx: typer.Context) -> None:
         console.print(ctx.get_help())
         return
 
-    from rich.text import Text
-
-    from .panda_art import render_panda
-    render_panda(console)   # panda 🐼 beside the RONIN wordmark (logo lockup)
-    console.print(Text("  masterless Claude agent · one assistant for everything",
-                       style="#6b7089"))
+    # Animated panda mascot doing an activity — dancing / running / playing /
+    # sleeping — in a panel on launch. It actually *moves*, frame by frame.
+    _banner()
 
     # Interactive terminal: drop into a session, the way `claude` does.
     config = load_config()

@@ -22,6 +22,7 @@ from .code_tools import SENSITIVE_TOOLS, build_code_tools, undo_last, unified_di
 from .config import CSKConfig
 from .media import build_image_tool
 from .project_memory import load_project_memory, memory_system_block, write_memory_template
+from .prompt_box import read_prompt
 from .runner import build_provider
 from .streaming import LiveRenderer
 from .theme import ACCENT as _ACCENT
@@ -372,9 +373,15 @@ def handle_slash_command(
     """
     from rich.panel import Panel
 
-    if not (user.startswith("/") or user.startswith(":")):
+    stripped = user.strip()
+    if not (stripped.startswith("/") or stripped.startswith(":")):
         return "passthrough"
-    parts = user[1:].strip().split()
+    first = stripped.split()[0]
+    # A real command is "/cmd" or ":cmd" (letters/digits/hyphen) — NOT a leading
+    # filesystem path like "/Users/me/proj" or "/home/x". Those go to the agent.
+    if "/" in first[1:] or "\\" in first:
+        return "passthrough"
+    parts = stripped[1:].split()
     if not parts:
         return "handled"
     cmd = parts[0].lower()
@@ -457,7 +464,7 @@ def run_code_session(
 
     while True:
         try:
-            user = console.input(f"[bold {_ACCENT}]code ›[/bold {_ACCENT}] ").strip()
+            user = read_prompt(console, hint="/help · @path to add files · ⌃c to quit").strip()
         except (EOFError, KeyboardInterrupt):
             console.print("\n[dim]bye[/dim]")
             return
@@ -551,7 +558,7 @@ def run_unified_session(
 
     while True:
         try:
-            user = console.input("[bold magenta]ronin ›[/bold magenta] ").strip()
+            user = read_prompt(console, hint="/ for commands · @ for files · ⌃c to quit").strip()
         except (EOFError, KeyboardInterrupt):
             console.print("\n[dim]bye[/dim]")
             return
