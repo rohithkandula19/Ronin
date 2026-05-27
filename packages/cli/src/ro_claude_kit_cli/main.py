@@ -315,7 +315,8 @@ def _key_preview(key: str) -> str:
 
 @app.command("set-key")
 def set_key(
-    provider: str = typer.Option(None, "--provider", help="Set/override the provider (e.g. groq, anthropic)."),
+    provider: str = typer.Option(None, "--provider", help="Set/override the provider (e.g. groq, openrouter, anthropic)."),
+    model: str = typer.Option(None, "--model", help="Set/override the model (e.g. qwen/qwen3-coder:free)."),
     scope: str = typer.Option("project", "--scope", help="'project' (./.csk/) or 'user' (~/.config/csk/)."),
 ) -> None:
     """Set just the LLM API key — masked input with a length/preview confirmation
@@ -323,6 +324,8 @@ def set_key(
     config = load_config()
     if provider:
         config.provider = provider
+    if model:
+        config.model = model
     prov = config.provider
     if prov == "ollama":
         console.print("[yellow]ollama runs locally and needs no key.[/yellow]")
@@ -343,7 +346,8 @@ def set_key(
     else:
         config.openai_api_key = key
     path = save_config(config, scope=scope)
-    console.print(f"[green]✓[/green] key saved for [bold]{prov}[/bold] → [cyan]{path}[/cyan]")
+    console.print(f"[green]✓[/green] key saved for [bold]{prov}[/bold] "
+                  f"[dim]({config.resolved_model()})[/dim] → [cyan]{path}[/cyan]")
     console.print("[dim]verify it works: [bold]ronin doctor --check[/bold][/dim]")
 
 
