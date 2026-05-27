@@ -106,6 +106,7 @@ class CodeRunResult:
 
 import hashlib as _hashlib
 import json as _json
+import os as _os
 import re as _re
 
 _MENTION_RE = _re.compile(r"(?:^|\s)@([\w./\-]+)")
@@ -163,6 +164,32 @@ def expand_file_mentions(task: str, root: Path | str) -> str:
     return "Referenced files:\n\n" + "\n\n".join(blocks) + "\n\n---\n\n" + task
 
 
+def _list_provider_models(config: CSKConfig) -> list[str]:
+    """Best-effort list of model ids for the active provider.
+
+    OpenAI-compatible providers expose ``GET {base_url}/models``; Anthropic has
+    no list endpoint so we return a short curated set. Network/parse failures
+    return an empty list (the caller shows a friendly hint)."""
+    if config.provider == "anthropic":
+        return ["claude-sonnet-4-6", "claude-opus-4-1", "claude-haiku-4-5"]
+    base = config.resolved_base_url()
+    if not base:
+        return []
+    key = config.openai_api_key or _os.environ.get("OPENAI_API_KEY")
+    try:
+        import httpx
+        headers = {"User-Agent": "ronin"}
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
+        r = httpx.get(base.rstrip("/") + "/models", headers=headers, timeout=20)
+        r.raise_for_status()
+        data = r.json().get("data", [])
+        ids = [m.get("id", "") for m in data if m.get("id")]
+        return sorted(ids)
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def split_leading_dir(user: str, root: Path | str) -> tuple[_Path | None, str]:
     """If a message *starts* with a path to an existing directory, return
     ``(resolved_dir, rest_of_message)`` so the session can switch into that
@@ -185,8 +212,32 @@ def split_leading_dir(user: str, root: Path | str) -> tuple[_Path | None, str]:
     return None, user
 
 
+def _fmt_tokens(n: int) -> str:
+    return f"{n / 1000:.1f}k" if n >= 1000 else str(n)
+
+
+def _status_line(config: CSKConfig, result: "CodeRunResult", elapsed: float) -> str:
+    """A subtle per-turn footer: provider · model · ↑in ↓out · time."""
+    u = result.usage or {}
+    inp, out = u.get("input_tokens", 0), u.get("output_tokens", 0)
+    bits = [f"{config.provider} · {config.resolved_model()}"]
+    if inp or out:
+        bits.append(f"↑{_fmt_tokens(inp)} ↓{_fmt_tokens(out)}")
+    bits.append(f"{elapsed:.1f}s")
+    return "  [#6b7089]" + "  ·  ".join(bits) + "[/#6b7089]"
+
+
 def _render_diff(console: Console, diff: str) -> None:
-    """Print a unified diff with +/- line coloring (Claude-Code style preview)."""
+    """Print a unified diff with proper syntax highlighting (Claude-Code style)."""
+    if not diff.strip():
+        return
+    try:
+        from rich.syntax import Syntax
+        console.print(Syntax(diff, "diff", theme="monokai",
+                             background_color="default", word_wrap=True))
+        return
+    except Exception:  # noqa: BLE001 - fall back to plain +/- coloring
+        pass
     for line in diff.splitlines():
         if line.startswith("+") and not line.startswith("+++"):
             console.print(f"[green]{line}[/green]")
@@ -354,7 +405,8 @@ SLASH_COMMANDS: dict[str, str] = {
     "clear": "forget the conversation so far",
     "undo": "revert the most recent file change",
     "diff": "show the working-tree git diff",
-    "model": "show the active provider + model",
+    "model": "show the model, or switch it: /model <name> (no key re-entry)",
+    "models": "list the models available for the current provider",
     "memory": "show loaded project memory (RONIN.md / CLAUDE.md / AGENTS.md)",
     "init": "scaffold a RONIN.md project-memory file",
     "tools": "list the tools the agent can use",
@@ -469,10 +521,31 @@ def handle_slash_command(
         _show_git_diff(console, root)
         return "handled"
     if cmd == "model":
+        if len(parts) > 1:  # /model <name> → switch model in place, no key re-entry
+            from .config import save_config
+            config.model = " ".join(parts[1:])
+            save_config(config)
+            console.print(f"  [green]✓[/green] model → [bold]{config.resolved_model()}[/bold] "
+                          f"[dim](provider {config.provider})[/dim]; using it from your next message.")
+            return "handled"
         console.print(
             f"[dim]provider[/dim] [bold]{config.provider}[/bold]  ·  "
-            f"[dim]model[/dim] [bold]{config.model or '(provider default)'}[/bold]"
+            f"[dim]model[/dim] [bold]{config.resolved_model()}[/bold]"
         )
+        console.print("[dim]switch with [bold]/model <name>[/bold] · list with [bold]/models[/bold][/dim]")
+        return "handled"
+    if cmd == "models":
+        names = _list_provider_models(config)
+        if not names:
+            console.print(f"[dim]couldn't list models for [bold]{config.provider}[/bold] "
+                          f"(set a key with [bold]/login[/bold] first).[/dim]")
+            return "handled"
+        current = config.resolved_model()
+        console.print(f"[bold]{config.provider}[/bold] models [dim]({len(names)})[/dim]")
+        for n in names[:40]:
+            mark = " [green]← active[/green]" if n == current else ""
+            console.print(f"  [cyan]{n}[/cyan]{mark}")
+        console.print("[dim]switch with [bold]/model <name>[/bold][/dim]")
         return "handled"
     if cmd == "memory":
         # persistent cross-session memory about the user
@@ -556,22 +629,23 @@ def run_code_session(
         if transcript:
             history_prefix = "Conversation so far:\n" + "\n".join(transcript[-6:])
 
+        import time as _time
+        _t0 = _time.time()
         result = run_code_agent(
             config, user, root=root, console=console, yolo=yolo,
             max_iterations=max_iterations, undo_stack=undo_stack,
             history_prefix=history_prefix,
         )
+        _elapsed = _time.time() - _t0
         transcript.append(f"USER: {user}")
         transcript.append(f"ASSISTANT: {result.output}")
         save_session(root, transcript)  # persist so `ronin code --continue` can resume
-        # The summary already streamed inline; just show a subtle completion mark
-        # instead of re-printing the whole thing.
         if not result.success:
             console.print(f"\n{result.output}\n")   # clean error (e.g. rate-limit), session continues
-        elif result.streamed:
-            console.print("\n[bold green]✅[/bold green] [dim]done[/dim]\n")
         else:
-            console.print(f"\n[bold green]✅[/bold green] {result.output}\n")
+            if not result.streamed:
+                console.print(f"\n{result.output}")
+            console.print(_status_line(config, result, _elapsed) + "\n")
 
 
 UNIFIED_SYSTEM = """You are ronin — one helpful assistant living in the user's terminal.
@@ -660,12 +734,15 @@ def run_unified_session(
         if transcript:
             history_prefix = "Conversation so far:\n" + "\n".join(transcript[-6:])
 
+        import time as _time
+        _t0 = _time.time()
         result = run_code_agent(
             config, user, root=root, console=console, yolo=yolo,
             max_iterations=max_iterations, undo_stack=undo_stack,
             history_prefix=history_prefix, extra_tools=extra,
             base_system=UNIFIED_SYSTEM, extra_system=mem_block, include_image_tool=False,
         )
+        _elapsed = _time.time() - _t0
         transcript.append(f"USER: {user}")
         transcript.append(f"ASSISTANT: {result.output}")
         save_session(root, transcript)
@@ -676,8 +753,8 @@ def run_unified_session(
             auto_extract_background(config, f"USER: {user}\nASSISTANT: {result.output}")
         if not result.success:
             console.print(f"\n{result.output}\n")   # clean error (e.g. rate-limit), session continues
-        elif result.streamed:
-            console.print("\n[bold green]✅[/bold green] [dim]done[/dim]\n")
         else:
-            console.print(f"\n[bold green]✅[/bold green] {result.output}\n")
+            if not result.streamed:
+                console.print(f"\n{result.output}")
+            console.print(_status_line(config, result, _elapsed) + "\n")
         show_artifacts(artifacts)  # display any image/video produced

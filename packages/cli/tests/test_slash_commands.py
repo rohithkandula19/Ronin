@@ -132,3 +132,24 @@ def test_login_rejects_double_paste(tmp_path: Path, monkeypatch) -> None:
                              config=config, undo_stack=[], transcript=[])
     assert config.openai_api_key is None          # rejected, not saved
     assert "pasted more than once" in buf.getvalue()
+
+
+def test_model_switch_in_place(tmp_path: Path, monkeypatch) -> None:
+    """/model <name> changes the model without prompting for a key."""
+    from ro_claude_kit_cli.code_mode import handle_slash_command
+    monkeypatch.chdir(tmp_path)
+    console, buf = _console()
+    config = CSKConfig(provider="cerebras")
+    action = handle_slash_command("/model qwen-3-235b-a22b-instruct-2507",
+                                  console=console, root=tmp_path, config=config,
+                                  undo_stack=[], transcript=[])
+    assert action == "handled"
+    assert config.model == "qwen-3-235b-a22b-instruct-2507"
+    assert config.resolved_model() == "qwen-3-235b-a22b-instruct-2507"
+
+
+def test_summarize_result_counts() -> None:
+    from ro_claude_kit_cli.streaming import _summarize_result
+    assert _summarize_result('["a.py", "b.py", "c.py"]').startswith("3 items · ")
+    assert _summarize_result("line1\nline2\nline3").startswith("3 lines · ")
+    assert _summarize_result("just a short string") == "just a short string"

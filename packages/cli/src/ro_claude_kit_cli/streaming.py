@@ -22,6 +22,35 @@ from ro_claude_kit_agent_patterns import Step
 from .theme import ACCENT, BULLET, ERR, MUTE, OK, SOFT, TOOL, gradient_text, short as _short
 
 
+def _summarize_result(result) -> str:
+    """A tidy one-line preview of a tool result: item counts for file listings,
+    line counts for multi-line output, else a short snippet."""
+    s = str(result).strip()
+    if not s:
+        return ""
+    if s.startswith("[") and s.endswith("]"):
+        import ast
+        import json
+        items = None
+        for parse in (json.loads, ast.literal_eval):
+            try:
+                got = parse(s)
+                if isinstance(got, list):
+                    items = got
+                    break
+            except Exception:  # noqa: BLE001
+                continue
+        if items is not None:
+            n = len(items)
+            sample = ", ".join(str(x) for x in items[:6])
+            more = f"  +{n - 6} more" if n > 6 else ""
+            return f"{n} item{'s' if n != 1 else ''} · {_short(sample, 80)}{more}"
+    lines = s.splitlines()
+    if len(lines) > 1:
+        return f"{len(lines)} lines · {_short(lines[0], 78)}"
+    return _short(s, 100)
+
+
 class LiveRenderer:
     """Streams assistant text (as live Markdown on a TTY) and renders tool steps
     as they happen, with a soft 'thinking…' spinner before the first token."""
@@ -128,11 +157,12 @@ class LiveRenderer:
         elif step.kind == "tool_result" and isinstance(c, dict):
             if c.get("name") == "update_todos":
                 return  # the checklist was already drawn on the tool_call
-            preview = _short(c.get("result", ""), 100)
             if c.get("is_error"):
-                self.console.print(f"  [{ERR}]↳ ✗ {preview}[/{ERR}]")
-            elif preview:
-                self.console.print(f"  [{MUTE}]↳ {preview}[/{MUTE}]")
+                self.console.print(f"  [{ERR}]↳ ✗ {_short(c.get('result', ''), 100)}[/{ERR}]")
+            else:
+                preview = _summarize_result(c.get("result", ""))
+                if preview:
+                    self.console.print(f"  [{MUTE}]↳ {preview}[/{MUTE}]")
         elif step.kind == "error":
             self.console.print(f"  [{ERR}]⚠ {_short(c, 160)}[/{ERR}]")
         elif step.kind == "plan":
