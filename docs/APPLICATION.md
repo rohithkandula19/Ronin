@@ -1,51 +1,51 @@
 # Application note — Applied AI Engineer, Startups (Anthropic)
 
-> A ready-to-adapt note built around **ronin**. Fill the `[bracketed]` bits with your
-> own details. Keep it short — the repo does the talking.
+> Paste-and-send ready. Only the `[bracketed]` bits are yours to fill — name,
+> contact, and the one personal line. Everything else is true of the repo today.
 
 ---
 
-## Short version (email / DM / cover note)
+## The email (short — they skim)
 
 **Subject:** Applied AI Engineer (Startups) — I built a Claude-grade agent that runs on anything
 
 Hi [name],
 
-I'm [your name], [one line: e.g. "a developer who ships fast"]. I want to build with startups at Anthropic, so instead of a résumé I'll point you at what I made: **ronin** — an open-source, terminal-native Claude agent.
+I'm [your name] — [one honest line, e.g. "a developer who ships end-to-end and fast"]. Rather than send a résumé, I'll point you at what I built: **ronin**, an open-source terminal agent.
 
-It's a coding/ops agent with the full Claude Code experience — streaming, gated edits with diffs, plan mode, MCP, subagents, project memory — **and** the things a startup actually needs that Claude Code doesn't: it generates images/video/voice, produces a Monday-morning founder briefing from Stripe/Linear/Slack, root-causes incidents across business data *and* code, and runs on **any** model (Claude when quality matters, free models when cost does).
+It's the full Claude Code experience — streaming, gated edits with diffs, plan mode, MCP, subagents, custom commands, project memory — **plus** what a startup actually needs and Claude Code doesn't: it generates images/video/voice, turns Stripe/Linear/Slack into a Monday-morning founder briefing, root-causes incidents across business data *and* code, and runs on **any** model — Claude when quality matters, free models when cost does.
 
-Two things I think are most relevant to this role:
-- **It has its own eval harness** — `ronin eval` scores the agent on objective tasks and works across providers, so "does the agent actually work?" is a number, not a vibe.
-- **It's cost-aware and provider-agnostic** — the exact same agent runs on Claude or on a free tier, with automatic rate-limit handling. That's the reality of shipping AI at a startup.
+Two things I think map directly to this role:
 
-Code (515+ tests, MIT): **https://github.com/rohithkandula19/Ronin**
-60-second tour: [demo GIF / loom link]
+- **It knows whether it works.** `ronin eval` scores the agent on objective, deterministic tasks (no LLM judge) across providers — "does the agent work?" is a number, not a vibe. I also documented *why* naive cross-model benchmarking on a free tier is misleading, instead of hiding it.
+- **It's cost-aware and provider-agnostic.** The same agent runs on Claude or a free tier, with automatic 429 back-off and smart model routing (cheap model for simple turns, strong for hard). That's the reality of shipping AI in a startup.
+
+- **Repo** (526 tests, MIT): https://github.com/rohithkandula19/Ronin
+- **60-sec demo**: the GIF at the top of the README
+- **Benchmark + method**: [docs/BENCHMARK.md](https://github.com/rohithkandula19/Ronin/blob/main/docs/BENCHMARK.md)
 
 Would love 15 minutes.
 
-[your name] · [email] · [github]
+[your name] · [email] · [github] · [linkedin]
 
 ---
 
-## What ronin demonstrates (map to the role)
+## Why this maps to the role (use in the email or the interview)
 
 | The role wants… | ronin shows it |
 |---|---|
-| Building real agents on Claude | Hand-rolled ReAct loop, gated tools, streaming, plan mode, subagents — no framework crutches |
-| Evals / knowing it works | `ronin eval` — objective, deterministic, cross-provider agent scoring |
-| Working with Anthropic's ecosystem | First-class **MCP** client; provider abstraction with Claude as the default |
-| Startup pragmatism | Founder briefings, `investigate`, cost-aware multi-provider (free → Claude), zero-config demo |
-| Shipping & craft | 515+ tests, CI, packaged CLI, polished UX, MIT, building in public |
+| Building real agents on Claude | Hand-rolled ReAct loop, gated tools, streaming, plan mode, subagents, self-verification — no framework crutches |
+| Knowing it works (evals) | `ronin eval` — objective, deterministic, cross-provider scoring + an honest benchmark write-up |
+| Anthropic's ecosystem | First-class **MCP** client; provider abstraction with Claude as the default |
+| Startup pragmatism | Founder briefings, `investigate`, cost-aware multi-provider + routing, zero-config demo |
+| Shipping & craft | 526 tests, CI, packaged CLI, polished UX, demo GIF, MIT, built in public |
 | Safety | prompt-injection scanner, read-only-by-default integrations, every write gated behind approval |
 
-## Talking points if asked "why not just use Claude Code?"
+## "Why not just use Claude Code?" (you'll get asked)
 
-- ronin isn't a Claude Code clone — it's Claude-Code-*grade* UX plus a startup's actual surface area (data, media, briefings, evals).
-- It's a sandbox for the questions this role lives in: how do you measure agent quality? how do you make agents reliable on flaky free tiers? how do you wire MCP tools in cleanly? — all answered in code.
+ronin isn't a clone — it's Claude-Code-*grade* UX plus a startup's real surface area (data, media, briefings, evals), and it's a working sandbox for the questions this job lives in: how do you measure agent quality, make agents reliable on flaky free tiers, and wire MCP tools in cleanly. All answered in code, not slides.
 
-## Before you send
-- [ ] Record the 60-second demo (`docs/demo/demo.tape` → GIF) and link it.
-- [ ] Skim the README top-to-bottom as a stranger would.
-- [ ] Make sure the repo is public and CI is green.
+## Final checks before you hit send
 - [ ] Personalize every `[bracket]` — generic notes get ignored.
+- [ ] Repo is public, CI is green, README GIF plays.
+- [ ] Send it. The build is done; shipping it is the only step left.
