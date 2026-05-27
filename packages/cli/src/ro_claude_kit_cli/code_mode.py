@@ -30,41 +30,52 @@ from .todo import TodoStore, build_todo_tool
 
 
 def _welcome(console: "Console", config: CSKConfig, root, yolo: bool, *, title: str, hint: str) -> None:
-    """A soft, premium welcome header with the gradient ronin wordmark."""
+    """A Claude-Code-style welcome card: two columns (identity + config on the
+    left, what-you-can-do on the right) in a bordered panel titled with the
+    version, plus a vertical divider between them."""
     from rich.console import Group
     from rich.panel import Panel
+    from rich.table import Table
     from rich.text import Text
 
-    from .theme import ACCENT, MUTE, SOFT, gradient_text
-
-    head = Text()
-    head.append_text(gradient_text("✦ ronin"))
-    sub = title
-    for p in ("ronin — ", "ronin "):
-        if sub.startswith(p):
-            sub = sub[len(p):]
-            break
-    if sub:
-        head.append("  ")
-        head.append(sub, style=SOFT)
+    from . import __version__
+    from .theme import ACCENT, MUTE, SOFT, TOOL, gradient_text
 
     def row(label: str, value: str) -> Text:
-        t = Text("  ")
+        t = Text()
         t.append(f"{label:<6}", style=MUTE)
         t.append(value, style=SOFT)
         return t
 
     mode = "auto-approve (YOLO)" if yolo else "edits + commands need approval"
-    body = Group(
-        head,
+    left = Group(
+        gradient_text("✦ ronin"),
+        Text("one assistant for everything", style=MUTE),
         Text(""),
         row("cwd", str(_Path(root).resolve())),
         row("model", f"{config.provider} · {config.resolved_model()}"),
         row("mode", mode),
-        Text(""),
-        Text("  " + hint, style=MUTE),
     )
-    console.print(Panel.fit(body, border_style=ACCENT, padding=(1, 2)))
+    right = Group(
+        Text("what you can do", style=f"bold {TOOL}"),
+        Text(""),
+        Text("• chat, or ask about your data", style=SOFT),
+        Text("• write & run code (edits gated)", style=SOFT),
+        Text("• review · fix · explain code", style=SOFT),
+        Text("• make images · video · voice", style=SOFT),
+        Text("@path · /help · /q to quit", style=MUTE),
+    )
+    n = max(len(left.renderables), len(right.renderables))
+    divider = Text("\n".join("│" for _ in range(n)), style=MUTE)
+
+    grid = Table.grid(padding=(0, 3))
+    grid.add_column(vertical="top")
+    grid.add_column(vertical="top")
+    grid.add_column(vertical="top")
+    grid.add_row(left, divider, right)
+
+    console.print(Panel(grid, title=f"[bold {ACCENT}]ronin[/bold {ACCENT}] [dim]v{__version__}[/dim]",
+                        title_align="left", border_style=ACCENT, padding=(1, 2)))
     console.print()
 
 
