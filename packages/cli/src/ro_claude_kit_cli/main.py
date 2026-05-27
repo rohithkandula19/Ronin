@@ -1147,6 +1147,29 @@ def investigate(
     console.print(f"[dim]{meta}[/dim]")
 
 
+# ---------- fix ----------
+
+@app.command(name="fix")
+def fix_cmd(
+    command: list[str] = typer.Argument(..., help="The command to make pass, e.g. \"pytest -q\"."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    rounds: int = typer.Option(5, "--rounds", help="Max fix→re-run rounds."),
+    yolo: bool = typer.Option(False, "--yolo", help="Auto-approve edits (sandbox use)."),
+) -> None:
+    """Autonomous fix-until-green: run a command, and if it fails, edit + re-run until it passes.
+
+    Examples:  ronin fix "pytest -q"  ·  ronin fix "npm test"  ·  ronin fix "python app.py"
+    """
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold]. "
+                      "Run [bold]ronin login[/bold] or [bold]ronin init[/bold] first.")
+        raise typer.Exit(2)
+    from .fix_mode import run_fix
+    ok = run_fix(config, " ".join(command), root=root, console=console, max_rounds=rounds, yolo=yolo)
+    raise typer.Exit(0 if ok else 1)
+
+
 # ---------- review ----------
 
 @app.command()

@@ -229,6 +229,7 @@ Add `.csk/` to `.gitignore` — the file is plaintext credentials.
 | **`ronin code [task]`** | **Coding agent — streaming, plan tracker, project memory, slash commands.** |
 | **`ronin investigate "<symptom>"`** | **Root-cause a problem across your business data AND your code.** |
 | **`ronin review [--base main]`** | **AI code review of your diff — severity-tagged findings, read-only.** |
+| **`ronin fix "<command>"`** | **Autonomous fix-until-green: runs the command, edits + re-runs until it passes.** |
 | **`ronin explain <path>`** | **Explain a codebase — prose + Mermaid diagram + optional voice.** |
 | `ronin image "<prompt>"` | Text-to-image, shown in the terminal (free Pollinations / OpenAI). |
 | `ronin video "<prompt>"` | Text-to-video — free frames+ffmpeg, or `--engine replicate` (paid). |
