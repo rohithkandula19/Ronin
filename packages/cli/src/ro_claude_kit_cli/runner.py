@@ -71,7 +71,20 @@ def _friendly_provider_error(e: Exception, config: CSKConfig) -> str:
             f"[bold]/login groq[/bold].[/dim]"
         )
     if status is not None:
-        return f"[red]✗ {provider} returned HTTP {status}.[/red] [dim]Check your config / model name.[/dim]"
+        detail = ""
+        resp = getattr(e, "response", None)
+        if resp is not None:
+            try:
+                body = resp.json()
+                if isinstance(body, dict):
+                    detail = str((body.get("error") or {}).get("message") or "")
+                elif isinstance(body, list) and body:
+                    detail = str((body[0].get("error") or {}).get("message") or "")
+            except Exception:  # noqa: BLE001
+                detail = ""
+        detail = f"\n[dim]{detail[:240]}[/dim]" if detail else ""
+        return (f"[red]✗ {provider} returned HTTP {status}.[/red] "
+                f"[dim]Check your config / model name.[/dim]{detail}")
     if name in ("ConnectError", "ConnectTimeout", "ReadTimeout", "TimeoutException"):
         return (f"[red]✗ couldn't reach {provider}.[/red] "
                 f"[dim]Check your network or base_url. ({name})[/dim]")
