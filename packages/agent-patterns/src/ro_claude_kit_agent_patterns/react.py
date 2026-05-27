@@ -14,6 +14,9 @@ OnStep = Callable[[Step], None]
 BeforeTool = Callable[[str, dict], bool]
 # Token-streaming hook: called with each text delta as the model generates it.
 OnText = Callable[[str], None]
+# Post-tool hook: (tool_name, arguments, result, is_error) -> None. Fires after
+# each tool runs — used for side-effects like auto-format/test hooks.
+AfterTool = Callable[[str, dict, str, bool], None]
 
 
 class ReActAgent(BaseModel):
@@ -60,6 +63,7 @@ class ReActAgent(BaseModel):
         on_step: OnStep | None = None,
         before_tool: BeforeTool | None = None,
         on_text: OnText | None = None,
+        after_tool: "AfterTool | None" = None,
     ) -> AgentResult:
         """Run the agent.
 
@@ -161,6 +165,11 @@ class ReActAgent(BaseModel):
                     continue
 
                 result, is_err = execute_tool_call(tool, tc.arguments)
+                if after_tool is not None:
+                    try:
+                        after_tool(tc.name, tc.arguments or {}, result, is_err)
+                    except Exception:  # noqa: BLE001 - a hook must never break the run
+                        pass
                 emit(Step(
                     kind="tool_result",
                     content={"name": tc.name, "result": result, "is_error": is_err},
