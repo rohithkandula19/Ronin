@@ -1168,6 +1168,33 @@ def investigate(
     console.print(f"[dim]{meta}[/dim]")
 
 
+# ---------- eval ----------
+
+@app.command(name="eval")
+def eval_cmd(
+    model: str = typer.Option(None, "--model", help="Evaluate a specific model on the current provider."),
+) -> None:
+    """Measure agent quality on objective tasks — prints a scored success-rate table.
+
+    Runs ronin's agent through a battery of real jobs (reasoning, codegen, tool
+    use, multi-file, instruction-following) in throwaway sandboxes and checks the
+    *outcome* of each (no LLM judge), so the score is trustworthy and works on any
+    provider. Compare models with ``--model``.
+    """
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold]. "
+                      "Run [bold]ronin login[/bold] or [bold]ronin init[/bold] first.")
+        raise typer.Exit(2)
+    from .agent_eval import render_report, run_eval
+    shown = model or config.resolved_model()
+    console.print(f"[dim]running agent eval on [bold]{config.provider} · {shown}[/bold] — "
+                  "several real model calls, ~1–2 min on free tiers…[/dim]")
+    with console.status("[dim] evaluating…[/dim]", spinner="dots"):
+        outcomes = run_eval(config, model=model)
+    render_report(console, config, outcomes, model=model)
+
+
 # ---------- version ----------
 
 @app.command()
