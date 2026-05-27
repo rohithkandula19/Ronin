@@ -1227,6 +1227,28 @@ def investigate(
     console.print(f"[dim]{meta}[/dim]")
 
 
+# ---------- review ----------
+
+@app.command()
+def review(
+    base: str = typer.Option(None, "--base", help="Review this branch vs a base ref (e.g. main)."),
+    staged: bool = typer.Option(False, "--staged", help="Review only staged changes."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo to review."),
+) -> None:
+    """AI code review of your changes — structured, severity-tagged findings (read-only).
+
+    Reviews your working-tree diff by default; ``--staged`` for staged changes,
+    ``--base main`` to review the whole branch against a base.
+    """
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold]. "
+                      "Run [bold]ronin login[/bold] or [bold]ronin init[/bold] first.")
+        raise typer.Exit(2)
+    from .review_mode import run_review
+    run_review(config, root=root, base=base, staged=staged, console=console)
+
+
 # ---------- version ----------
 
 @app.command()
