@@ -1,6 +1,6 @@
 [project]
 name = "ro-claude-kit-cli"
-version = "0.20.0"
+version = "0.20.1"
 description = "ronin — a masterless Claude agent CLI: founder briefings, a coding agent, and terminal-native image/video/speech generation."
 readme = "README.md"
 requires-python = ">=3.11"

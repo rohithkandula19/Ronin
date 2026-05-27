@@ -3,11 +3,12 @@
 > **A masterless Claude agent CLI.** A Monday-morning founder **briefing** (revenue, churn, failed payments, urgent issues), an autonomous **agent** for ad-hoc data questions, a **coding agent** (Claude-Code shaped) that reads/edits/runs your code, and **media generation** — images, video, and speech, right in the terminal.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-v0.13.0-blue)](CHANGELOG.md)
-[![Tests](https://img.shields.io/badge/tests-498%20passing-green)](https://github.com/rohithkandula19/Ronin/actions)
+[![Status](https://img.shields.io/badge/status-v0.20.0-blue)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Providers](https://img.shields.io/badge/providers-Claude%20·%20Ollama%20·%20OpenAI%20·%20Together%20·%20Groq%20·%20Fireworks-d4a373)](#-supported-providers)
+[![Providers](https://img.shields.io/badge/providers-Claude%20·%20Gemini%20·%20Cerebras%20·%20Groq%20·%20OpenRouter%20·%20Ollama%20·%20OpenAI-d4a373)](#-supported-providers)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
+> **Runs free, no credit card.** Point it at a free model (Gemini / Cerebras / Groq / OpenRouter) and go — or plug in Claude for top quality. Same agent, same UI, your choice of brain.
 
 ```bash
 $ curl -sSL https://raw.githubusercontent.com/rohithkandula19/Ronin/main/install.sh | bash
@@ -97,6 +98,29 @@ Point it at any unfamiliar file, module, or repo and ronin makes it make sense �
 
 A pure coding agent *explains*. ronin explains, **draws it**, and **talks** — because it also has a diagram generator and a voice. Read-only: it explores and explains, never edits.
 
+## 📊 `ronin eval` — know whether your agent actually works
+
+```bash
+ronin eval                                       # score the current provider
+ronin eval --model gpt-oss-120b                  # compare a specific model
+```
+
+Runs the agent through a battery of **real** jobs — reasoning, file writes, code generation, grounded reads, multi-file tasks, instruction-following — each in a throwaway sandbox, and checks the **outcome** (did the file get created? is the answer right?). No LLM-as-judge, so the score is deterministic, reproducible, and works on **any** provider:
+
+```
+ronin eval  ·  cerebras · gpt-oss-120b
+  ✓  arithmetic     reasoning                 1 step    723 tok
+  ✓  write_file     file write (tool use)     2 steps  1,499 tok
+  ✓  codegen        code generation           2 steps  1,664 tok
+  ✓  read_grounded  read + grounded answer    2 steps  1,483 tok
+  ✓  multi_file     multi-file task           3 steps  2,602 tok
+  ✓  instruction    instruction-following     1 step    707 tok
+
+  6/6 passed (100%)  ·  8,678 tokens
+```
+
+Swap providers with `/login` and re-run to compare them on the exact same bar — the "how do you know it works?" artifact, built in.
+
 ## 🎨 `ronin image` / `ronin video` / `ronin say` — media, in the terminal
 
 ```bash
@@ -114,24 +138,27 @@ The coding agent can make media too: `ronin code` has a **`generate_image`** too
 
 ## 🧠 Supported providers
 
-`ronin` works with any LLM — proprietary or open-source. Switch providers with one config change.
+`ronin` works with any LLM — proprietary or open-source. **Switch provider or model from inside a session, no restart:** `/login <provider>` sets a provider + key (masked), `/model <name>` swaps the model.
 
-| Provider | Backend | Default model | Auth |
+| Provider | Free? | Default model | Notes |
 |---|---|---|---|
-| **Anthropic** (default) | native SDK | `claude-sonnet-4-6` | `ANTHROPIC_API_KEY` |
-| **Ollama** (local, free) | OpenAI-compat | `llama3.1` | none — runs on your machine |
-| **OpenAI** | OpenAI-compat | `gpt-4o-mini` | `OPENAI_API_KEY` |
-| **Together** | OpenAI-compat | `Llama-3.3-70B-Instruct-Turbo` | `OPENAI_API_KEY` |
-| **Groq** | OpenAI-compat | `llama-3.3-70b-versatile` | `OPENAI_API_KEY` |
-| **Fireworks** | OpenAI-compat | `llama-v3p3-70b-instruct` | `OPENAI_API_KEY` |
-| **Custom** | OpenAI-compat | (you specify) | (you specify) |
+| **Anthropic** | — | `claude-sonnet-4-6` | top quality; native SDK |
+| **Gemini** | ✅ free tier | `gemini-flash-latest` | generous free RPM; key at aistudio.google.com |
+| **Cerebras** | ✅ free tier | `gpt-oss-120b` | very fast / high throughput |
+| **Groq** | ✅ free tier | `llama-3.3-70b-versatile` | 30 req/min free |
+| **OpenRouter** | ✅ free models | `deepseek/deepseek-v4-flash:free` | one key, many models |
+| **Ollama** | ✅ local | `llama3.1` | runs on your machine, no key |
+| **OpenAI** | — | `gpt-4o-mini` | — |
+| **Custom** | — | (you specify) | any OpenAI-compatible endpoint |
 
-Switch providers:
-```toml
-# .csk/config.toml
-provider = "ollama"
-model = "llama3.1"
+```bash
+ronin                       # then, in-session:
+/login gemini               # paste a free key at the masked prompt
+/model gemini-flash-latest  # or switch models without re-entering the key
+/models                     # list what the current provider offers
 ```
+
+ronin auto-retries free-tier rate limits (429) with backoff, and rounds-trips Gemini thinking-model signatures — so free providers work for real multi-step agent tasks.
 
 ## Install
 
@@ -198,8 +225,7 @@ Add `.csk/` to `.gitignore` — the file is plaintext credentials.
 | `ronin costs [--by model\|day]` | Token + cost usage recorded by previous runs. |
 | `ronin tools` | List the tools registered for the current config. |
 | `ronin doctor` | Health check: provider, auth, services. |
-| `ronin eval run <dataset>` | LLM-as-judge eval over a golden dataset (HTML report optional). |
-| `ronin eval drift <a> <b>` | Compare two runs; non-zero exit on regression. CI-friendly. |
+| **`ronin eval [--model X]`** | **Score agent quality on objective tasks — a success-rate table, works on any provider (no LLM judge).** |
 | **`ronin code [task]`** | **Coding agent — streaming, plan tracker, project memory, slash commands.** |
 | **`ronin investigate "<symptom>"`** | **Root-cause a problem across your business data AND your code.** |
 | **`ronin explain <path>`** | **Explain a codebase — prose + Mermaid diagram + optional voice.** |
@@ -207,7 +233,8 @@ Add `.csk/` to `.gitignore` — the file is plaintext credentials.
 | `ronin video "<prompt>"` | Text-to-video — free frames+ffmpeg, or `--engine replicate` (paid). |
 | `ronin say "<text>"` | Text-to-speech — speak aloud or save audio (`--out`). |
 | `ronin see <image> "<q>"` | Vision — ask the model about a local image. |
-| `ronin set-key [--provider X]` | Set the LLM API key (masked, with a paste-worked confirmation). |
+| `ronin set-key [--provider X] [--model Y]` | Set the LLM API key (masked). In-session, use `/login` instead. |
+| `/login <provider>` · `/model <name>` · `/models` | In-session: switch provider+key / model / list models (no restart). |
 | `ronin doctor --check` | Verify the key + model actually work (live ping). |
 | `ronin version` | Print the version. |
 
