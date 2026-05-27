@@ -20,7 +20,41 @@ from .theme import ACCENT, MUTE, SOFT
 try:  # pragma: no cover - platform dependent
     import readline  # noqa: F401
 except Exception:  # noqa: BLE001
-    pass
+    readline = None  # type: ignore
+
+_completer_installed = False
+
+
+def _slash_completer(text: str, state: int):
+    """Tab-complete /slash-commands (only when the word starts with '/')."""
+    if not text.startswith(("/", ":")):
+        return None
+    try:
+        from .code_mode import SLASH_COMMANDS
+        names = sorted(SLASH_COMMANDS)
+    except Exception:  # noqa: BLE001
+        names = ["help", "login", "model", "models", "clear", "diff", "undo",
+                 "memory", "init", "tools", "quit"]
+    prefix = text[0]
+    matches = [f"{prefix}{n} " for n in names if f"{prefix}{n}".startswith(text)]
+    return matches[state] if state < len(matches) else None
+
+
+def _install_completer() -> None:
+    global _completer_installed
+    if _completer_installed or readline is None:
+        return
+    try:
+        readline.set_completer(_slash_completer)
+        readline.set_completer_delims(" \t\n")  # keep '/cmd' as one token
+        # libedit (macOS default) vs GNU readline use different bind syntax
+        if "libedit" in (getattr(readline, "__doc__", "") or ""):
+            readline.parse_and_bind("bind ^I rl_complete")
+        else:
+            readline.parse_and_bind("tab: complete")
+        _completer_installed = True
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _interactive(console: Console) -> bool:
@@ -43,6 +77,7 @@ def read_prompt(console: Console, *, symbol: str = "›", hint: str = "") -> str
     if not _interactive(console):
         return console.input("")
 
+    _install_completer()  # tab-complete /commands
     try:
         return _boxed_read(console, symbol=symbol, hint=hint)
     except Exception:  # noqa: BLE001 - never let cosmetics break the REPL

@@ -153,3 +153,11 @@ def test_summarize_result_counts() -> None:
     assert _summarize_result('["a.py", "b.py", "c.py"]').startswith("3 items · ")
     assert _summarize_result("line1\nline2\nline3").startswith("3 lines · ")
     assert _summarize_result("just a short string") == "just a short string"
+
+
+def test_slash_completer_completes_commands() -> None:
+    from ro_claude_kit_cli.prompt_box import _slash_completer
+    assert _slash_completer("/he", 0) == "/help "
+    ms = {_slash_completer("/m", i) for i in range(4)} - {None}
+    assert {"/memory ", "/model ", "/models "} <= ms
+    assert _slash_completer("hello", 0) is None       # only completes slash words
