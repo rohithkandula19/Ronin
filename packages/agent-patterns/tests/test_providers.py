@@ -227,3 +227,30 @@ def test_openai_compat_retries_on_429(monkeypatch) -> None:
 
     assert result.text == "recovered"
     assert fake_client.post.call_count == 3
+
+
+def test_openai_compat_roundtrips_tool_call_provider_meta() -> None:
+    """Gemini-style extra_content (thought_signature) is captured on parse and
+    replayed when the assistant tool-call is serialized back."""
+    from ro_claude_kit_agent_patterns.providers.openai_compat import _to_openai_messages
+
+    sig = {"google": {"thought_signature": "SIG"}}
+    resp = _openai_response(content="", tool_calls=[{
+        "id": "c1", "type": "function",
+        "function": {"name": "f", "arguments": "{}"},
+        "extra_content": sig,
+    }])
+    fake_client = MagicMock()
+    fake_client.__enter__.return_value = fake_client
+    fake_client.__exit__.return_value = False
+    fake_client.post.return_value = resp
+    with patch("ro_claude_kit_agent_patterns.providers.openai_compat.httpx.Client", return_value=fake_client):
+        prov = OpenAICompatProvider(model="m", api_key="k")
+        r = prov.complete(system="s", messages=[Message(role="user", content="hi")], tools=[])
+
+    tc = r.tool_calls[0]
+    assert tc.provider_meta == {"extra_content": sig}
+
+    msgs = _to_openai_messages("sys", [Message(role="assistant", content="", tool_calls=[tc])])
+    asst = next(m for m in msgs if m["role"] == "assistant")
+    assert asst["tool_calls"][0]["extra_content"] == sig

@@ -57,8 +57,9 @@ def _to_openai_messages(system: str, messages: list[Message]) -> list[dict[str, 
             if m.content:
                 msg["content"] = m.content
             if m.tool_calls:
-                msg["tool_calls"] = [
-                    {
+                msg["tool_calls"] = []
+                for tc in m.tool_calls:
+                    call: dict[str, Any] = {
                         "id": tc.id,
                         "type": "function",
                         "function": {
@@ -66,8 +67,11 @@ def _to_openai_messages(system: str, messages: list[Message]) -> list[dict[str, 
                             "arguments": json.dumps(tc.arguments),
                         },
                     }
-                    for tc in m.tool_calls
-                ]
+                    # Replay provider data (e.g. Gemini's thought_signature) so
+                    # thinking models accept the tool-call follow-up.
+                    if tc.provider_meta and tc.provider_meta.get("extra_content"):
+                        call["extra_content"] = tc.provider_meta["extra_content"]
+                    msg["tool_calls"].append(call)
             if "content" not in msg:
                 msg["content"] = ""
             out.append(msg)
@@ -173,6 +177,7 @@ class OpenAICompatProvider(LLMProvider):
                 id=tc.get("id", ""),
                 name=tc.get("function", {}).get("name", ""),
                 arguments=self._parse_args(tc.get("function", {}).get("arguments", "{}")),
+                provider_meta={"extra_content": tc["extra_content"]} if tc.get("extra_content") else None,
             ))
 
         usage = data.get("usage") or {}
@@ -232,9 +237,11 @@ class OpenAICompatProvider(LLMProvider):
                                 yield StreamEvent(type="text", text=delta["content"])
                             for tcd in delta.get("tool_calls") or []:
                                 idx = tcd.get("index", 0)
-                                slot = acc.setdefault(idx, {"id": "", "name": "", "args": ""})
+                                slot = acc.setdefault(idx, {"id": "", "name": "", "args": "", "extra": None})
                                 if tcd.get("id"):
                                     slot["id"] = tcd["id"]
+                                if tcd.get("extra_content"):
+                                    slot["extra"] = tcd["extra_content"]
                                 fn = tcd.get("function") or {}
                                 if fn.get("name"):
                                     slot["name"] = fn["name"]
@@ -245,7 +252,11 @@ class OpenAICompatProvider(LLMProvider):
                 break  # streamed successfully; leave the retry loop
 
         tool_calls = [
-            ToolCall(id=slot["id"], name=slot["name"], arguments=self._parse_args(slot["args"] or "{}"))
+            ToolCall(
+                id=slot["id"], name=slot["name"],
+                arguments=self._parse_args(slot["args"] or "{}"),
+                provider_meta={"extra_content": slot["extra"]} if slot.get("extra") else None,
+            )
             for _, slot in sorted(acc.items())
         ]
         yield StreamEvent(type="done", response=LLMResponse(

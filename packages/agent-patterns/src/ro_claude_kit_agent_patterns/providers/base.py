@@ -14,6 +14,9 @@ class ToolCall(BaseModel):
     id: str
     name: str
     arguments: dict[str, Any] = Field(default_factory=dict)
+    # Opaque provider-specific data that must be echoed back on follow-up turns
+    # (e.g. Gemini's ``extra_content`` carrying a ``thought_signature``).
+    provider_meta: dict[str, Any] | None = None
 
 
 class Message(BaseModel):
