@@ -27,20 +27,22 @@ OPENAI_BASE_URL = "https://api.openai.com/v1"
 OLLAMA_BASE_URL = "http://localhost:11434/v1"
 
 # Transient statuses worth retrying — free tiers 429 constantly, and an agent
-# loop fires several calls per task, so one retry often saves the whole turn.
+# loop fires several calls per task, so retrying often saves the whole turn.
 _RETRY_STATUSES = {429, 500, 502, 503, 529}
-_MAX_RETRIES = 4
+# Patient enough to ride over a free-tier *per-minute* window (waits sum to
+# ~60s across the attempts), honouring Retry-After when the server sends it.
+_MAX_RETRIES = 6
 
 
 def _retry_wait(attempt: int, retry_after: str | None) -> float:
     """Seconds to wait before retry ``attempt`` (0-based). Honour a numeric
-    Retry-After header when present, else exponential backoff (1,2,4,8,16s)."""
+    Retry-After header when present, else exponential backoff (2,4,8,16,30,30s)."""
     if retry_after:
         try:
-            return min(float(retry_after), 30.0)
+            return min(float(retry_after), 60.0)
         except ValueError:
             pass
-    return float(min(2 ** attempt, 16))
+    return float(min(2 ** (attempt + 1), 30))
 
 
 def _to_openai_messages(system: str, messages: list[Message]) -> list[dict[str, Any]]:
