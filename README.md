@@ -1,4 +1,3 @@
-> **⚠️ All Rights Reserved.** This repository is published for viewing and portfolio purposes only. The code is **not** open source — reuse, redistribution, modification, or derivative works are not permitted without written permission. See [LICENSE](./LICENSE).
 # ronin 🐼
 
 > **A masterless Claude agent CLI.** A Monday-morning founder **briefing** (revenue, churn, failed payments, urgent issues), an autonomous **agent** for ad-hoc data questions, a **coding agent** (Claude-Code shaped) that reads/edits/runs your code, and **media generation** — images, video, and speech, right in the terminal.
