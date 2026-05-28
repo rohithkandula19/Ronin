@@ -1,83 +1,104 @@
-"""The ronin launch welcome — a compact rounded panel with a small kaomoji
-panda that dances, followed by the one-line tagline + quick-help hint.
+"""The ronin launch panda — a small ASCII kaomoji panda that *does things*.
 
-We animate four 3-line kaomoji frames via rich.Live on a TTY, then settle on
-the calm pose. On a non-TTY (pipe / CI / captured Console) the panel renders
-once with the still frame and no animation.
+Each activity (dancing / running / playing / playing football / sleeping) has
+four animation frames. On launch we pick a random activity and animate it in a
+small rounded panel that mirrors the v0.17.4-style welcome card: panda
+mascot + ``ronin vX.Y.Z · masterless Claude agent · <activity>`` line +
+feature chips. The friendly tagline and quick-help hint render below the
+panel.
+
+On a non-TTY (pipe / CI / captured Console) we render a single still frame of
+the neutral panda — no animation, no sleep loops.
+
+The activities are exported as ``PANDA_ACTIVITIES`` so the ``ronin panda``
+command can cycle through them on demand.
 """
 from __future__ import annotations
 
+import random
 import sys
 import time
 
 from rich.console import Console
 
-# Four dance frames: head stays put, arms wave. Each frame is 3 lines.
-# We normalise widths at import time so the panel column stays steady as the
-# panda dances.
-PANDA_FRAMES: tuple[str, ...] = (
-    # frame 0 — calm, arms by sides
-    "   ʕ•ᴥ•ʔ\n"
-    "  ε(   )ɜ\n"
-    "     ||",
-    # frame 1 — celebrating, both arms up
-    "   ʕ•ᴥ•ʔ\n"
-    "   \\( )/\n"
-    "     /\\",
-    # frame 2 — right arm up, left out
-    "   ʕ•ᴥ•ʔ\n"
-    "  ε(   )/\n"
-    "    //",
-    # frame 3 — left arm up, right out
-    "   ʕ•ᴥ•ʔ\n"
-    "  \\(   )ɜ\n"
-    "    \\\\",
-)
+
+PANDA_NEUTRAL: list[str] = [
+    " ʕ•ᴥ•ʔ ",
+    "  (   ) ",
+    "  ‾‾‾‾  ",
+]
 
 
-def _normalize(frames: tuple[str, ...]) -> tuple[str, ...]:
-    """Right-pad every line of every frame to a single shared width so the
-    panel doesn't reflow as we cycle frames."""
-    width = max(len(line) for frame in frames for line in frame.splitlines())
-    return tuple(
-        "\n".join(line.ljust(width) for line in frame.splitlines())
-        for frame in frames
-    )
+PANDA_ACTIVITIES: dict[str, list[list[str]]] = {
+    "dancing": [
+        [" ♪ \\ʕ•ᴥ•ʔ/", "    (   )  ", "   _/   \\_ "],
+        ["    ƪʕ•ᴥ•ʔʅ ♪", "    (   )  ", "    \\   /  "],
+        ["     \\ʕ•ᴥ•ʔ/ ♪", "    (   )  ", "   _/   \\_ "],
+        [" ♪  ƪʕ•ᴥ•ʔʅ ", "    (   )  ", "    \\   /  "],
+    ],
+    "running": [
+        [" »   ʕ•ᴥ•ʔ ", "    ε(   )϶", "     /   ⌐ "],
+        [" »»  ʕ•ᴥ•ʔ ", "    ε(   )϶", "     ⌐   \\ "],
+        [" »   ʕ•ᴥ•ʔ ", "    ε(   )϶", "     J   L "],
+        [" »»  ʕ•ᴥ•ʔ ", "    ε(   )϶", "     L   J "],
+    ],
+    "playing": [
+        [" ʕ•ᴥ•ʔﾉ      ●", "  (   )  ", "  /   \\  "],
+        [" ʕ•ᴥ•ʔﾉ   ●  ", "  (   )  ", "  /   \\  "],
+        [" ʕ•ᴥ•ʔﾉ ●   ",  "  (   )  ", "  /   \\  "],
+        [" ʕ•ᴥ•ʔﾉ●     ", "  (   )  ", "  /   \\  "],
+    ],
+    "playing football": [
+        [" ʕ•ᴥ•ʔ     ", "  (   )    ", "  /  L ●   "],
+        [" ʕ•ᴥ•ʔ  ●  ", "  (   )    ", "  /   ⌐    "],
+        [" ʕ•ᴥ•ʔ    ●", "  (   )    ", "  /   \\    "],
+        [" ʕ•ᴥ•ʔ  ●  ", "  (   )    ", "  /   ⌐    "],
+    ],
+    "sleeping": [
+        [" ʕ-ᴥ-ʔ   z ", "  (   )  ", "  ‾‾‾‾‾  "],
+        [" ʕ-ᴥ-ʔ  Z  ", "  (   )  ", "  ‾‾‾‾‾  "],
+        [" ʕ-ᴥ-ʔ zZ  ", "  (   )  ", "  ‾‾‾‾‾  "],
+        [" ʕ-ᴥ-ʔ Z   ", "  (   )  ", "  ‾‾‾‾‾  "],
+    ],
+}
 
 
-PANDA_FRAMES = _normalize(PANDA_FRAMES)
+def normalize_frames(frames: list[list[str]]) -> list[list[str]]:
+    """Pad every frame to the same row count and width so the panel doesn't
+    reflow or resize as we cycle frames."""
+    rows = max(len(f) for f in frames)
+    width = max((len(line) for f in frames for line in f), default=0)
+    out: list[list[str]] = []
+    for f in frames:
+        padded = [line.ljust(width) for line in f]
+        padded += [" " * width] * (rows - len(padded))
+        out.append(padded)
+    return out
 
-# Backward-compat constant — anything that imports PANDA gets the still pose.
-_STILL_FRAME = 0
-PANDA = PANDA_FRAMES[_STILL_FRAME]
 
-
-def _card(frame_idx: int):
-    """Build the welcome panel (panda + version line + feature chips)."""
-    from rich.console import Group
+def _panel(frame_lines: list[str], activity: str):
+    """One mascot frame + version/status/feature lines in a rounded teal panel."""
+    from rich.align import Align
     from rich.panel import Panel
-    from rich.text import Text
 
     from . import __version__
-    from .theme import ACCENT, MUTE, SOFT
+    from .theme import ACCENT
 
-    panda = Text(PANDA_FRAMES[frame_idx], style="grey85")
-    version = Text()
-    version.append("ronin ", style=f"bold {ACCENT}")
-    version.append(f"v{__version__}", style=SOFT)
-    version.append("  ·  ", style=MUTE)
-    version.append("masterless Claude agent", style=SOFT)
-    version.append("  ·  ", style=MUTE)
-    version.append("running", style="green")
-    tags = Text("briefing · agent · code · chat · tui", style=MUTE)
-
-    body = Group(panda, Text(""), version, tags)
-    return Panel(body, border_style=ACCENT, padding=(0, 2), expand=False)
+    mascot = "\n".join(f"[bold white]{line}[/bold white]" for line in frame_lines)
+    body = (
+        mascot
+        + f"\n\n[bold {ACCENT}]ronin[/bold {ACCENT}] [dim]v{__version__}[/dim]"
+        + f"  ·  [dim]masterless Claude agent[/dim]"
+        + f"  ·  [green]{activity}[/green]\n"
+        + "[dim]briefing · agent · code · chat · tui[/dim]"
+    )
+    return Panel.fit(Align.center(body), border_style=ACCENT, padding=(1, 3))
 
 
-def _print_tagline(console: Console) -> None:
-    """The two lines under the panel: friendly tagline + slash-command hint."""
+def print_welcome_tagline(console: Console) -> None:
+    """The two lines under the panel — friendly tagline + slash-command hint."""
     from rich.text import Text
+
     from .theme import ACCENT, MUTE, SOFT
 
     tag = Text()
@@ -101,39 +122,56 @@ def _print_tagline(console: Console) -> None:
     console.print()
 
 
-_LOOPS = 2          # cycle the 4 frames twice
-_FRAME_DELAY = 0.18  # seconds per frame (~5.5 fps — readable kaomoji shimmy)
+def render_panda(
+    console: Console,
+    *,
+    activity: str | None = None,
+    loops: int = 2,
+    tagline: bool = True,
+) -> None:
+    """Print the panda welcome.
 
+    A random activity is picked unless ``activity`` is given. On a TTY we
+    animate it for ``loops`` cycles via ``rich.Live``, settle on the first
+    frame, then (by default) print the friendly tagline + slash-command hint
+    below the panel. On a non-TTY we render one still frame of the neutral
+    panda — no animation, no sleeping.
 
-def _animate(console: Console) -> None:
-    from rich.live import Live
-
-    sequence = list(range(len(PANDA_FRAMES))) * _LOOPS + [_STILL_FRAME]
-    with Live(
-        _card(sequence[0]),
-        console=console,
-        refresh_per_second=10,
-        transient=False,
-    ) as live:
-        for idx in sequence[1:]:
-            time.sleep(_FRAME_DELAY)
-            live.update(_card(idx))
-
-
-def render_panda(console: Console) -> None:
-    """Print the dancing-panda welcome panel + tagline.
-
-    On a TTY we animate the kaomoji panda for ~1.6s and settle on the still
-    pose. On a non-TTY (pipe, CI, captured Console) we render the still card
-    once and no animation runs.
+    Pass ``tagline=False`` when you only want the mascot panel (e.g. the
+    ``ronin panda`` command, which cycles activities without re-printing the
+    welcome chrome each time).
     """
+    name = activity or random.choice(list(PANDA_ACTIVITIES))
+    frames = normalize_frames(PANDA_ACTIVITIES[name])
+
     is_tty = bool(getattr(console, "is_terminal", False)) and sys.stdout.isatty()
     if is_tty:
         try:
-            _animate(console)
-            _print_tagline(console)
-            return
-        except Exception:  # pragma: no cover — fall back to static
-            pass
-    console.print(_card(_STILL_FRAME))
-    _print_tagline(console)
+            _animate(console, frames, name, loops)
+        except Exception:  # pragma: no cover — fall back to a static print
+            console.print(_panel(normalize_frames([PANDA_NEUTRAL])[0], "ready"))
+    else:
+        console.print(_panel(normalize_frames([PANDA_NEUTRAL])[0], "ready"))
+
+    if tagline:
+        print_welcome_tagline(console)
+
+
+def _animate(console: Console, frames: list[list[str]], activity: str, loops: int) -> None:
+    from rich.live import Live
+
+    with Live(console=console, refresh_per_second=12, transient=False) as live:
+        for _ in range(loops):
+            for f in frames:
+                live.update(_panel(f, activity))
+                time.sleep(0.14)
+        live.update(_panel(frames[0], activity))
+
+
+# Backward-compat exports — anything that imported PANDA / PANDA_FRAMES still
+# gets a sensible value. PANDA_FRAMES now holds the dancing frames joined into
+# strings; PANDA is the neutral pose.
+PANDA_FRAMES: tuple[str, ...] = tuple(
+    "\n".join(frame) for frame in normalize_frames(PANDA_ACTIVITIES["dancing"])
+)
+PANDA: str = "\n".join(PANDA_NEUTRAL)

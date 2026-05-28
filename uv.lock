@@ -2132,7 +2132,7 @@ dev = [
 
 [[package]]
 name = "ro-claude-kit-cli"
-version = "0.44.0"
+version = "0.46.0"
 source = { editable = "packages/cli" }
 dependencies = [
     { name = "anthropic" },

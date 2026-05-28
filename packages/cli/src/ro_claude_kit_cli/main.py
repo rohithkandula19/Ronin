@@ -41,108 +41,11 @@ app = typer.Typer(
 console = Console()
 
 
-# --------------------------------------------------------------------------
-# Panda mascot — a little animated panda that *does things* on launch.
-#
-# Each activity is a list of frames; each frame is a list of text lines. The
-# head is the round-eared bear face ``ʕ•ᴥ•ʔ`` — it renders identically in any
-# terminal (plain text, no colour tricks, no block-art striping), and the
-# motion between frames is what sells "panda running / dancing / …".
-# --------------------------------------------------------------------------
-
-_PANDA_NEUTRAL = [
-    " ʕ•ᴥ•ʔ ",
-    "  (   ) ",
-    "  ‾‾‾‾  ",
-]
-
-_PANDA_ACTIVITIES: dict[str, list[list[str]]] = {
-    "dancing": [
-        [" ♪ \\ʕ•ᴥ•ʔ/", "    (   )  ", "   _/   \\_ "],
-        ["    ƪʕ•ᴥ•ʔʅ ♪", "    (   )  ", "    \\   /  "],
-        ["     \\ʕ•ᴥ•ʔ/ ♪", "    (   )  ", "   _/   \\_ "],
-        [" ♪  ƪʕ•ᴥ•ʔʅ ", "    (   )  ", "    \\   /  "],
-    ],
-    "running": [
-        [" »   ʕ•ᴥ•ʔ ", "    ε(   )϶", "     /   ⌐ "],
-        [" »»  ʕ•ᴥ•ʔ ", "    ε(   )϶", "     ⌐   \\ "],
-        [" »   ʕ•ᴥ•ʔ ", "    ε(   )϶", "     J   L "],
-        [" »»  ʕ•ᴥ•ʔ ", "    ε(   )϶", "     L   J "],
-    ],
-    "playing": [
-        [" ʕ•ᴥ•ʔﾉ      ●", "  (   )  ", "  /   \\  "],
-        [" ʕ•ᴥ•ʔﾉ   ●  ", "  (   )  ", "  /   \\  "],
-        [" ʕ•ᴥ•ʔﾉ ●   ", "  (   )  ", "  /   \\  "],
-        [" ʕ•ᴥ•ʔﾉ●     ", "  (   )  ", "  /   \\  "],
-    ],
-    "playing football": [
-        [" ʕ•ᴥ•ʔ     ", "  (   )    ", "  /  L ●   "],
-        [" ʕ•ᴥ•ʔ  ●  ", "  (   )    ", "  /   ⌐    "],
-        [" ʕ•ᴥ•ʔ    ●", "  (   )    ", "  /   \\    "],
-        [" ʕ•ᴥ•ʔ  ●  ", "  (   )    ", "  /   ⌐    "],
-    ],
-    "sleeping": [
-        [" ʕ-ᴥ-ʔ   z ", "  (   )  ", "  ‾‾‾‾‾  "],
-        [" ʕ-ᴥ-ʔ  Z  ", "  (   )  ", "  ‾‾‾‾‾  "],
-        [" ʕ-ᴥ-ʔ zZ  ", "  (   )  ", "  ‾‾‾‾‾  "],
-        [" ʕ-ᴥ-ʔ Z   ", "  (   )  ", "  ‾‾‾‾‾  "],
-    ],
-}
-
-
-def _normalize_frames(frames: list[list[str]]) -> list[list[str]]:
-    """Pad every frame to the same line-count and width so the panda doesn't
-    jitter or resize the panel as it animates."""
-    rows = max(len(f) for f in frames)
-    width = max((len(line) for f in frames for line in f), default=0)
-    out = []
-    for f in frames:
-        padded = [line.ljust(width) for line in f]
-        padded += [" " * width] * (rows - len(padded))
-        out.append(padded)
-    return out
-
-
-def _panda_panel(frame_lines: list[str], caption: str):
-    """Wrap one mascot frame + the ronin wordmark in a centred panel."""
-    from rich.panel import Panel
-    from rich.align import Align
-
-    mascot = "\n".join(f"[bold white]{line}[/bold white]" for line in frame_lines)
-    body = (
-        mascot
-        + f"\n\n[bold #2dd4bf]ronin[/bold #2dd4bf] [dim]v{__version__}[/dim]"
-        + f"  ·  [dim]{caption}[/dim]\n"
-        + "[dim]briefing · agent · code · chat · tui[/dim]"
-    )
-    return Panel.fit(Align.center(body), border_style="#2dd4bf", padding=(1, 3))
-
-
-def _banner(animate: bool = True, activity: str | None = None, loops: int = 2) -> None:
-    """ronin's panda — a small panda mascot doing a (random) activity on launch.
-
-    On a real TTY it animates frame-by-frame; piped/non-interactive output gets
-    a single still frame so logs and tests stay clean and deterministic.
-    """
-    import random
-    import sys
-    import time
-
-    name = activity or random.choice(list(_PANDA_ACTIVITIES))
-    frames = _normalize_frames(_PANDA_ACTIVITIES[name])
-    caption = f"masterless Claude agent · {name}"
-
-    if animate and sys.stdout.isatty():
-        from rich.live import Live
-        with Live(console=console, refresh_per_second=12, transient=False) as live:
-            for _ in range(loops):
-                for f in frames:
-                    live.update(_panda_panel(f, caption))
-                    time.sleep(0.14)
-            live.update(_panda_panel(frames[0], caption))
-    else:
-        console.print(_panda_panel(_normalize_frames([_PANDA_NEUTRAL])[0],
-                                   "masterless Claude agent"))
+# The panda mascot (dancing / running / playing / playing football / sleeping)
+# lives in panda_art.py — single source of truth for both the launch banner
+# and the `ronin panda` command. We re-export the activities dict so existing
+# imports keep working.
+from .panda_art import PANDA_ACTIVITIES as _PANDA_ACTIVITIES, render_panda as _render_panda
 
 
 @app.callback(invoke_without_command=True)
@@ -156,9 +59,8 @@ def _root(ctx: typer.Context) -> None:
         console.print(ctx.get_help())
         return
 
-    # The real panda — a photoreal cutie rendered as truecolor half-block art,
-    # beside the gradient RONIN wordmark. (The little ASCII activity mascot still
-    # lives in _banner() if we ever want the animated version back.)
+    # A random panda activity (dancing / running / playing / sleeping / …)
+    # in a compact rounded panel, followed by the tagline + slash-command hint.
     from .panda_art import render_panda
     render_panda(console)
 
@@ -1269,7 +1171,7 @@ def panda(
             raise typer.Exit(2)
         activities = [activity]
     for name in activities:
-        _banner(activity=name, loops=loops)
+        _render_panda(console, activity=name, loops=loops, tagline=False)
 
 
 @app.command()

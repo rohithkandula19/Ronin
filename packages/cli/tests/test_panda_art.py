@@ -1,11 +1,11 @@
-"""Lock-in invariants for the dancing kaomoji panda welcome panel.
+"""Lock-in invariants for the ronin launch-panda activities.
 
-The art is generated/edited in ``panda_art.PANDA_FRAMES``; we don't compare
-exact glyph strings (kaomoji can be tweaked). We just guarantee the
-properties the launch banner depends on: there are four frames, they all
-settle to the same printable width (so the panel doesn't reflow as they
-cycle), the static ``PANDA`` constant matches the still frame, and
-``render_panda`` falls back to a single static render when stdout isn't a TTY.
+The actual ASCII art is in ``panda_art.PANDA_ACTIVITIES`` and is allowed to
+be tweaked — we just guarantee the properties the launch banner depends on:
+the named activities exist, every activity has multiple frames, frame widths
+within an activity stay constant (so the panel doesn't reflow as the panda
+animates), and ``render_panda`` behaves on a non-TTY console (no animation,
+prints panel + tagline by default, can skip the tagline).
 """
 from __future__ import annotations
 
@@ -16,37 +16,51 @@ from rich.console import Console
 from ro_claude_kit_cli import panda_art
 from ro_claude_kit_cli.panda_art import (
     PANDA,
+    PANDA_ACTIVITIES,
     PANDA_FRAMES,
-    _STILL_FRAME,
+    PANDA_NEUTRAL,
+    normalize_frames,
+    print_welcome_tagline,
     render_panda,
 )
 
 
-def _max_width(art: str) -> int:
-    return max(len(line) for line in art.splitlines())
+REQUIRED_ACTIVITIES = {"dancing", "running", "playing", "sleeping"}
 
 
-def test_four_dance_frames():
-    assert len(PANDA_FRAMES) == 4
-    for frame in PANDA_FRAMES:
-        assert frame and isinstance(frame, str)
+def test_required_activities_exist():
+    missing = REQUIRED_ACTIVITIES - set(PANDA_ACTIVITIES)
+    assert not missing, f"missing activities: {missing}"
 
 
-def test_frames_share_a_width_so_the_panel_does_not_reflow():
-    widths = {_max_width(f) for f in PANDA_FRAMES}
-    assert len(widths) == 1, f"frame widths diverge: {widths}"
+def test_every_activity_has_at_least_two_frames():
+    for name, frames in PANDA_ACTIVITIES.items():
+        assert len(frames) >= 2, f"{name}: needs ≥2 frames to animate"
 
 
-def test_every_frame_shows_the_panda_face():
-    # the ʕ ᴥ ʔ kaomoji bracket-mouth-bracket is the panda signature
-    for i, frame in enumerate(PANDA_FRAMES):
-        assert "ʕ" in frame and "ᴥ" in frame and "ʔ" in frame, (
-            f"frame {i} missing panda face: {frame!r}"
-        )
+def test_every_frame_shows_a_panda_face():
+    # ʕ + ʔ are the panda kaomoji ears — sleeping uses ʕ-ᴥ-ʔ, others use ʕ•ᴥ•ʔ
+    for name, frames in PANDA_ACTIVITIES.items():
+        for i, frame in enumerate(frames):
+            blob = "\n".join(frame)
+            assert "ʕ" in blob and "ʔ" in blob, f"{name} frame {i} missing panda face"
 
 
-def test_still_constant_matches_still_frame():
-    assert PANDA == PANDA_FRAMES[_STILL_FRAME]
+def test_normalize_frames_pads_to_a_single_shape():
+    for name, frames in PANDA_ACTIVITIES.items():
+        normalized = normalize_frames(frames)
+        row_counts = {len(f) for f in normalized}
+        widths = {len(line) for f in normalized for line in f}
+        assert len(row_counts) == 1, f"{name}: frame row count varies: {row_counts}"
+        assert len(widths) == 1, f"{name}: frame line widths vary: {widths}"
+
+
+def test_backward_compat_constants():
+    # PANDA / PANDA_FRAMES are still exported for anything that imported them
+    assert isinstance(PANDA, str) and PANDA
+    assert isinstance(PANDA_FRAMES, tuple) and len(PANDA_FRAMES) >= 2
+    assert all(isinstance(f, str) and f for f in PANDA_FRAMES)
+    assert isinstance(PANDA_NEUTRAL, list)
 
 
 def test_render_panda_non_tty_is_static_no_animation(monkeypatch):
@@ -57,12 +71,34 @@ def test_render_panda_non_tty_is_static_no_animation(monkeypatch):
     monkeypatch.setattr(panda_art, "_animate", boom)
 
     buf = StringIO()
-    console = Console(file=buf, force_terminal=False, width=120)
+    console = Console(file=buf, force_terminal=False, width=140)
     render_panda(console)
     out = buf.getvalue()
-    # the welcome panel includes the kaomoji face and the version label
-    assert "ʕ" in out and "ᴥ" in out, "expected panda face in non-TTY render"
-    assert "ronin" in out, "expected ronin version label in non-TTY render"
-    # tagline + hint lines render too
+    # panel content
+    assert "ʕ" in out, "expected panda face in non-TTY render"
+    assert "ronin" in out, "expected ronin version label"
+    # tagline + hint (default behaviour)
     assert "One assistant for everything" in out
+    assert "@path" in out and "/help" in out and "/q" in out
+
+
+def test_render_panda_can_skip_tagline(monkeypatch):
+    """`ronin panda` cycles activities and shouldn't repeat the welcome chrome."""
+    monkeypatch.setattr(panda_art, "_animate", lambda *a, **kw: None)
+
+    buf = StringIO()
+    console = Console(file=buf, force_terminal=False, width=140)
+    render_panda(console, activity="dancing", tagline=False)
+    out = buf.getvalue()
+    assert "ʕ" in out, "expected panda face"
+    assert "One assistant for everything" not in out, "tagline should be suppressed"
+
+
+def test_print_welcome_tagline_emits_the_expected_lines():
+    buf = StringIO()
+    console = Console(file=buf, force_terminal=False, width=140)
+    print_welcome_tagline(console)
+    out = buf.getvalue()
+    assert "One assistant for everything" in out
+    assert "generate a panda image" in out
     assert "@path" in out and "/help" in out and "/q" in out
