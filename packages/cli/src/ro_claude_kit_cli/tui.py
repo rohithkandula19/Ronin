@@ -110,12 +110,26 @@ class RoninApp(App):
         yield Footer()
 
     def _initial_chat(self) -> str:
+        import random
+        from . import __version__
+        from .panda_art import PANDA_ACTIVITIES, normalize_frames
+
+        # Pick a random activity and embed its first frame as a monospace block.
+        # Textual's Markdown widget renders fenced code blocks in monospace,
+        # which keeps the kaomoji art aligned.
+        activity = random.choice(list(PANDA_ACTIVITIES))
+        frame = normalize_frames(PANDA_ACTIVITIES[activity])[0]
+        panda = "```\n" + "\n".join(frame) + "\n```"
         services = ", ".join(self.config.configured_services()) or "_(none)_"
         return (
+            f"{panda}\n\n"
+            f"**ronin** v{__version__} · masterless Claude agent · _{activity}_\n\n"
             f"**provider:** `{self.config.provider}` · "
             f"**model:** `{self.config.resolved_model()}` · "
             f"**services:** {services}\n\n"
-            f"_Type a question below and press Enter._"
+            f"_Type a question below and press Enter._  "
+            f"_For code editing with approval gating, exit and run_ "
+            f"`ronin code` _or_ `ronin --no-tui`."
         )
 
     def on_mount(self) -> None:

@@ -49,9 +49,21 @@ from .panda_art import PANDA_ACTIVITIES as _PANDA_ACTIVITIES, render_panda as _r
 
 
 @app.callback(invoke_without_command=True)
-def _root(ctx: typer.Context) -> None:
+def _root(
+    ctx: typer.Context,
+    no_tui: bool = typer.Option(
+        False, "--no-tui", "--repl",
+        help="Use the stream-and-scroll REPL instead of the full-screen TUI.",
+    ),
+) -> None:
     if ctx.invoked_subcommand is not None:
         return
+
+    # When _root is called directly (not via typer's CLI parsing — e.g. from
+    # tests), typer leaves the parameter default as an OptionInfo object, not
+    # a real bool. Normalise so direct callers see False by default.
+    if not isinstance(no_tui, bool):
+        no_tui = False
 
     import sys
     # Non-interactive (pipe/test) → just show help and exit, cleanly (no banner).
@@ -59,14 +71,10 @@ def _root(ctx: typer.Context) -> None:
         console.print(ctx.get_help())
         return
 
-    # A random panda activity (dancing / running / playing / sleeping / …)
-    # in a compact rounded panel, followed by the tagline + slash-command hint.
-    from .panda_art import render_panda
-    render_panda(console)
-
-    # Interactive terminal: drop into a session, the way `claude` does.
     config = load_config()
     if not config.has_provider_auth():
+        from .panda_art import render_panda
+        render_panda(console)
         console.print(
             "[dim]No provider configured yet. Run [bold]ronin init[/bold] "
             "(or [bold]ronin init --demo[/bold]) to get started, or [bold]ronin --help[/bold] for all commands.[/dim]"
@@ -75,6 +83,20 @@ def _root(ctx: typer.Context) -> None:
         return
 
     root = Path(".")
+
+    # Default: full-screen Textual TUI (Claude-Code-style — takes over the
+    # whole terminal, header + chat + trace + sticky input). The TUI shows
+    # the dancing panda inside its welcome message, so we skip the pre-launch
+    # render (anything printed here gets wiped when Textual takes over).
+    if not no_tui:
+        from .tui import run_tui
+        run_tui(config=config)
+        return
+
+    # --no-tui: the classic stream-REPL with the dancing panda + welcome card.
+    from .panda_art import render_panda
+    render_panda(console)
+
     from .code_mode import run_code_session, run_unified_session
 
     if _is_code_project(root):
@@ -87,14 +109,8 @@ def _root(ctx: typer.Context) -> None:
         run_code_session(config, root=root, console=console)
         return
 
-    # Bare `ronin` outside a code repo = one assistant that does everything:
-    # talk, generate media, query data, and write/run code when asked.
-    console.print(
-        "[dim]One assistant for everything — talk, [bold]\"generate a panda image\"[/bold], "
-        "[bold]\"write code to …\"[/bold] (edits need approval), query your data, and more.\n"
-        "[bold]@path[/bold] to reference files · [bold]/help[/bold] for commands · "
-        "[bold]/q[/bold] to quit.[/dim]\n"
-    )
+    # Bare `ronin --no-tui` outside a code repo = one assistant that does
+    # everything: talk, generate media, query data, write/run code when asked.
     run_unified_session(config, root=root, console=console)
 
 
