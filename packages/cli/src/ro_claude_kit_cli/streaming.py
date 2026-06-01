@@ -171,8 +171,8 @@ class LiveRenderer:
             self.console.print(f"  [{OK}]🔎 {_short(c, 160)}[/{OK}]")
 
     def finish(self) -> None:
-        """Call once the run is over: stop the spinner, close the text block, divider."""
+        """Call once the run is over: stop the spinner and close the text block.
+        No trailing rule — turns are separated by the ``⏺`` marker + the prompt,
+        which keeps the scrollback clean and Claude-Code-like (no per-turn rules)."""
         self._stop_status()
         self._end_text()
-        if self.streamed_text and self._is_term():
-            self.console.rule(style=MUTE)

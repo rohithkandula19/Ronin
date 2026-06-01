@@ -1,10 +1,12 @@
 """Claude-Code-style bottom input box.
 
-On a real terminal this uses **prompt_toolkit** to draw the signature Claude Code
-input: a rounded-corner box, a ``›`` prompt with *ghost placeholder* text, a
-live ``/``-command dropdown (names + descriptions that filter as you type), and a
-right-aligned status on the hint line. History (↑/↓) and inline editing come for
-free.
+On a real terminal this uses **prompt_toolkit** to draw a clean, minimal input:
+a ``›`` prompt with *ghost placeholder* text, a live ``/``-command and ``@``-file
+dropdown (names + descriptions that filter as you type), and a transient hint
+line with a right-aligned status. No persistent borders, so past turns read as
+plain ``› your text`` in scrollback — Claude-Code-style flow. (The boxed,
+pinned-input look lives in the full-screen TUI, ``ronin --tui``.) History (↑/↓)
+and inline editing come for free.
 
 If prompt_toolkit isn't available it falls back to a readline-backed bordered
 prompt, and on anything that isn't a real TTY (pipes, tests) it falls back again
@@ -268,8 +270,6 @@ def _pt_read(console: Console, *, symbol: str, hint: str,
     from prompt_toolkit.styles import Style
 
     width = max(24, console.width)
-    top_border = "╭" + "─" * (width - 2) + "╮"
-    bot_border = "╰" + "─" * (width - 2) + "╯"
 
     class _ReplCompleter(Completer):
         """Live dropdown for the REPL: ``/`` lists commands (name + description),
@@ -284,11 +284,9 @@ def _pt_read(console: Console, *, symbol: str, hint: str,
                 yield Completion(insert, start_position=start, display=display, display_meta="")
 
     style = Style.from_dict({
-        "box": MUTE,
         "arrow": f"{ACCENT} bold",
         "placeholder": f"{MUTE} italic",
         "bottom-toolbar": f"noreverse bg:default {SOFT}",
-        "bottom-toolbar.box": MUTE,
         "bottom-toolbar.status": ACCENT,
         "bottom-toolbar.mode": f"{ACCENT} bold",
         "completion-menu": "bg:default",
@@ -298,20 +296,16 @@ def _pt_read(console: Console, *, symbol: str, hint: str,
         "scrollbar.button": f"bg:{MUTE}",
     })
 
-    # message: rounded top border, then "│ › " — the left wall + prompt. The
-    # right wall is the rprompt below; the bottom border lives in the toolbar.
-    message = [
-        ("class:box", top_border + "\n"),
-        ("class:box", "│ "),
-        ("class:arrow", f"{symbol} "),
-    ]
-
-    # right wall of the box, flush-right on the input line (single-line case)
-    rprompt = [("class:box", "│")]
+    # Minimal inline prompt: just "› " — no persistent box, so past turns read
+    # as clean "› your text" in the terminal's scrollback (Claude-Code-style
+    # flow, no rules or borders between turns). The boxed, pinned-input look
+    # lives in the full-screen TUI (`ronin --tui`).
+    message = [("class:arrow", f"{symbol} ")]
 
     def bottom_toolbar():
-        # Rounded bottom border, then an indented hint line *below* the box —
-        # exactly like Claude Code. A mode chip shows only when off the default.
+        # A single transient hint line *below* the input — prompt_toolkit clears
+        # the bottom toolbar on submit, so it never persists into scrollback. A
+        # mode chip shows only when off the default (mirrors Claude Code).
         mode = current_mode()
         tag = ""
         if mode == "auto-accept":
@@ -322,7 +316,6 @@ def _pt_read(console: Console, *, symbol: str, hint: str,
         right = (f"● {status}" if status else "")
         gap = max(1, width - 2 - _w(tag) - _w(left) - _w(right))
         return [
-            ("class:bottom-toolbar.box", bot_border + "\n"),
             ("class:bottom-toolbar", "  "),
             ("class:bottom-toolbar.mode", tag),
             ("class:bottom-toolbar", left + " " * gap),
@@ -357,7 +350,6 @@ def _pt_read(console: Console, *, symbol: str, hint: str,
     return _pt_session.prompt(
         message,
         placeholder=ph,
-        rprompt=rprompt,
         completer=_ReplCompleter(),
         complete_while_typing=True,
         complete_in_thread=True,   # scan dirs off the UI thread → no typing lag
@@ -381,17 +373,13 @@ def _w(text: str) -> int:
 # readline fallback prompt                                                      #
 # --------------------------------------------------------------------------- #
 def _boxed_read(console: Console, *, symbol: str, hint: str) -> str:
-    """Flat, full-width fallback prompt (no prompt_toolkit):
+    """Minimal readline fallback (no prompt_toolkit) — matches the clean inline
+    look: a ``›`` prompt with the hint dimmed below, no rules or borders.
 
-        ────────────────────────────────────────
          › your text (any length)
-        ────────────────────────────────────────
-          hint…
+           hint…
     """
-    width = max(24, console.width - 2)
-    console.print(f"[{MUTE}]{'─' * width}[/{MUTE}]")
-    line = console.input(f" [{SOFT}]{symbol}[/{SOFT}] ")
-    console.print(f"[{MUTE}]{'─' * width}[/{MUTE}]")
+    line = console.input(f" [bold {ACCENT}]{symbol}[/bold {ACCENT}] ")
     if hint:
         console.print(f"  [{MUTE}]{hint}[/{MUTE}]")
     return line
