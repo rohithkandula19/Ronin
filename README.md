@@ -3,9 +3,9 @@
 > **A masterless, terminal-native Claude agent.** ronin is a **Claude-Code-style AI coding agent** — it reads, edits, and runs your code from the terminal — built on a **provider-agnostic agent framework** with first-class evals, memory, security hardening, and MCP tool integrations. Plug in Claude for top quality, or run it **free** on Gemini / Cerebras / Groq / Ollama.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-v0.52.0-blue)](CHANGELOG.md)
+[![Status](https://img.shields.io/badge/status-v0.53.0-blue)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-636%20passing-brightgreen.svg)](#-whats-under-the-hood)
+[![Tests](https://img.shields.io/badge/tests-730%20passing-brightgreen.svg)](#-whats-under-the-hood)
 [![Providers](https://img.shields.io/badge/providers-Claude%20·%20Gemini%20·%20Cerebras%20·%20Groq%20·%20OpenRouter%20·%20Ollama%20·%20OpenAI-d4a373)](#-supported-providers)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
@@ -36,7 +36,7 @@ Regenerate the walkthrough anytime with [`vhs`](https://github.com/charmbracelet
 
 **One front door:** type **`ronin`** and you get a single agent that reads, writes, and runs code (every edit and shell command gated behind a diff preview and your approval — reads run freely), generates images/video/speech, and queries your connected data — all in one conversation, in plain language. It's **provider-agnostic**: the same agent runs on Claude or on free open models.
 
-It's also a **reference implementation for building agents the right way**. The CLI is a thin wrapper over seven independently-usable packages — agent patterns, evals, memory, hardening, and MCP integrations — backed by **636 tests** that run offline in CI. (`ronin code` is the focused coding agent; `ronin chat` is the talk/media surface — both available when you want a single-purpose mode.)
+It's also a **reference implementation for building agents the right way**. The CLI is a thin wrapper over seven independently-usable packages — agent patterns, evals, memory, hardening, and MCP integrations — backed by **730 tests** that run offline in CI. (`ronin code` is the focused coding agent; `ronin chat` is the talk/media surface — both available when you want a single-purpose mode.)
 
 ## 🛠 `ronin code` — the coding agent (Claude-Code shaped)
 
@@ -94,9 +94,12 @@ Because ronin is **provider-agnostic**, it can do things a single-vendor agent s
 
 Plus, on the coding agent itself:
 
+- **🖥️ Full-screen TUI by default** — a managed input box separate from the output, so you can **type and queue while it works** (no keystroke interleaving), with streaming, a live tool trace, and an approval modal for edits/commands. `--no-tui` drops to the inline REPL.
 - **⚡ Prompt caching** (Anthropic) — the static system + tools prefix is cached on every turn (up to ~90% cheaper/faster); the status line shows `⚡N cached`.
-- **🧠 Semantic code intelligence** — `diagnostics` / `definition` / `references` via real language servers (pyright, ts-language-server, gopls, rust-analyzer), with graceful "install X" fallback when a server is missing.
+- **🧠 Semantic code intelligence** — `diagnostics` / `definition` / `references` via real language servers (pyright, ts-language-server, gopls, rust-analyzer), with graceful "install X" fallback. Plus **`repo_map`** (BM25) and optional **`semantic_search`** (embeddings, local-Ollama or OpenAI) to find code by meaning, and **auto context engineering** that front-loads the most relevant files each turn.
 - **🌳 Parallel mutating sub-agents** — `isolated_task` runs several editing agents at once, each in its **own git worktree**, so concurrent edits never collide; each returns a reviewable diff.
+- **🖥️ Background processes** — `run_background` a dev server / test-watcher, tail its logs, and keep working ("watch-and-fix"); **⏪ checkpoint & rewind** snapshots the whole workspace and rolls it back; **👁️ vision-in-the-loop** screenshots a UI and analyzes it so the agent can self-correct.
+- **🛡️ Built for free models** — tool calls survive near-miss argument names (auto-remapped), oversized tool results are capped, context compacts earlier off-Anthropic, clarifying questions (`ask_user`) head off wrong guesses, and per-provider keys mean switching providers never clobbers a key.
 
 ## Install
 
@@ -218,7 +221,7 @@ ronin is MIT-licensed and meant to be picked up by other people. A few notes if 
 | `cli` | The `ronin` binary — agent loop, MCP client, web tools, subagents, eval, media | 382 |
 | `deployment-templates` | Docker Compose, Modal, Vercel, Railway | — |
 
-**636 tests** across all packages, green on every push (see CI). A `FakeProvider` makes them deterministic, offline, and free — no API calls in CI.
+**730 tests** across all packages, green on every push (see CI). A `FakeProvider` makes them deterministic, offline, and free — no API calls in CI.
 
 ## Use the modules without the CLI
 
