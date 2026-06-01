@@ -19,7 +19,7 @@ from rich.console import Console
 
 from ro_claude_kit_agent_patterns import Step
 
-from .theme import ACCENT, BULLET, ERR, MUTE, OK, SOFT, TOOL, gradient_text, short as _short
+from .theme import ACCENT, BULLET, CONNECTOR, ERR, MUTE, OK, SOFT, TOOL, short as _short
 
 
 def _summarize_result(result) -> str:
@@ -117,7 +117,7 @@ class LiveRenderer:
         if not self._is_term():
             # deterministic plain streaming for pipes/tests
             if not self._avatar_shown:
-                self.console.print(gradient_text("✦ ronin"))
+                self.console.print(BULLET)
                 self._avatar_shown = True
             self.console.print(delta, end="", markup=False, highlight=False, soft_wrap=True)
             self._dirty = True
@@ -125,7 +125,7 @@ class LiveRenderer:
 
         if self._live is None:
             if not self._avatar_shown:
-                self.console.print(gradient_text("✦ ronin"))
+                self.console.print(BULLET)
                 self._avatar_shown = True
             from rich.live import Live
             self._buf = ""
@@ -158,13 +158,13 @@ class LiveRenderer:
             if c.get("name") == "update_todos":
                 return  # the checklist was already drawn on the tool_call
             if c.get("is_error"):
-                self.console.print(f"  [{ERR}]↳ ✗ {_short(c.get('result', ''), 100)}[/{ERR}]")
+                self.console.print(f"  [{ERR}]{CONNECTOR}  ✗ {_short(c.get('result', ''), 100)}[/{ERR}]")
             else:
                 preview = _summarize_result(c.get("result", ""))
                 if preview:
-                    self.console.print(f"  [{MUTE}]↳ {preview}[/{MUTE}]")
+                    self.console.print(f"  [{MUTE}]{CONNECTOR}  {preview}[/{MUTE}]")
         elif step.kind == "error":
-            self.console.print(f"  [{ERR}]⚠ {_short(c, 160)}[/{ERR}]")
+            self.console.print(f"  [{ERR}]{CONNECTOR}  ⚠ {_short(c, 160)}[/{ERR}]")
         elif step.kind == "plan":
             self.console.print(f"  [{ACCENT}]🗂 {_short(c, 160)}[/{ACCENT}]")
         elif step.kind == "reflection":

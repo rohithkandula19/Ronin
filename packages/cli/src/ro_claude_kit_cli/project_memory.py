@@ -83,3 +83,47 @@ def write_memory_template(root: Path | str) -> Path:
     if not path.exists():
         path.write_text(_TEMPLATE, encoding="utf-8")
     return path
+
+
+def append_project_note(root: Path | str, note: str) -> tuple[Path, str]:
+    """Append a one-line note to project memory — the ``#`` quick-memory shortcut.
+
+    Writes to the first existing memory file (``RONIN.md`` / ``CLAUDE.md`` /
+    ``AGENTS.md``), else creates ``RONIN.md``. The note is filed under a
+    ``## Notes`` section (newest first). Returns ``(path, filename)``.
+    """
+    base = Path(root)
+    path: Path | None = None
+    for name in MEMORY_FILENAMES:
+        cand = base / name
+        if cand.is_file():
+            path = cand
+            break
+    if path is None:
+        path = base / "RONIN.md"
+
+    bullet = f"- {note.strip()}\n"
+    if path.exists():
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            text = ""
+        if "## Notes" in text:
+            # insert the new bullet right after the "## Notes" heading (newest first)
+            out: list[str] = []
+            inserted = False
+            for line in text.splitlines(keepends=True):
+                out.append(line)
+                if not inserted and line.strip() == "## Notes":
+                    if not line.endswith("\n"):
+                        out.append("\n")
+                    out.append(bullet)
+                    inserted = True
+            text = "".join(out)
+        else:
+            sep = "" if (not text or text.endswith("\n")) else "\n"
+            text = f"{text}{sep}\n## Notes\n\n{bullet}"
+        path.write_text(text, encoding="utf-8")
+    else:
+        path.write_text(f"# {path.stem}\n\n## Notes\n\n{bullet}", encoding="utf-8")
+    return path, path.name

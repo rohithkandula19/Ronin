@@ -19,7 +19,7 @@ from ro_claude_kit_agent_patterns import (
 # ---------- AnthropicProvider ----------
 
 
-def _anthropic_response(text="ok", tool_use=None):
+def _anthropic_response(text="ok", tool_use=None, usage=None):
     blocks = []
     if text:
         blocks.append(SimpleNamespace(type="text", text=text))
@@ -28,7 +28,16 @@ def _anthropic_response(text="ok", tool_use=None):
     return SimpleNamespace(
         content=blocks,
         stop_reason="tool_use" if tool_use else "end_turn",
-        usage=SimpleNamespace(input_tokens=10, output_tokens=5),
+        usage=usage or SimpleNamespace(input_tokens=10, output_tokens=5),
+    )
+
+
+def _cache_tool() -> Tool:
+    return Tool(
+        name="calc",
+        description="do math",
+        input_schema={"type": "object", "properties": {"x": {"type": "number"}}, "required": ["x"]},
+        handler=lambda x: x,
     )
 
 
@@ -88,6 +97,55 @@ def test_anthropic_provider_batches_consecutive_tool_messages() -> None:
     assert sent[2]["role"] == "user"
     tool_result_blocks = [b for b in sent[2]["content"] if b["type"] == "tool_result"]
     assert len(tool_result_blocks) == 2
+
+
+def test_anthropic_provider_sets_cache_breakpoints() -> None:
+    """With caching on (default), the system prompt and the last tool carry a
+    cache_control breakpoint so the static preamble is read from cache."""
+    fake_client = MagicMock()
+    fake_client.messages.create.return_value = _anthropic_response("ok")
+    provider = AnthropicProvider(api_key="sk-test")
+    with patch("ro_claude_kit_agent_patterns.providers.anthropic_provider.anthropic.Anthropic", return_value=fake_client):
+        provider.complete(system="be nice", messages=[Message(role="user", content="hi")], tools=[_cache_tool()])
+
+    kwargs = fake_client.messages.create.call_args.kwargs
+    # system becomes a list of blocks with a breakpoint
+    assert isinstance(kwargs["system"], list)
+    assert kwargs["system"][0]["cache_control"] == {"type": "ephemeral"}
+    assert kwargs["system"][0]["text"] == "be nice"
+    # the last tool carries the breakpoint (covers the whole tools block)
+    assert kwargs["tools"][-1]["cache_control"] == {"type": "ephemeral"}
+
+
+def test_anthropic_provider_caching_can_be_disabled() -> None:
+    """cache_prompt=False sends a plain string system and unannotated tools."""
+    fake_client = MagicMock()
+    fake_client.messages.create.return_value = _anthropic_response("ok")
+    provider = AnthropicProvider(api_key="sk-test", cache_prompt=False)
+    with patch("ro_claude_kit_agent_patterns.providers.anthropic_provider.anthropic.Anthropic", return_value=fake_client):
+        provider.complete(system="be nice", messages=[Message(role="user", content="hi")], tools=[_cache_tool()])
+
+    kwargs = fake_client.messages.create.call_args.kwargs
+    assert kwargs["system"] == "be nice"
+    assert "cache_control" not in kwargs["tools"][-1]
+
+
+def test_anthropic_provider_surfaces_cache_usage() -> None:
+    """cache_read / cache_creation token counts flow through into usage."""
+    fake_client = MagicMock()
+    fake_client.messages.create.return_value = _anthropic_response(
+        "ok",
+        usage=SimpleNamespace(
+            input_tokens=3, output_tokens=5,
+            cache_creation_input_tokens=0, cache_read_input_tokens=1200,
+        ),
+    )
+    provider = AnthropicProvider(api_key="sk-test")
+    with patch("ro_claude_kit_agent_patterns.providers.anthropic_provider.anthropic.Anthropic", return_value=fake_client):
+        resp = provider.complete(system="s", messages=[Message(role="user", content="hi")], tools=[])
+
+    assert resp.usage["cache_read_input_tokens"] == 1200
+    assert resp.usage["cache_creation_input_tokens"] == 0
 
 
 # ---------- OpenAICompatProvider ----------

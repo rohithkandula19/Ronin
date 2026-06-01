@@ -1,10 +1,11 @@
 # ronin 🐼
 
-> **A masterless Claude agent CLI.** A Monday-morning founder **briefing** (revenue, churn, failed payments, urgent issues), an autonomous **agent** for ad-hoc data questions, a **coding agent** (Claude-Code shaped) that reads/edits/runs your code, and **media generation** — images, video, and speech, right in the terminal.
+> **A masterless, terminal-native Claude agent.** ronin is a **Claude-Code-style AI coding agent** — it reads, edits, and runs your code from the terminal — built on a **provider-agnostic agent framework** with first-class evals, memory, security hardening, and MCP tool integrations. Plug in Claude for top quality, or run it **free** on Gemini / Cerebras / Groq / Ollama.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-v0.20.0-blue)](CHANGELOG.md)
+[![Status](https://img.shields.io/badge/status-v0.51.0-blue)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Tests](https://img.shields.io/badge/tests-540%20passing-brightgreen.svg)](#-whats-under-the-hood)
 [![Providers](https://img.shields.io/badge/providers-Claude%20·%20Gemini%20·%20Cerebras%20·%20Groq%20·%20OpenRouter%20·%20Ollama%20·%20OpenAI-d4a373)](#-supported-providers)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
@@ -12,11 +13,9 @@
 
 ```bash
 $ curl -sSL https://raw.githubusercontent.com/rohithkandula19/Ronin/main/install.sh | bash
-$ ronin init --demo
-$ ronin                                    # ONE assistant: talk · code · generate images/video/voice · query data
-$ ronin briefing                          # the founder briefing
-$ ronin agent "why did revenue drop?"     # autonomous data agent
-$ ronin code "fix the failing test"       # coding agent
+$ ronin                                    # ONE agent: talk · code · generate media · query data
+$ ronin code "fix the failing test"        # the coding agent
+$ ronin "explain @main.py and add tests"   # @-mention files inline
 ```
 
 > The binary is **`ronin`**. `ro` and `csk` also work as aliases.
@@ -33,34 +32,11 @@ The animated panda mascot, the command surface, and live MCP wiring — in one s
 
 Regenerate the walkthrough anytime with [`vhs`](https://github.com/charmbracelet/vhs): `brew install vhs && vhs docs/demo/demo.tape`.
 
-```markdown
-# Founder briefing — 2026-05-11
-
-## 💰 Revenue
-- MRR: $334 (ARR ~$4,008)
-- New this week: 2 (Team for Grace, Starter for Henry)
-- Churned this week: 1 — ⚠️ Pro `cus_demo_carol` (ARR loss $588)
-
-## 💳 Payments (last 7 days)
-- 6 succeeded · 1 failed · 0 refunded
-- Failed charges to retry: cus_demo_frank ($49) — card_declined
-- ⚠️ 1 subscription past due — at risk of churn
-
-## 🛠 Engineering
-- Urgent open: 2 · High open: 5 · In-progress: 3
-- ENG-101 Stripe webhook flake — Alice, In Progress
-
-## ✅ Suggested action items
-- Reach out to recently churned customers for exit interviews
-- Retry failed payments / dunning for past-due subs
-- Unblock or escalate every Urgent (P1) issue
-```
-
 ## What is `ronin`?
 
-**One front door:** just type **`ronin`** and you get a single assistant that does everything in one conversation — talk, write & run code (edits/commands gated for approval), generate images/video/speech, and query your connected data. Ask for anything in plain language; it picks the right capability. (`ronin chat` is the talk/media-only surface; `ronin code` is the pure coding agent — both still available when you want a focused mode.)
+**One front door:** type **`ronin`** and you get a single agent that reads, writes, and runs code (every edit and shell command gated behind a diff preview and your approval — reads run freely), generates images/video/speech, and queries your connected data — all in one conversation, in plain language. It's **provider-agnostic**: the same agent runs on Claude or on free open models.
 
-It's also a focused ops tool: the **headline command `ronin briefing`** replaces the Monday-morning "check Stripe, then Linear, then Slack" ritual, with `ronin ask`, `ronin tui`, `investigate`, `explain`, and more as one-shot subcommands.
+It's also a **reference implementation for building agents the right way**. The CLI is a thin wrapper over seven independently-usable packages — agent patterns, evals, memory, hardening, and MCP integrations — backed by **540 tests** that run offline in CI. (`ronin code` is the focused coding agent; `ronin chat` is the talk/media surface — both available when you want a single-purpose mode.)
 
 ## 🛠 `ronin code` — the coding agent (Claude-Code shaped)
 
@@ -68,73 +44,20 @@ It's also a focused ops tool: the **headline command `ronin briefing`** replaces
 ronin code "add a --json flag and update the tests"
 ronin code "explain @main.py and fix the bug in @utils.py"   # @-mention files
 ronin code --plan "refactor the auth module"                 # plan → approve → execute
-ronin code --continue      # resume your last session
+ronin code --continue                                        # resume your last session
 ```
 
 A coding agent that reads, edits, and runs your code — every write and shell command gated behind a diff preview and your approval (read operations run freely). It mirrors the Claude Code experience:
 
-- **Bordered input box + streaming Markdown** — type inside a rounded prompt (↑/↓ history, `/`+TAB completion); replies stream as rendered Markdown with tool activity inline (`● Read(file)` / `↳ result`), edits shown as syntax-highlighted diffs you approve.
+- **Rounded input box + live dropdowns** — type inside a bordered prompt with ghost placeholder text. **`/`** opens a command menu (26 commands with descriptions), **`@`** opens a live file picker, **`!`** runs a shell command inline, and **`#`** files a note straight into project memory. ↑/↓ history, vi-mode (`/vim`).
+- **Shift+Tab modes** — cycle **normal → auto-accept → plan** edit modes, shown live in the input chrome.
+- **Streaming Markdown + inline tool calls** — replies stream as rendered Markdown; tool activity renders Claude-Code-style as `⏺ Read(file)` with `⎿ result` underneath; edits are shown as syntax-highlighted diffs you approve.
 - **@-file mentions** — drop `@path` in your request to pull files into context. Start a message with a folder path to `cd` into it.
 - **Plan mode** (`--plan`) proposes the steps read-only, you approve, then it executes. **Resume** (`--continue`) picks up your last session.
 - **Live plan tracker** — multi-step tasks show a checklist (`✓ / ▶ / ☐`) the agent keeps current as it works.
 - **Tools**: read / write / `edit` / `multi_edit` / `glob` / search / run — plus **`web_search` / `fetch_url`**, a **`task`** subagent, and any **MCP** server's tools (`ronin mcp add …`).
 - **Project memory** — auto-loads `RONIN.md` / `CLAUDE.md` / `AGENTS.md` from the repo so it follows your conventions.
-- **Interactive session** — steer across turns with slash commands: `/help`, `/login`, `/model`, `/models`, `/diff`, `/undo`, `/memory`, `/clear`, `/tools`, `/quit`. A per-turn status line shows provider · model · tokens · time.
-
-And the wedge no pure coding agent has — **`ronin investigate "<symptom>"`** bridges your business data *and* your code to root-cause a problem (e.g. "failed payments spiked the 9th → `stripe_webhook.py` changed in commit `a1b2c3` on the 9th").
-
-## 🧭 `ronin explain` — onboard to any codebase in minutes
-
-```bash
-ronin explain packages/cli              # explain a whole module
-ronin explain main.py "how does auth work" --speak --out notes.md
-```
-
-Point it at any unfamiliar file, module, or repo and ronin makes it make sense — three ways at once:
-
-- **Explains it** in plain English: the big picture, the key pieces, and the data/control flow.
-- **Draws it** — an auto-generated **Mermaid architecture diagram** that renders on GitHub and pastes straight into a README.
-- **Speaks it** (`--speak`) — narrates the explanation aloud.
-
-A pure coding agent *explains*. ronin explains, **draws it**, and **talks** — because it also has a diagram generator and a voice. Read-only: it explores and explains, never edits.
-
-## 📊 `ronin eval` — know whether your agent actually works
-
-```bash
-ronin eval                                       # score the current provider
-ronin eval --model gpt-oss-120b                  # compare a specific model
-```
-
-Runs the agent through a battery of **real** jobs — reasoning, file writes, code generation, grounded reads, multi-file tasks, instruction-following — each in a throwaway sandbox, and checks the **outcome** (did the file get created? is the answer right?). No LLM-as-judge, so the score is deterministic, reproducible, and works on **any** provider:
-
-```
-ronin eval  ·  cerebras · gpt-oss-120b
-  ✓  arithmetic     reasoning                 1 step    723 tok
-  ✓  write_file     file write (tool use)     2 steps  1,499 tok
-  ✓  codegen        code generation           2 steps  1,664 tok
-  ✓  read_grounded  read + grounded answer    2 steps  1,483 tok
-  ✓  multi_file     multi-file task           3 steps  2,602 tok
-  ✓  instruction    instruction-following     1 step    707 tok
-
-  6/6 passed (100%)  ·  8,678 tokens
-```
-
-Swap providers with `/login` and re-run to compare them on the exact same bar — the "how do you know it works?" artifact, built in. Full results + methodology: **[docs/BENCHMARK.md](docs/BENCHMARK.md)**.
-
-## 🎨 `ronin image` / `ronin video` / `ronin say` — media, in the terminal
-
-```bash
-ronin image "a red panda hacking at night, neon, flat vector"   # free, no API key
-ronin video "a red panda surfing a neon wave" --frames 16 --fps 8
-ronin say   "your weekly briefing is ready"                      # speak aloud / --out clip.m4a
-```
-
-- **`ronin image`** — text-to-image that **displays in the terminal** (inline on iTerm2, via `chafa`/`viu`/`imgcat` otherwise, else opens in your viewer). Free by default via **Pollinations** (no key); `--backend openai` for `gpt-image-1`.
-- **`ronin video`** — generates AI frames and stitches a real `.mp4` with `ffmpeg` (free frame-animation). `--engine replicate` runs a paid real-motion text-to-video model (needs `REPLICATE_API_TOKEN`).
-- **`ronin say`** — text-to-speech via your OS engine (free; macOS `say`, Linux espeak). Speaks aloud or saves audio with `--out`.
-- **`ronin see <image> "<question>"`** — vision: ask the model *about* an image. ronin both generates and understands pictures.
-
-The coding agent can make media too: `ronin code` has a **`generate_image`** tool, so "design a logo and drop it in `assets/`" just works.
+- **26 slash commands** — steer across turns: `/help`, `/login`, `/model`, `/models`, `/mcp`, `/agents`, `/compact`, `/context`, `/copy`, `/export`, `/resume`, `/diff`, `/undo`, `/commit`, `/pr`, `/doctor`, `/config`, and more. A per-turn status line shows provider · model · tokens · time.
 
 ## 🧠 Supported providers
 
@@ -158,7 +81,7 @@ ronin                       # then, in-session:
 /models                     # list what the current provider offers
 ```
 
-ronin auto-retries free-tier rate limits (429) with backoff, and rounds-trips Gemini thinking-model signatures — so free providers work for real multi-step agent tasks.
+ronin auto-retries free-tier rate limits (429) with backoff, and round-trips Gemini thinking-model signatures — so free providers work for real multi-step agent tasks.
 
 ## Install
 
@@ -168,20 +91,35 @@ ronin auto-retries free-tier rate limits (429) with backoff, and rounds-trips Ge
 curl -sSL https://raw.githubusercontent.com/rohithkandula19/Ronin/main/install.sh | bash
 ```
 
-Pin a tag: append `-s -- --ref v0.2.0`. PyPI publish is wired (`.github/workflows/release.yml`) and lands `pip install ro-claude-kit-cli` once `PYPI_TOKEN` is set as a repo secret.
+Pin a tag: append `-s -- --ref v0.51.0`. PyPI publish is wired (`.github/workflows/release.yml`) and lands `pip install ro-claude-kit-cli` once `PYPI_TOKEN` is set as a repo secret.
 
 For Postgres support after install: `(cd ~/.local/share/ro-claude-kit && uv pip install psycopg2-binary)`.
+
+## More surfaces
+
+ronin is one agent with several focused entry points beyond `code`:
+
+- **`ronin explain <path>`** — onboard to any codebase: prose explanation **+ an auto-generated Mermaid architecture diagram** (renders on GitHub) **+ optional voice** (`--speak`). Read-only.
+- **`ronin eval [--model X]`** — score agent quality on a battery of **real** sandboxed jobs (reasoning, file writes, codegen, grounded reads, multi-file). Checks the **outcome**, not an LLM judge — so it's deterministic and works on **any** provider. Swap providers with `/login` and re-run to compare on the same bar.
+- **`ronin briefing`** — a founder ops briefing (revenue, churn, failed payments, urgent issues) aggregated from Stripe / Linear / Slack / Notion / Postgres via read-only MCP servers; auto-saved with week-over-week deltas, `--slack` to post.
+- **`ronin investigate "<symptom>"`** — root-cause a problem across your **business data AND your code** (e.g. "failed payments spiked the 9th → `stripe_webhook.py` changed in commit `a1b2c3`").
+- **`ronin image` / `ronin video` / `ronin say` / `ronin see`** — terminal-native media: text-to-image (free via Pollinations, shown inline), frames+ffmpeg video, OS text-to-speech, and vision Q&A on a local image.
+
+```bash
+ronin explain packages/cli                                       # explain a module + diagram
+ronin eval --model gpt-oss-120b                                  # objective score, any provider
+ronin image "a red panda hacking at night, neon, flat vector"    # free, no API key
+```
 
 ## 30-second quickstart (no real credentials)
 
 ```bash
 ronin init --demo                                 # ships fake Stripe + Linear data
 ronin ask "what ENG issues are in progress?"
-ronin ask "which customers have active subscriptions?"
 ronin chat                                        # multi-turn REPL
 ```
 
-Demo mode is wired so you can play with the CLI before connecting any real services. Without an API key, an offline keyword router answers — set a key for full natural-language responses.
+Demo mode lets you play with the CLI before connecting any real services. Without an API key, an offline keyword router answers — set a key for full natural-language responses.
 
 ## Real config
 
@@ -200,108 +138,59 @@ stripe_api_key = "rk_live_..."                  # use a Restricted Key
 linear_api_key = "lin_api_..."
 slack_bot_token = "xoxb-..."
 notion_token = "secret_..."
-database_url = "postgres://readonly_user:...@host:5432/db"
+database_url = "postgres://readonly_user:...@host:5432/db"   # a read-only role
 ```
 
-Add `.csk/` to `.gitignore` — the file is plaintext credentials.
+`.csk/` is gitignored — the file holds plaintext credentials. Keys are user-supplied and never committed.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
+| **`ronin`** | **The unified agent — talk, code, generate media, query data in one conversation.** |
+| **`ronin code [task]`** | **Coding agent — streaming, plan tracker, project memory, 26 slash commands.** |
+| `ronin chat` | Talk/media REPL with short-term memory. |
 | `ronin init [--demo]` | Create a config file (interactive or demo). |
-| **`ronin briefing`** | **Weekly founder briefing — auto-saved + shows week-over-week deltas inline.** |
-| `ronin briefing --slack <#chan>` | Post the briefing to Slack via `chat.postMessage`. |
-| `ronin briefing --history` | Trend table of all past briefings (MRR / new / churn / failed / urgent over time). |
-| `ronin briefing --out file.md` | Write briefing to a Markdown file. |
-| `ronin ask "<question>"` | One-shot — print answer + typed trace. |
-| `ronin chat` | Multi-turn REPL with short-term memory. |
-| `ronin tui` | Full-screen Textual UI: chat + live trace, F1 help. |
-| `ronin save NAME "..."` | Save a question for later (turns ad-hoc into reusable). |
-| `ronin run NAME` | Run a saved query. |
-| `ronin queries` / `ronin unsave NAME` | List or remove saved queries. |
-| `ronin serve --port 8000` | Expose the agent as an HTTP API (`POST /ask`). |
-| `ronin plugins` | List user plugins discovered in `.csk/plugins/`. |
-| `ronin costs [--by model\|day]` | Token + cost usage recorded by previous runs. |
-| `ronin tools` | List the tools registered for the current config. |
-| `ronin doctor` | Health check: provider, auth, services. |
-| **`ronin eval [--model X]`** | **Score agent quality on objective tasks — a success-rate table, works on any provider (no LLM judge).** |
-| **`ronin code [task]`** | **Coding agent — streaming, plan tracker, project memory, slash commands.** |
+| **`ronin eval [--model X]`** | **Score agent quality on objective tasks — works on any provider (no LLM judge).** |
+| **`ronin explain <path>`** | **Explain a codebase — prose + Mermaid diagram + optional voice.** |
 | **`ronin investigate "<symptom>"`** | **Root-cause a problem across your business data AND your code.** |
 | **`ronin review [--base main]`** | **AI code review of your diff — severity-tagged findings, read-only.** |
 | **`ronin fix "<command>"`** | **Autonomous fix-until-green: runs the command, edits + re-runs until it passes.** |
-| **`ronin explain <path>`** | **Explain a codebase — prose + Mermaid diagram + optional voice.** |
-| `ronin image "<prompt>"` | Text-to-image, shown in the terminal (free Pollinations / OpenAI). |
-| `ronin video "<prompt>"` | Text-to-video — free frames+ffmpeg, or `--engine replicate` (paid). |
-| `ronin say "<text>"` | Text-to-speech — speak aloud or save audio (`--out`). |
-| `ronin see <image> "<q>"` | Vision — ask the model about a local image. |
-| `ronin set-key [--provider X] [--model Y]` | Set the LLM API key (masked). In-session, use `/login` instead. |
-| `/login <provider>` · `/model <name>` · `/models` | In-session: switch provider+key / model / list models (no restart). |
-| `ronin doctor --check` | Verify the key + model actually work (live ping). |
+| **`ronin briefing`** | **Founder ops briefing — auto-saved with week-over-week deltas.** |
+| `ronin briefing --slack <#chan>` / `--history` / `--out file.md` | Post to Slack / trend table / write to Markdown. |
+| `ronin ask "<question>"` | One-shot — print answer + typed trace. |
+| `ronin tui` | Full-screen Textual UI: chat + live trace, F1 help. |
+| `ronin mcp add <name> <command>` | Register an MCP tool server (then `/mcp` lists them in-session). |
+| `ronin serve --port 8000` | Expose the agent as an HTTP API (`POST /ask`). |
+| `ronin tools` / `ronin doctor [--check]` | List tools / health-check provider + auth + services (live ping). |
+| `ronin image` / `video` / `say` / `see` | Media: text-to-image, video, text-to-speech, vision. |
+| `ronin set-key [--provider X] [--model Y]` | Set the LLM API key (masked). In-session, use `/login`. |
 | `ronin version` | Print the version. |
 
-## Hosted SaaS (`apps/api`)
+## 🔒 Safety & security
 
-`ronin` is the CLI. For founders who want the briefing to **run automatically every Monday and post to Slack without anyone opening a terminal**, there's a FastAPI backend at `apps/api/`. Sign up, upload encrypted credentials, schedule. Same briefing engine under the hood — the CLI and the hosted version share the aggregator code in `packages/cli/.../briefing.py`.
+ronin can write files and run commands, so safety is built into the core, not bolted on:
 
-```bash
-# run the API
-uv run uvicorn csk_api.main:app --reload --port 8000 --app-dir apps/api
+- **Gated mutations.** Every file write and shell command in the coding agent is held behind a **diff preview + your approval** — read operations run freely. **Plan mode** (`--plan`) is fully read-only.
+- **Prompt-injection scanning.** User input passes through an injection scanner (`packages/hardening`) before it reaches a tool-calling planner.
+- **Read-only data integrations.** The Stripe / Linear / Slack / Notion / Postgres MCP templates are read-only by default; the recommended Postgres setup uses a read-only DB role.
+- **Secrets discipline.** API keys are user-supplied and stored only in local `.csk/` (gitignored) — never committed (the repo is public). PII (emails, SSNs, cards, keys) is redacted from traces before anything leaves your process.
 
-# run the cron worker (separate process)
-uv --project apps/api run python -m csk_api.worker --interval 60
+## 🧱 What's under the hood
 
-# smoke test
-TOKEN=$(curl -s -X POST http://localhost:8000/signup \
-  -H 'Content-Type: application/json' -d '{"email":"you@example.com"}' | jq -r .api_token)
-curl -X POST http://localhost:8000/briefings -H "Authorization: Bearer $TOKEN" | jq -r .markdown
-```
-
-See [`apps/api/README.md`](apps/api/README.md) for the full surface, encryption details, and Railway deploy.
-
-## Releasing & launching
-
-The repo ships two operational bits for whoever's running the project, not just using it:
-
-- **`scripts/release.sh <version>`** — bumps the CLI version, runs the test suite, updates the CHANGELOG, tags `vX.Y.Z`, pushes, and watches the tag-triggered PyPI publish workflow in `.github/workflows/release.yml`. Adds the version to PyPI in ~2 minutes. One-time setup: add a `PYPI_TOKEN` repo secret.
-- **`scripts/launch_kit/`** — 9 numbered, copy-paste-ready messages (Anthropic email/DM, founder DM, Show HN title + first comment, Indie Hackers, Twitter variants, LinkedIn, public Anthropic tag) + a 5-day plan at `DAY_BY_DAY_PLAN.md`. Start there once `release.sh` succeeds.
-
-## Why ronin vs ...
-
-| | ronin | aider | langchain | crewai |
-|---|---|---|---|---|
-| Built specifically for startup ops (Stripe / Linear / Slack / Notion / Postgres) | ✅ | ❌ | ❌ | ❌ |
-| Read-only by default for every integration | ✅ | n/a | ❌ | ❌ |
-| Built-in prompt-injection scanner | ✅ | ❌ | ❌ | ❌ |
-| Works with Claude AND open-source LLMs | ✅ | ✅ | ✅ | ✅ |
-| Zero-config offline demo (`--demo`) | ✅ | ❌ | ❌ | ❌ |
-| Hand-rolled agent loop (no LangChain dependency) | ✅ | ✅ | n/a | ❌ |
-| LLM-as-judge eval suite included | ✅ | ❌ | ❌ | ❌ |
-
-aider is the gold standard for *coding* agents. CrewAI / LangChain are agent frameworks — useful but heavyweight. `ronin` is a focused product for one thing: asking your operational data questions.
-
-## Safety by default
-
-Every input passes through a prompt-injection scanner before reaching the LLM. Every tool is read-only. There is no path through `ronin` to mutate your data — even if the LLM tries, the kit's `ToolAllowlist` blocks it. Adding write paths is a deliberate fork-and-wrap operation through `ApprovalGate`.
-
-PII (emails, SSNs, credit cards, API keys) is redacted from traces before anything leaves your process.
-
-## What's under the hood
-
-`ronin` is the user-facing wrapper. The substance lives in seven packages you can also use independently:
+`ronin` is the user-facing wrapper. The substance lives in **seven packages you can also use independently** — this is the engineering core:
 
 | Package | What it does | Tests |
 |---|---|---|
-| `agent-patterns` | ReAct, Planner-Executor, Multi-Agent Supervisor, Reflexion + provider abstraction (streaming, 429 retry, MCP-style metadata) | 29 |
+| `agent-patterns` | ReAct, Planner-Executor, Multi-Agent Supervisor, Reflexion + a provider abstraction (streaming, 429 retry, MCP-style metadata) | 29 |
 | `eval-suite` | LLM-as-a-judge, golden datasets, drift detection, HTML reports | 11 |
 | `memory` | Short-term (rolling summary), long-term (pluggable vector store), user preferences | 11 |
-| `hardening` | Prompt-injection scanner, tool allowlist, approval gates, output validator | 40 |
+| `hardening` | Prompt-injection scanner, tool allowlist, approval gates, output validator, token budgets, tracing | 40 |
 | `mcp-servers` | Read-only Postgres, Stripe, Linear, Slack, Notion, Tavily, GitHub templates | 67 |
-| `cli` | The `ronin` binary — agent loop, MCP client, web tools, subagents, eval, media | 319 |
+| `cli` | The `ronin` binary — agent loop, MCP client, web tools, subagents, eval, media | 382 |
 | `deployment-templates` | Docker Compose, Modal, Vercel, Railway | — |
-| `apps/demo` | AgentLab — interactive FastAPI playground | 5 |
 
-**515+ tests** across all packages, green on every push (see CI).
+**540 tests** across all packages, green on every push (see CI). A `FakeProvider` makes them deterministic, offline, and free — no API calls in CI.
 
 ## Use the modules without the CLI
 
@@ -317,16 +206,12 @@ agent = ReActAgent(
 print(agent.run("What is the ReAct pattern?").output)
 ```
 
-Use it with Ollama instead of Claude:
+Run it on Ollama instead of Claude:
 
 ```python
 from ro_claude_kit_agent_patterns import OllamaProvider, ReActAgent
 
-agent = ReActAgent(
-    system="...",
-    tools=[...],
-    provider=OllamaProvider(model="llama3.1"),
-)
+agent = ReActAgent(system="...", tools=[...], provider=OllamaProvider(model="llama3.1"))
 ```
 
 Add an eval suite:
@@ -340,6 +225,20 @@ suite = EvalSuite(
 )
 report = suite.run(GoldenDataset.from_jsonl("./golden.jsonl"))
 ```
+
+## Why ronin vs ...
+
+| | ronin | aider | langchain | crewai |
+|---|---|---|---|---|
+| Terminal-native coding agent (read / edit / run, gated) | ✅ | ✅ | ❌ | ❌ |
+| Provider-agnostic — Claude **and** free open-source models | ✅ | ✅ | ✅ | ✅ |
+| Hand-rolled agent loop (no LangChain dependency) | ✅ | ✅ | n/a | ❌ |
+| Built-in prompt-injection scanner | ✅ | ❌ | ❌ | ❌ |
+| Deterministic eval suite included | ✅ | ❌ | ❌ | ❌ |
+| Zero-config offline demo (`--demo`) | ✅ | ❌ | ❌ | ❌ |
+| Terminal-native media (image / video / speech / vision) | ✅ | ❌ | ❌ | ❌ |
+
+aider is the gold standard for *coding* agents; CrewAI / LangChain are general agent frameworks. ronin's angle is a **single, provider-agnostic agent** that pairs a Claude-Code-style coding experience with a tested, reusable framework underneath.
 
 ## Examples
 
@@ -357,33 +256,21 @@ uv run python examples/customer-support/main.py "I was charged twice for my Pro 
 uv run python examples/code-reviewer/main.py examples/code-reviewer/sample_buggy_code.py
 ```
 
-## Try AgentLab — the interactive playground
-
-A FastAPI app that lets you click through all four agent patterns side-by-side:
-
-```bash
-git clone https://github.com/rohithkandula19/Ronin
-cd Ronin
-uv sync --all-packages --all-groups
-uv run uvicorn app.main:app --port 8000 --app-dir apps/demo
-```
-
-Open http://localhost:8000.
-
 ## Repository layout
 
 ```
 Ronin/
 ├── packages/
-│   ├── cli/                  # the ronin binary
+│   ├── cli/                  # the ronin binary — the coding agent + CLI
 │   ├── agent-patterns/       # core loop patterns + provider abstraction
-│   ├── eval-suite/           # LLM-as-a-judge
+│   ├── eval-suite/           # objective + LLM-as-judge evaluation
 │   ├── memory/               # 3-layer memory
-│   ├── mcp-servers/          # 5 read-only service templates
+│   ├── mcp-servers/          # read-only service integrations (MCP)
 │   ├── hardening/            # injection / allowlist / approval / validation
 │   └── deployment-templates/ # docker-compose, modal, vercel, railway
 ├── apps/
 │   ├── demo/                 # AgentLab — interactive playground
+│   ├── api/                  # optional FastAPI backend (scheduled briefings)
 │   └── docs/                 # Mintlify documentation site
 ├── examples/
 └── ...
@@ -398,10 +285,6 @@ Ronin/
 ## License
 
 MIT. See [LICENSE](LICENSE).
-
-## Star history
-
-If this saves you a weekend, ⭐️ the repo. It's the only metric I'll see.
 
 ---
 

@@ -19,6 +19,7 @@ from ro_claude_kit_cli.panda_art import (
     PANDA_ACTIVITIES,
     PANDA_FRAMES,
     PANDA_NEUTRAL,
+    animate_inline,
     normalize_frames,
     print_welcome_tagline,
     render_panda,
@@ -102,3 +103,30 @@ def test_print_welcome_tagline_emits_the_expected_lines():
     assert "One assistant for everything" in out
     assert "generate a panda image" in out
     assert "@path" in out and "/help" in out and "/q" in out
+
+
+def test_animate_inline_non_tty_prints_one_frame_no_live(monkeypatch):
+    """The minimal welcome dance: on a non-TTY we print a single bare frame —
+    no bordered panel, no rich.Live, no sleeping."""
+    import time as _time
+
+    def boom(*_a, **_kw):
+        raise AssertionError("animate_inline slept on a non-TTY console")
+
+    monkeypatch.setattr(_time, "sleep", boom)
+
+    buf = StringIO()
+    console = Console(file=buf, force_terminal=False, width=140)
+    from rich.text import Text
+    animate_inline(console, Text("ronin v9.9.9"), activity="dancing", loops=3)
+    out = buf.getvalue()
+    assert "ʕ" in out and "ʔ" in out, "expected a panda face in the inline dance"
+    assert "ronin v9.9.9" in out, "expected the side-text block beside the panda"
+
+
+def test_animate_inline_defaults_to_dancing_when_activity_unknown():
+    buf = StringIO()
+    console = Console(file=buf, force_terminal=False, width=140)
+    # unknown activity must not raise — it falls back to the dancing frames
+    animate_inline(console, None, activity="not-a-real-activity")
+    assert "ʕ" in buf.getvalue()

@@ -15,8 +15,28 @@ def test_bare_ronin_non_interactive_shows_help() -> None:
     assert "Usage" in r.output or "Commands" in r.output
 
 
-def test_bare_ronin_interactive_launches_tui_by_default(monkeypatch, tmp_path) -> None:
-    """`ronin` with no args, interactive + authed → opens the full-screen TUI."""
+def test_bare_ronin_interactive_opens_repl_by_default(monkeypatch, tmp_path) -> None:
+    """`ronin` with no args, interactive + authed → opens the minimal inline REPL
+    (not the full-screen TUI)."""
+    import sys as _sys
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(_sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(_sys.stdout, "isatty", lambda: True)
+    with patch("ro_claude_kit_cli.tui.run_tui") as run_tui_mock, \
+         patch("ro_claude_kit_cli.main._is_code_project", return_value=False), \
+         patch("ro_claude_kit_cli.main.console.print"), \
+         patch("ro_claude_kit_cli.code_mode.run_unified_session") as run_unified:
+        from ro_claude_kit_cli.main import _root
+        ctx = MagicMock()
+        ctx.invoked_subcommand = None
+        _root(ctx)
+    run_unified.assert_called_once()
+    run_tui_mock.assert_not_called()
+
+
+def test_ronin_tui_flag_launches_tui(monkeypatch, tmp_path) -> None:
+    """`ronin --tui` opts into the full-screen TUI."""
     import sys as _sys
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
     monkeypatch.chdir(tmp_path)
@@ -26,7 +46,7 @@ def test_bare_ronin_interactive_launches_tui_by_default(monkeypatch, tmp_path) -
         from ro_claude_kit_cli.main import _root
         ctx = MagicMock()
         ctx.invoked_subcommand = None
-        _root(ctx)
+        _root(ctx, tui=True)
     run_tui_mock.assert_called_once()
 
 

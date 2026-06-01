@@ -26,56 +26,38 @@ from .prompt_box import read_prompt
 from .runner import build_provider
 from .streaming import LiveRenderer
 from .theme import ACCENT as _ACCENT
+from .theme import ERR as _ERR
+from .theme import MUTE as _MUTE
+from .theme import OK as _OK
 from .todo import TodoStore, build_todo_tool
 
 
 def _welcome(console: "Console", config: CSKConfig, root, yolo: bool, *, title: str, hint: str) -> None:
-    """A Claude-Code-style welcome card: two columns (identity + config on the
-    left, what-you-can-do on the right) in a bordered panel titled with the
-    version, plus a vertical divider between them."""
-    from rich.console import Group
-    from rich.panel import Panel
-    from rich.table import Table
+    """Launch welcome: the **dancing panda** animates inline beside the
+    version/model/cwd block (ronin's signature mascot), then a one-line tips
+    row — Claude-Code-minimal chrome, but the panda still dances on every
+    launch. On a non-TTY (tests/pipes) the panda renders as a single static
+    frame, so output stays deterministic. (``title``/``hint`` are accepted for
+    call-site compatibility; the per-prompt hint line carries shortcuts now.)"""
     from rich.text import Text
 
     from . import __version__
-    from .theme import ACCENT, MUTE, SOFT, TOOL, gradient_text
+    from .panda_art import animate_inline
+    from .theme import ACCENT, MUTE, SOFT
 
-    def row(label: str, value: str) -> Text:
-        t = Text()
-        t.append(f"{label:<6}", style=MUTE)
-        t.append(value, style=SOFT)
-        return t
+    info = Text()
+    info.append("ronin ", style=f"bold {ACCENT}")
+    info.append(f"v{__version__}\n", style=MUTE)
+    info.append(f"{config.provider} · {config.resolved_model()}\n", style=SOFT)
+    info.append(str(_Path(root).resolve()), style=MUTE)
+    if yolo:
+        info.append("  · auto-approve (YOLO)", style="yellow")
 
-    mode = "auto-approve (YOLO)" if yolo else "edits + commands need approval"
-    left = Group(
-        gradient_text("✦ ronin"),
-        Text("one assistant for everything", style=MUTE),
-        Text(""),
-        row("cwd", str(_Path(root).resolve())),
-        row("model", f"{config.provider} · {config.resolved_model()}"),
-        row("mode", mode),
-    )
-    right = Group(
-        Text("what you can do", style=f"bold {TOOL}"),
-        Text(""),
-        Text("• chat, or ask about your data", style=SOFT),
-        Text("• write & run code (edits gated)", style=SOFT),
-        Text("• review · fix · explain code", style=SOFT),
-        Text("• make images · video · voice", style=SOFT),
-        Text("@path · /help · /q to quit", style=MUTE),
-    )
-    n = max(len(left.renderables), len(right.renderables))
-    divider = Text("\n".join("│" for _ in range(n)), style=MUTE)
-
-    grid = Table.grid(padding=(0, 3))
-    grid.add_column(vertical="top")
-    grid.add_column(vertical="top")
-    grid.add_column(vertical="top")
-    grid.add_row(left, divider, right)
-
-    console.print(Panel(grid, title=f"[bold {ACCENT}]ronin[/bold {ACCENT}] [dim]v{__version__}[/dim]",
-                        title_align="left", border_style=ACCENT, padding=(1, 2)))
+    console.print()
+    animate_inline(console, info, activity="dancing", loops=3)
+    console.print()
+    console.print(Text("  /help for commands · @ to add files · shift+tab to cycle mode",
+                       style=MUTE))
     console.print()
 
 
@@ -258,9 +240,13 @@ def _status_line(config: CSKConfig, result: "CodeRunResult", elapsed: float) -> 
     """A subtle per-turn footer: provider · model · ↑in ↓out · time."""
     u = result.usage or {}
     inp, out = u.get("input_tokens", 0), u.get("output_tokens", 0)
+    cached = u.get("cache_read_input_tokens", 0)
     bits = [f"{config.provider} · {config.resolved_model()}"]
     if inp or out:
-        bits.append(f"↑{_fmt_tokens(inp)} ↓{_fmt_tokens(out)}")
+        tok = f"↑{_fmt_tokens(inp)} ↓{_fmt_tokens(out)}"
+        if cached:
+            tok += f" ⚡{_fmt_tokens(cached)} cached"
+        bits.append(tok)
     bits.append(f"{elapsed:.1f}s")
     return "  [#6b7089]" + "  ·  ".join(bits) + "[/#6b7089]"
 
@@ -374,6 +360,10 @@ def run_code_agent(
     if read_only:
         # plan mode: explore but never mutate
         tools = [t for t in tools if t.name in _READONLY_CODE_TOOLS]
+    # Semantic code intelligence (diagnostics / definition / references). These
+    # are read-only, so they're available even in plan mode and to sub-agents.
+    from .lsp import build_lsp_tools
+    tools = tools + build_lsp_tools(root)
     # The live plan tracker: the agent maintains a checklist via update_todos.
     todo_store = TodoStore()
     tools = tools + [build_todo_tool(todo_store)]
@@ -506,6 +496,144 @@ def build_task_tool(config: CSKConfig, root: Path | str, *, max_iterations: int 
     )
 
 
+def build_parallel_task_tool(config: CSKConfig, root: Path | str, *,
+                             max_iterations: int = 12, max_workers: int = 4):
+    """A 'parallel_task' tool: fan out SEVERAL read-only sub-agents at once and
+    collect their results. Each sub-agent is the same read-only explorer as
+    ``task``; running them concurrently turns an N-part investigation from N
+    sequential round-trips into one. Read-only, so there's nothing to collide."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from ro_claude_kit_agent_patterns import Tool
+
+    def _run_one(item: dict) -> tuple[str, str]:
+        desc = str(item.get("description", "task"))
+        prompt = str(item.get("prompt", ""))
+        res = run_code_agent(
+            config, prompt, root=root, console=None, yolo=True, read_only=True,
+            max_iterations=max_iterations, base_system=_SUBAGENT_SYSTEM,
+            include_image_tool=False,
+        )
+        body = res.output if res.success else f"sub-agent error: {res.error or res.output}"
+        return desc, body or "(no output)"
+
+    def _parallel(tasks: list) -> str:
+        if not tasks:
+            return "no tasks provided — pass a list of {description, prompt}"
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(tasks))) as ex:
+            results = list(ex.map(_run_one, tasks))  # ex.map preserves input order
+        return "\n\n".join(f"### {desc}\n{body}" for desc, body in results)
+
+    return Tool(
+        name="parallel_task",
+        description=(
+            "Run SEVERAL read-only sub-agents concurrently and get all their results "
+            "together — use when a job splits into independent investigations (e.g. "
+            "'how does auth work', 'where is rate-limiting', 'list the API routes'). "
+            "Much faster than calling `task` one at a time. Args: tasks (a list of "
+            "{description, prompt} objects)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "tasks": {
+                    "type": "array",
+                    "description": "Independent sub-tasks to run in parallel.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "description": {"type": "string", "description": "Short label."},
+                            "prompt": {"type": "string", "description": "Full instruction for the sub-agent."},
+                        },
+                        "required": ["description", "prompt"],
+                    },
+                },
+            },
+            "required": ["tasks"],
+        },
+        handler=_parallel,
+    )
+
+
+_ISOLATED_SYSTEM = """You are a sub-agent working inside an ISOLATED git worktree —
+your own private checkout of the repository. Make the change you were asked for:
+read, edit, create files, and run commands freely. You are sandboxed — nothing you
+do touches the main checkout or any other agent until the user reviews your diff.
+When finished, briefly summarise what you changed and why. Keep the work tightly
+scoped to your task."""
+
+
+def build_isolated_task_tool(config: CSKConfig, root: Path | str, *,
+                             max_iterations: int = 25, max_workers: int = 3):
+    """An 'isolated_task' tool: run one or more MUTATING sub-agents, each in its
+    own git worktree, in parallel. Because every agent edits a separate checkout,
+    parallel writes can't collide; each returns a self-contained diff for the
+    user to review and apply. Needs a git repo (worktrees are a git feature)."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from ro_claude_kit_agent_patterns import Tool
+
+    from .worktree import NotAGitRepo, git_worktree, is_git_repo, worktree_diff
+
+    def _run_one(index: int, item: dict) -> tuple[str, str]:
+        desc = str(item.get("description", f"task-{index}"))
+        prompt = str(item.get("prompt", ""))
+        try:
+            with git_worktree(root, label=f"t{index}") as wt:
+                res = run_code_agent(
+                    config, prompt, root=wt, console=None, yolo=True, read_only=False,
+                    max_iterations=max_iterations, base_system=_ISOLATED_SYSTEM,
+                    include_image_tool=False,
+                )
+                diff = worktree_diff(wt)
+        except NotAGitRepo as e:
+            return desc, f"cannot isolate: {e}"
+        summary = res.output if res.success else f"sub-agent error: {res.error or res.output}"
+        diff_block = diff.strip() or "(no file changes)"
+        return desc, f"{summary}\n\n--- diff (in isolated worktree) ---\n{diff_block}"
+
+    def _isolated(tasks: list) -> str:
+        if not is_git_repo(root):
+            return ("isolated_task needs a git repository (run `git init` first). "
+                    "For read-only work use task / parallel_task instead.")
+        if not tasks:
+            return "no tasks provided — pass a list of {description, prompt}"
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(tasks))) as ex:
+            results = list(ex.map(lambda iv: _run_one(*iv), list(enumerate(tasks))))
+        return "\n\n".join(f"### {desc}\n{body}" for desc, body in results)
+
+    return Tool(
+        name="isolated_task",
+        description=(
+            "Run one or more MUTATING sub-agents in parallel, each in its own isolated "
+            "git worktree, so their edits can't collide. Each sub-agent can read, edit, "
+            "and run code; it returns a summary plus a diff of its changes for you to "
+            "review and apply. Use for parallel implementation work (e.g. 'add tests to "
+            "module A' and 'refactor module B' at once). Requires a git repo. Args: tasks "
+            "(a list of {description, prompt})."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "tasks": {
+                    "type": "array",
+                    "description": "Independent mutating sub-tasks, each isolated in its own worktree.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "description": {"type": "string", "description": "Short label."},
+                            "prompt": {"type": "string", "description": "Full instruction for the sub-agent."},
+                        },
+                        "required": ["description", "prompt"],
+                    },
+                },
+            },
+            "required": ["tasks"],
+        },
+        handler=_isolated,
+    )
+
+
 # In-session slash commands (the Claude-Code control surface). Both ``/cmd``
 # and ``:cmd`` are accepted.
 SLASH_COMMANDS: dict[str, str] = {
@@ -524,8 +652,127 @@ SLASH_COMMANDS: dict[str, str] = {
     "memory": "show loaded project memory (RONIN.md / CLAUDE.md / AGENTS.md)",
     "init": "scaffold a RONIN.md project-memory file",
     "tools": "list the tools the agent can use",
+    "mcp": "list connected MCP servers and their tools",
+    "agents": "list the sub-agents ronin can delegate to",
+    "compact": "summarize the conversation so far to free up context",
+    "context": "show conversation size + a token estimate for this session",
+    "copy": "copy ronin's last reply to the clipboard",
+    "export": "write the conversation to a markdown file",
+    "resume": "reload this project's saved session from disk",
+    "vim": "toggle vi-style keybindings in the input box (/vim on|off)",
+    "doctor": "health check: provider auth, model, services",
+    "config": "show the active config (provider, model, paths)",
     "quit": "exit the session",
 }
+
+
+def _copy_to_clipboard(text: str) -> bool:
+    """Best-effort copy to the OS clipboard. Returns True on success.
+    Tries pbcopy (macOS), clip (Windows), then xclip/xsel (Linux)."""
+    import shutil
+    import subprocess
+    candidates = (
+        ["pbcopy"], ["clip"],
+        ["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"],
+    )
+    for cmd in candidates:
+        if shutil.which(cmd[0]) is None:
+            continue
+        try:
+            subprocess.run(cmd, input=text.encode("utf-8"), check=True, timeout=5)
+            return True
+        except (OSError, subprocess.SubprocessError):
+            continue
+    return False
+
+
+def _last_assistant_reply(transcript: list[str]) -> str | None:
+    """The most recent 'ASSISTANT: …' entry, prefix stripped."""
+    for entry in reversed(transcript):
+        if entry.startswith("ASSISTANT: "):
+            return entry[len("ASSISTANT: "):]
+    return None
+
+
+def _estimate_tokens(text: str) -> int:
+    """Rough token estimate (~4 chars/token) — good enough for a context gauge."""
+    return max(1, len(text) // 4) if text else 0
+
+
+def _compact_transcript(config: "CSKConfig", transcript: list[str], console: "Console") -> None:
+    """Summarize the conversation into a tight note and replace the transcript
+    with it — frees context while keeping the gist (like Claude Code's /compact)."""
+    if not transcript:
+        console.print("[dim]nothing to compact yet[/dim]")
+        return
+    from ro_claude_kit_agent_patterns import Message
+
+    from .runner import build_provider
+    convo = "\n".join(transcript)
+    before = _estimate_tokens(convo)
+    try:
+        provider = build_provider(config)
+        resp = provider.complete(
+            system=("Summarize the conversation below into a tight set of bullet "
+                    "points: decisions made, facts established, files/areas touched, "
+                    "and any open threads. Preserve specifics (names, paths, numbers). "
+                    "No preamble — just the summary."),
+            messages=[Message(role="user", content=convo[:24000])],
+            tools=[],
+            max_tokens=1024,
+        )
+        summary = (resp.text or "").strip()
+    except Exception as e:  # noqa: BLE001
+        console.print(f"[yellow]couldn't compact:[/yellow] {e}")
+        return
+    if not summary:
+        console.print("[yellow]couldn't compact: empty summary[/yellow]")
+        return
+    transcript.clear()
+    transcript.append(f"ASSISTANT: (summary of earlier conversation)\n{summary}")
+    after = _estimate_tokens(summary)
+    console.print(f"[green]✓[/green] compacted [dim]~{before} → ~{after} tokens[/dim]")
+
+
+def _run_bash_inline(cmd: str, *, console: Console, root: Path | str,
+                     transcript: list[str]) -> None:
+    """``!cmd`` bash mode — run a shell command in the project dir, show its
+    output, and record it so the agent has the result as context on the next
+    turn (Claude Code's ``!`` prefix). The command is whatever the user typed
+    in their own terminal — never anything from observed content."""
+    import subprocess
+    console.print(f"[{_MUTE}]$ {cmd}[/{_MUTE}]", highlight=False)
+    try:
+        proc = subprocess.run(
+            cmd, shell=True, cwd=str(_Path(root).resolve()),
+            capture_output=True, text=True, timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        console.print(f"[{_ERR}]! timed out after 120s[/{_ERR}]")
+        return
+    except Exception as e:  # noqa: BLE001
+        console.print(f"[{_ERR}]! {e}[/{_ERR}]")
+        return
+    out = ((proc.stdout or "") + (proc.stderr or "")).rstrip()
+    if out:
+        console.print(out, highlight=False)
+    if proc.returncode != 0:
+        console.print(f"[{_MUTE}](exit {proc.returncode})[/{_MUTE}]")
+    transcript.append(f"USER: !{cmd}")
+    body = out[:4000] if out else "(no output)"
+    transcript.append(f"ASSISTANT: (ran `{cmd}` · exit {proc.returncode})\n{body}")
+
+
+def _save_quick_note(note: str, *, console: Console, root: Path | str) -> None:
+    """``#note`` quick-memory — file a durable one-liner into project memory
+    (Claude Code's ``#`` shortcut). No agent round-trip."""
+    from .project_memory import append_project_note
+    if not note:
+        console.print(f"[{_MUTE}]usage: #a fact worth remembering[/{_MUTE}]")
+        return
+    _path, name = append_project_note(root, note)
+    console.print(f"[{_OK}]✓ saved to {name}[/{_OK}] [{_MUTE}]{note}[/{_MUTE}]",
+                  highlight=False)
 
 
 def _show_git_diff(console: Console, root: Path | str) -> None:
@@ -723,8 +970,140 @@ def handle_slash_command(
         console.print(f"[green]✓[/green] project memory at [cyan]{path}[/cyan]")
         return "handled"
     if cmd == "tools":
-        names = [t.name for t in build_code_tools(root)] + ["update_todos"]
+        from .lsp import build_lsp_tools
+        names = ([t.name for t in build_code_tools(root)]
+                 + [t.name for t in build_lsp_tools(root)] + ["update_todos"])
         console.print("[dim]" + ", ".join(names) + "[/dim]")
+        return "handled"
+    if cmd == "mcp":
+        from rich.table import Table as _Table
+
+        from .mcp_client import _ACTIVE, load_mcp_servers
+        configured = load_mcp_servers(root)
+        live = {c.name: c for c in _ACTIVE}
+        if not configured and not live:
+            console.print("[dim]no MCP servers configured — add one with "
+                          "[bold]ronin mcp add <name> <command>[/bold][/dim]")
+            return "handled"
+        grid = _Table.grid(padding=(0, 2))
+        grid.add_column(style="cyan", no_wrap=True)
+        grid.add_column()
+        seen = set()
+        for name, spec in configured.items():
+            seen.add(name)
+            c = live.get(name)
+            if c is not None:
+                status = f"[green]● connected[/green] [dim]· {len(c.tools)} tool(s)[/dim]"
+            else:
+                status = "[dim]configured (not started this session)[/dim]"
+            grid.add_row(name, f"{status}  [dim]{spec.get('command', '')}[/dim]")
+        for name, c in live.items():  # live but not in the config file (rare)
+            if name not in seen:
+                grid.add_row(name, f"[green]● connected[/green] [dim]· {len(c.tools)} tool(s)[/dim]")
+        console.print("[bold]MCP servers[/bold]")
+        console.print(grid)
+        return "handled"
+    if cmd == "agents":
+        from rich.table import Table as _Table
+        grid = _Table.grid(padding=(0, 2))
+        grid.add_column(style="cyan", no_wrap=True)
+        grid.add_column()
+        grid.add_row("task", "read-only sub-agent — explores the codebase and reports "
+                             "back; the agent spawns it to scope big multi-part jobs")
+        console.print("[bold]sub-agents[/bold]")
+        console.print(grid)
+        console.print("[dim]the agent delegates to these on its own; you don't call them directly[/dim]")
+        return "handled"
+    if cmd == "copy":
+        reply = _last_assistant_reply(transcript)
+        if not reply:
+            console.print("[dim]nothing to copy yet[/dim]")
+        elif _copy_to_clipboard(reply):
+            console.print(f"[green]✓[/green] copied last reply [dim]({len(reply)} chars)[/dim]")
+        else:
+            console.print("[yellow]no clipboard tool found[/yellow] [dim](install pbcopy/xclip/xsel)[/dim]")
+        return "handled"
+    if cmd == "resume":
+        saved = load_session(root)
+        if not saved:
+            console.print("[dim]no saved session on disk for this project[/dim]")
+            return "handled"
+        transcript.clear()
+        transcript.extend(saved)
+        turns = sum(1 for e in saved if e.startswith("USER: "))
+        console.print(f"[green]✓[/green] resumed [dim]{turns} turn(s) from {_session_path(root)}[/dim]")
+        return "handled"
+    if cmd == "export":
+        if not transcript:
+            console.print("[dim]nothing to export yet[/dim]")
+            return "handled"
+        import datetime as _dt
+        stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+        out = _Path(root).resolve() / f"ronin-conversation-{stamp}.md"
+        lines = ["# ronin conversation", ""]
+        for e in transcript:
+            if e.startswith("USER: "):
+                lines += [f"## You", "", e[len("USER: "):], ""]
+            elif e.startswith("ASSISTANT: "):
+                lines += [f"## ronin", "", e[len("ASSISTANT: "):], ""]
+            else:
+                lines += [e, ""]
+        try:
+            out.write_text("\n".join(lines), encoding="utf-8")
+            console.print(f"[green]✓[/green] exported → [cyan]{out}[/cyan]")
+        except OSError as e:
+            console.print(f"[red]export failed:[/red] {e}")
+        return "handled"
+    if cmd == "compact":
+        _compact_transcript(config, transcript, console)
+        return "handled"
+    if cmd == "context":
+        convo = "\n".join(transcript)
+        turns = sum(1 for e in transcript if e.startswith("USER: "))
+        toks = _estimate_tokens(convo)
+        console.print(
+            f"[bold]context[/bold]  [dim]·[/dim]  {turns} turns  [dim]·[/dim]  "
+            f"{len(transcript)} entries  [dim]·[/dim]  ~{toks} tokens  [dim]·[/dim]  "
+            f"~{len(convo)} chars",
+            highlight=False,
+        )
+        console.print("[dim]shrink it with [bold]/compact[/bold] · wipe it with [bold]/clear[/bold][/dim]",
+                      highlight=False)
+        return "handled"
+    if cmd == "vim":
+        from .prompt_box import set_vi_mode
+        want = None
+        if len(parts) >= 2 and parts[1].lower() in ("on", "true", "yes"):
+            want = True
+        elif len(parts) >= 2 and parts[1].lower() in ("off", "false", "no"):
+            want = False
+        now_on = set_vi_mode(want)
+        console.print(f"[green]✓[/green] vi keybindings [bold]{'on' if now_on else 'off'}[/bold]"
+                      + (" [dim](Esc for normal mode)[/dim]" if now_on else ""))
+        return "handled"
+    if cmd in ("doctor", "config"):
+        from rich.table import Table as _Table
+
+        from . import __version__
+        from .config import find_config_path
+        path = find_config_path()
+        grid = _Table.grid(padding=(0, 2))
+        grid.add_column(style="cyan", no_wrap=True)
+        grid.add_column()
+        grid.add_row("config file", str(path) if path else "[red]none — run ronin init[/red]")
+        grid.add_row("provider", config.provider)
+        grid.add_row("model", config.resolved_model())
+        if config.resolved_base_url():
+            grid.add_row("base_url", config.resolved_base_url() or "")
+        if cmd == "doctor":
+            grid.add_row(f"{config.provider} key",
+                         "[green]present[/green]" if config.has_provider_auth() else "[red]missing[/red]")
+        services = config.configured_services()
+        grid.add_row("services", ", ".join(services) if services else "[dim]none[/dim]")
+        grid.add_row("ronin", __version__)
+        console.print(grid)
+        if cmd == "doctor":
+            console.print("[dim]live key+model check: [bold]ronin doctor --check[/bold][/dim]")
         return "handled"
 
     console.print(f"[yellow]unknown command[/yellow] /{cmd} — try [cyan]/help[/cyan]")
@@ -757,11 +1136,27 @@ def run_code_session(
 
     while True:
         try:
-            user = read_prompt(console, hint="/help · @path to add files · ⌃c interrupt · /q quit").strip()
+            user = read_prompt(
+                console,
+                hint="/ commands · @ files · ⇧⭾ mode · ⌃c stop · /q quit",
+                placeholder='Describe a change — / for commands, @ to add files',
+                status=config.provider,
+                root=root,
+            ).strip()
         except (EOFError, KeyboardInterrupt):
             console.print("\n[dim]bye[/dim]")
             return
         if not user:
+            continue
+        # ! bash mode — run a shell command inline, no agent round-trip (CC's ! prefix)
+        if user.startswith("!"):
+            _bash = user[1:].strip()
+            if _bash:
+                _run_bash_inline(_bash, console=console, root=root, transcript=transcript)
+            continue
+        # # quick-memory — jot a durable note straight into project memory (CC's # shortcut)
+        if user.startswith("#"):
+            _save_quick_note(user[1:].strip(), console=console, root=root)
             continue
         # /voice [seconds] → record the mic, transcribe, run the transcript as the message
         if user.split()[0].lower() in ("/voice", "/v"):
@@ -812,12 +1207,18 @@ def run_code_session(
         if transcript:
             history_prefix = "Conversation so far:\n" + "\n".join(transcript[-6:])
 
+        # Shift+Tab edit mode: plan → read-only, auto-accept → yolo, normal → default
+        from .prompt_box import current_mode
+        _mode = current_mode()
+        _turn_yolo = True if _mode == "auto-accept" else yolo
+        _read_only = (_mode == "plan")
+
         import time as _time
         _t0 = _time.time()
         result = run_code_agent(
-            config, user, root=root, console=console, yolo=yolo,
+            config, user, root=root, console=console, yolo=_turn_yolo,
             max_iterations=max_iterations, undo_stack=undo_stack,
-            history_prefix=history_prefix,
+            history_prefix=history_prefix, read_only=_read_only,
         )
         _elapsed = _time.time() - _t0
         transcript.append(f"USER: {user}")
@@ -880,7 +1281,7 @@ def run_unified_session(
     from rich.panel import Panel
 
     from .media import build_media_tools, show_artifacts
-    from .memory_store import build_remember_tool, load_memories, memory_prompt_block
+    from .memory_store import build_remember_tool, memory_prompt_block
     from .tools import build_tools
 
     undo_stack: list = []
@@ -893,27 +1294,46 @@ def run_unified_session(
 
     media_tools = build_media_tools(artifacts, root=root)
     data_tools = build_tools(config)
-    mcp_tools = build_mcp_tools(root, console=console)  # tools from .csk/mcp.json servers
+    # console=None → load MCP tools silently (no "🔌 MCP fs · N tool(s)" chrome
+    # at launch; Claude Code doesn't announce its tool wiring either).
+    mcp_tools = build_mcp_tools(root, console=None)  # tools from .csk/mcp.json servers
     extra = (media_tools + data_tools + build_web_tools() + mcp_tools
-             + [build_task_tool(config, root), build_remember_tool()])
-    # cross-session memory: what ronin remembers about the user
+             + [build_task_tool(config, root),
+                build_parallel_task_tool(config, root),
+                build_isolated_task_tool(config, root),
+                build_remember_tool()])
+    # cross-session memory: what ronin remembers about the user (loaded into the
+    # system prompt; we no longer print a "🧠 remembered" banner at launch).
     mem_block = memory_prompt_block()
-    n_mem = len(load_memories())
 
     resumed = " · resumed" if (continue_session and transcript) else ""
     _welcome(console, config, root, yolo,
              title=f"ronin — one assistant for everything{resumed}",
              hint="talk · code · make images/video/voice · query data · @path · /help · /quit")
-    if n_mem:
-        console.print(f"  [#6b7089]🧠 {n_mem} thing(s) remembered about you · [bold]/memory[/bold] to view[/#6b7089]\n")
 
     while True:
         try:
-            user = read_prompt(console, hint="/ for commands · @ for files · ⌃c interrupt · /q quit").strip()
+            user = read_prompt(
+                console,
+                hint="/ commands · @ files · ⇧⭾ mode · ⌃c stop · /q quit",
+                placeholder='Try "build me a landing page" — / for commands, @ to add files',
+                status=config.provider,
+                root=root,
+            ).strip()
         except (EOFError, KeyboardInterrupt):
             console.print("\n[dim]bye[/dim]")
             return
         if not user:
+            continue
+        # ! bash mode — run a shell command inline, no agent round-trip (CC's ! prefix)
+        if user.startswith("!"):
+            _bash = user[1:].strip()
+            if _bash:
+                _run_bash_inline(_bash, console=console, root=root, transcript=transcript)
+            continue
+        # # quick-memory — jot a durable note straight into project memory (CC's # shortcut)
+        if user.startswith("#"):
+            _save_quick_note(user[1:].strip(), console=console, root=root)
             continue
         # /voice [seconds] → record the mic, transcribe, run the transcript as the message
         if user.split()[0].lower() in ("/voice", "/v"):
@@ -970,12 +1390,18 @@ def run_unified_session(
         _chosen = pick_model(config, user)
         turn_cfg = config.model_copy(update={"model": _chosen}) if _chosen else config
 
+        # Shift+Tab edit mode: plan → read-only, auto-accept → yolo, normal → default
+        from .prompt_box import current_mode
+        _mode = current_mode()
+        _turn_yolo = True if _mode == "auto-accept" else yolo
+        _read_only = (_mode == "plan")
+
         import time as _time
         _t0 = _time.time()
         result = run_code_agent(
-            turn_cfg, user, root=root, console=console, yolo=yolo,
+            turn_cfg, user, root=root, console=console, yolo=_turn_yolo,
             max_iterations=max_iterations, undo_stack=undo_stack,
-            history_prefix=history_prefix, extra_tools=extra,
+            history_prefix=history_prefix, extra_tools=extra, read_only=_read_only,
             base_system=UNIFIED_SYSTEM, extra_system=mem_block, include_image_tool=False,
         )
         _elapsed = _time.time() - _t0
@@ -990,7 +1416,7 @@ def run_unified_session(
                 "satisfies the request. If anything is missing, broken, or wrong, fix it "
                 "now. If it is complete and correct, reply briefly with 'Verified.'")
             _vres = run_code_agent(
-                turn_cfg, _vprompt, root=root, console=console, yolo=yolo,
+                turn_cfg, _vprompt, root=root, console=console, yolo=_turn_yolo,
                 max_iterations=max_iterations, undo_stack=undo_stack,
                 history_prefix=f"USER: {user}\nASSISTANT: {result.output}",
                 extra_tools=extra, base_system=UNIFIED_SYSTEM, extra_system=mem_block,

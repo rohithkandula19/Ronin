@@ -115,6 +115,11 @@ class ReActAgent(BaseModel):
                 )
             usage["input_tokens"] += response.usage.get("input_tokens", 0)
             usage["output_tokens"] += response.usage.get("output_tokens", 0)
+            # Carry prompt-cache counts when the provider reports them, so callers
+            # can show cache savings. Absent (e.g. non-Anthropic) → keys never appear.
+            for k in ("cache_read_input_tokens", "cache_creation_input_tokens"):
+                if k in response.usage:
+                    usage[k] = usage.get(k, 0) + response.usage[k]
 
             if response.text:
                 emit(Step(kind="thought", content=response.text))

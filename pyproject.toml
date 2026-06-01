@@ -1,7 +1,7 @@
 [project]
 name = "ro-claude-kit"
 version = "0.0.1"
-description = "Opinionated reference implementation for shipping production Claude agents in a weekend."
+description = "ronin — a masterless, terminal-native Claude agent: a Claude-Code-style coding agent on a provider-agnostic agent framework with evals, memory, hardening, and MCP integrations."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"

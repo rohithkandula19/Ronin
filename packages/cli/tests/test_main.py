@@ -132,8 +132,28 @@ def test_root_no_tui_starts_unified_session_outside_code_repo(tmp_path: Path, mo
     run_code.assert_not_called()
 
 
-def test_root_launches_tui_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Bare ronin (no --no-tui) launches the full-screen Textual TUI."""
+def test_root_opens_repl_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bare ronin (no flags) opens the minimal inline REPL, not the full-screen TUI."""
+    monkeypatch.chdir(tmp_path)
+    ctx = type("Ctx", (), {"invoked_subcommand": None, "get_help": lambda self: "help"})()
+
+    with patch("ro_claude_kit_cli.main._is_code_project", return_value=False), \
+         patch("ro_claude_kit_cli.main.load_config", return_value=CSKConfig(provider="ollama")), \
+         patch("ro_claude_kit_cli.main.console.print"), \
+         patch("ro_claude_kit_cli.tui.run_tui") as run_tui_mock, \
+         patch("ro_claude_kit_cli.code_mode.run_code_session") as run_code, \
+         patch("ro_claude_kit_cli.code_mode.run_unified_session") as run_unified:
+        with patch("sys.stdin.isatty", return_value=True), \
+             patch("sys.stdout.isatty", return_value=True):
+            main_mod._root(ctx)
+
+    run_unified.assert_called_once()
+    run_tui_mock.assert_not_called()
+    run_code.assert_not_called()
+
+
+def test_root_tui_flag_launches_tui(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`ronin --tui` opts into the full-screen Textual TUI."""
     monkeypatch.chdir(tmp_path)
     ctx = type("Ctx", (), {"invoked_subcommand": None, "get_help": lambda self: "help"})()
 
@@ -143,7 +163,7 @@ def test_root_launches_tui_by_default(tmp_path: Path, monkeypatch: pytest.Monkey
          patch("ro_claude_kit_cli.code_mode.run_unified_session") as run_unified:
         with patch("sys.stdin.isatty", return_value=True), \
              patch("sys.stdout.isatty", return_value=True):
-            main_mod._root(ctx)
+            main_mod._root(ctx, tui=True)
 
     run_tui_mock.assert_called_once()
     run_code.assert_not_called()

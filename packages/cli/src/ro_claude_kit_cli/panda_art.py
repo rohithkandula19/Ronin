@@ -168,6 +168,56 @@ def _animate(console: Console, frames: list[list[str]], activity: str, loops: in
         live.update(_panel(frames[0], activity))
 
 
+def animate_inline(
+    console: Console,
+    side_text=None,
+    *,
+    activity: str = "dancing",
+    loops: int = 3,
+) -> None:
+    """Animate the *bare* panda frames (no bordered panel) inline, with an
+    optional Rich renderable shown to its right — e.g. the minimal welcome's
+    version/model/cwd block. This is the Claude-Code-minimal counterpart to
+    ``render_panda``: the panda dances on every launch but there's no panel
+    chrome, and it settles on a dancing pose (arms up) rather than going still.
+
+    On a non-TTY (tests / pipes) we print a single frame — no Live, no sleeps.
+    """
+    from rich.table import Table
+    from rich.text import Text
+
+    from .theme import ACCENT
+
+    frames = normalize_frames(PANDA_ACTIVITIES.get(activity) or PANDA_ACTIVITIES["dancing"])
+
+    def grid_for(frame_lines: list[str]):
+        mascot = Text("\n".join(frame_lines), style=f"bold {ACCENT}")
+        g = Table.grid(padding=(0, 2))
+        g.add_column(vertical="top")
+        if side_text is not None:
+            g.add_column(vertical="top")
+            g.add_row(mascot, side_text)
+        else:
+            g.add_row(mascot)
+        return g
+
+    is_tty = bool(getattr(console, "is_terminal", False)) and sys.stdout.isatty()
+    if not is_tty:
+        console.print(grid_for(frames[0]))
+        return
+    try:
+        from rich.live import Live
+
+        with Live(console=console, refresh_per_second=12, transient=False) as live:
+            for _ in range(loops):
+                for f in frames:
+                    live.update(grid_for(f))
+                    time.sleep(0.14)
+            live.update(grid_for(frames[0]))  # settle on the arms-up dancing pose
+    except Exception:  # pragma: no cover — never let cosmetics break launch
+        console.print(grid_for(frames[0]))
+
+
 # Backward-compat exports — anything that imported PANDA / PANDA_FRAMES still
 # gets a sensible value. PANDA_FRAMES now holds the dancing frames joined into
 # strings; PANDA is the neutral pose.

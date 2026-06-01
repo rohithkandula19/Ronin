@@ -16,7 +16,8 @@ WARN = "#e0af68"            # soft amber
 ERR = "#f7768e"             # soft rose
 MUTE = "#6b7089"            # muted slate
 SOFT = "#9aa0b8"            # soft foreground for secondary text
-BULLET = f"[{ACCENT}]●[/{ACCENT}]"   # soft action bullet
+BULLET = f"[{ACCENT}]⏺[/{ACCENT}]"   # filled turn/action marker (Claude-Code style)
+CONNECTOR = "⎿"                       # result connector under a tool call (CC's ⎿)
 
 # gradient stops for the ronin wordmark (cyan → teal → mint)
 GRADIENT = ((0x22, 0xD3, 0xEE), (0x2D, 0xD4, 0xBF), (0x34, 0xD3, 0x99))

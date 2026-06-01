@@ -51,17 +51,23 @@ from .panda_art import PANDA_ACTIVITIES as _PANDA_ACTIVITIES, render_panda as _r
 @app.callback(invoke_without_command=True)
 def _root(
     ctx: typer.Context,
+    tui: bool = typer.Option(
+        False, "--tui",
+        help="Open the full-screen TUI (panes + trace) instead of the inline REPL.",
+    ),
     no_tui: bool = typer.Option(
-        False, "--no-tui", "--repl",
-        help="Use the stream-and-scroll REPL instead of the full-screen TUI.",
+        False, "--no-tui", "--repl", hidden=True,
+        help="(default) the inline REPL — kept for backward-compatibility.",
     ),
 ) -> None:
     if ctx.invoked_subcommand is not None:
         return
 
     # When _root is called directly (not via typer's CLI parsing — e.g. from
-    # tests), typer leaves the parameter default as an OptionInfo object, not
-    # a real bool. Normalise so direct callers see False by default.
+    # tests), typer leaves parameter defaults as OptionInfo objects, not real
+    # bools. Normalise so direct callers see False by default.
+    if not isinstance(tui, bool):
+        tui = False
     if not isinstance(no_tui, bool):
         no_tui = False
 
@@ -73,8 +79,8 @@ def _root(
 
     config = load_config()
     if not config.has_provider_auth():
-        from .panda_art import render_panda
-        render_panda(console)
+        from .theme import ACCENT
+        console.print(f"\n[bold {ACCENT}]ʕ•ᴥ•ʔ  ronin[/bold {ACCENT}]\n")
         console.print(
             "[dim]No provider configured yet. Run [bold]ronin init[/bold] "
             "(or [bold]ronin init --demo[/bold]) to get started, or [bold]ronin --help[/bold] for all commands.[/dim]"
@@ -84,33 +90,25 @@ def _root(
 
     root = Path(".")
 
-    # Default: full-screen Textual TUI (Claude-Code-style — takes over the
-    # whole terminal, header + chat + trace + sticky input). The TUI shows
-    # the dancing panda inside its welcome message, so we skip the pre-launch
-    # render (anything printed here gets wiped when Textual takes over).
-    if not no_tui:
+    # `ronin --tui` opts into the full-screen Textual app (header + panes +
+    # trace + sticky input). The default — and `--no-tui`/`--repl` — is the
+    # minimal, Claude-Code-style inline REPL: output flows in the terminal's
+    # normal scrollback under a tiny logo and a bordered input box. Less chrome,
+    # closer to how Claude Code actually looks.
+    if tui and not no_tui:
         from .tui import run_tui
         run_tui(config=config)
         return
 
-    # --no-tui: the classic stream-REPL with the dancing panda + welcome card.
-    from .panda_art import render_panda
-    render_panda(console)
-
     from .code_mode import run_code_session, run_unified_session
 
     if _is_code_project(root):
-        console.print(
-            "[dim]Code project detected — launching the coding agent.\n"
-            "[bold]@path[/bold] to reference files · [bold]/help[/bold], [bold]/undo[/bold], "
-            "[bold]/diff[/bold] · [bold]/q[/bold] to quit.\n"
-            "Reads run freely; edits and commands need approval.[/dim]\n"
-        )
+        console.print("[dim]code project · reads run free, edits & commands need approval[/dim]")
         run_code_session(config, root=root, console=console)
         return
 
-    # Bare `ronin --no-tui` outside a code repo = one assistant that does
-    # everything: talk, generate media, query data, write/run code when asked.
+    # Outside a code repo = one assistant that does everything: talk, generate
+    # media, query data, write/run code when asked.
     run_unified_session(config, root=root, console=console)
 
 
