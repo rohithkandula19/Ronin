@@ -15,6 +15,7 @@ from pathlib import Path
 
 from ro_claude_kit_agent_patterns import Tool
 
+from .repo_map import _IGNORE_DIRS as IGNORE_DIRS
 from .repo_map import repo_map as _repo_map
 
 # Tools that must be approved before they run (write + execute).
@@ -22,6 +23,11 @@ SENSITIVE_TOOLS = {"write_file", "edit_file", "multi_edit", "run_command"}
 
 MAX_READ_BYTES = 100_000
 MAX_LIST_ENTRIES = 500
+
+# Directories never worth walking — keeps list/search/glob from drowning the
+# context in vendored deps (a `venv/` or `node_modules/` can be tens of thousands
+# of files). Shared with the repo map so the ignore policy is consistent.
+_SKIP_DIRS = IGNORE_DIRS
 
 
 def undo_last(undo_stack: list) -> str:
@@ -94,13 +100,16 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None) 
         return text + truncated
 
     # ---- list_files ----
-    def list_files(directory: str = ".", pattern: str = "*") -> list[str]:
+    # ``path`` is accepted as an alias for ``directory`` — models reach for it
+    # constantly, and a bare TypeError just wastes a round-trip.
+    def list_files(directory: str = ".", pattern: str = "*", path: str | None = None) -> list[str]:
+        directory = path if path is not None else directory
         base = _resolve(root_path, directory)
         if not base.is_dir():
             return [f"ERROR: {directory} is not a directory"]
         out: list[str] = []
         for p in sorted(base.rglob(pattern)):
-            if any(part in {".git", "node_modules", ".venv", "__pycache__", ".next"} for part in p.parts):
+            if any(part in _SKIP_DIRS for part in p.parts):
                 continue
             if p.is_file():
                 out.append(str(p.relative_to(root_path)))
@@ -109,11 +118,12 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None) 
         return out
 
     # ---- search_files (grep-like) ----
-    def search_files(query: str, directory: str = ".") -> list[dict]:
+    def search_files(query: str, directory: str = ".", path: str | None = None) -> list[dict]:
+        directory = path if path is not None else directory
         base = _resolve(root_path, directory)
         hits: list[dict] = []
         for p in base.rglob("*"):
-            if any(part in {".git", "node_modules", ".venv", "__pycache__", ".next"} for part in p.parts):
+            if any(part in _SKIP_DIRS for part in p.parts):
                 continue
             if not p.is_file():
                 continue
@@ -157,13 +167,14 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None) 
         return f"edited {path}: replaced 1 occurrence ({len(old_string)}→{len(new_string)} chars)"
 
     # ---- glob (find files by pattern) ----
-    def glob(pattern: str, directory: str = ".") -> list[str]:
+    def glob(pattern: str, directory: str = ".", path: str | None = None) -> list[str]:
+        directory = path if path is not None else directory
         base = _resolve(root_path, directory)
         if not base.is_dir():
             return [f"ERROR: {directory} is not a directory"]
         out: list[str] = []
         for p in sorted(base.glob(pattern)):
-            if any(part in {".git", "node_modules", ".venv", "__pycache__", ".next"} for part in p.parts):
+            if any(part in _SKIP_DIRS for part in p.parts):
                 continue
             if p.is_file():
                 out.append(str(p.relative_to(root_path)))

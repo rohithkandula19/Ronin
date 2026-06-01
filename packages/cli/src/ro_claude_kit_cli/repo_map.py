@@ -182,6 +182,13 @@ def get_index(root: Path | str = ".", *, refresh: bool = False) -> RepoIndex:
     return _CACHE[key]
 
 
+def cached_index(root: Path | str = ".") -> RepoIndex | None:
+    """The already-built index for ``root``, or ``None`` if it hasn't been built
+    yet — non-blocking, so callers can decide whether to build in the background
+    rather than stalling a turn on a cold index."""
+    return _CACHE.get(str(Path(root).resolve()))
+
+
 def repo_map(query: str, root: Path | str = ".", k: int = 8, *,
              refresh: bool = False) -> str:
     """Return a compact, ranked map of the files most relevant to ``query``."""

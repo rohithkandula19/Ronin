@@ -56,6 +56,10 @@ class CSKConfig(BaseModel):
     # Offline mode: force a local brain and forbid any network egress (web tools
     # off, only a local provider allowed). Nothing leaves the machine.
     offline: bool = False
+    # Auto context engineering: each interactive turn, inject a compact block of
+    # the most relevant files (from the repo map) so the model starts aimed at
+    # the right code. Non-blocking; set False to disable.
+    auto_context: bool = True
 
     anthropic_api_key: str | None = None
     openai_api_key: str | None = None  # legacy shared slot (openai/together/groq/…)

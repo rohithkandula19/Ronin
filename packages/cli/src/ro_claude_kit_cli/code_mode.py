@@ -400,6 +400,16 @@ def run_code_agent(
         if console is not None and not history_prefix:
             console.print(f"[dim]📄 loaded project memory from [bold]{mem_name}[/bold][/dim]")
 
+    # Context engineering: front-load the files most relevant to THIS request so
+    # the model starts aimed at the right code (non-blocking; interactive turns
+    # only — sub-agents/evals pass console=None and stay deterministic).
+    if console is not None and getattr(config, "auto_context", False):
+        from .context_engine import relevant_context
+        _ctx = relevant_context(task, root)
+        if _ctx:
+            system += "\n\n" + _ctx
+            console.print("[dim]📎 added relevant files to context[/dim]")
+
     provider = build_provider(config)
     # Surface rate-limit backoff so a (up to ~60s) retry wait doesn't look frozen.
     if console is not None:
