@@ -44,6 +44,10 @@ class ReActAgent(BaseModel):
     # sessions don't blow the context window. None disables it.
     compact_after_tokens: int | None = None
     compact_keep_recent: int = 6
+    # Hard per-result cap: no single tool result may exceed this many characters
+    # when it enters the context (a runaway `list_files`/`search` can't blow the
+    # window in one shot). 0 disables.
+    max_tool_result_chars: int = 16000
 
     # Backward-compat shortcuts (used only if provider is not supplied):
     model: str | None = None
@@ -170,6 +174,7 @@ class ReActAgent(BaseModel):
                     continue
 
                 result, is_err = execute_tool_call(tool, tc.arguments)
+                result = self._cap_result(result)
                 if after_tool is not None:
                     try:
                         after_tool(tc.name, tc.arguments or {}, result, is_err)
@@ -195,6 +200,17 @@ class ReActAgent(BaseModel):
             error=f"hit max_iterations={self.max_iterations}",
             usage=usage,
         )
+
+    def _cap_result(self, result: str) -> str:
+        """Truncate a single tool result that's too large to enter context whole.
+        Keeps the head (where lists/search hits/file starts carry the signal) and
+        tells the model how to get the rest."""
+        cap = self.max_tool_result_chars
+        if not cap or not result or len(result) <= cap:
+            return result
+        return (result[:cap] + f"\n…[tool result truncated: showed {cap:,} of "
+                f"{len(result):,} chars. Narrow the query or read a specific "
+                "file/section to see more.]")
 
     def _maybe_compact(self, messages: list[Message], emit) -> None:
         """Shrink old tool-result payloads when the history grows too large.

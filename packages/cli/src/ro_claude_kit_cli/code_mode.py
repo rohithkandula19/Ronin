@@ -413,14 +413,16 @@ def run_code_agent(
     if console is not None:
         from .runner import attach_retry_notifier
         attach_retry_notifier(provider, console)
+    # Compact old tool output before the context window fills. Claude has a 200k
+    # window; most free/open models are far smaller (some 8–32k), so they'd error
+    # long before a Claude-sized threshold — compact much earlier off-Anthropic.
+    _compact_at = 120_000 if config.provider == "anthropic" else 28_000
     agent = ReActAgent(
         system=system,
         tools=tools,
         provider=provider,
         max_iterations=max_iterations,
-        # Long coding sessions read many files; compact old file/command output
-        # so the context window survives a 25-step task.
-        compact_after_tokens=120_000,
+        compact_after_tokens=_compact_at,
         compact_keep_recent=6,
     )
 
