@@ -1317,6 +1317,7 @@ def run_code_session(
         # next turns — "send while it's working", like a managed-input UI.
         from .bg_processes import build_background_tools
         from .checkpoint import build_checkpoint_tools
+        from .embeddings import build_semantic_tools
         from .input_queue import InputQueue
         from .vision_tools import build_vision_tools
         _iq = InputQueue(console)
@@ -1326,7 +1327,8 @@ def run_code_session(
                 max_iterations=max_iterations, undo_stack=undo_stack,
                 history_prefix=history_prefix, read_only=_read_only,
                 extra_tools=(build_background_tools(root) + build_checkpoint_tools(root)
-                             + build_vision_tools(config, root)),
+                             + build_vision_tools(config, root)
+                             + build_semantic_tools(config, root)),
             )
         pending.extend(_iq.drain())
         _elapsed = _time.time() - _t0
@@ -1408,10 +1410,11 @@ def run_unified_session(
     mcp_tools = build_mcp_tools(root, console=None)  # tools from .csk/mcp.json servers
     from .bg_processes import build_background_tools
     from .checkpoint import build_checkpoint_tools
+    from .embeddings import build_semantic_tools
     from .vision_tools import build_vision_tools
     extra = (media_tools + data_tools + build_web_tools() + mcp_tools
              + build_background_tools(root) + build_checkpoint_tools(root)
-             + build_vision_tools(config, root)
+             + build_vision_tools(config, root) + build_semantic_tools(config, root)
              + [build_task_tool(config, root),
                 build_parallel_task_tool(config, root),
                 build_isolated_task_tool(config, root),
