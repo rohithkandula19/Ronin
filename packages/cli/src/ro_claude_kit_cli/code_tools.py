@@ -15,6 +15,8 @@ from pathlib import Path
 
 from ro_claude_kit_agent_patterns import Tool
 
+from .repo_map import repo_map as _repo_map
+
 # Tools that must be approved before they run (write + execute).
 SENSITIVE_TOOLS = {"write_file", "edit_file", "multi_edit", "run_command"}
 
@@ -216,6 +218,12 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None) 
         _tool("search_files", "Grep for a literal string across files; returns file/line/text hits.",
               {"type": "object", "properties": {"query": {"type": "string"}, "directory": {"type": "string"}}, "required": ["query"]},
               search_files),
+        _tool("repo_map", "Relevance-RANKED code search (semantic-ish, not exact-match): give a concept or "
+              "question — 'how is auth handled', 'where config is loaded' — and get the most relevant files "
+              "plus their symbol outlines, ranked by BM25 over identifiers/paths/content. Use this FIRST to "
+              "locate the right files in an unfamiliar repo, then read_file them. Complements search_files (exact grep).",
+              {"type": "object", "properties": {"query": {"type": "string"}, "k": {"type": "integer"}}, "required": ["query"]},
+              lambda query, k=8: _repo_map(query, root=root_path, k=k)),
         _tool("glob", "Find files by glob pattern (e.g. '**/*.py', 'src/*.ts') relative to a directory.",
               {"type": "object", "properties": {"pattern": {"type": "string"}, "directory": {"type": "string"}}, "required": ["pattern"]},
               glob),
