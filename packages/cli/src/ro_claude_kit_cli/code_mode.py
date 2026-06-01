@@ -81,7 +81,9 @@ Constraints:
 - write_file and run_command require human approval — expect to be told 'no'
   sometimes; adapt.
 - Stay inside the project root. Don't touch .git.
-- If the task is ambiguous or unsafe, stop and explain rather than guessing.
+- If the task is ambiguous or unsafe and you can't resolve it by reading the
+  code, call ask_user with ONE sharp question (offer options when you can)
+  before doing significant work — guessing wrong wastes more time than asking.
 """
 
 
@@ -374,6 +376,11 @@ def run_code_agent(
     if extra_tools and not read_only:
         tools = tools + list(extra_tools)
 
+    # Clarifying questions: only when there's a real human on the other end
+    # (console set). Sub-agents and evals pass console=None and never block.
+    if console is not None:
+        tools = tools + [build_ask_user_tool(console)]
+
     # Offline mode: strip every network-touching tool so nothing can leave the
     # machine (the brain is already forced local in build_provider).
     if config.offline:
@@ -455,6 +462,58 @@ def run_code_agent(
         usage=result.usage,
         error=result.error,
         streamed=bool(renderer and renderer.streamed_text),
+    )
+
+
+def build_ask_user_tool(console: "Console", *, ask_fn=None):
+    """An 'ask_user' tool: let the agent ask the human a clarifying question
+    BEFORE charging into an ambiguous task. Only wired up in interactive sessions
+    (sub-agents and evals pass console=None, so they never block on input)."""
+    from ro_claude_kit_agent_patterns import Tool
+
+    from .theme import ACCENT
+
+    def _ask(question: str, options: list | None = None) -> str:
+        console.print(f"\n[bold {ACCENT}]ʕ•ᴥ•ʔ asks:[/bold {ACCENT}] {question}")
+        if options:
+            for i, opt in enumerate(options, 1):
+                console.print(f"  [{ACCENT}]{i}.[/{ACCENT}] {opt}")
+        reader = ask_fn or input
+        try:
+            answer = reader("  ↳ your answer: ")
+        except (EOFError, KeyboardInterrupt):
+            return "(no answer — user is unavailable; proceed with your best judgment)"
+        answer = (answer or "").strip()
+        if not answer:
+            return "(user gave no answer; proceed with your best judgment)"
+        # let the user answer "2" to pick an option by number
+        if options and answer.isdigit() and 1 <= int(answer) <= len(options):
+            return str(options[int(answer) - 1])
+        return answer
+
+    return Tool(
+        name="ask_user",
+        description=(
+            "Ask the user a clarifying question when the task is ambiguous — missing "
+            "requirements, several valid interpretations, or a destructive/irreversible "
+            "choice. Prefer asking ONE sharp question early over guessing wrong and "
+            "redoing work. Don't ask about things you can determine yourself by reading "
+            "the code. Args: question (string), options (optional list of choices the "
+            "user can pick by number)."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "question": {"type": "string", "description": "The clarifying question."},
+                "options": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional choices the user can select by number.",
+                },
+            },
+            "required": ["question"],
+        },
+        handler=_ask,
     )
 
 
@@ -869,10 +928,7 @@ def handle_slash_command(
             console.print("  [red]✗ that looks pasted more than once — run [bold]/login[/bold] again and paste it once[/red]")
             return "handled"
         config.demo_mode = False
-        if prov == "anthropic":
-            config.anthropic_api_key = key
-        else:
-            config.openai_api_key = key
+        config.set_key_for(prov, key)  # per-provider — never clobbers another provider's key
         path = save_config(config)
         console.print(f"  [green]✓[/green] [bold]{prov}[/bold] [dim]({config.resolved_model()})[/dim] "
                       f"— saved to [cyan]{path}[/cyan]; using it from your next message.")
@@ -1140,18 +1196,23 @@ def run_code_session(
              title=f"ronin code{resumed}",
              hint="your request · @path to reference files · /help · /undo · /quit")
 
+    pending: list[str] = []  # messages typed while the agent was working
     while True:
-        try:
-            user = read_prompt(
-                console,
-                hint="/ commands · @ files · ⇧⭾ mode · ⌃c stop · /q quit",
-                placeholder='Describe a change — / for commands, @ to add files',
-                status=config.provider,
-                root=root,
-            ).strip()
-        except (EOFError, KeyboardInterrupt):
-            console.print("\n[dim]bye[/dim]")
-            return
+        if pending:
+            user = pending.pop(0).strip()
+            console.print(f"[dim]▸ running queued message ›[/dim] {user}")
+        else:
+            try:
+                user = read_prompt(
+                    console,
+                    hint="/ commands · @ files · ⇧⭾ mode · ⌃c stop · /q quit",
+                    placeholder='Describe a change — / for commands, @ to add files',
+                    status=config.provider,
+                    root=root,
+                ).strip()
+            except (EOFError, KeyboardInterrupt):
+                console.print("\n[dim]bye[/dim]")
+                return
         if not user:
             continue
         # ! bash mode — run a shell command inline, no agent round-trip (CC's ! prefix)
@@ -1221,11 +1282,17 @@ def run_code_session(
 
         import time as _time
         _t0 = _time.time()
-        result = run_code_agent(
-            config, user, root=root, console=console, yolo=_turn_yolo,
-            max_iterations=max_iterations, undo_stack=undo_stack,
-            history_prefix=history_prefix, read_only=_read_only,
-        )
+        # Capture anything typed WHILE the agent works, then run those as the
+        # next turns — "send while it's working", like a managed-input UI.
+        from .input_queue import InputQueue
+        _iq = InputQueue(console)
+        with _iq:
+            result = run_code_agent(
+                config, user, root=root, console=console, yolo=_turn_yolo,
+                max_iterations=max_iterations, undo_stack=undo_stack,
+                history_prefix=history_prefix, read_only=_read_only,
+            )
+        pending.extend(_iq.drain())
         _elapsed = _time.time() - _t0
         transcript.append(f"USER: {user}")
         transcript.append(f"ASSISTANT: {result.output}")
@@ -1317,18 +1384,23 @@ def run_unified_session(
              title=f"ronin — one assistant for everything{resumed}",
              hint="talk · code · make images/video/voice · query data · @path · /help · /quit")
 
+    pending: list[str] = []  # messages typed while the agent was working
     while True:
-        try:
-            user = read_prompt(
-                console,
-                hint="/ commands · @ files · ⇧⭾ mode · ⌃c stop · /q quit",
-                placeholder='Try "build me a landing page" — / for commands, @ to add files',
-                status=config.provider,
-                root=root,
-            ).strip()
-        except (EOFError, KeyboardInterrupt):
-            console.print("\n[dim]bye[/dim]")
-            return
+        if pending:
+            user = pending.pop(0).strip()
+            console.print(f"[dim]▸ running queued message ›[/dim] {user}")
+        else:
+            try:
+                user = read_prompt(
+                    console,
+                    hint="/ commands · @ files · ⇧⭾ mode · ⌃c stop · /q quit",
+                    placeholder='Try "build me a landing page" — / for commands, @ to add files',
+                    status=config.provider,
+                    root=root,
+                ).strip()
+            except (EOFError, KeyboardInterrupt):
+                console.print("\n[dim]bye[/dim]")
+                return
         if not user:
             continue
         # ! bash mode — run a shell command inline, no agent round-trip (CC's ! prefix)
@@ -1404,12 +1476,17 @@ def run_unified_session(
 
         import time as _time
         _t0 = _time.time()
-        result = run_code_agent(
-            turn_cfg, user, root=root, console=console, yolo=_turn_yolo,
-            max_iterations=max_iterations, undo_stack=undo_stack,
-            history_prefix=history_prefix, extra_tools=extra, read_only=_read_only,
-            base_system=UNIFIED_SYSTEM, extra_system=mem_block, include_image_tool=False,
-        )
+        # Capture anything typed WHILE the agent works → run it as the next turn.
+        from .input_queue import InputQueue
+        _iq = InputQueue(console)
+        with _iq:
+            result = run_code_agent(
+                turn_cfg, user, root=root, console=console, yolo=_turn_yolo,
+                max_iterations=max_iterations, undo_stack=undo_stack,
+                history_prefix=history_prefix, extra_tools=extra, read_only=_read_only,
+                base_system=UNIFIED_SYSTEM, extra_system=mem_block, include_image_tool=False,
+            )
+        pending.extend(_iq.drain())
         _elapsed = _time.time() - _t0
 
         # smarter agent: opt-in self-verification after a turn that made changes

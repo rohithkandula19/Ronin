@@ -58,7 +58,11 @@ class CSKConfig(BaseModel):
     offline: bool = False
 
     anthropic_api_key: str | None = None
-    openai_api_key: str | None = None  # used for openai/together/groq/fireworks/custom
+    openai_api_key: str | None = None  # legacy shared slot (openai/together/groq/…)
+    # Per-provider keys — keyed by provider name. This is what prevents a
+    # `/login openai` from clobbering your cerebras key: each provider keeps its
+    # own. ``key_for`` prefers this over the legacy flat fields above.
+    provider_keys: dict[str, str] = Field(default_factory=dict)
 
     stripe_api_key: str | None = None
     linear_api_key: str | None = None
@@ -107,16 +111,38 @@ class CSKConfig(BaseModel):
             services.append("postgres")
         return services
 
+    def key_for(self, provider: str | None = None) -> str | None:
+        """The API key to use for ``provider`` (defaults to the active one).
+
+        Resolution order: the per-provider store (``provider_keys``) wins, then
+        the legacy flat field for that provider family, then the env var. This is
+        what lets several providers keep their own keys at once."""
+        provider = provider or self.provider
+        if provider in self.provider_keys and self.provider_keys[provider]:
+            return self.provider_keys[provider]
+        if provider == "anthropic":
+            return self.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY")
+        if provider == "ollama":
+            return None  # local, no key
+        return self.openai_api_key or os.environ.get("OPENAI_API_KEY")
+
+    def set_key_for(self, provider: str, key: str) -> None:
+        """Store ``key`` for ``provider`` without disturbing other providers'
+        keys. Also mirrors into the legacy flat field for the current provider so
+        older code paths still resolve it."""
+        self.provider_keys[provider] = key
+        if provider == "anthropic":
+            self.anthropic_api_key = key
+        else:
+            self.openai_api_key = key
+
     def has_provider_auth(self) -> bool:
         """Returns True iff the chosen provider has the credentials it needs."""
         if self.demo_mode:
             return True
-        if self.provider == "anthropic":
-            return bool(self.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY"))
         if self.provider == "ollama":
             return True  # local server, no auth
-        # openai-compat needs a key
-        return bool(self.openai_api_key or os.environ.get("OPENAI_API_KEY"))
+        return bool(self.key_for())
 
     # Backward-compat alias used by older code paths.
     def has_anthropic_auth(self) -> bool:

@@ -1,7 +1,6 @@
 """Agent execution glue — wraps ReActAgent + the configured tool set + the configured LLM provider."""
 from __future__ import annotations
 
-import os
 import sys
 from dataclasses import dataclass, field
 from typing import Any
@@ -117,12 +116,9 @@ def build_single_provider(config: CSKConfig) -> LLMProvider:
     base_url = config.resolved_base_url()
 
     if config.provider == "anthropic":
-        return AnthropicProvider(
-            model=model,
-            api_key=config.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY"),
-        )
+        return AnthropicProvider(model=model, api_key=config.key_for("anthropic"))
 
-    api_key = config.openai_api_key or os.environ.get("OPENAI_API_KEY")
+    api_key = config.key_for(config.provider)
     if config.provider == "ollama" and not api_key:
         api_key = "ollama"  # local; placeholder header
     return OpenAICompatProvider(
@@ -143,13 +139,11 @@ def config_for_spec(base: CSKConfig, spec: dict[str, Any]) -> CSKConfig:
         "base_url": spec.get("base_url"),
         "failover": [],  # a derived single-provider config never fails over itself
     }
+    sub = base.model_copy(update=update)
     key = spec.get("api_key")
     if key:
-        if provider == "anthropic":
-            update["anthropic_api_key"] = key
-        else:
-            update["openai_api_key"] = key
-    return base.model_copy(update=update)
+        sub.set_key_for(provider, key)
+    return sub
 
 
 def build_provider(config: CSKConfig) -> LLMProvider:
@@ -176,11 +170,9 @@ def build_provider(config: CSKConfig) -> LLMProvider:
 
 
 def _has_real_provider_key(config: CSKConfig) -> bool:
-    if config.provider == "anthropic":
-        return bool(config.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY"))
     if config.provider == "ollama":
         return True
-    return bool(config.openai_api_key or os.environ.get("OPENAI_API_KEY"))
+    return bool(config.key_for())
 
 
 def _build_agent(config: CSKConfig, tools: list[Tool], *, extra_system: str = "") -> ReActAgent:

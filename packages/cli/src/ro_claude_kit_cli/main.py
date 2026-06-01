@@ -282,10 +282,7 @@ def set_key(
         raise typer.Exit(1)
 
     config.demo_mode = False
-    if prov == "anthropic":
-        config.anthropic_api_key = key
-    else:
-        config.openai_api_key = key
+    config.set_key_for(prov, key)  # per-provider — never clobbers another provider's key
     path = save_config(config, scope=scope)
     console.print(f"[green]✓[/green] key saved for [bold]{prov}[/bold] "
                   f"[dim]({config.resolved_model()})[/dim] → [cyan]{path}[/cyan]")
