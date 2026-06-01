@@ -59,6 +59,11 @@ def _root(
         False, "--no-tui", "--repl", hidden=True,
         help="(default) the inline REPL — kept for backward-compatibility.",
     ),
+    offline: bool = typer.Option(
+        False, "--offline",
+        help="Zero network egress: forces a local brain (Ollama) and strips all "
+             "network tools. Nothing leaves the machine.",
+    ),
 ) -> None:
     if ctx.invoked_subcommand is not None:
         return
@@ -70,6 +75,8 @@ def _root(
         tui = False
     if not isinstance(no_tui, bool):
         no_tui = False
+    if not isinstance(offline, bool):
+        offline = False
 
     import sys
     # Non-interactive (pipe/test) → just show help and exit, cleanly (no banner).
@@ -78,7 +85,12 @@ def _root(
         return
 
     config = load_config()
-    if not config.has_provider_auth():
+    if offline:
+        from .offline import apply_offline
+        config = apply_offline(config.model_copy(update={"offline": True}))
+        console.print(f"[dim]🔒 offline mode — local brain ([bold]{config.provider}[/bold]), "
+                      "no network tools, nothing leaves this machine[/dim]")
+    if not offline and not config.has_provider_auth():
         from .theme import ACCENT
         console.print(f"\n[bold {ACCENT}]ʕ•ᴥ•ʔ  ronin[/bold {ACCENT}]\n")
         console.print(
@@ -337,6 +349,72 @@ def chat(
         border_style="cyan",
     ))
     start_chat(config, console=console, raw=raw)
+
+
+# ---------- consensus (multi-model) ----------
+
+@app.command()
+def consensus(
+    task: str = typer.Argument(..., help="The question / task to put to the panel of models."),
+    models: str = typer.Option(
+        ..., "--models", "-m",
+        help="Comma-separated provider[:model] specs, e.g. "
+             "'anthropic,gemini,cerebras' or 'openrouter:deepseek/deepseek-v4-flash:free,openrouter:qwen/qwen3-coder:free'.",
+    ),
+    judge: Optional[str] = typer.Option(
+        None, "--judge", help="provider[:model] to synthesize the answers (defaults to your current provider)."),
+) -> None:
+    """Ask SEVERAL models the same thing in parallel, then synthesize one
+    cross-checked answer. Read-only — for design/review/decision questions.
+
+    Something a single-vendor agent structurally can't do: run Claude AND Gemini
+    AND a local model at once and reconcile them.
+    """
+    from .consensus import parse_model_spec, render_consensus, run_consensus
+
+    config = load_config()
+    specs = [parse_model_spec(s) for s in models.split(",") if s.strip()]
+    if len(specs) < 2:
+        console.print("[yellow]consensus needs at least 2 models[/yellow] — e.g. "
+                      "[cyan]--models anthropic,gemini[/cyan]")
+        raise typer.Exit(2)
+    judge_spec = parse_model_spec(judge) if judge else None
+
+    labels = ", ".join(f"{s['provider']}{':' + s['model'] if s.get('model') else ''}" for s in specs)
+    console.print(f"[dim]polling {len(specs)} models in parallel — {labels}…[/dim]")
+    with console.status("[dim] gathering answers + synthesizing…[/dim]", spinner="dots"):
+        result = run_consensus(config, task, specs, judge_spec=judge_spec)
+    render_consensus(console, result)
+
+
+# ---------- bench (model bake-off) ----------
+
+@app.command()
+def bench(
+    models: str = typer.Option(
+        ..., "--models", "-m",
+        help="Comma-separated provider[:model] specs to benchmark, e.g. "
+             "'anthropic,gemini,cerebras,ollama:llama3.1'.",
+    ),
+    threshold: float = typer.Option(
+        0.8, "--threshold", help="Pass-rate bar (0..1) a model must clear to be recommended."),
+) -> None:
+    """Run the objective eval battery across several models and recommend the
+    CHEAPEST one that clears the quality bar.
+
+    Eval-driven model selection — pick the model with data, not vibes. Something
+    a single-vendor agent has no way to do.
+    """
+    from .bench import parse_specs_or_exit, render_bench, run_bench
+
+    config = load_config()
+    specs = parse_specs_or_exit(models, console)
+    labels = ", ".join(f"{s['provider']}{':' + s['model'] if s.get('model') else ''}" for s in specs)
+    console.print(f"[dim]benchmarking {len(specs)} models on the objective battery — {labels}\n"
+                  "several real model calls each, ~1–3 min on free tiers…[/dim]")
+    with console.status("[dim] running evals…[/dim]", spinner="dots"):
+        result = run_bench(config, specs, threshold=threshold)
+    render_bench(console, result)
 
 
 # ---------- tools ----------

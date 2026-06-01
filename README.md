@@ -3,9 +3,9 @@
 > **A masterless, terminal-native Claude agent.** ronin is a **Claude-Code-style AI coding agent** — it reads, edits, and runs your code from the terminal — built on a **provider-agnostic agent framework** with first-class evals, memory, security hardening, and MCP tool integrations. Plug in Claude for top quality, or run it **free** on Gemini / Cerebras / Groq / Ollama.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-v0.51.0-blue)](CHANGELOG.md)
+[![Status](https://img.shields.io/badge/status-v0.52.0-blue)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-540%20passing-brightgreen.svg)](#-whats-under-the-hood)
+[![Tests](https://img.shields.io/badge/tests-636%20passing-brightgreen.svg)](#-whats-under-the-hood)
 [![Providers](https://img.shields.io/badge/providers-Claude%20·%20Gemini%20·%20Cerebras%20·%20Groq%20·%20OpenRouter%20·%20Ollama%20·%20OpenAI-d4a373)](#-supported-providers)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
@@ -36,7 +36,7 @@ Regenerate the walkthrough anytime with [`vhs`](https://github.com/charmbracelet
 
 **One front door:** type **`ronin`** and you get a single agent that reads, writes, and runs code (every edit and shell command gated behind a diff preview and your approval — reads run freely), generates images/video/speech, and queries your connected data — all in one conversation, in plain language. It's **provider-agnostic**: the same agent runs on Claude or on free open models.
 
-It's also a **reference implementation for building agents the right way**. The CLI is a thin wrapper over seven independently-usable packages — agent patterns, evals, memory, hardening, and MCP integrations — backed by **540 tests** that run offline in CI. (`ronin code` is the focused coding agent; `ronin chat` is the talk/media surface — both available when you want a single-purpose mode.)
+It's also a **reference implementation for building agents the right way**. The CLI is a thin wrapper over seven independently-usable packages — agent patterns, evals, memory, hardening, and MCP integrations — backed by **636 tests** that run offline in CI. (`ronin code` is the focused coding agent; `ronin chat` is the talk/media surface — both available when you want a single-purpose mode.)
 
 ## 🛠 `ronin code` — the coding agent (Claude-Code shaped)
 
@@ -55,7 +55,7 @@ A coding agent that reads, edits, and runs your code — every write and shell c
 - **@-file mentions** — drop `@path` in your request to pull files into context. Start a message with a folder path to `cd` into it.
 - **Plan mode** (`--plan`) proposes the steps read-only, you approve, then it executes. **Resume** (`--continue`) picks up your last session.
 - **Live plan tracker** — multi-step tasks show a checklist (`✓ / ▶ / ☐`) the agent keeps current as it works.
-- **Tools**: read / write / `edit` / `multi_edit` / `glob` / search / run — plus **`web_search` / `fetch_url`**, a **`task`** subagent, and any **MCP** server's tools (`ronin mcp add …`).
+- **Tools**: read / write / `edit` / `multi_edit` / `glob` / search / run — plus **`web_search` / `fetch_url`**, **semantic code intelligence** (`diagnostics` / `definition` / `references` via LSP), a **`task`** subagent plus **`parallel_task`** (concurrent read-only fan-out) and **`isolated_task`** (parallel *mutating* sub-agents, each in its own git worktree so edits can't collide), and any **MCP** server's tools (`ronin mcp add …`).
 - **Project memory** — auto-loads `RONIN.md` / `CLAUDE.md` / `AGENTS.md` from the repo so it follows your conventions.
 - **26 slash commands** — steer across turns: `/help`, `/login`, `/model`, `/models`, `/mcp`, `/agents`, `/compact`, `/context`, `/copy`, `/export`, `/resume`, `/diff`, `/undo`, `/commit`, `/pr`, `/doctor`, `/config`, and more. A per-turn status line shows provider · model · tokens · time.
 
@@ -82,6 +82,21 @@ ronin                       # then, in-session:
 ```
 
 ronin auto-retries free-tier rate limits (429) with backoff, and round-trips Gemini thinking-model signatures — so free providers work for real multi-step agent tasks.
+
+## 🚀 Beyond Claude Code
+
+Because ronin is **provider-agnostic**, it can do things a single-vendor agent structurally can't:
+
+- **🧩 Multi-model consensus** — `ronin consensus "<task>" -m anthropic,gemini,cerebras` runs the *same* question on several models in parallel, then a judge model synthesizes one cross-checked answer (with a "where they agreed / diverged" note). More robust on hard design/review/decision questions than any single model. Read-only.
+- **🔁 Cross-provider failover** — set `failover` in config and a turn that hits a rate-limit or outage on the primary **transparently continues on the next provider** instead of dying. (Tokens already streamed aren't silently re-answered.)
+- **🔒 Fully offline mode** — `ronin --offline` forces a **local brain** (Ollama / any localhost model) and **strips every network tool**, so ronin codes on a plane or in an air-gapped box with **zero egress** — nothing leaves the machine.
+- **📊 Eval-driven model bake-off** — `ronin bench -m anthropic,gemini,ollama:llama3.1` runs the **objective** eval battery (no LLM judge) across models and tells you the **cheapest model that clears your quality bar**. Pick a model with data, not vibes.
+
+Plus, on the coding agent itself:
+
+- **⚡ Prompt caching** (Anthropic) — the static system + tools prefix is cached on every turn (up to ~90% cheaper/faster); the status line shows `⚡N cached`.
+- **🧠 Semantic code intelligence** — `diagnostics` / `definition` / `references` via real language servers (pyright, ts-language-server, gopls, rust-analyzer), with graceful "install X" fallback when a server is missing.
+- **🌳 Parallel mutating sub-agents** — `isolated_task` runs several editing agents at once, each in its **own git worktree**, so concurrent edits never collide; each returns a reviewable diff.
 
 ## Install
 
@@ -156,6 +171,9 @@ database_url = "postgres://readonly_user:...@host:5432/db"   # a read-only role
 | **`ronin investigate "<symptom>"`** | **Root-cause a problem across your business data AND your code.** |
 | **`ronin review [--base main]`** | **AI code review of your diff — severity-tagged findings, read-only.** |
 | **`ronin fix "<command>"`** | **Autonomous fix-until-green: runs the command, edits + re-runs until it passes.** |
+| **`ronin consensus "<task>" -m a,b,c`** | **Multi-model panel — ask several models in parallel, then synthesize one cross-checked answer.** |
+| **`ronin bench -m a,b,c`** | **Eval-driven model bake-off — score models on the objective battery, recommend the cheapest that passes.** |
+| **`ronin --offline`** | **Zero-network mode — local brain (Ollama) + network tools stripped; nothing leaves the machine.** |
 | **`ronin briefing`** | **Founder ops briefing — auto-saved with week-over-week deltas.** |
 | `ronin briefing --slack <#chan>` / `--history` / `--out file.md` | Post to Slack / trend table / write to Markdown. |
 | `ronin ask "<question>"` | One-shot — print answer + typed trace. |
@@ -175,6 +193,16 @@ ronin can write files and run commands, so safety is built into the core, not bo
 - **Prompt-injection scanning.** User input passes through an injection scanner (`packages/hardening`) before it reaches a tool-calling planner.
 - **Read-only data integrations.** The Stripe / Linear / Slack / Notion / Postgres MCP templates are read-only by default; the recommended Postgres setup uses a read-only DB role.
 - **Secrets discipline.** API keys are user-supplied and stored only in local `.csk/` (gitignored) — never committed (the repo is public). PII (emails, SSNs, cards, keys) is redacted from traces before anything leaves your process.
+- **Offline guarantee.** `ronin --offline` forces a local brain and removes every network-touching tool — a hard guarantee for air-gapped / privacy-sensitive work.
+
+### Running ronin for others / at scale
+
+ronin is MIT-licensed and meant to be picked up by other people. A few notes if you're deploying it for a team:
+
+- **`--yolo` / auto-accept bypasses the approval gate** and lets the model run shell commands unattended. Only use it in a sandbox or CI you trust — interactive use keeps every mutation gated.
+- **Parallel sub-agents cost real tokens.** `parallel_task` / `isolated_task` / `consensus` / `bench` fan out *N* model runs at once; concurrency is capped (3–4 workers) but spend scales with the number of tasks/models — budget accordingly.
+- **`isolated_task` needs a git repo** (worktrees are a git feature) and returns diffs for review rather than auto-merging — parallel changes stay reviewable.
+- **Pin the installer** for reproducibility: `curl … | bash -s -- --ref v0.52.0`.
 
 ## 🧱 What's under the hood
 
@@ -190,7 +218,7 @@ ronin can write files and run commands, so safety is built into the core, not bo
 | `cli` | The `ronin` binary — agent loop, MCP client, web tools, subagents, eval, media | 382 |
 | `deployment-templates` | Docker Compose, Modal, Vercel, Railway | — |
 
-**540 tests** across all packages, green on every push (see CI). A `FakeProvider` makes them deterministic, offline, and free — no API calls in CI.
+**636 tests** across all packages, green on every push (see CI). A `FakeProvider` makes them deterministic, offline, and free — no API calls in CI.
 
 ## Use the modules without the CLI
 

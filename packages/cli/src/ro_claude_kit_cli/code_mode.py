@@ -374,6 +374,12 @@ def run_code_agent(
     if extra_tools and not read_only:
         tools = tools + list(extra_tools)
 
+    # Offline mode: strip every network-touching tool so nothing can leave the
+    # machine (the brain is already forced local in build_provider).
+    if config.offline:
+        from .offline import strip_network_tools
+        tools = strip_network_tools(tools)
+
     # Project memory: fold RONIN.md / CLAUDE.md / AGENTS.md into the system
     # prompt so the agent follows the repo's conventions. Announce it once (on
     # the first turn of a session / a one-shot run), not on every turn.

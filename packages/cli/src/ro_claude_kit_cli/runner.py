@@ -106,8 +106,8 @@ def _serialize_trace(trace: list) -> list[dict[str, Any]]:
     return [{"kind": s.kind, "content": s.content} for s in trace]
 
 
-def build_provider(config: CSKConfig) -> LLMProvider:
-    """Construct the LLMProvider for this config.
+def build_single_provider(config: CSKConfig) -> LLMProvider:
+    """Construct ONE LLMProvider for this config (no failover wrapping).
 
     - ``anthropic`` → ``AnthropicProvider``
     - everything else (``ollama``, ``openai``, ``together``, ``groq``, ``fireworks``,
@@ -130,6 +130,49 @@ def build_provider(config: CSKConfig) -> LLMProvider:
         base_url=base_url or "https://api.openai.com/v1",
         api_key=api_key,
     )
+
+
+def config_for_spec(base: CSKConfig, spec: dict[str, Any]) -> CSKConfig:
+    """Derive a CSKConfig for a provider spec (used by failover / consensus /
+    bench). ``spec`` keys: provider (required), model?, base_url?, api_key?.
+    The api_key lands in the slot the chosen provider reads from."""
+    provider = spec.get("provider", base.provider)
+    update: dict[str, Any] = {
+        "provider": provider,
+        "model": spec.get("model"),
+        "base_url": spec.get("base_url"),
+        "failover": [],  # a derived single-provider config never fails over itself
+    }
+    key = spec.get("api_key")
+    if key:
+        if provider == "anthropic":
+            update["anthropic_api_key"] = key
+        else:
+            update["openai_api_key"] = key
+    return base.model_copy(update=update)
+
+
+def build_provider(config: CSKConfig) -> LLMProvider:
+    """The provider the agent actually runs on. Returns a plain provider, or a
+    ``FailoverProvider`` chaining the primary + configured fallbacks so a turn
+    survives an outage on any single backend. In offline mode the config is first
+    forced to a local brain so nothing leaves the machine."""
+    if config.offline:
+        from .offline import apply_offline
+        config = apply_offline(config)
+    primary = build_single_provider(config)
+    if not config.failover:
+        return primary
+
+    from ro_claude_kit_agent_patterns import FailoverProvider
+
+    providers: list[LLMProvider] = [primary]
+    labels: list[str] = [f"{config.provider}:{config.resolved_model()}"]
+    for spec in config.failover:
+        sub = config_for_spec(config, spec)
+        providers.append(build_single_provider(sub))
+        labels.append(f"{sub.provider}:{sub.resolved_model()}")
+    return FailoverProvider(providers=providers, labels=labels, model="failover")
 
 
 def _has_real_provider_key(config: CSKConfig) -> bool:

@@ -10,11 +10,13 @@ For tests: ``FakeProvider`` returns canned ``LLMResponse``s in order, no network
 """
 from .anthropic_provider import AnthropicProvider
 from .base import LLMProvider, LLMResponse, Message, StreamEvent, ToolCall
+from .failover import FailoverProvider
 from .fake import FakeProvider
 from .openai_compat import OllamaProvider, OpenAICompatProvider
 
 __all__ = [
     "AnthropicProvider",
+    "FailoverProvider",
     "FakeProvider",
     "LLMProvider",
     "LLMResponse",

@@ -49,6 +49,13 @@ class CSKConfig(BaseModel):
     # Self-verification: after a turn that made changes, the agent reviews its own
     # work against the request and fixes gaps (Reflexion-style). Opt-in via /verify.
     verify: bool = False
+    # Cross-provider failover: ordered fallbacks tried (after the primary) when a
+    # provider rate-limits or errors mid-turn. Each entry is a partial provider
+    # spec: {provider, model?, base_url?, api_key?}. Empty → no failover.
+    failover: list[dict[str, Any]] = Field(default_factory=list)
+    # Offline mode: force a local brain and forbid any network egress (web tools
+    # off, only a local provider allowed). Nothing leaves the machine.
+    offline: bool = False
 
     anthropic_api_key: str | None = None
     openai_api_key: str | None = None  # used for openai/together/groq/fireworks/custom

@@ -12,6 +12,7 @@ Plus shared types (``Tool``, ``AgentResult``, ``Step``) and providers
 from .planner_executor import Plan, PlannerExecutorAgent
 from .providers import (
     AnthropicProvider,
+    FailoverProvider,
     FakeProvider,
     LLMProvider,
     LLMResponse,
@@ -30,6 +31,7 @@ __all__ = [
     "AgentResult",
     "AnthropicProvider",
     "Critique",
+    "FailoverProvider",
     "FakeProvider",
     "LLMProvider",
     "LLMResponse",
