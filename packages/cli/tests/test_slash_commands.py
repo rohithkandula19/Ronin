@@ -237,14 +237,24 @@ def test_export_writes_markdown_file(tmp_path: Path) -> None:
     assert "make a plan" in body and "here is the plan" in body
 
 
-def test_resume_reloads_saved_session(tmp_path: Path) -> None:
+def test_resume_lists_then_reloads(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    from ro_claude_kit_cli import sessions
+    sessions._session_id = None  # fresh session id for isolation
     from ro_claude_kit_cli.code_mode import save_session
     save_session(tmp_path, ["USER: earlier q", "ASSISTANT: earlier a"])
+
+    # /resume (no arg) LISTS past sessions — it does not auto-load
     transcript: list[str] = []
     action, out = _call("/resume", root=tmp_path, transcript=transcript)
     assert action == "handled"
-    assert transcript == ["USER: earlier q", "ASSISTANT: earlier a"]
-    assert "resumed" in out and "1 turn" in out
+    assert "earlier q" in out          # the session is listed (by its title)
+    assert transcript == []            # nothing loaded yet
+
+    # /resume 1 reloads the chosen session into the transcript
+    action, out = _call("/resume 1", root=tmp_path, transcript=transcript)
+    assert action == "handled"
+    assert len(transcript) == 2 and "earlier q" in transcript[0]
 
 
 def test_copy_uses_clipboard_helper(tmp_path: Path, monkeypatch) -> None:

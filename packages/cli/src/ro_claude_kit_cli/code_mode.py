@@ -117,23 +117,21 @@ def _session_path(root: Path | str) -> _Path:
 
 
 def save_session(root: Path | str, transcript: list[str]) -> None:
-    p = _session_path(root)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        p.write_text(_json.dumps({"root": str(_Path(root).resolve()), "transcript": transcript[-40:]}),
-                     encoding="utf-8")
-    except OSError:
-        pass
+    """Archive the FULL current-session transcript under .csk/sessions/ — every
+    session is kept as its own file (resumable via /resume), never overwritten."""
+    from .sessions import save_session as _archive
+    _archive(root, transcript)
 
 
 def load_session(root: Path | str) -> list[str]:
-    p = _session_path(root)
-    if not p.is_file():
+    """Reload the MOST RECENT session for this project and continue it (used by
+    --continue); pick an older one with /resume. Returns its transcript."""
+    from .sessions import latest_session, load_session as _load, set_current_session
+    sid = latest_session(root)
+    if not sid:
         return []
-    try:
-        return list(_json.loads(p.read_text(encoding="utf-8")).get("transcript", []))
-    except (OSError, ValueError):
-        return []
+    set_current_session(sid)   # continue that session instead of forking a new file
+    return _load(sid)
 
 
 def expand_file_mentions(task: str, root: Path | str) -> str:
@@ -1101,14 +1099,30 @@ def handle_slash_command(
             console.print("[yellow]no clipboard tool found[/yellow] [dim](install pbcopy/xclip/xsel)[/dim]")
         return "handled"
     if cmd == "resume":
-        saved = load_session(root)
-        if not saved:
-            console.print("[dim]no saved session on disk for this project[/dim]")
+        # /resume → list past sessions (a picker); /resume <n> → reload session n.
+        from .sessions import list_sessions, load_session as _load_sess, set_current_session
+        sess = list_sessions(root)
+        if not sess:
+            console.print("[dim]no past sessions for this project yet[/dim]")
             return "handled"
-        transcript.clear()
-        transcript.extend(saved)
-        turns = sum(1 for e in saved if e.startswith("USER: "))
-        console.print(f"[green]✓[/green] resumed [dim]{turns} turn(s) from {_session_path(root)}[/dim]")
+        if len(parts) > 1 and parts[1].isdigit():
+            idx = int(parts[1]) - 1
+            if not (0 <= idx < len(sess)):
+                console.print(f"[yellow]no session #{parts[1]}[/yellow] — run [bold]/resume[/bold] to list")
+                return "handled"
+            chosen = sess[idx]
+            transcript.clear()
+            transcript.extend(_load_sess(chosen["id"]))
+            set_current_session(chosen["id"])   # continue this one
+            console.print(f"[green]✓[/green] resumed [dim]{chosen['turns']} turns · "
+                          f"{chosen['title']!r}[/dim]", highlight=False)
+            return "handled"
+        console.print(f"[bold]past sessions[/bold] [dim]· {len(sess)} · this project[/dim]")
+        for i, s in enumerate(sess[:20], 1):
+            when = (s["updated"][:16].replace("T", " ")) or "?"
+            console.print(f"  [cyan]{i:>2}[/cyan]  [#6b7089]{when}[/#6b7089]  "
+                          f"{s['turns']:>2} turns  {s['title'][:58]}", highlight=False)
+        console.print("[dim]reload one with [bold]/resume <number>[/bold][/dim]", highlight=False)
         return "handled"
     if cmd == "export":
         if not transcript:
@@ -1299,13 +1313,18 @@ def run_code_session(
         _t0 = _time.time()
         # Capture anything typed WHILE the agent works, then run those as the
         # next turns — "send while it's working", like a managed-input UI.
+        from .bg_processes import build_background_tools
+        from .checkpoint import build_checkpoint_tools
         from .input_queue import InputQueue
+        from .vision_tools import build_vision_tools
         _iq = InputQueue(console)
         with _iq:
             result = run_code_agent(
                 config, user, root=root, console=console, yolo=_turn_yolo,
                 max_iterations=max_iterations, undo_stack=undo_stack,
                 history_prefix=history_prefix, read_only=_read_only,
+                extra_tools=(build_background_tools(root) + build_checkpoint_tools(root)
+                             + build_vision_tools(config, root)),
             )
         pending.extend(_iq.drain())
         _elapsed = _time.time() - _t0
@@ -1385,7 +1404,12 @@ def run_unified_session(
     # console=None → load MCP tools silently (no "🔌 MCP fs · N tool(s)" chrome
     # at launch; Claude Code doesn't announce its tool wiring either).
     mcp_tools = build_mcp_tools(root, console=None)  # tools from .csk/mcp.json servers
+    from .bg_processes import build_background_tools
+    from .checkpoint import build_checkpoint_tools
+    from .vision_tools import build_vision_tools
     extra = (media_tools + data_tools + build_web_tools() + mcp_tools
+             + build_background_tools(root) + build_checkpoint_tools(root)
+             + build_vision_tools(config, root)
              + [build_task_tool(config, root),
                 build_parallel_task_tool(config, root),
                 build_isolated_task_tool(config, root),

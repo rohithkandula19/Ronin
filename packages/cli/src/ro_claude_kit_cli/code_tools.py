@@ -19,7 +19,7 @@ from .repo_map import _IGNORE_DIRS as IGNORE_DIRS
 from .repo_map import repo_map as _repo_map
 
 # Tools that must be approved before they run (write + execute).
-SENSITIVE_TOOLS = {"write_file", "edit_file", "multi_edit", "run_command"}
+SENSITIVE_TOOLS = {"write_file", "edit_file", "multi_edit", "run_command", "run_background", "rewind"}
 
 MAX_READ_BYTES = 100_000
 MAX_LIST_ENTRIES = 500
