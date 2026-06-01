@@ -102,14 +102,13 @@ def _root(
 
     root = Path(".")
 
-    # `ronin --tui` opts into the full-screen Textual app (header + panes +
-    # trace + sticky input). The default — and `--no-tui`/`--repl` — is the
-    # minimal, Claude-Code-style inline REPL: output flows in the terminal's
-    # normal scrollback under a tiny logo and a bordered input box. Less chrome,
-    # closer to how Claude Code actually looks.
-    if tui and not no_tui:
+    # Default: the full-screen Textual TUI — a managed input box separate from the
+    # output (type/queue while it works, no interleaving), streaming, a live tool
+    # trace, and an approval modal for edits/commands. Opt out with `--no-tui` /
+    # `--repl` for the minimal inline REPL. `--tui` is kept as a no-op alias.
+    if not no_tui:
         from .tui import run_tui
-        run_tui(config=config)
+        run_tui(config=config, root=str(root))
         return
 
     from .code_mode import run_code_session, run_unified_session

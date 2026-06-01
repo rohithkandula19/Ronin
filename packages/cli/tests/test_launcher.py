@@ -15,9 +15,9 @@ def test_bare_ronin_non_interactive_shows_help() -> None:
     assert "Usage" in r.output or "Commands" in r.output
 
 
-def test_bare_ronin_interactive_opens_repl_by_default(monkeypatch, tmp_path) -> None:
-    """`ronin` with no args, interactive + authed → opens the minimal inline REPL
-    (not the full-screen TUI)."""
+def test_bare_ronin_interactive_opens_tui_by_default(monkeypatch, tmp_path) -> None:
+    """`ronin` with no args, interactive + authed → opens the full-screen TUI by
+    default (the inline REPL is the `--no-tui` opt-out)."""
     import sys as _sys
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
     monkeypatch.chdir(tmp_path)
@@ -31,8 +31,8 @@ def test_bare_ronin_interactive_opens_repl_by_default(monkeypatch, tmp_path) -> 
         ctx = MagicMock()
         ctx.invoked_subcommand = None
         _root(ctx)
-    run_unified.assert_called_once()
-    run_tui_mock.assert_not_called()
+    run_tui_mock.assert_called_once()
+    run_unified.assert_not_called()
 
 
 def test_ronin_tui_flag_launches_tui(monkeypatch, tmp_path) -> None:

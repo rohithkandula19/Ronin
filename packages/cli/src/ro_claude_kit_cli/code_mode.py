@@ -345,6 +345,11 @@ def run_code_agent(
     extra_system: str = "",
     include_image_tool: bool = True,
     base_system: str | None = None,
+    # Headless callback overrides — when set (e.g. by the TUI), these replace the
+    # console renderer/gate so the agent can be driven from another front-end.
+    on_text_cb=None,
+    on_step_cb=None,
+    gate_cb=None,
 ) -> CodeRunResult:
     scan = InjectionScanner().scan(task)
     if scan.flagged:
@@ -426,13 +431,14 @@ def run_code_agent(
         compact_keep_recent=6,
     )
 
-    before_tool = _selective_gate(console, yolo, _Path(root).resolve())
+    before_tool = gate_cb or _selective_gate(console, yolo, _Path(root).resolve())
 
     # Stream the model's reasoning + summary live (the Claude-Code feel) when we
     # have a console; fall back to the step-narrator for non-interactive runs.
+    # Headless callbacks (the TUI) take precedence over the console renderer.
     renderer = LiveRenderer(console) if console is not None else None
-    on_step = renderer.on_step if renderer is not None else None
-    on_text = renderer.on_text if renderer is not None else None
+    on_step = on_step_cb or (renderer.on_step if renderer is not None else None)
+    on_text = on_text_cb or (renderer.on_text if renderer is not None else None)
 
     # user-defined hooks (auto-format/test after edits, etc.) from .csk/hooks.json
     from .hooks import build_after_tool, load_hooks
