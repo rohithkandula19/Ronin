@@ -287,6 +287,37 @@ def test_openai_compat_retries_on_429(monkeypatch) -> None:
     assert fake_client.post.call_count == 3
 
 
+def test_openai_compat_on_retry_callback_fires(monkeypatch) -> None:
+    """A 429 fires the on_retry callback (so the CLI can show 'retrying in Ns')
+    then the call succeeds on the next attempt."""
+    import ro_claude_kit_agent_patterns.providers.openai_compat as oc
+    monkeypatch.setattr(oc.time, "sleep", lambda *_a, **_k: None)
+
+    r429 = MagicMock(spec=httpx.Response)
+    r429.status_code = 429
+    r429.headers = {"retry-after": "7"}
+    ok = _openai_response(content="recovered")
+
+    fake_client = MagicMock()
+    fake_client.__enter__.return_value = fake_client
+    fake_client.__exit__.return_value = False
+    fake_client.post.side_effect = [r429, ok]
+
+    calls: list = []
+    with patch("ro_claude_kit_agent_patterns.providers.openai_compat.httpx.Client", return_value=fake_client):
+        provider = OpenAICompatProvider(
+            model="m", api_key="sk-x",
+            on_retry=lambda attempt, wait, status: calls.append((attempt, wait, status)),
+        )
+        result = provider.complete(system="s", messages=[Message(role="user", content="hi")], tools=[])
+
+    assert result.text == "recovered"
+    assert len(calls) == 1
+    assert calls[0][0] == 1            # attempt number
+    assert calls[0][1] == 7.0          # honoured Retry-After
+    assert calls[0][2] == 429          # status
+
+
 def test_openai_compat_roundtrips_tool_call_provider_meta() -> None:
     """Gemini-style extra_content (thought_signature) is captured on parse and
     replayed when the assistant tool-call is serialized back."""

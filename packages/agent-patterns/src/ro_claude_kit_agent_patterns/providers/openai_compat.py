@@ -92,6 +92,17 @@ class OpenAICompatProvider(LLMProvider):
     api_key: str | None = None
     timeout: float = 120.0
     extra_headers: dict[str, str] = {}
+    # Optional callback fired before each retry sleep: on_retry(attempt, wait, status).
+    # The CLI uses it to tell the user "rate-limited — retrying in Ns" instead of
+    # appearing frozen during the (up to ~60s) backoff.
+    on_retry: Any | None = None
+
+    def _notify_retry(self, attempt: int, wait: float, status: int) -> None:
+        if self.on_retry is not None:
+            try:
+                self.on_retry(attempt, wait, status)
+            except Exception:  # noqa: BLE001 — a noisy notifier must never break a turn
+                pass
 
     def _resolve_api_key(self) -> str | None:
         if self.api_key:
@@ -163,7 +174,9 @@ class OpenAICompatProvider(LLMProvider):
             for attempt in range(_MAX_RETRIES + 1):
                 response = client.post(self._url(), json=body, headers=self._headers())
                 if response.status_code in _RETRY_STATUSES and attempt < _MAX_RETRIES:
-                    time.sleep(_retry_wait(attempt, response.headers.get("retry-after")))
+                    wait = _retry_wait(attempt, response.headers.get("retry-after"))
+                    self._notify_retry(attempt + 1, wait, response.status_code)
+                    time.sleep(wait)
                     continue
                 break
             response.raise_for_status()
@@ -217,7 +230,9 @@ class OpenAICompatProvider(LLMProvider):
                     # Retry transient statuses before we start consuming the body.
                     if r.status_code in _RETRY_STATUSES and attempt < _MAX_RETRIES:
                         r.read()  # drain so the connection can be reused
-                        time.sleep(_retry_wait(attempt, r.headers.get("retry-after")))
+                        wait = _retry_wait(attempt, r.headers.get("retry-after"))
+                        self._notify_retry(attempt + 1, wait, r.status_code)
+                        time.sleep(wait)
                         continue
                     r.raise_for_status()
                     for line in r.iter_lines():

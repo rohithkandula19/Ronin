@@ -400,10 +400,15 @@ def run_code_agent(
         if console is not None and not history_prefix:
             console.print(f"[dim]📄 loaded project memory from [bold]{mem_name}[/bold][/dim]")
 
+    provider = build_provider(config)
+    # Surface rate-limit backoff so a (up to ~60s) retry wait doesn't look frozen.
+    if console is not None:
+        from .runner import attach_retry_notifier
+        attach_retry_notifier(provider, console)
     agent = ReActAgent(
         system=system,
         tools=tools,
-        provider=build_provider(config),
+        provider=provider,
         max_iterations=max_iterations,
         # Long coding sessions read many files; compact old file/command output
         # so the context window survives a 25-step task.

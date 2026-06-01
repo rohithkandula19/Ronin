@@ -56,3 +56,27 @@ def test_config_for_spec_never_recurses_failover() -> None:
     base = CSKConfig(provider="anthropic", failover=[{"provider": "ollama"}])
     sub = config_for_spec(base, {"provider": "ollama"})
     assert sub.failover == []
+
+
+def test_attach_retry_notifier_sets_callback() -> None:
+    import os
+
+    from rich.console import Console
+
+    from ro_claude_kit_agent_patterns import FailoverProvider, OpenAICompatProvider
+
+    from ro_claude_kit_cli.runner import attach_retry_notifier
+
+    console = Console(file=open(os.devnull, "w"))
+
+    plain = OpenAICompatProvider(model="m", api_key="k")
+    attach_retry_notifier(plain, console)
+    assert plain.on_retry is not None
+
+    # failover: each inner provider that retries gets the notifier
+    fo = FailoverProvider(providers=[
+        OpenAICompatProvider(model="a", api_key="k"),
+        OpenAICompatProvider(model="b", api_key="k"),
+    ])
+    attach_retry_notifier(fo, console)
+    assert all(p.on_retry is not None for p in fo.providers)

@@ -169,6 +169,23 @@ def build_provider(config: CSKConfig) -> LLMProvider:
     return FailoverProvider(providers=providers, labels=labels, model="failover")
 
 
+def attach_retry_notifier(provider: LLMProvider, console) -> None:
+    """Wire a console notice onto any provider that retries (OpenAI-compatible),
+    including the inner providers of a FailoverProvider. Turns a silent ~60s
+    rate-limit backoff into a visible 'retrying in Ns' line the user can cancel."""
+    def _notify(attempt: int, wait: float, status: int) -> None:
+        label = "rate-limited" if status == 429 else f"HTTP {status}"
+        console.print(
+            f"[#b38b2d]⏳ {label} — retrying in {wait:.0f}s "
+            f"(attempt {attempt})… press Ctrl+C to stop[/#b38b2d]"
+        )
+
+    targets = getattr(provider, "providers", None) or [provider]
+    for p in targets:
+        if hasattr(p, "on_retry"):
+            p.on_retry = _notify
+
+
 def _has_real_provider_key(config: CSKConfig) -> bool:
     if config.provider == "ollama":
         return True
