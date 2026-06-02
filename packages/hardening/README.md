@@ -1,11 +1,11 @@
-# ro-claude-kit-hardening
+# ronin-hardening
 
 Production hardening for Claude agents. The unglamorous stuff that decides whether your agent survives prod.
 
 ## Prompt-injection scanning
 
 ```python
-from ro_claude_kit_hardening import InjectionScanner
+from ronin_hardening import InjectionScanner
 
 scanner = InjectionScanner()
 result = scanner.scan(user_input)
@@ -22,7 +22,7 @@ For high-risk inputs use the *dual-LLM* pattern: keep untrusted input out of the
 ## Tool allowlist + approval gate
 
 ```python
-from ro_claude_kit_hardening import ToolAllowlist, ApprovalGate
+from ronin_hardening import ToolAllowlist, ApprovalGate
 
 allowlist = ToolAllowlist(allowed={"search", "fetch_doc"})
 allowlist.assert_allowed(tool_name)  # raises PermissionError if not allowed
@@ -40,7 +40,7 @@ Allowlist blocks hallucinated or attacker-crafted tool names at dispatch time. A
 
 ```python
 from pydantic import BaseModel
-from ro_claude_kit_hardening import OutputValidator
+from ronin_hardening import OutputValidator
 
 class ExtractedPerson(BaseModel):
     name: str
@@ -58,7 +58,7 @@ On validation failure the validator feeds the Pydantic error back to the model a
 ## Provider-agnostic tracing
 
 ```python
-from ro_claude_kit_hardening import TraceEmitter
+from ronin_hardening import TraceEmitter
 
 emitter = TraceEmitter(sink=lambda event: langfuse.create_event(event.model_dump()))
 trace_id = emitter.start_trace("research-agent", payload={"user": user_email})

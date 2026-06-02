@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from ro_claude_kit_mcp_servers import StripeReadOnlyTools
+from ronin_mcp_servers import StripeReadOnlyTools
 
 
 def _fake_response(payload: dict, status: int = 200) -> MagicMock:
@@ -70,7 +70,7 @@ def test_propagates_api_errors() -> None:
 
 
 def test_factory_returns_named_handlers() -> None:
-    from ro_claude_kit_mcp_servers import stripe_tools
+    from ronin_mcp_servers import stripe_tools
 
     handlers = stripe_tools(api_key="sk_test_x")
     assert "stripe_list_customers" in handlers

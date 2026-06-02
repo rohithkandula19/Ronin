@@ -1,5 +1,5 @@
 {
-  "name": "@ro-claude-kit/docs",
+  "name": "@ronin/docs",
   "version": "0.0.1",
   "private": true,
   "description": "Documentation site for Ronin.",

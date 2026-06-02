@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 
-from ro_claude_kit_cli.bg_processes import BackgroundManager, build_background_tools
+from ronin_cli.bg_processes import BackgroundManager, build_background_tools
 
 
 def _wait_exit(mgr, pid, timeout=5.0) -> None:
@@ -54,7 +54,7 @@ def test_logs_unknown_id() -> None:
 
 
 def test_build_background_tools_shape_and_sensitivity() -> None:
-    from ro_claude_kit_cli.code_tools import SENSITIVE_TOOLS
+    from ronin_cli.code_tools import SENSITIVE_TOOLS
     tools = {t.name: t for t in build_background_tools(".")}
     assert set(tools) == {"run_background", "background_logs", "background_status", "stop_background"}
     assert "run_background" in SENSITIVE_TOOLS  # gated like run_command

@@ -9,15 +9,15 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "ro-claude-kit",
-    "ro-claude-kit-agent-patterns",
-    "ro-claude-kit-api",
-    "ro-claude-kit-cli",
-    "ro-claude-kit-demo",
-    "ro-claude-kit-eval-suite",
-    "ro-claude-kit-hardening",
-    "ro-claude-kit-mcp-servers",
-    "ro-claude-kit-memory",
+    "ronin",
+    "ronin-agent-patterns",
+    "ronin-api",
+    "ronin-cli",
+    "ronin-demo",
+    "ronin-eval-suite",
+    "ronin-hardening",
+    "ronin-mcp-servers",
+    "ronin-memory",
 ]
 
 [[package]]
@@ -2062,12 +2062,12 @@ wheels = [
 ]
 
 [[package]]
-name = "ro-claude-kit"
+name = "ronin"
 version = "0.0.1"
 source = { virtual = "." }
 
 [[package]]
-name = "ro-claude-kit-agent-patterns"
+name = "ronin-agent-patterns"
 version = "0.0.1"
 source = { editable = "packages/agent-patterns" }
 dependencies = [
@@ -2092,7 +2092,7 @@ requires-dist = [
 dev = [{ name = "pytest", specifier = ">=7.0" }]
 
 [[package]]
-name = "ro-claude-kit-api"
+name = "ronin-api"
 version = "0.0.1"
 source = { editable = "apps/api" }
 dependencies = [
@@ -2102,8 +2102,8 @@ dependencies = [
     { name = "fastapi" },
     { name = "pydantic", extra = ["email"] },
     { name = "pydantic-settings" },
-    { name = "ro-claude-kit-agent-patterns" },
-    { name = "ro-claude-kit-cli" },
+    { name = "ronin-agent-patterns" },
+    { name = "ronin-cli" },
     { name = "sqlalchemy" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -2129,8 +2129,8 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.5" },
     { name = "pydantic", extras = ["email"], specifier = ">=2.5" },
     { name = "pydantic-settings", specifier = ">=2.0" },
-    { name = "ro-claude-kit-agent-patterns", editable = "packages/agent-patterns" },
-    { name = "ro-claude-kit-cli", editable = "packages/cli" },
+    { name = "ronin-agent-patterns", editable = "packages/agent-patterns" },
+    { name = "ronin-cli", editable = "packages/cli" },
     { name = "sqlalchemy", specifier = ">=2.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]
@@ -2143,7 +2143,7 @@ dev = [
 ]
 
 [[package]]
-name = "ro-claude-kit-cli"
+name = "ronin-cli"
 version = "0.53.0"
 source = { editable = "packages/cli" }
 dependencies = [
@@ -2151,11 +2151,11 @@ dependencies = [
     { name = "prompt-toolkit" },
     { name = "pydantic" },
     { name = "rich" },
-    { name = "ro-claude-kit-agent-patterns" },
-    { name = "ro-claude-kit-eval-suite" },
-    { name = "ro-claude-kit-hardening" },
-    { name = "ro-claude-kit-mcp-servers" },
-    { name = "ro-claude-kit-memory" },
+    { name = "ronin-agent-patterns" },
+    { name = "ronin-eval-suite" },
+    { name = "ronin-hardening" },
+    { name = "ronin-mcp-servers" },
+    { name = "ronin-memory" },
     { name = "textual" },
     { name = "tomli-w" },
     { name = "typer" },
@@ -2180,11 +2180,11 @@ requires-dist = [
     { name = "psycopg2-binary", marker = "extra == 'postgres'", specifier = ">=2.9" },
     { name = "pydantic", specifier = ">=2.5" },
     { name = "rich", specifier = ">=13.7" },
-    { name = "ro-claude-kit-agent-patterns", editable = "packages/agent-patterns" },
-    { name = "ro-claude-kit-eval-suite", editable = "packages/eval-suite" },
-    { name = "ro-claude-kit-hardening", editable = "packages/hardening" },
-    { name = "ro-claude-kit-mcp-servers", editable = "packages/mcp-servers" },
-    { name = "ro-claude-kit-memory", editable = "packages/memory" },
+    { name = "ronin-agent-patterns", editable = "packages/agent-patterns" },
+    { name = "ronin-eval-suite", editable = "packages/eval-suite" },
+    { name = "ronin-hardening", editable = "packages/hardening" },
+    { name = "ronin-mcp-servers", editable = "packages/mcp-servers" },
+    { name = "ronin-memory", editable = "packages/memory" },
     { name = "textual", specifier = ">=0.85" },
     { name = "tomli-w", specifier = ">=1.0" },
     { name = "typer", specifier = ">=0.12" },
@@ -2199,13 +2199,13 @@ dev = [
 ]
 
 [[package]]
-name = "ro-claude-kit-demo"
+name = "ronin-demo"
 version = "0.0.1"
 source = { editable = "apps/demo" }
 dependencies = [
     { name = "fastapi" },
-    { name = "ro-claude-kit-agent-patterns" },
-    { name = "ro-claude-kit-hardening" },
+    { name = "ronin-agent-patterns" },
+    { name = "ronin-hardening" },
     { name = "uvicorn" },
 ]
 
@@ -2218,8 +2218,8 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.110" },
-    { name = "ro-claude-kit-agent-patterns", editable = "packages/agent-patterns" },
-    { name = "ro-claude-kit-hardening", editable = "packages/hardening" },
+    { name = "ronin-agent-patterns", editable = "packages/agent-patterns" },
+    { name = "ronin-hardening", editable = "packages/hardening" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]
 
@@ -2230,7 +2230,7 @@ dev = [
 ]
 
 [[package]]
-name = "ro-claude-kit-eval-suite"
+name = "ronin-eval-suite"
 version = "0.0.1"
 source = { editable = "packages/eval-suite" }
 dependencies = [
@@ -2253,7 +2253,7 @@ requires-dist = [
 dev = [{ name = "pytest", specifier = ">=7.0" }]
 
 [[package]]
-name = "ro-claude-kit-hardening"
+name = "ronin-hardening"
 version = "0.0.1"
 source = { editable = "packages/hardening" }
 dependencies = [
@@ -2276,7 +2276,7 @@ requires-dist = [
 dev = [{ name = "pytest", specifier = ">=7.0" }]
 
 [[package]]
-name = "ro-claude-kit-mcp-servers"
+name = "ronin-mcp-servers"
 version = "0.0.1"
 source = { editable = "packages/mcp-servers" }
 dependencies = [
@@ -2310,7 +2310,7 @@ provides-extras = ["postgres", "mcp"]
 dev = [{ name = "pytest", specifier = ">=7.0" }]
 
 [[package]]
-name = "ro-claude-kit-memory"
+name = "ronin-memory"
 version = "0.0.1"
 source = { editable = "packages/memory" }
 dependencies = [

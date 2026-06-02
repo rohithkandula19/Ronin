@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ro_claude_kit_cli import bushido
+from ronin_cli import bushido
 
 
 def _home(monkeypatch, tmp_path: Path) -> Path:

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from rich.console import Console
 
-from ro_claude_kit_cli.code_mode import build_ask_user_tool
+from ronin_cli.code_mode import build_ask_user_tool
 
 
 def _tool(answer: str):

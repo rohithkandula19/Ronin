@@ -23,8 +23,8 @@ app = modal.App("ro-claude-agent")
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .pip_install(
-        "ro-claude-kit-agent-patterns>=0.0.1",
-        "ro-claude-kit-hardening>=0.0.1",
+        "ronin-agent-patterns>=0.0.1",
+        "ronin-hardening>=0.0.1",
         "fastapi>=0.110",
     )
 )
@@ -36,8 +36,8 @@ ANTHROPIC_SECRET = modal.Secret.from_name("anthropic")
 @modal.web_endpoint(method="POST")
 def run_agent(payload: dict) -> dict:
     """POST endpoint that runs a ReAct agent over the question and returns the trace."""
-    from ro_claude_kit_agent_patterns import ReActAgent
-    from ro_claude_kit_hardening import InjectionScanner
+    from ronin_agent_patterns import ReActAgent
+    from ronin_hardening import InjectionScanner
 
     question = str(payload.get("question", "")).strip()
     if not question:

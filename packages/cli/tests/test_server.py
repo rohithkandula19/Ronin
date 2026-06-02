@@ -4,13 +4,13 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from ro_claude_kit_cli.config import CSKConfig
-from ro_claude_kit_cli.runner import AgentResultRich
-from ro_claude_kit_cli.server import make_app
+from ronin_cli.config import RoninConfig
+from ronin_cli.runner import AgentResultRich
+from ronin_cli.server import make_app
 
 
 def test_health_endpoint() -> None:
-    config = CSKConfig(demo_mode=True, provider="anthropic")
+    config = RoninConfig(demo_mode=True, provider="anthropic")
     client = TestClient(make_app(config))
     response = client.get("/health")
     assert response.status_code == 200
@@ -30,9 +30,9 @@ def test_ask_endpoint_runs_via_run_ask() -> None:
         demo_mode=True,
     )
 
-    config = CSKConfig(demo_mode=True)
+    config = RoninConfig(demo_mode=True)
     client = TestClient(make_app(config))
-    with patch("ro_claude_kit_cli.server.run_ask", return_value=fake_result):
+    with patch("ronin_cli.server.run_ask", return_value=fake_result):
         response = client.post("/ask", json={"question": "what is our MRR?"})
 
     assert response.status_code == 200
@@ -43,7 +43,7 @@ def test_ask_endpoint_runs_via_run_ask() -> None:
 
 
 def test_ask_rejects_empty_question() -> None:
-    config = CSKConfig(demo_mode=True)
+    config = RoninConfig(demo_mode=True)
     client = TestClient(make_app(config))
     response = client.post("/ask", json={"question": "   "})
     assert response.status_code == 400

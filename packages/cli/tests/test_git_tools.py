@@ -4,7 +4,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from ro_claude_kit_cli.git_tools import build_git_tools
+from ronin_cli.git_tools import build_git_tools
 
 
 def _git(root: Path, *args: str) -> None:

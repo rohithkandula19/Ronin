@@ -4,12 +4,12 @@ from unittest.mock import patch
 
 from textual.widgets import Input
 
-from ro_claude_kit_cli.config import CSKConfig
-from ro_claude_kit_cli.tui import RoninApp
+from ronin_cli.config import RoninConfig
+from ronin_cli.tui import RoninApp
 
 
 async def test_typing_while_busy_queues_then_runs() -> None:
-    app = RoninApp(config=CSKConfig(provider="anthropic"))
+    app = RoninApp(config=RoninConfig(provider="anthropic"))
     async with app.run_test() as pilot:
         # while a turn is "running" (we stub _run_agent to just mark busy)
         with patch.object(app, "_run_agent", side_effect=lambda q: setattr(app, "busy", True)):

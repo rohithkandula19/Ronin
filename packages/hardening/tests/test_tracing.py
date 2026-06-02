@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from ro_claude_kit_hardening import TraceEmitter, redact_pii
-from ro_claude_kit_hardening.tracing import TraceEvent
+from ronin_hardening import TraceEmitter, redact_pii
+from ronin_hardening.tracing import TraceEvent
 
 
 def test_redact_pii_email_and_secret() -> None:

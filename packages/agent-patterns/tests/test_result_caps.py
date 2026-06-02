@@ -1,7 +1,7 @@
 """Tests for per-tool-result truncation — no single result can blow the window."""
 from __future__ import annotations
 
-from ro_claude_kit_agent_patterns import FakeProvider, LLMResponse, ReActAgent, Tool, ToolCall
+from ronin_agent_patterns import FakeProvider, LLMResponse, ReActAgent, Tool, ToolCall
 
 
 def test_cap_result_truncates_large() -> None:

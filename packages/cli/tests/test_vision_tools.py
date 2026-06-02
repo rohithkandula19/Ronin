@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ro_claude_kit_cli import vision_tools
-from ro_claude_kit_cli.config import CSKConfig
+from ronin_cli import vision_tools
+from ronin_cli.config import RoninConfig
 
 
-def _cfg() -> CSKConfig:
-    return CSKConfig(provider="anthropic", anthropic_api_key="sk-x")
+def _cfg() -> RoninConfig:
+    return RoninConfig(provider="anthropic", anthropic_api_key="sk-x")
 
 
 def _tools(root):

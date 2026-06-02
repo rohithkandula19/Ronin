@@ -17,14 +17,14 @@ CI runs the same command. If it's green locally, it'll be green in CI.
 ## What we welcome
 
 - **Bug fixes** — open an issue first if it's non-trivial; otherwise a PR with a failing test → fix is great.
-- **New MCP servers** — read-only, following the pattern in `packages/mcp-servers/src/ro_claude_kit_mcp_servers/`. Each server: a `*_ReadOnlyTools` Pydantic class + a `*_tools()` factory + tests with mocked `httpx`.
-- **New providers** — add a class subclassing `LLMProvider` in `packages/agent-patterns/src/ro_claude_kit_agent_patterns/providers/`. See `openai_compat.py` for the template.
+- **New MCP servers** — read-only, following the pattern in `packages/mcp-servers/src/ronin_mcp_servers/`. Each server: a `*_ReadOnlyTools` Pydantic class + a `*_tools()` factory + tests with mocked `httpx`.
+- **New providers** — add a class subclassing `LLMProvider` in `packages/agent-patterns/src/ronin_agent_patterns/providers/`. See `openai_compat.py` for the template.
 - **Documentation** — typos, clarifications, new cookbook recipes in `apps/docs/`.
 - **CLI commands** — keep them small and composable. `csk` should feel like `git`, not `kubectl`.
 
 ## What we don't want (please don't open PRs for these)
 
-- **Write paths** in MCP servers. Read-only is a deliberate design choice. If you need writes, wrap the handler in `ApprovalGate` from `ro-claude-kit-hardening` *in your own code*.
+- **Write paths** in MCP servers. Read-only is a deliberate design choice. If you need writes, wrap the handler in `ApprovalGate` from `ronin-hardening` *in your own code*.
 - **Skipping the prompt-injection scanner** for "convenience". The scanner is the load-bearing safety check.
 - **New agent frameworks** as dependencies (LangChain, LlamaIndex, CrewAI, etc.). The point of this kit is to *not* depend on them.
 - **Vendor SDKs** as hard dependencies. Use `httpx` against documented HTTP APIs; vendor SDKs go behind optional extras.
@@ -40,7 +40,7 @@ CI runs the same command. If it's green locally, it'll be green in CI.
 
 ## Adding a new MCP server (template)
 
-1. Create `packages/mcp-servers/src/ro_claude_kit_mcp_servers/<name>.py` with a Pydantic class wrapping the read-only methods.
+1. Create `packages/mcp-servers/src/ronin_mcp_servers/<name>.py` with a Pydantic class wrapping the read-only methods.
 2. Add a `<name>_tools()` factory returning a `name -> handler` dict.
 3. Export both from `__init__.py`.
 4. Tests in `packages/mcp-servers/tests/test_<name>.py` mocking `httpx.Client`.
@@ -48,11 +48,11 @@ CI runs the same command. If it's green locally, it'll be green in CI.
 
 ## Adding a new LLM provider (template)
 
-1. Create `packages/agent-patterns/src/ro_claude_kit_agent_patterns/providers/<name>.py`.
+1. Create `packages/agent-patterns/src/ronin_agent_patterns/providers/<name>.py`.
 2. Subclass `LLMProvider`, implement `complete(...)`.
 3. Translate the neutral `Message` list to your provider's wire format.
 4. Export from `providers/__init__.py`.
-5. If it's a CLI-supported provider, add a preset to `PROVIDER_PRESETS` in `packages/cli/src/ro_claude_kit_cli/config.py` and route it in `runner.build_provider`.
+5. If it's a CLI-supported provider, add a preset to `PROVIDER_PRESETS` in `packages/cli/src/ronin_cli/config.py` and route it in `runner.build_provider`.
 6. Tests in `packages/agent-patterns/tests/test_providers.py`.
 
 ## Releasing

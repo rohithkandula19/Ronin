@@ -20,7 +20,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from ro_claude_kit_agent_patterns import (
+from ronin_agent_patterns import (
     AnthropicProvider,
     LLMProvider,
     SubAgent,

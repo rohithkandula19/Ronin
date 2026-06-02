@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from ro_claude_kit_cli.briefing import compute_briefing_data
-from ro_claude_kit_cli.briefing_history import (
+from ronin_cli.briefing import compute_briefing_data
+from ronin_cli.briefing_history import (
     BriefingDelta,
     BriefingSnapshot,
     format_delta_line,
@@ -15,16 +15,16 @@ from ro_claude_kit_cli.briefing_history import (
     most_recent_prior,
     save_snapshot,
 )
-from ro_claude_kit_cli.config import CSKConfig
-from ro_claude_kit_cli.main import app
-from ro_claude_kit_cli.tools import build_tools
+from ronin_cli.config import RoninConfig
+from ronin_cli.main import app
+from ronin_cli.tools import build_tools
 
 
 runner = CliRunner()
 
 
 def test_snapshot_from_briefing_captures_counts() -> None:
-    tools = build_tools(CSKConfig(demo_mode=True))
+    tools = build_tools(RoninConfig(demo_mode=True))
     data = compute_briefing_data(tools)
     snap = BriefingSnapshot.from_briefing(data, date="2026-05-11")
 

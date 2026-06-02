@@ -2,9 +2,9 @@
 the index/search/cache logic is covered deterministically and offline."""
 from __future__ import annotations
 
-from ro_claude_kit_cli import embeddings
-from ro_claude_kit_cli.config import CSKConfig
-from ro_claude_kit_cli.embeddings import EmbeddingBackend, SemanticIndex, cosine
+from ronin_cli import embeddings
+from ronin_cli.config import RoninConfig
+from ronin_cli.embeddings import EmbeddingBackend, SemanticIndex, cosine
 
 
 class _FakeBackend(EmbeddingBackend):
@@ -54,32 +54,32 @@ def test_index_caches_embeddings(tmp_path) -> None:
 
 def test_get_backend_none_for_anthropic() -> None:
     # anthropic has no embeddings route here → None → callers fall back to BM25
-    assert embeddings.get_backend(CSKConfig(provider="anthropic", anthropic_api_key="x")) is None
+    assert embeddings.get_backend(RoninConfig(provider="anthropic", anthropic_api_key="x")) is None
 
 
 def test_get_backend_ollama() -> None:
-    backend = embeddings.get_backend(CSKConfig(provider="ollama"))
+    backend = embeddings.get_backend(RoninConfig(provider="ollama"))
     assert backend is not None and backend.name == "ollama"
 
 
 def test_get_backend_openai() -> None:
-    cfg = CSKConfig(provider="openai")
+    cfg = RoninConfig(provider="openai")
     cfg.set_key_for("openai", "sk-x")
     backend = embeddings.get_backend(cfg)
     assert backend is not None and backend.name == "openai"
 
 
 def test_semantic_search_returns_none_without_backend(tmp_path) -> None:
-    cfg = CSKConfig(provider="anthropic", anthropic_api_key="x")
+    cfg = RoninConfig(provider="anthropic", anthropic_api_key="x")
     assert embeddings.semantic_search("q", tmp_path, cfg) is None
 
 
 def test_build_semantic_tools_gated_on_backend(tmp_path) -> None:
     # no backend → no tool exposed
     assert embeddings.build_semantic_tools(
-        CSKConfig(provider="anthropic", anthropic_api_key="x"), tmp_path) == []
+        RoninConfig(provider="anthropic", anthropic_api_key="x"), tmp_path) == []
     # backend present → the tool appears
-    tools = embeddings.build_semantic_tools(CSKConfig(provider="ollama"), tmp_path)
+    tools = embeddings.build_semantic_tools(RoninConfig(provider="ollama"), tmp_path)
     assert [t.name for t in tools] == ["semantic_search"]
 
 
@@ -87,6 +87,6 @@ def test_semantic_search_tool_output(tmp_path, monkeypatch) -> None:
     _seed(tmp_path)
     monkeypatch.setattr(embeddings, "get_backend", lambda cfg: _FakeBackend())
     embeddings._INDEX_CACHE.clear()
-    tools = {t.name: t for t in embeddings.build_semantic_tools(CSKConfig(provider="ollama"), tmp_path)}
+    tools = {t.name: t for t in embeddings.build_semantic_tools(RoninConfig(provider="ollama"), tmp_path)}
     out = tools["semantic_search"].handler(query="login and verify credentials")
     assert "auth.py" in out

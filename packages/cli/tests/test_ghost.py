@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from ro_claude_kit_cli.ghost import (
+from ronin_cli.ghost import (
     GhostState,
     PANDA,
     changed_files,

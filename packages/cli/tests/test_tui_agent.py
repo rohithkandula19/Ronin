@@ -3,14 +3,14 @@ run_code_agent and the approval-gate logic (the parts testable without a live
 Textual event loop)."""
 from __future__ import annotations
 
-from ro_claude_kit_agent_patterns import FakeProvider, LLMResponse, ToolCall
+from ronin_agent_patterns import FakeProvider, LLMResponse, ToolCall
 
-from ro_claude_kit_cli import code_mode
-from ro_claude_kit_cli.config import CSKConfig
+from ronin_cli import code_mode
+from ronin_cli.config import RoninConfig
 
 
-def _cfg() -> CSKConfig:
-    return CSKConfig(provider="anthropic", anthropic_api_key="sk-x")
+def _cfg() -> RoninConfig:
+    return RoninConfig(provider="anthropic", anthropic_api_key="sk-x")
 
 
 def test_run_code_agent_drives_headless_callbacks(monkeypatch, tmp_path) -> None:
@@ -55,7 +55,7 @@ def test_run_code_agent_gate_denial_is_respected(monkeypatch, tmp_path) -> None:
 
 
 def test_tui_gate_allows_nonsensitive() -> None:
-    from ro_claude_kit_cli.tui import RoninApp
+    from ronin_cli.tui import RoninApp
     app = RoninApp(config=_cfg(), root=".")
     # non-sensitive tools never block on a modal — immediate True
     assert app._gate("read_file", {}) is True
@@ -63,7 +63,7 @@ def test_tui_gate_allows_nonsensitive() -> None:
 
 
 def test_tui_imports_and_constructs() -> None:
-    from ro_claude_kit_cli.tui import ApprovalScreen, RoninApp
+    from ronin_cli.tui import ApprovalScreen, RoninApp
     app = RoninApp(config=_cfg(), root=".")
     assert app.busy is False
     assert app.root.endswith(("/", "ronin")) or app.root  # resolved to an abs path

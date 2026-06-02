@@ -2,13 +2,13 @@
 calls happen — the test covers scoring, cost estimation, and the recommendation."""
 from __future__ import annotations
 
-from ro_claude_kit_cli import bench
-from ro_claude_kit_cli.agent_eval import EvalTask, TaskOutcome
-from ro_claude_kit_cli.config import CSKConfig
+from ronin_cli import bench
+from ronin_cli.agent_eval import EvalTask, TaskOutcome
+from ronin_cli.config import RoninConfig
 
 
-def _cfg() -> CSKConfig:
-    return CSKConfig(provider="anthropic", anthropic_api_key="sk-x")
+def _cfg() -> RoninConfig:
+    return RoninConfig(provider="anthropic", anthropic_api_key="sk-x")
 
 
 def _outcomes(n_pass: int, n_total: int, tokens_each: int = 1000,

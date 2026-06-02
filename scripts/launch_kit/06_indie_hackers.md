@@ -36,7 +36,7 @@ csk briefing
 
 5. The eval suite was a forcing function for finishing. "Drift detection" sounds fancy but is just `if criterion_score_delta < -0.5: exit 1`. Wire it into CI and you can never silently regress.
 
-**Open source under MIT**, no telemetry, no signup. PyPI: `ro-claude-kit-cli`. Repo: https://github.com/rohithkandula19/Ronin
+**Open source under MIT**, no telemetry, no signup. PyPI: `ronin-cli`. Repo: https://github.com/rohithkandula19/Ronin
 
 **Looking for two things from this crowd**:
 1. What's the briefing missing that you'd check first thing Monday?

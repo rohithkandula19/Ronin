@@ -6,9 +6,9 @@ from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
-from ro_claude_kit_cli import main as cli_main
-from ro_claude_kit_cli.config import CSKConfig
-from ro_claude_kit_cli.main import _provider_live_check, app, load_config
+from ronin_cli import main as cli_main
+from ronin_cli.config import RoninConfig
+from ronin_cli.main import _provider_live_check, app, load_config
 
 runner = CliRunner()
 
@@ -45,7 +45,7 @@ class _HTTPError(Exception):
 
 
 def test_live_check_invalid_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    cfg = CSKConfig(provider="groq", model="llama-3.3-70b-versatile", openai_api_key="bad")
+    cfg = RoninConfig(provider="groq", model="llama-3.3-70b-versatile", openai_api_key="bad")
     import urllib.error
     with patch("urllib.request.urlopen", side_effect=urllib.error.HTTPError("u", 401, "no", {}, None)):
         msg = _provider_live_check(cfg)
@@ -53,7 +53,7 @@ def test_live_check_invalid_key(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_live_check_model_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
-    cfg = CSKConfig(provider="groq", model="yes", openai_api_key="gsk_ok")
+    cfg = RoninConfig(provider="groq", model="yes", openai_api_key="gsk_ok")
 
     class _Resp:
         def __enter__(self): return self
@@ -66,7 +66,7 @@ def test_live_check_model_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_live_check_ok(monkeypatch: pytest.MonkeyPatch) -> None:
-    cfg = CSKConfig(provider="groq", model="llama-3.3-70b-versatile", openai_api_key="gsk_ok")
+    cfg = RoninConfig(provider="groq", model="llama-3.3-70b-versatile", openai_api_key="gsk_ok")
 
     class _Resp:
         def __enter__(self): return self
@@ -79,7 +79,7 @@ def test_live_check_ok(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_live_check_no_key() -> None:
-    cfg = CSKConfig(provider="groq", model="x")  # no key
+    cfg = RoninConfig(provider="groq", model="x")  # no key
     assert "no key" in _provider_live_check(cfg).lower()
 
 

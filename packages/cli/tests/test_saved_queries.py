@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from ro_claude_kit_cli.saved_queries import QueryStore, SavedQuery
+from ronin_cli.saved_queries import QueryStore, SavedQuery
 
 
 def test_roundtrip(tmp_path: Path) -> None:

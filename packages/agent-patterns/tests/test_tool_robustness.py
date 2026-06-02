@@ -2,8 +2,8 @@
 make instead of crashing the turn."""
 from __future__ import annotations
 
-from ro_claude_kit_agent_patterns.base import _adapt_args, execute_tool_call
-from ro_claude_kit_agent_patterns.types import Tool
+from ronin_agent_patterns.base import _adapt_args, execute_tool_call
+from ronin_agent_patterns.types import Tool
 
 
 def _tool(handler, schema=None) -> Tool:

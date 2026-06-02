@@ -5,10 +5,10 @@ from unittest.mock import patch
 
 import pytest
 
-from ro_claude_kit_agent_patterns import FakeProvider, LLMResponse, ToolCall
-from ro_claude_kit_cli import media
-from ro_claude_kit_cli.code_mode import run_code_agent
-from ro_claude_kit_cli.config import CSKConfig
+from ronin_agent_patterns import FakeProvider, LLMResponse, ToolCall
+from ronin_cli import media
+from ronin_cli.code_mode import run_code_agent
+from ronin_cli.config import RoninConfig
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"img"
 
@@ -52,8 +52,8 @@ def _image_using_provider() -> FakeProvider:
 
 def test_code_agent_can_generate_image(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
-    config = CSKConfig(provider="anthropic")
-    with patch("ro_claude_kit_cli.code_mode.build_provider", return_value=_image_using_provider()), \
+    config = RoninConfig(provider="anthropic")
+    with patch("ronin_cli.code_mode.build_provider", return_value=_image_using_provider()), \
          patch.object(media, "_image_bytes", return_value=(PNG, "image/png")):
         # console=None → non-interactive; generate_image is gated but yolo auto-approves
         result = run_code_agent(config, "make a logo", root=tmp_path, console=None, yolo=True)

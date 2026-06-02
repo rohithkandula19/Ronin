@@ -5,7 +5,7 @@
    it constantly; a bare TypeError just wastes a round-trip)."""
 from __future__ import annotations
 
-from ro_claude_kit_cli.code_tools import build_code_tools
+from ronin_cli.code_tools import build_code_tools
 
 
 def _tools(root):

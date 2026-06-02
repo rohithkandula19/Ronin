@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import time
 
-from ro_claude_kit_cli import context_engine
-from ro_claude_kit_cli.repo_map import _CACHE
+from ronin_cli import context_engine
+from ronin_cli.repo_map import _CACHE
 
 
 def _seed_repo(root) -> None:

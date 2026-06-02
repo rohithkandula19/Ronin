@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from ro_claude_kit_cli.code_tools import build_code_tools
+from ronin_cli.code_tools import build_code_tools
 
 
 def _tools(root: Path, *, sandbox: bool = True) -> dict:

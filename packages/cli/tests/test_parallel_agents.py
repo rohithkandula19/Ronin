@@ -9,17 +9,17 @@ import threading
 import time
 from pathlib import Path
 
-from ro_claude_kit_cli import code_mode
-from ro_claude_kit_cli.code_mode import (
+from ronin_cli import code_mode
+from ronin_cli.code_mode import (
     CodeRunResult,
     build_isolated_task_tool,
     build_parallel_task_tool,
 )
-from ro_claude_kit_cli.config import CSKConfig
+from ronin_cli.config import RoninConfig
 
 
-def _cfg() -> CSKConfig:
-    return CSKConfig(provider="anthropic", model="claude-sonnet-4-6")
+def _cfg() -> RoninConfig:
+    return RoninConfig(provider="anthropic", model="claude-sonnet-4-6")
 
 
 def _init_repo(path: Path) -> None:

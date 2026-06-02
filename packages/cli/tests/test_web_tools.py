@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from ro_claude_kit_cli import web_tools
+from ronin_cli import web_tools
 
 
 def _resp(text: str, ctype: str = "text/html"):

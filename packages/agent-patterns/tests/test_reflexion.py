@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ro_claude_kit_agent_patterns import FakeProvider, LLMResponse, ReflexionAgent
+from ronin_agent_patterns import FakeProvider, LLMResponse, ReflexionAgent
 
 
 def test_reflexion_accepts_first_attempt() -> None:

@@ -1,6 +1,6 @@
 """Business logic — orchestrates DB rows and the CLI's briefing engine.
 
-The CLI lives in ``ro_claude_kit_cli``; we reuse its data aggregator and Markdown
+The CLI lives in ``ronin_cli``; we reuse its data aggregator and Markdown
 renderer directly. The SaaS just provides per-user persistence + a way to run
 the briefing on a cron without anyone opening a terminal.
 """
@@ -11,14 +11,14 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from ro_claude_kit_cli.briefing import compute_briefing_data, render_briefing_md
-from ro_claude_kit_cli.briefing_history import (
+from ronin_cli.briefing import compute_briefing_data, render_briefing_md
+from ronin_cli.briefing_history import (
     BriefingDelta,
     BriefingSnapshot,
     format_delta_line,
 )
-from ro_claude_kit_cli.config import CSKConfig
-from ro_claude_kit_cli.tools import build_tools
+from ronin_cli.config import RoninConfig
+from ronin_cli.tools import build_tools
 
 from .crypto import decrypt, encrypt, hash_api_token
 from .db import ALLOWED_SERVICES, BriefingRun, Schedule, ServiceConnection, User
@@ -71,13 +71,13 @@ def list_connections(session: Session, user: User) -> list[str]:
     ]
 
 
-def config_for_user(session: Session, user: User) -> CSKConfig:
-    """Decrypt the user's stored credentials into a CSKConfig the CLI can use."""
+def config_for_user(session: Session, user: User) -> RoninConfig:
+    """Decrypt the user's stored credentials into a RoninConfig the CLI can use."""
     conns = {
         c.service: decrypt(c.secret_ciphertext)
         for c in session.query(ServiceConnection).filter_by(user_id=user.id).all()
     }
-    return CSKConfig(
+    return RoninConfig(
         anthropic_api_key=conns.get("anthropic"),
         openai_api_key=conns.get("openai"),
         stripe_api_key=conns.get("stripe"),

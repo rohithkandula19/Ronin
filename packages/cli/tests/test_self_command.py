@@ -2,7 +2,7 @@
 about ronin's own CLI commands."""
 from __future__ import annotations
 
-from ro_claude_kit_cli.self_command import detect_self_command, ronin_subcommands
+from ronin_cli.self_command import detect_self_command, ronin_subcommands
 
 
 def test_real_subcommands_are_discovered() -> None:

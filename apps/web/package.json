@@ -1,5 +1,5 @@
 {
-  "name": "@ro-claude-kit/web",
+  "name": "@ronin/web",
   "version": "0.0.1",
   "private": true,
   "scripts": {

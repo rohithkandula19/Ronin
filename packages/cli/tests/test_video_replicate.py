@@ -6,8 +6,8 @@ from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
-from ro_claude_kit_cli import media
-from ro_claude_kit_cli.main import app
+from ronin_cli import media
+from ronin_cli.main import app
 
 runner = CliRunner()
 MP4 = b"\x00\x00\x00 ftypisom real-motion-mp4"

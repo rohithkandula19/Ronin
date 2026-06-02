@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from ro_claude_kit_hardening import (
+from ronin_hardening import (
     BudgetExceededError,
     TokenBudget,
     estimate_cost_usd,

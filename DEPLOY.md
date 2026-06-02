@@ -120,7 +120,7 @@ For each provider, register an app in their developer console with our callback 
 
 Test in Stripe test mode first; flip to live keys after one real test transaction.
 
-## 6. PyPI for `pip install ro-claude-kit-cli` — 5 min
+## 6. PyPI for `pip install ronin-cli` — 5 min
 
 (Independent of the SaaS — for users who want the local CLI.)
 
@@ -133,7 +133,7 @@ Test in Stripe test mode first; flip to live keys after one real test transactio
    gh workflow run release.yml --ref v0.2.0
    gh run watch
    ```
-4. Verify: open a fresh shell, run `pipx install ro-claude-kit-cli && csk briefing`.
+4. Verify: open a fresh shell, run `pipx install ronin-cli && csk briefing`.
 
 ## 7. Smoke test the live SaaS — 5 min
 

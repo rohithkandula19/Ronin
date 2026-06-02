@@ -7,9 +7,9 @@ from unittest.mock import patch
 
 from rich.console import Console
 
-from ro_claude_kit_agent_patterns import FakeProvider, LLMResponse
-from ro_claude_kit_cli import git_helper
-from ro_claude_kit_cli.config import CSKConfig
+from ronin_agent_patterns import FakeProvider, LLMResponse
+from ronin_cli import git_helper
+from ronin_cli.config import RoninConfig
 
 
 def _git(root, *args):
@@ -26,9 +26,9 @@ def test_commit_drafts_message_and_commits(tmp_path: Path) -> None:
     console = Console(file=io.StringIO(), force_terminal=False)
     provider = FakeProvider(responses=[
         LLMResponse(text="feat: add f.txt", stop_reason="end_turn", usage={})])
-    with patch("ro_claude_kit_cli.runner.build_provider", return_value=provider), \
+    with patch("ronin_cli.runner.build_provider", return_value=provider), \
          patch("builtins.input", return_value="y"):
-        git_helper.commit(console, tmp_path, CSKConfig(provider="groq", openai_api_key="x"))
+        git_helper.commit(console, tmp_path, RoninConfig(provider="groq", openai_api_key="x"))
 
     log = subprocess.run(["git", "-C", str(tmp_path), "log", "--oneline"],
                          capture_output=True, text=True).stdout
@@ -38,5 +38,5 @@ def test_commit_drafts_message_and_commits(tmp_path: Path) -> None:
 def test_commit_clean_tree_noops(tmp_path: Path) -> None:
     _git(tmp_path, "init")
     console = Console(file=(buf := io.StringIO()), force_terminal=False)
-    git_helper.commit(console, tmp_path, CSKConfig(provider="groq", openai_api_key="x"))
+    git_helper.commit(console, tmp_path, RoninConfig(provider="groq", openai_api_key="x"))
     assert "clean" in buf.getvalue()

@@ -10,18 +10,18 @@
 #
 # What it does:
 #   1. Installs `uv` (https://github.com/astral-sh/uv) if it's not on PATH.
-#   2. Clones the repo to ~/.local/share/ro-claude-kit (or updates if it's already there).
+#   2. Clones the repo to ~/.local/share/ronin (or updates if it's already there).
 #   3. Runs `uv sync --all-packages` to resolve the workspace.
 #   4. Creates a `csk` shim at ~/.local/bin/csk that invokes the workspace-managed venv.
 #   5. Tells you to add ~/.local/bin to PATH if it's not there.
 #
-# This is the bootstrap install. Once `ro-claude-kit-cli` lands on PyPI, you can
-# switch to `pipx install ro-claude-kit-cli`.
+# This is the bootstrap install. Once `ronin-cli` lands on PyPI, you can
+# switch to `pipx install ronin-cli`.
 
 set -euo pipefail
 
 REPO_URL="https://github.com/rohithkandula19/Ronin"
-INSTALL_DIR="${CSK_INSTALL_DIR:-$HOME/.local/share/ro-claude-kit}"
+INSTALL_DIR="${CSK_INSTALL_DIR:-$HOME/.local/share/ronin}"
 BIN_DIR="${CSK_BIN_DIR:-$HOME/.local/bin}"
 REF="main"
 
@@ -77,7 +77,7 @@ if ! command -v git >/dev/null 2>&1; then
 fi
 
 # --- clone / update ---
-say "Fetching ro-claude-kit ($REF)"
+say "Fetching ronin ($REF)"
 mkdir -p "$(dirname "$INSTALL_DIR")"
 if [[ -d "$INSTALL_DIR/.git" ]]; then
   ok "existing checkout at $INSTALL_DIR — fetching latest"
@@ -102,7 +102,7 @@ mkdir -p "$BIN_DIR"
 SHIM="$BIN_DIR/csk"
 cat > "$SHIM" <<EOF
 #!/usr/bin/env bash
-# csk shim installed by ro-claude-kit's install.sh
+# csk shim installed by ronin's install.sh
 exec uv --project "$INSTALL_DIR" run csk "\$@"
 EOF
 chmod +x "$SHIM"

@@ -5,7 +5,7 @@ this tool. Replace the fake implementation with a real weather API.
 """
 from __future__ import annotations
 
-from ro_claude_kit_agent_patterns import Tool
+from ronin_agent_patterns import Tool
 
 
 _FAKE_WEATHER = {

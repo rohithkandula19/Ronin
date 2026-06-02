@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ro_claude_kit_cli.repo_map import (
+from ronin_cli.repo_map import (
     RepoIndex,
     _extract_symbols,
     _tokenize,

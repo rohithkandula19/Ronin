@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from ro_claude_kit_cli.main import app
+from ronin_cli.main import app
 
 
 runner = CliRunner()
@@ -72,7 +72,7 @@ def test_eval_subcommand_help(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
 def test_run_saved_query_executes_with_fake_provider(tmp_path, monkeypatch) -> None:
     """End-to-end: save a query, then `csk run <name>` invokes the agent."""
     from unittest.mock import patch
-    from ro_claude_kit_agent_patterns import FakeProvider, LLMResponse
+    from ronin_agent_patterns import FakeProvider, LLMResponse
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
@@ -83,7 +83,7 @@ def test_run_saved_query_executes_with_fake_provider(tmp_path, monkeypatch) -> N
         LLMResponse(text="MRR is $78/mo from 2 active subscriptions.", stop_reason="end_turn",
                     usage={"input_tokens": 10, "output_tokens": 5}),
     ])
-    with patch("ro_claude_kit_cli.runner.build_provider", return_value=provider):
+    with patch("ronin_cli.runner.build_provider", return_value=provider):
         r = runner.invoke(app, ["run", "mrr"])
     assert r.exit_code == 0
     assert "$78" in r.stdout

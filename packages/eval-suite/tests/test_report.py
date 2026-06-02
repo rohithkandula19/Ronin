@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ro_claude_kit_eval_suite import EvalScore, RunReport, Rubric, render_html_report
+from ronin_eval_suite import EvalScore, RunReport, Rubric, render_html_report
 
 
 def test_html_report_renders_and_writes(tmp_path: Path) -> None:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from conftest import make_block, make_response  # type: ignore
 
-from ro_claude_kit_agent_patterns import FakeProvider, LLMResponse, ReActAgent, Tool, ToolCall
+from ronin_agent_patterns import FakeProvider, LLMResponse, ReActAgent, Tool, ToolCall
 
 
 def _big_result_tool() -> Tool:

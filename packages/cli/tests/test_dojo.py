@@ -1,7 +1,7 @@
 """Tests for the Dojo's pure logic — winner parsing + contender selection."""
 from __future__ import annotations
 
-from ro_claude_kit_cli.dojo import DojoResult, Fighter, pick_winner
+from ronin_cli.dojo import DojoResult, Fighter, pick_winner
 
 
 def test_pick_winner_valid() -> None:

@@ -3,15 +3,15 @@ provider are both faked, so no network/LLM is touched — the test covers the
 fan-out + synthesis orchestration."""
 from __future__ import annotations
 
-from ro_claude_kit_agent_patterns import FakeProvider, LLMResponse
+from ronin_agent_patterns import FakeProvider, LLMResponse
 
-from ro_claude_kit_cli import code_mode, consensus
-from ro_claude_kit_cli.code_mode import CodeRunResult
-from ro_claude_kit_cli.config import CSKConfig
+from ronin_cli import code_mode, consensus
+from ronin_cli.code_mode import CodeRunResult
+from ronin_cli.config import RoninConfig
 
 
-def _cfg() -> CSKConfig:
-    return CSKConfig(provider="anthropic", anthropic_api_key="sk-x")
+def _cfg() -> RoninConfig:
+    return RoninConfig(provider="anthropic", anthropic_api_key="sk-x")
 
 
 def test_parse_model_spec() -> None:

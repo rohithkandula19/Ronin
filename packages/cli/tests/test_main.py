@@ -6,9 +6,9 @@ from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
-from ro_claude_kit_cli.config import CSKConfig
-from ro_claude_kit_cli import main as main_mod
-from ro_claude_kit_cli.main import app
+from ronin_cli.config import RoninConfig
+from ronin_cli import main as main_mod
+from ronin_cli.main import app
 
 
 runner = CliRunner()
@@ -73,13 +73,13 @@ def test_ask_in_demo_mode_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake-for-test")
     runner.invoke(app, ["init", "--demo", "-y"])
 
-    from ro_claude_kit_agent_patterns import FakeProvider, LLMResponse
+    from ronin_agent_patterns import FakeProvider, LLMResponse
 
     fake_provider = FakeProvider(responses=[
         LLMResponse(text="You have 2 active subscriptions.", stop_reason="end_turn",
                     usage={"input_tokens": 50, "output_tokens": 20}),
     ])
-    with patch("ro_claude_kit_cli.runner.build_provider", return_value=fake_provider):
+    with patch("ronin_cli.runner.build_provider", return_value=fake_provider):
         result = runner.invoke(app, ["ask", "how many active subs?"])
     assert result.exit_code == 0
     assert "2 active subscriptions" in result.stdout
@@ -99,12 +99,12 @@ def test_root_no_tui_starts_code_session_in_code_repo(tmp_path: Path, monkeypatc
     monkeypatch.chdir(tmp_path)
     ctx = type("Ctx", (), {"invoked_subcommand": None, "get_help": lambda self: "help"})()
 
-    with patch("ro_claude_kit_cli.main._is_code_project", return_value=True), \
-         patch("ro_claude_kit_cli.main.load_config", return_value=CSKConfig(provider="ollama")), \
-         patch("ro_claude_kit_cli.panda_art.render_panda"), \
-         patch("ro_claude_kit_cli.main.console.print"), \
-         patch("ro_claude_kit_cli.code_mode.run_code_session") as run_code, \
-         patch("ro_claude_kit_cli.code_mode.run_unified_session") as run_unified:
+    with patch("ronin_cli.main._is_code_project", return_value=True), \
+         patch("ronin_cli.main.load_config", return_value=RoninConfig(provider="ollama")), \
+         patch("ronin_cli.panda_art.render_panda"), \
+         patch("ronin_cli.main.console.print"), \
+         patch("ronin_cli.code_mode.run_code_session") as run_code, \
+         patch("ronin_cli.code_mode.run_unified_session") as run_unified:
         with patch("sys.stdin.isatty", return_value=True), \
              patch("sys.stdout.isatty", return_value=True):
             main_mod._root(ctx, no_tui=True)
@@ -118,12 +118,12 @@ def test_root_no_tui_starts_unified_session_outside_code_repo(tmp_path: Path, mo
     monkeypatch.chdir(tmp_path)
     ctx = type("Ctx", (), {"invoked_subcommand": None, "get_help": lambda self: "help"})()
 
-    with patch("ro_claude_kit_cli.main._is_code_project", return_value=False), \
-         patch("ro_claude_kit_cli.main.load_config", return_value=CSKConfig(provider="ollama")), \
-         patch("ro_claude_kit_cli.panda_art.render_panda"), \
-         patch("ro_claude_kit_cli.main.console.print"), \
-         patch("ro_claude_kit_cli.code_mode.run_code_session") as run_code, \
-         patch("ro_claude_kit_cli.code_mode.run_unified_session") as run_unified:
+    with patch("ronin_cli.main._is_code_project", return_value=False), \
+         patch("ronin_cli.main.load_config", return_value=RoninConfig(provider="ollama")), \
+         patch("ronin_cli.panda_art.render_panda"), \
+         patch("ronin_cli.main.console.print"), \
+         patch("ronin_cli.code_mode.run_code_session") as run_code, \
+         patch("ronin_cli.code_mode.run_unified_session") as run_unified:
         with patch("sys.stdin.isatty", return_value=True), \
              patch("sys.stdout.isatty", return_value=True):
             main_mod._root(ctx, no_tui=True)
@@ -138,12 +138,12 @@ def test_root_opens_repl_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     monkeypatch.chdir(tmp_path)
     ctx = type("Ctx", (), {"invoked_subcommand": None, "get_help": lambda self: "help"})()
 
-    with patch("ro_claude_kit_cli.main._is_code_project", return_value=False), \
-         patch("ro_claude_kit_cli.main.load_config", return_value=CSKConfig(provider="ollama")), \
-         patch("ro_claude_kit_cli.main.console.print"), \
-         patch("ro_claude_kit_cli.tui.run_tui") as run_tui_mock, \
-         patch("ro_claude_kit_cli.code_mode.run_code_session") as run_code, \
-         patch("ro_claude_kit_cli.code_mode.run_unified_session") as run_unified:
+    with patch("ronin_cli.main._is_code_project", return_value=False), \
+         patch("ronin_cli.main.load_config", return_value=RoninConfig(provider="ollama")), \
+         patch("ronin_cli.main.console.print"), \
+         patch("ronin_cli.tui.run_tui") as run_tui_mock, \
+         patch("ronin_cli.code_mode.run_code_session") as run_code, \
+         patch("ronin_cli.code_mode.run_unified_session") as run_unified:
         with patch("sys.stdin.isatty", return_value=True), \
              patch("sys.stdout.isatty", return_value=True):
             main_mod._root(ctx)
@@ -158,10 +158,10 @@ def test_root_tui_flag_launches_tui(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     monkeypatch.chdir(tmp_path)
     ctx = type("Ctx", (), {"invoked_subcommand": None, "get_help": lambda self: "help"})()
 
-    with patch("ro_claude_kit_cli.main.load_config", return_value=CSKConfig(provider="ollama")), \
-         patch("ro_claude_kit_cli.tui.run_tui") as run_tui_mock, \
-         patch("ro_claude_kit_cli.code_mode.run_code_session") as run_code, \
-         patch("ro_claude_kit_cli.code_mode.run_unified_session") as run_unified:
+    with patch("ronin_cli.main.load_config", return_value=RoninConfig(provider="ollama")), \
+         patch("ronin_cli.tui.run_tui") as run_tui_mock, \
+         patch("ronin_cli.code_mode.run_code_session") as run_code, \
+         patch("ronin_cli.code_mode.run_unified_session") as run_unified:
         with patch("sys.stdin.isatty", return_value=True), \
              patch("sys.stdout.isatty", return_value=True):
             main_mod._root(ctx, tui=True)

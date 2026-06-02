@@ -1,2 +1,2 @@
-ro-claude-kit-agent-patterns>=0.0.1
-ro-claude-kit-hardening>=0.0.1
+ronin-agent-patterns>=0.0.1
+ronin-hardening>=0.0.1

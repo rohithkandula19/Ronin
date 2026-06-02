@@ -1,4 +1,4 @@
-# ro-claude-kit-mcp-servers
+# ronin-mcp-servers
 
 Reference MCP server templates. Read-only by default; write operations require explicit configuration. Auth via env vars.
 
@@ -18,7 +18,7 @@ All six servers are read-only by design. Adding write paths should go through `A
 ## Tavily web search
 
 ```python
-from ro_claude_kit_mcp_servers import TavilyTools
+from ronin_mcp_servers import TavilyTools
 
 tavily = TavilyTools(api_key="tvly-...")  # or set TAVILY_API_KEY
 result = tavily.search("What is the ReAct pattern?", max_results=5, include_answer=True)
@@ -32,7 +32,7 @@ Free tier at https://tavily.com gives 1000 searches/mo — perfect for a researc
 ## Stripe (read-only)
 
 ```python
-from ro_claude_kit_mcp_servers import StripeReadOnlyTools, stripe_tools
+from ronin_mcp_servers import StripeReadOnlyTools, stripe_tools
 
 stripe = StripeReadOnlyTools(api_key="sk_live_...")  # or set STRIPE_API_KEY env var
 customers = stripe.list_customers(limit=10, email="alice@example.com")
@@ -48,7 +48,7 @@ Use a Stripe *Restricted Key* scoped to read-only resources. Never use a live se
 ## Linear (read-only)
 
 ```python
-from ro_claude_kit_mcp_servers import LinearReadOnlyTools, linear_tools
+from ronin_mcp_servers import LinearReadOnlyTools, linear_tools
 
 linear = LinearReadOnlyTools(api_key="lin_api_...")
 issues = linear.list_issues(team_id="...", state="In Progress")
@@ -66,7 +66,7 @@ Read-only SQL with two layers of defense:
 ### Direct use (as an in-process tool)
 
 ```python
-from ro_claude_kit_mcp_servers import PostgresQueryTool
+from ronin_mcp_servers import PostgresQueryTool
 import psycopg2
 
 conn = psycopg2.connect(DATABASE_URL)
@@ -77,7 +77,7 @@ rows = tool.query("SELECT id, email FROM users LIMIT 10")
 Wire it into the agent-patterns toolkit:
 
 ```python
-from ro_claude_kit_agent_patterns import Tool
+from ronin_agent_patterns import Tool
 
 pg = Tool(
     name="postgres_query",
@@ -94,9 +94,9 @@ pg = Tool(
 ### As an MCP server over stdio
 
 ```bash
-pip install ro-claude-kit-mcp-servers[mcp,postgres]
+pip install ronin-mcp-servers[mcp,postgres]
 export DATABASE_URL=postgres://readonly_user:...@host:5432/db
-python -m ro_claude_kit_mcp_servers.postgres
+python -m ronin_mcp_servers.postgres
 ```
 
 Then point your MCP-aware client at the process.
@@ -106,7 +106,7 @@ Then point your MCP-aware client at the process.
 If you want the safety check without the rest:
 
 ```python
-from ro_claude_kit_mcp_servers import is_readonly_sql
+from ronin_mcp_servers import is_readonly_sql
 
 allowed, reason = is_readonly_sql(user_sql)
 if not allowed:

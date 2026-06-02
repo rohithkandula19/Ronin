@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
 
-from ro_claude_kit_cli.main import app
+from ronin_cli.main import app
 
 
 def test_bare_ronin_non_interactive_shows_help() -> None:
@@ -23,11 +23,11 @@ def test_bare_ronin_interactive_opens_repl_by_default(monkeypatch, tmp_path) -> 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(_sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(_sys.stdout, "isatty", lambda: True)
-    with patch("ro_claude_kit_cli.tui.run_tui") as run_tui_mock, \
-         patch("ro_claude_kit_cli.main._is_code_project", return_value=False), \
-         patch("ro_claude_kit_cli.main.console.print"), \
-         patch("ro_claude_kit_cli.code_mode.run_unified_session") as run_unified:
-        from ro_claude_kit_cli.main import _root
+    with patch("ronin_cli.tui.run_tui") as run_tui_mock, \
+         patch("ronin_cli.main._is_code_project", return_value=False), \
+         patch("ronin_cli.main.console.print"), \
+         patch("ronin_cli.code_mode.run_unified_session") as run_unified:
+        from ronin_cli.main import _root
         ctx = MagicMock()
         ctx.invoked_subcommand = None
         _root(ctx)
@@ -42,8 +42,8 @@ def test_ronin_tui_flag_launches_tui(monkeypatch, tmp_path) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(_sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(_sys.stdout, "isatty", lambda: True)
-    with patch("ro_claude_kit_cli.tui.run_tui") as run_tui_mock:
-        from ro_claude_kit_cli.main import _root
+    with patch("ronin_cli.tui.run_tui") as run_tui_mock:
+        from ronin_cli.main import _root
         ctx = MagicMock()
         ctx.invoked_subcommand = None
         _root(ctx, tui=True)
@@ -58,10 +58,10 @@ def test_bare_ronin_no_tui_opens_unified_session(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(_sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(_sys.stdout, "isatty", lambda: True)
     calls = {}
-    with patch("ro_claude_kit_cli.panda_art.render_panda"), \
-         patch("ro_claude_kit_cli.code_mode.run_unified_session",
+    with patch("ronin_cli.panda_art.render_panda"), \
+         patch("ronin_cli.code_mode.run_unified_session",
                side_effect=lambda c, **k: calls.update(root=str(k.get("root")))):
-        from ro_claude_kit_cli.main import _root
+        from ronin_cli.main import _root
         ctx = MagicMock()
         ctx.invoked_subcommand = None
         _root(ctx, no_tui=True)

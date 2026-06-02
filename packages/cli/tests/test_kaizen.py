@@ -10,8 +10,8 @@ from pathlib import Path
 
 from rich.console import Console
 
-from ro_claude_kit_cli.config import CSKConfig
-from ro_claude_kit_cli.kaizen import KaizenResult, find_targets, parse_pytest, run_kaizen
+from ronin_cli.config import RoninConfig
+from ronin_cli.kaizen import KaizenResult, find_targets, parse_pytest, run_kaizen
 
 
 def test_find_targets_picks_up_markers(tmp_path: Path) -> None:
@@ -90,7 +90,7 @@ def test_kaizen_result_has_verdict_field() -> None:
 
 def test_run_kaizen_outside_git_is_clean(tmp_path: Path) -> None:
     # the no-git early return must still produce a well-formed result (verdict None)
-    res = run_kaizen(CSKConfig(), tmp_path, Console(), goal="anything",
+    res = run_kaizen(RoninConfig(), tmp_path, Console(), goal="anything",
                      duel_against={"provider": "gemini"})
     assert not res.applied and res.verdict is None
     assert "git" in res.note.lower()

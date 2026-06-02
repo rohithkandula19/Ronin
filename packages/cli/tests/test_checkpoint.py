@@ -5,8 +5,8 @@ import subprocess
 
 import pytest
 
-from ro_claude_kit_cli import checkpoint
-from ro_claude_kit_cli.worktree import NotAGitRepo
+from ronin_cli import checkpoint
+from ronin_cli.worktree import NotAGitRepo
 
 
 def _init_repo(path) -> None:
@@ -69,7 +69,7 @@ def test_rewind_unknown_id(tmp_path) -> None:
 
 
 def test_checkpoint_tools_and_sensitivity(tmp_path) -> None:
-    from ro_claude_kit_cli.code_tools import SENSITIVE_TOOLS
+    from ronin_cli.code_tools import SENSITIVE_TOOLS
     tools = {t.name: t for t in checkpoint.build_checkpoint_tools(tmp_path)}
     assert set(tools) == {"checkpoint", "list_checkpoints", "rewind"}
     assert "rewind" in SENSITIVE_TOOLS  # destructive → gated

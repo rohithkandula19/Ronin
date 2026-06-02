@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from ro_claude_kit_cli import worktree
+from ronin_cli import worktree
 
 
 def _init_repo(path: Path) -> None:

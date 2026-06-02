@@ -235,7 +235,7 @@ This unblocks the "csk as SaaS, $19/mo" path: hosted scheduling, Slack delivery 
 
 ### Added — `csk` CLI
 
-- New `ro-claude-kit-cli` package shipping the `csk` binary.
+- New `ronin-cli` package shipping the `csk` binary.
 - Subcommands: `csk init`, `csk ask`, `csk chat`, `csk tools`, `csk doctor`, `csk version`.
 - Demo mode (`csk init --demo`) ships fake Stripe + Linear data; runs zero-config.
 - Offline `demo_brain` keyword router so `csk ask` works without any API key.

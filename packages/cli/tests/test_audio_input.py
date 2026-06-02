@@ -5,8 +5,8 @@ from pathlib import Path
 
 import httpx
 
-from ro_claude_kit_cli import audio
-from ro_claude_kit_cli.config import CSKConfig
+from ronin_cli import audio
+from ronin_cli.config import RoninConfig
 
 
 class _Resp:
@@ -32,7 +32,7 @@ def test_transcribe_groq_uses_turbo(monkeypatch) -> None:
     p = Path(tempfile.mktemp(suffix=".wav"))
     p.write_bytes(b"RIFFfake")
     try:
-        text = audio.transcribe(p, CSKConfig(provider="groq", openai_api_key="k"))
+        text = audio.transcribe(p, RoninConfig(provider="groq", openai_api_key="k"))
     finally:
         p.unlink()
     assert text == "hello world"
@@ -46,7 +46,7 @@ def test_transcribe_404_is_friendly(monkeypatch) -> None:
     p.write_bytes(b"x")
     try:
         try:
-            audio.transcribe(p, CSKConfig(provider="cerebras", openai_api_key="k"))
+            audio.transcribe(p, RoninConfig(provider="cerebras", openai_api_key="k"))
             assert False, "should have raised"
         except RuntimeError as e:
             assert "Whisper" in str(e)

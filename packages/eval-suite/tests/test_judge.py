@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from ro_claude_kit_eval_suite import EvalCase, Rubric, judge_one
+from ronin_eval_suite import EvalCase, Rubric, judge_one
 
 
 def _resp(text: str) -> SimpleNamespace:

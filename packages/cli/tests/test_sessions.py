@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from ro_claude_kit_cli import sessions
+from ronin_cli import sessions
 
 
 @pytest.fixture(autouse=True)

@@ -6,14 +6,14 @@ from typing import Iterator
 
 import pytest
 
-from ro_claude_kit_agent_patterns import (
+from ronin_agent_patterns import (
     FailoverProvider,
     FakeProvider,
     LLMResponse,
     Message,
     StreamEvent,
 )
-from ro_claude_kit_agent_patterns.providers.base import LLMProvider
+from ronin_agent_patterns.providers.base import LLMProvider
 
 
 class _Boom(LLMProvider):

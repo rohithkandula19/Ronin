@@ -2,7 +2,7 @@
 cycle is injected so capture is tested deterministically, no real stdin/threads."""
 from __future__ import annotations
 
-from ro_claude_kit_cli.input_queue import InputQueue
+from ronin_cli.input_queue import InputQueue
 
 
 def _iq(lines, *, ready=True, console=None):

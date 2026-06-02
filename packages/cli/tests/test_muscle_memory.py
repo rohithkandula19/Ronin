@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from ro_claude_kit_cli.muscle_memory import (
+from ronin_cli.muscle_memory import (
     build_muscle_tool,
     crystallize,
     list_skills,
@@ -43,7 +43,7 @@ def test_crystallize_rejects_empty_body(tmp_path: Path) -> None:
 
 def test_skill_is_runnable_as_custom_command(tmp_path: Path) -> None:
     # crystallized skill must be picked up by the custom-command runner as /name
-    from ro_claude_kit_cli.code_mode import expand_custom_command
+    from ronin_cli.code_mode import expand_custom_command
     crystallize(tmp_path, "greet", "Say hello to $ARGUMENTS warmly")
     out = expand_custom_command("/greet the team", tmp_path)
     assert out == "Say hello to the team warmly"

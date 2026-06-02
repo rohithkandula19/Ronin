@@ -1,11 +1,11 @@
 """Tests for Ronin Duel — a rival model red-teaming a diff."""
 from __future__ import annotations
 
-from ro_claude_kit_agent_patterns.providers.fake import FakeProvider
-from ro_claude_kit_agent_patterns.providers.base import LLMResponse
+from ronin_agent_patterns.providers.fake import FakeProvider
+from ronin_agent_patterns.providers.base import LLMResponse
 
-from ro_claude_kit_cli.config import CSKConfig
-from ro_claude_kit_cli.duel import parse_verdict, review_diff
+from ronin_cli.config import RoninConfig
+from ronin_cli.duel import parse_verdict, review_diff
 
 _DIFF = "diff --git a/x.py b/x.py\n+balance -= amount  # no lock\n"
 
@@ -41,7 +41,7 @@ def test_missing_verdict_line_uses_blockers() -> None:
 
 def test_review_diff_with_injected_provider() -> None:
     prov = _fake("BLOCKER: x.py:1 — unguarded balance mutation\nVERDICT: BLOCK")
-    v = review_diff(CSKConfig(), _DIFF, {"provider": "gemini", "model": "g"}, provider=prov)
+    v = review_diff(RoninConfig(), _DIFF, {"provider": "gemini", "model": "g"}, provider=prov)
     assert not v.passed and v.blocker_count == 1
     assert v.duelist == "gemini:g"
     # the diff was actually handed to the reviewer
@@ -50,5 +50,5 @@ def test_review_diff_with_injected_provider() -> None:
 
 def test_review_empty_diff_passes_without_call() -> None:
     prov = _fake("unused")
-    v = review_diff(CSKConfig(), "   ", provider=prov)
+    v = review_diff(RoninConfig(), "   ", provider=prov)
     assert v.passed and not prov.calls   # never bothered the model

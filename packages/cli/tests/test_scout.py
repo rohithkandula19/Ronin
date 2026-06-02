@@ -1,17 +1,17 @@
 """Tests for Scout → Strike blade resolution."""
 from __future__ import annotations
 
-from ro_claude_kit_cli.config import CSKConfig
-from ro_claude_kit_cli.scout import resolve_blades
+from ronin_cli.config import RoninConfig
+from ronin_cli.scout import resolve_blades
 
 
 def test_no_routing_returns_none() -> None:
-    assert resolve_blades(CSKConfig()) is None
-    assert resolve_blades(CSKConfig(route_fast="cerebras:gpt-oss-120b")) is None  # need both
+    assert resolve_blades(RoninConfig()) is None
+    assert resolve_blades(RoninConfig(route_fast="cerebras:gpt-oss-120b")) is None  # need both
 
 
 def test_cross_provider_blades() -> None:
-    cfg = CSKConfig(provider="anthropic",
+    cfg = RoninConfig(provider="anthropic",
                     route_fast="cerebras:gpt-oss-120b",
                     route_strong="anthropic:claude-sonnet-4-6")
     blades = resolve_blades(cfg)
@@ -24,7 +24,7 @@ def test_cross_provider_blades() -> None:
 
 
 def test_bare_model_keeps_current_provider() -> None:
-    cfg = CSKConfig(provider="groq",
+    cfg = RoninConfig(provider="groq",
                     route_fast="llama-3.1-8b-instant",
                     route_strong="llama-3.3-70b-versatile")
     blades = resolve_blades(cfg)

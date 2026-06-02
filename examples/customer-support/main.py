@@ -24,16 +24,16 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from ro_claude_kit_agent_patterns import (
+from ronin_agent_patterns import (
     AnthropicProvider,
     LLMProvider,
     SubAgent,
     SupervisorAgent,
     Tool,
 )
-from ro_claude_kit_cli.config import CSKConfig
-from ro_claude_kit_cli.tools import build_tools
-from ro_claude_kit_hardening import InjectionScanner
+from ronin_cli.config import RoninConfig
+from ronin_cli.tools import build_tools
+from ronin_hardening import InjectionScanner
 
 # Make the local kb module importable when run as a script.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -64,7 +64,7 @@ KB_SEARCH_TOOL = Tool(
 
 def build_supervisor(provider: LLMProvider) -> SupervisorAgent:
     """Wire the orchestrator with three specialist sub-agents."""
-    config = CSKConfig(demo_mode=True)  # provides demo Stripe + Linear tools
+    config = RoninConfig(demo_mode=True)  # provides demo Stripe + Linear tools
     service_tools = build_tools(config)
     stripe_tools_only = [t for t in service_tools if t.name.startswith("stripe_")]
     linear_tools_only = [t for t in service_tools if t.name.startswith("linear_")]

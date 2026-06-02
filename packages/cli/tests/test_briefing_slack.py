@@ -7,8 +7,8 @@ import httpx
 import pytest
 from typer.testing import CliRunner
 
-from ro_claude_kit_cli.briefing_slack import post_briefing_to_slack, to_slack_mrkdwn
-from ro_claude_kit_cli.main import app
+from ronin_cli.briefing_slack import post_briefing_to_slack, to_slack_mrkdwn
+from ronin_cli.main import app
 
 
 runner = CliRunner()

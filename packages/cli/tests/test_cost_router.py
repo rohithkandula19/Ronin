@@ -1,9 +1,9 @@
 """Tests for the Cost Router — pricing, the savings ledger, cross-provider routing."""
 from __future__ import annotations
 
-from ro_claude_kit_cli.config import CSKConfig
-from ro_claude_kit_cli.cost import CostLedger, estimate_cost, is_free, price_for
-from ro_claude_kit_cli.routing import route_decision
+from ronin_cli.config import RoninConfig
+from ronin_cli.cost import CostLedger, estimate_cost, is_free, price_for
+from ronin_cli.routing import route_decision
 
 
 def test_free_providers_cost_nothing() -> None:
@@ -38,11 +38,11 @@ def test_ledger_tracks_savings() -> None:
 
 
 def test_route_decision_off_by_default() -> None:
-    assert route_decision(CSKConfig(), "fix the bug") is None
+    assert route_decision(RoninConfig(), "fix the bug") is None
 
 
 def test_route_decision_cross_provider() -> None:
-    cfg = CSKConfig(provider="anthropic",
+    cfg = RoninConfig(provider="anthropic",
                     route_fast="cerebras:gpt-oss-120b",
                     route_strong="anthropic:claude-sonnet-4-6")
     simple = route_decision(cfg, "hey")
@@ -53,7 +53,7 @@ def test_route_decision_cross_provider() -> None:
 
 
 def test_route_decision_bare_model_keeps_provider() -> None:
-    cfg = CSKConfig(provider="groq", route_fast="llama-3.1-8b-instant",
+    cfg = RoninConfig(provider="groq", route_fast="llama-3.1-8b-instant",
                     route_strong="llama-3.3-70b-versatile")
     d = route_decision(cfg, "hello")
     assert d.provider == "groq" and d.model == "llama-3.1-8b-instant"

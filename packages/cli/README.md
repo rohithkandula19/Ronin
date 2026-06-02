@@ -1,7 +1,7 @@
 # csk — the agent CLI for startup ops
 
 ```bash
-$ pipx install ro-claude-kit-cli
+$ pipx install ronin-cli
 $ csk init --demo
 $ csk ask "how many active subscriptions do we have?"
 
@@ -25,12 +25,12 @@ Founders spend hours each week clicking through Stripe dashboards, Linear boards
 ## Install
 
 ```bash
-pipx install ro-claude-kit-cli                    # recommended (isolated venv)
+pipx install ronin-cli                    # recommended (isolated venv)
 # or
-pip install ro-claude-kit-cli
+pip install ronin-cli
 ```
 
-For Postgres support: `pipx install 'ro-claude-kit-cli[postgres]'`.
+For Postgres support: `pipx install 'ronin-cli[postgres]'`.
 
 ## Quickstart (no real credentials needed)
 
@@ -76,7 +76,7 @@ model = "claude-sonnet-4-6"
 
 ## Safety
 
-Every input is run through the prompt-injection scanner from `ro-claude-kit-hardening` before reaching the agent. Every tool is read-only by design — there is no way to make `csk` mutate your data, even if Claude tries.
+Every input is run through the prompt-injection scanner from `ronin-hardening` before reaching the agent. Every tool is read-only by design — there is no way to make `csk` mutate your data, even if Claude tries.
 
 To add write paths: don't. If you must, fork and wrap them in `ApprovalGate` from the hardening package.
 

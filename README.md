@@ -18,7 +18,7 @@ $ ronin code "fix the failing test"        # the coding agent
 $ ronin "explain @main.py and add tests"   # @-mention files inline
 ```
 
-> The binary is **`ronin`**. `ro` and `csk` also work as aliases.
+> The binary is **`ronin`**. `ro` also works as a short alias.
 
 ## 🎬 Demo
 
@@ -111,13 +111,13 @@ Plus, on the coding agent itself:
 
 ```bash
 # one-liner: installs uv if missing, clones the repo, syncs the workspace,
-# drops a 'ronin' shim in ~/.local/bin (with ro / csk aliases)
+# drops a 'ronin' shim in ~/.local/bin (with a 'ro' short alias)
 curl -sSL https://raw.githubusercontent.com/rohithkandula19/Ronin/main/install.sh | bash
 ```
 
-Pin a tag: append `-s -- --ref v0.51.0`. PyPI publish is wired (`.github/workflows/release.yml`) and lands `pip install ro-claude-kit-cli` once `PYPI_TOKEN` is set as a repo secret.
+Pin a tag: append `-s -- --ref v0.51.0`. PyPI publish is wired (`.github/workflows/release.yml`) and lands `pip install ronin-cli` once `PYPI_TOKEN` is set as a repo secret.
 
-For Postgres support after install: `(cd ~/.local/share/ro-claude-kit && uv pip install psycopg2-binary)`.
+For Postgres support after install: `(cd ~/.local/share/ronin && uv pip install psycopg2-binary)`.
 
 ## More surfaces
 
@@ -234,7 +234,7 @@ ronin is MIT-licensed and meant to be picked up by other people. A few notes if 
 Build an agent in 5 lines:
 
 ```python
-from ro_claude_kit_agent_patterns import ReActAgent, Tool
+from ronin_agent_patterns import ReActAgent, Tool
 
 agent = ReActAgent(
     system="You are a helpful research assistant.",
@@ -246,7 +246,7 @@ print(agent.run("What is the ReAct pattern?").output)
 Run it on Ollama instead of Claude:
 
 ```python
-from ro_claude_kit_agent_patterns import OllamaProvider, ReActAgent
+from ronin_agent_patterns import OllamaProvider, ReActAgent
 
 agent = ReActAgent(system="...", tools=[...], provider=OllamaProvider(model="llama3.1"))
 ```
@@ -254,7 +254,7 @@ agent = ReActAgent(system="...", tools=[...], provider=OllamaProvider(model="lla
 Add an eval suite:
 
 ```python
-from ro_claude_kit_eval_suite import EvalSuite, Rubric, GoldenDataset
+from ronin_eval_suite import EvalSuite, Rubric, GoldenDataset
 
 suite = EvalSuite(
     rubric=Rubric(criteria=["task_success", "faithfulness", "safety"]),

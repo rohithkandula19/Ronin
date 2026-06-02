@@ -6,10 +6,10 @@ from unittest.mock import patch
 import pytest
 from rich.console import Console
 
-from ro_claude_kit_agent_patterns import LLMProvider
+from ronin_agent_patterns import LLMProvider
 
-from ro_claude_kit_cli import runner
-from ro_claude_kit_cli.config import CSKConfig
+from ronin_cli import runner
+from ronin_cli.config import RoninConfig
 
 
 class _FakeResp:
@@ -36,41 +36,41 @@ class _BoomProvider(LLMProvider):
 
 
 def test_friendly_error_401_mentions_key() -> None:
-    cfg = CSKConfig(provider="groq")
+    cfg = RoninConfig(provider="groq")
     msg = runner._friendly_provider_error(_HTTPStatusError(401), cfg)
     assert "401" in msg and "OPENAI_API_KEY" in msg and "ronin doctor" in msg
     assert "Traceback" not in msg
 
 
 def test_friendly_error_anthropic_key_name() -> None:
-    cfg = CSKConfig(provider="anthropic")
+    cfg = RoninConfig(provider="anthropic")
     msg = runner._friendly_provider_error(_HTTPStatusError(403), cfg)
     assert "ANTHROPIC_API_KEY" in msg
 
 
 def test_friendly_error_429() -> None:
-    msg = runner._friendly_provider_error(_HTTPStatusError(429), CSKConfig(provider="groq"))
+    msg = runner._friendly_provider_error(_HTTPStatusError(429), RoninConfig(provider="groq"))
     assert "rate-limited" in msg
 
 
 def test_friendly_error_connection() -> None:
     class ConnectError(Exception):
         pass
-    msg = runner._friendly_provider_error(ConnectError("boom"), CSKConfig(provider="ollama"))
+    msg = runner._friendly_provider_error(ConnectError("boom"), RoninConfig(provider="ollama"))
     assert "couldn't reach" in msg
 
 
 def test_chat_does_not_crash_on_401(monkeypatch: pytest.MonkeyPatch) -> None:
     """A provider 401 mid-chat shows a clean message and the loop survives."""
     monkeypatch.setenv("OPENAI_API_KEY", "bad")
-    config = CSKConfig(provider="groq")
+    config = RoninConfig(provider="groq")
 
     buf = io.StringIO()
     console = Console(file=buf, force_terminal=False, width=100)
     inputs = iter(["generate me a gta image", ":q"])
     console.input = lambda *a, **k: next(inputs)  # type: ignore[assignment]
 
-    with patch("ro_claude_kit_cli.runner.build_provider", return_value=_BoomProvider()):
+    with patch("ronin_cli.runner.build_provider", return_value=_BoomProvider()):
         runner.start_chat(config, console=console)  # must NOT raise
 
     out = buf.getvalue()
@@ -82,7 +82,7 @@ def test_chat_does_not_crash_on_401(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_run_code_agent_clean_on_429(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A provider 429 (rate limit) during code mode returns a clean result, no traceback."""
     monkeypatch.setenv("OPENAI_API_KEY", "x")
-    from ro_claude_kit_cli.code_mode import run_code_agent
+    from ronin_cli.code_mode import run_code_agent
 
     class _RateLimited(_BoomProvider):
         def complete(self, **kw):
@@ -90,8 +90,8 @@ def test_run_code_agent_clean_on_429(tmp_path, monkeypatch: pytest.MonkeyPatch) 
         def stream(self, **kw):
             raise _HTTPStatusError(429)
 
-    config = CSKConfig(provider="groq", openai_api_key="x")
-    with patch("ro_claude_kit_cli.code_mode.build_provider", return_value=_RateLimited()):
+    config = RoninConfig(provider="groq", openai_api_key="x")
+    with patch("ronin_cli.code_mode.build_provider", return_value=_RateLimited()):
         result = run_code_agent(config, "do something", root=tmp_path, console=None, yolo=True)
     assert result.success is False
     assert "rate-limited" in result.output  # friendly message, not a traceback
@@ -99,9 +99,9 @@ def test_run_code_agent_clean_on_429(tmp_path, monkeypatch: pytest.MonkeyPatch) 
 
 def test_run_ask_returns_clean_error_on_401(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "bad")
-    config = CSKConfig(provider="groq")
+    config = RoninConfig(provider="groq")
 
-    with patch("ro_claude_kit_cli.runner.build_provider", return_value=_BoomProvider()):
+    with patch("ronin_cli.runner.build_provider", return_value=_BoomProvider()):
         result = runner.run_ask(config, "hello", console=None)
 
     assert result.success is False

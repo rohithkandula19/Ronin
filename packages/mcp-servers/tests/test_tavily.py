@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from ro_claude_kit_mcp_servers import TavilyTools, tavily_tools
+from ronin_mcp_servers import TavilyTools, tavily_tools
 
 
 def _resp(payload: dict) -> MagicMock:

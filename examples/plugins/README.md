@@ -6,7 +6,7 @@ Drop a Python file in `.csk/plugins/` and `csk` will pick up any tools it expose
 
 ```python
 # .csk/plugins/my_tool.py
-from ro_claude_kit_agent_patterns import Tool
+from ronin_agent_patterns import Tool
 
 
 def my_handler(arg: str) -> str:

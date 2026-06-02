@@ -2,13 +2,13 @@
 when you switch between OpenAI-compatible providers."""
 from __future__ import annotations
 
-from ro_claude_kit_cli.config import CSKConfig
+from ronin_cli.config import RoninConfig
 
 
 def test_set_key_for_keeps_each_provider_separate() -> None:
     """The bug: /login openai used to overwrite the cerebras key. Now each
     provider keeps its own."""
-    cfg = CSKConfig(provider="cerebras")
+    cfg = RoninConfig(provider="cerebras")
     cfg.set_key_for("cerebras", "cba-key")
     cfg.set_key_for("openai", "oai-key")  # this used to clobber cerebras
 
@@ -17,35 +17,35 @@ def test_set_key_for_keeps_each_provider_separate() -> None:
 
 
 def test_key_for_defaults_to_active_provider() -> None:
-    cfg = CSKConfig(provider="groq")
+    cfg = RoninConfig(provider="groq")
     cfg.set_key_for("groq", "g-key")
     assert cfg.key_for() == "g-key"
 
 
 def test_key_for_falls_back_to_legacy_flat_field() -> None:
     """Old configs that only have the flat openai_api_key still resolve."""
-    cfg = CSKConfig(provider="together", openai_api_key="legacy-key")
+    cfg = RoninConfig(provider="together", openai_api_key="legacy-key")
     assert cfg.key_for("together") == "legacy-key"
 
 
 def test_key_for_anthropic_uses_anthropic_slot() -> None:
-    cfg = CSKConfig(provider="anthropic", anthropic_api_key="sk-ant")
+    cfg = RoninConfig(provider="anthropic", anthropic_api_key="sk-ant")
     assert cfg.key_for("anthropic") == "sk-ant"
 
 
 def test_key_for_env_fallback(monkeypatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "env-key")
-    cfg = CSKConfig(provider="openai")
+    cfg = RoninConfig(provider="openai")
     assert cfg.key_for("openai") == "env-key"
 
 
 def test_key_for_ollama_is_none() -> None:
-    cfg = CSKConfig(provider="ollama")
+    cfg = RoninConfig(provider="ollama")
     assert cfg.key_for("ollama") is None
 
 
 def test_has_provider_auth_uses_per_provider_key() -> None:
-    cfg = CSKConfig(provider="cerebras")
+    cfg = RoninConfig(provider="cerebras")
     assert cfg.has_provider_auth() is False
     cfg.set_key_for("cerebras", "cba-key")
     assert cfg.has_provider_auth() is True
@@ -53,12 +53,12 @@ def test_has_provider_auth_uses_per_provider_key() -> None:
 
 def test_provider_keys_round_trip_through_save_load(tmp_path, monkeypatch) -> None:
     """Per-provider keys persist to disk and reload — so they survive restarts."""
-    import ro_claude_kit_cli.config as cfgmod
+    import ronin_cli.config as cfgmod
 
     monkeypatch.setattr(cfgmod, "PROJECT_DIR", tmp_path / ".csk")
     monkeypatch.setattr(cfgmod, "USER_DIR", tmp_path / "user")
 
-    cfg = CSKConfig(provider="cerebras")
+    cfg = RoninConfig(provider="cerebras")
     cfg.set_key_for("cerebras", "cba-key")
     cfg.set_key_for("openai", "oai-key")
     cfgmod.save_config(cfg)

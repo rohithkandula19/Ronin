@@ -7,9 +7,9 @@ from unittest.mock import patch
 import pytest
 from rich.console import Console
 
-from ro_claude_kit_agent_patterns import FakeProvider, LLMResponse, ToolCall
-from ro_claude_kit_cli import media, runner
-from ro_claude_kit_cli.config import CSKConfig
+from ronin_agent_patterns import FakeProvider, LLMResponse, ToolCall
+from ronin_cli import media, runner
+from ronin_cli.config import RoninConfig
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"img"
 
@@ -42,15 +42,15 @@ def test_video_tool_without_ffmpeg(tmp_path: Path) -> None:
 
 def test_speak_tool_no_engine(tmp_path: Path) -> None:
     tools = {t.name: t for t in media.build_media_tools([], root=tmp_path)}
-    with patch("ro_claude_kit_cli.audio.tts_engine", return_value=None):
+    with patch("ronin_cli.audio.tts_engine", return_value=None):
         msg = tools["speak"].handler(text="hello")
     assert msg.startswith("ERROR")
 
 
 def test_speak_tool_calls_engine(tmp_path: Path) -> None:
     # build the tools inside the patch — the handler binds audio.speak at build time
-    with patch("ro_claude_kit_cli.audio.tts_engine", return_value="say"), \
-         patch("ro_claude_kit_cli.audio.speak") as sp:
+    with patch("ronin_cli.audio.tts_engine", return_value="say"), \
+         patch("ronin_cli.audio.speak") as sp:
         tools = {t.name: t for t in media.build_media_tools([], root=tmp_path)}
         msg = tools["speak"].handler(text="hello there")
     sp.assert_called_once()
@@ -78,7 +78,7 @@ def _queue_inputs(console: Console, lines: list[str]) -> None:
 def test_chat_routes_natural_language_to_image(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
-    config = CSKConfig(provider="anthropic")
+    config = RoninConfig(provider="anthropic")
 
     buf = io.StringIO()
     console = Console(file=buf, force_terminal=False, width=100)
@@ -92,7 +92,7 @@ def test_chat_routes_natural_language_to_image(tmp_path: Path, monkeypatch: pyte
                     usage={"input_tokens": 5, "output_tokens": 5}),
     ])
 
-    with patch("ro_claude_kit_cli.runner.build_provider", return_value=provider), \
+    with patch("ronin_cli.runner.build_provider", return_value=provider), \
          patch.object(media, "_image_bytes", return_value=(PNG, "image/png")), \
          patch.object(media, "display_image") as display:
         runner.start_chat(config, console=console)

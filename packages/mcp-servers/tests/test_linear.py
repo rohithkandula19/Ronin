@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from ro_claude_kit_mcp_servers import LinearReadOnlyTools, linear_tools
+from ronin_mcp_servers import LinearReadOnlyTools, linear_tools
 
 
 def _gql_response(data: dict, status: int = 200) -> MagicMock:
