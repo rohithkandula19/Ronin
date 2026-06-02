@@ -26,7 +26,12 @@ from .worktree import git_worktree, is_git_repo, worktree_diff
 
 # Markers that flag self-improvement targets in source, strongest first.
 _MARKERS = ("FIXME", "BUG", "XXX", "TODO", "HACK")
-_MARKER_RE = re.compile(r"\b(" + "|".join(_MARKERS) + r")\b[:\s]?(.*)")
+# A real marker lives in a COMMENT — after a #, //, /*, <!-- , or a ; — and is
+# followed by ':' or whitespace+text. Requiring the comment lead-in is what stops
+# false positives on the word appearing in a docstring or a string literal (e.g.
+# the marker list in this very file, or prose like "TODO/FIXME markers").
+_MARKER_RE = re.compile(
+    r"(?:#|//|/\*|<!--|;)\s*(" + "|".join(_MARKERS) + r")\b[:\s]+(.*)")
 _SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", "dist",
               "build", ".pytest_cache", ".csk"}
 # pytest summary line, e.g. "734 passed, 5 warnings in 7.55s" / "2 failed, 730 passed"

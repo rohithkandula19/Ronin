@@ -42,6 +42,22 @@ def test_find_targets_empty(tmp_path: Path) -> None:
     assert find_targets(tmp_path) == []
 
 
+def test_find_targets_ignores_string_literals_and_docstrings(tmp_path: Path) -> None:
+    # the marker word appearing in code/strings/docstrings is NOT a real target —
+    # only actual comment markers count (this was a real false-positive bug)
+    (tmp_path / "a.py").write_text(
+        '_MARKERS = ("FIXME", "BUG", "TODO")\n'
+        '"""This docstring mentions TODO/FIXME markers but is not one."""\n'
+        'msg = "no FIXME here either"\n'
+        'x = 1  # TODO: this one is real\n',
+        encoding="utf-8",
+    )
+    targets = find_targets(tmp_path)
+    assert len(targets) == 1
+    assert targets[0].marker == "TODO" and targets[0].line == 4
+    assert "this one is real" in targets[0].text
+
+
 def test_parse_pytest_all_passed() -> None:
     f = parse_pytest("........\n534 passed, 5 warnings in 7.55s")
     assert f.passed and f.total == 534 and f.failed == 0

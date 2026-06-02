@@ -22,6 +22,7 @@ from .code_tools import SENSITIVE_TOOLS, build_code_tools, undo_last, unified_di
 from .config import CSKConfig
 from .media import build_image_tool
 from .project_memory import load_project_memory, memory_system_block, write_memory_template
+from .self_command import detect_self_command
 from .prompt_box import read_prompt
 from .runner import build_provider
 from .streaming import LiveRenderer
@@ -1321,6 +1322,14 @@ def run_code_session(
             if _bash:
                 _run_bash_inline(_bash, console=console, root=root, transcript=transcript)
             continue
+        # ronin's OWN CLI command typed into chat (e.g. "ronin duel -a gemini") —
+        # run the real command instead of letting the model hallucinate about it.
+        _self_cmd = detect_self_command(user)
+        if _self_cmd is not None:
+            console.print(f"[#6b7089]↳ that's a ronin CLI command — running it[/#6b7089] "
+                          f"[dim](type it with a leading ! to run any shell command)[/dim]")
+            _run_bash_inline(_self_cmd, console=console, root=root, transcript=transcript)
+            continue
         # # quick-memory — jot a durable note straight into project memory (CC's # shortcut)
         if user.startswith("#"):
             _save_quick_note(user[1:].strip(), console=console, root=root)
@@ -1522,6 +1531,14 @@ def run_unified_session(
             _bash = user[1:].strip()
             if _bash:
                 _run_bash_inline(_bash, console=console, root=root, transcript=transcript)
+            continue
+        # ronin's OWN CLI command typed into chat (e.g. "ronin duel -a gemini") —
+        # run the real command instead of letting the model hallucinate about it.
+        _self_cmd = detect_self_command(user)
+        if _self_cmd is not None:
+            console.print(f"[#6b7089]↳ that's a ronin CLI command — running it[/#6b7089] "
+                          f"[dim](type it with a leading ! to run any shell command)[/dim]")
+            _run_bash_inline(_self_cmd, console=console, root=root, transcript=transcript)
             continue
         # # quick-memory — jot a durable note straight into project memory (CC's # shortcut)
         if user.startswith("#"):
