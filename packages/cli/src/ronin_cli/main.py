@@ -1361,12 +1361,15 @@ def fix_cmd(
 def review(
     base: str = typer.Option(None, "--base", help="Review this branch vs a base ref (e.g. main)."),
     staged: bool = typer.Option(False, "--staged", help="Review only staged changes."),
+    pr: int = typer.Option(None, "--pr", help="Review a GitHub PR by number (diff fetched via gh)."),
+    comment: bool = typer.Option(False, "--comment", help="Post the review back onto the PR (needs --pr)."),
     root: Path = typer.Option(Path("."), "--root", help="Repo to review."),
 ) -> None:
     """AI code review of your changes — structured, severity-tagged findings (read-only).
 
     Reviews your working-tree diff by default; ``--staged`` for staged changes,
-    ``--base main`` to review the whole branch against a base.
+    ``--base main`` for the branch vs a base, or ``--pr N`` for a GitHub PR
+    (add ``--comment`` to post the review onto it).
     """
     config = load_config()
     if not config.has_provider_auth():
@@ -1374,7 +1377,38 @@ def review(
                       "Run [bold]ronin login[/bold] or [bold]ronin init[/bold] first.")
         raise typer.Exit(2)
     from .review_mode import run_review
-    run_review(config, root=root, base=base, staged=staged, console=console)
+    run_review(config, root=root, base=base, staged=staged, pr=pr, comment=comment, console=console)
+
+
+@app.command()
+def triage(
+    limit: int = typer.Option(10, "--limit", help="How many open issues to triage."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo to triage."),
+) -> None:
+    """🗂 Read open GitHub issues and draft a triage — suggested labels, priority,
+    and a first-response sketch for each (read-only; nothing is posted).
+    """
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold].")
+        raise typer.Exit(2)
+    from .gh_helper import gh_available, open_issues
+    if not gh_available():
+        console.print("[yellow]the GitHub CLI 'gh' isn't installed.[/yellow] "
+                      "[dim]brew install gh && gh auth login[/dim]")
+        raise typer.Exit(2)
+    issues = open_issues(root, limit=limit)
+    if not issues:
+        console.print("[dim]no open issues (or gh not authenticated).[/dim]")
+        return
+    console.print(f"[#6b7089]triaging {len(issues)} open issue(s)…[/#6b7089]")
+    from .code_mode import run_code_agent
+    listing = "\n\n".join(f"#{i['number']} {i['title']}\n{i['body'][:600]}" for i in issues)
+    prompt = ("Triage these open GitHub issues. For each, suggest: labels (bug/feature/"
+              "question/etc.), a priority (P0–P3), and a one-line first response. Be concise.\n\n"
+              f"{listing}")
+    run_code_agent(config, prompt, root=root, console=console, read_only=True,
+                   include_image_tool=False, max_iterations=6)
 
 
 # ---------- version ----------
