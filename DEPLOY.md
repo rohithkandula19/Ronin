@@ -128,7 +128,7 @@ Test in Stripe test mode first; flip to live keys after one real test transactio
 2. https://pypi.org/manage/account/token/ → create token "entire account" scope.
 3. In your local terminal:
    ```bash
-   cd "/Users/rohithkandula/Claude kit"
+   cd "/Users/rohithkandula/ronin"
    gh secret set PYPI_TOKEN   # paste the pypi-... token
    gh workflow run release.yml --ref v0.2.0
    gh run watch
