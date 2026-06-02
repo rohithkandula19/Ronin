@@ -64,6 +64,12 @@ def _root(
         help="Zero network egress: forces a local brain (Ollama) and strips all "
              "network tools. Nothing leaves the machine.",
     ),
+    full_access: bool = typer.Option(
+        False, "--full-access", "--god-mode",
+        help="Lift all guards: filesystem-wide access (beyond the project root), "
+             "auto-approve every edit/command (no y/n), longer timeouts. Powerful "
+             "and unsandboxed — only in a directory you trust.",
+    ),
 ) -> None:
     if ctx.invoked_subcommand is not None:
         return
@@ -77,6 +83,8 @@ def _root(
         no_tui = False
     if not isinstance(offline, bool):
         offline = False
+    if not isinstance(full_access, bool):
+        full_access = False
 
     import sys
     # Non-interactive (pipe/test) → just show help and exit, cleanly (no banner).
@@ -100,6 +108,12 @@ def _root(
         console.print(ctx.get_help())
         return
 
+    if full_access:
+        config = config.model_copy(update={"full_access": True})
+        console.print("[bold #e0af68]⚠ FULL-ACCESS MODE[/bold #e0af68] [dim]— filesystem-wide, "
+                      "auto-approving every edit & command, no sandbox. Use only in a directory "
+                      "you trust.[/dim]")
+
     root = Path(".")
 
     # Default: the minimal, Claude-Code-style INLINE REPL — output flows in the
@@ -115,13 +129,14 @@ def _root(
     from .code_mode import run_code_session, run_unified_session
 
     if _is_code_project(root):
-        console.print("[dim]code project · reads run free, edits & commands need approval[/dim]")
-        run_code_session(config, root=root, console=console)
+        if not full_access:
+            console.print("[dim]code project · reads run free, edits & commands need approval[/dim]")
+        run_code_session(config, root=root, console=console, yolo=full_access)
         return
 
     # Outside a code repo = one assistant that does everything: talk, generate
     # media, query data, write/run code when asked.
-    run_unified_session(config, root=root, console=console)
+    run_unified_session(config, root=root, console=console, yolo=full_access)
 
 
 def _is_code_project(path: Path) -> bool:

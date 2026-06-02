@@ -105,6 +105,10 @@ import os as _os
 import re as _re
 
 _MENTION_RE = _re.compile(r"(?:^|\s)@([\w./\-]+)")
+# @-URL mentions: @https://… pulls the page's readable text into context, the
+# web counterpart of @file. Matched before file mentions (the file regex stops
+# at the ':' so it never swallows a URL).
+_URL_MENTION_RE = _re.compile(r"(?:^|\s)@(https?://[^\s]+)")
 
 # read-only tool subset (for plan mode — explore but don't mutate)
 _READONLY_CODE_TOOLS = {"read_file", "list_files", "search_files", "glob"}
@@ -134,10 +138,31 @@ def load_session(root: Path | str) -> list[str]:
     return _load(sid)
 
 
-def expand_file_mentions(task: str, root: Path | str) -> str:
-    """Expand ``@path`` mentions in a request by inlining those files' contents
-    (Claude Code's @-mention). Unknown paths are left as-is."""
+def expand_file_mentions(task: str, root: Path | str, *, offline: bool = False) -> str:
+    """Expand ``@path`` and ``@https://…`` mentions in a request by inlining the
+    referenced files' contents and web pages' readable text (Claude Code's
+    @-mention, extended to URLs). Unknown paths and unreachable URLs are left
+    as-is. ``offline`` skips all URL fetches (no network egress)."""
     root_path = _Path(root).resolve()
+
+    # --- @-URL mentions: fetch each page's readable text (skipped when offline)
+    url_blocks: list[str] = []
+    if not offline:
+        seen_urls: list[str] = []
+        urls = _URL_MENTION_RE.findall(task)
+        if urls:
+            from .web_tools import fetch_url
+            for url in urls:
+                url = url.rstrip(".,);]")  # trim trailing punctuation from prose
+                if url in seen_urls:
+                    continue
+                seen_urls.append(url)
+                text = fetch_url(url, max_chars=4000)
+                if text.startswith("ERROR:"):
+                    continue
+                url_blocks.append(f"--- {url} ---\n{text}")
+
+    # --- @-file mentions: inline real files inside the project root
     seen: list[str] = []
     blocks: list[str] = []
     for rel in _MENTION_RE.findall(task):
@@ -152,9 +177,15 @@ def expand_file_mentions(task: str, root: Path | str) -> str:
             except OSError:
                 continue
             blocks.append(f"--- {rel} ---\n{body}")
-    if not blocks:
+
+    if not blocks and not url_blocks:
         return task
-    return "Referenced files:\n\n" + "\n\n".join(blocks) + "\n\n---\n\n" + task
+    parts = []
+    if url_blocks:
+        parts.append("Referenced web pages:\n\n" + "\n\n".join(url_blocks))
+    if blocks:
+        parts.append("Referenced files:\n\n" + "\n\n".join(blocks))
+    return "\n\n".join(parts) + "\n\n---\n\n" + task
 
 
 def expand_custom_command(user: str, root: Path | str) -> str | None:
@@ -361,7 +392,10 @@ def run_code_agent(
             blocked=True,
         )
 
-    tools = build_code_tools(root, undo_stack=undo_stack)
+    # Full-access mode lifts the filesystem sandbox (and auto-approve is set by
+    # the session via yolo). Otherwise stay confined to the project root.
+    _sandbox = not getattr(config, "full_access", False)
+    tools = build_code_tools(root, undo_stack=undo_stack, sandbox=_sandbox)
     if read_only:
         # plan mode: explore but never mutate
         tools = [t for t in tools if t.name in _READONLY_CODE_TOOLS]
@@ -369,6 +403,15 @@ def run_code_agent(
     # are read-only, so they're available even in plan mode and to sub-agents.
     from .lsp import build_lsp_tools
     tools = tools + build_lsp_tools(root)
+    # Web tools (web_search + fetch_url): read-only and safe, so the coding
+    # agent gets them even in plan mode — look up docs/errors while it works.
+    # Offline mode strips them below (NETWORK_TOOLS).
+    from .web_tools import build_web_tools
+    tools = tools + build_web_tools()
+    # Git awareness (status/diff/log): read-only, so available in plan mode too.
+    # Mutating git stays in the gated /commit & /pr commands, not here.
+    from .git_tools import build_git_tools
+    tools = tools + build_git_tools(root)
     # The live plan tracker: the agent maintains a checklist via update_todos.
     todo_store = TodoStore()
     tools = tools + [build_todo_tool(todo_store)]
@@ -389,6 +432,12 @@ def run_code_agent(
     if config.offline:
         from .offline import strip_network_tools
         tools = strip_network_tools(tools)
+
+    # Dedup by name (first wins): extra_tools may overlap with built-ins (e.g.
+    # web tools). Two tools with the same name confuse the model and some
+    # providers reject the request outright.
+    _seen: set[str] = set()
+    tools = [t for t in tools if not (t.name in _seen or _seen.add(t.name))]
 
     # Project memory: fold RONIN.md / CLAUDE.md / AGENTS.md into the system
     # prompt so the agent follows the repo's conventions. Announce it once (on
@@ -445,7 +494,7 @@ def run_code_agent(
     _hooks = load_hooks(root)
     after_tool = build_after_tool(_hooks, root, console=console) if _hooks else None
 
-    task = expand_file_mentions(task, root)  # inline any @path references
+    task = expand_file_mentions(task, root, offline=config.offline)  # inline @path / @url refs
     prompt = f"{history_prefix}\n\nCurrent request: {task}" if history_prefix else task
     if renderer is not None:
         renderer.start()  # soft "thinking…" spinner until the first token
@@ -1407,7 +1456,6 @@ def run_unified_session(
     # media (image/video/speech) + data (stripe/linear/…) + persistent memory,
     # layered on the coding agent's machinery (streaming, diffs, gate, todos).
     from .mcp_client import build_mcp_tools
-    from .web_tools import build_web_tools
 
     media_tools = build_media_tools(artifacts, root=root)
     data_tools = build_tools(config)
@@ -1418,7 +1466,9 @@ def run_unified_session(
     from .checkpoint import build_checkpoint_tools
     from .embeddings import build_semantic_tools
     from .vision_tools import build_vision_tools
-    extra = (media_tools + data_tools + build_web_tools() + mcp_tools
+    # NB: web tools (web_search/fetch_url) are now built into the code agent
+    # itself (run_code_agent), so they're intentionally NOT added here again.
+    extra = (media_tools + data_tools + mcp_tools
              + build_background_tools(root) + build_checkpoint_tools(root)
              + build_vision_tools(config, root) + build_semantic_tools(config, root)
              + [build_task_tool(config, root),

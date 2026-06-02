@@ -60,6 +60,10 @@ class CSKConfig(BaseModel):
     # the most relevant files (from the repo map) so the model starts aimed at
     # the right code. Non-blocking; set False to disable.
     auto_context: bool = True
+    # Full-access mode (opt-in, `--full-access`): lifts the guards — filesystem
+    # access beyond the project root, auto-approve (no y/n gate), longer command
+    # timeouts + bigger output caps. Powerful and unsandboxed; off by default.
+    full_access: bool = False
 
     anthropic_api_key: str | None = None
     openai_api_key: str | None = None  # legacy shared slot (openai/together/groq/…)

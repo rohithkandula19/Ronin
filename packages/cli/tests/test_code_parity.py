@@ -35,6 +35,28 @@ def test_expand_mentions_noop_without_at(tmp_path: Path) -> None:
     assert expand_file_mentions("just a normal task", tmp_path) == "just a normal task"
 
 
+def test_expand_url_mention_offline_skips_fetch(tmp_path: Path) -> None:
+    # offline=True must never touch the network; the @url is left as-is.
+    out = expand_file_mentions("read @https://example.com/docs", tmp_path, offline=True)
+    assert out == "read @https://example.com/docs"
+
+
+def test_expand_url_mention_fetches(tmp_path: Path, monkeypatch) -> None:
+    # online: the page's text is inlined under "Referenced web pages:".
+    import ro_claude_kit_cli.web_tools as web_tools
+    monkeypatch.setattr(web_tools, "fetch_url", lambda url, max_chars=4000: "PAGE_BODY_MARKER")
+    out = expand_file_mentions("summarize @https://example.com/x", tmp_path)
+    assert "Referenced web pages:" in out and "PAGE_BODY_MARKER" in out
+    assert "summarize @https://example.com/x" in out
+
+
+def test_expand_url_mention_skips_failed_fetch(tmp_path: Path, monkeypatch) -> None:
+    import ro_claude_kit_cli.web_tools as web_tools
+    monkeypatch.setattr(web_tools, "fetch_url", lambda url, max_chars=4000: "ERROR: fetch failed")
+    out = expand_file_mentions("read @https://bad.example", tmp_path)
+    assert out == "read @https://bad.example"  # error pages are not inlined
+
+
 # ---------- glob + multi_edit tools ----------
 
 def test_glob_tool(tmp_path: Path) -> None:

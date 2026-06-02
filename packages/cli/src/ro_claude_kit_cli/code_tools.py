@@ -71,14 +71,36 @@ def _resolve(root: Path, rel: str) -> Path:
     return target
 
 
-def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None) -> list[Tool]:
+def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None,
+                     sandbox: bool = True) -> list[Tool]:
     """Build the coding tools rooted at ``root``.
 
     ``undo_stack``: optional list the write/edit tools push (path, prior_content
     | None) onto before modifying a file. Pass a list and the interactive
     session can pop it to restore the previous state (`:undo`).
+    ``sandbox``: when True (default) paths are confined to ``root``; when False
+    (full-access mode) absolute paths and paths outside root are allowed, and
+    run_command gets a longer timeout + bigger output caps.
     """
     root_path = Path(root).resolve()
+
+    def _resolve_path(rel: str) -> Path:
+        """Resolve ``rel`` honoring the sandbox flag. In full-access mode an
+        absolute path is taken as-is and containment is not enforced."""
+        target = Path(rel)
+        resolved = target.resolve() if target.is_absolute() else (root_path / rel).resolve()
+        if sandbox and root_path != resolved and root_path not in resolved.parents:
+            raise ValueError(f"path {rel!r} escapes the project root "
+                             "(enable full-access mode to reach outside it)")
+        return resolved
+
+    def _display(p: Path) -> str:
+        """Path shown in results: relative to root when possible (sandbox), else
+        the absolute path (full-access reaching outside root)."""
+        try:
+            return str(p.relative_to(root_path))
+        except ValueError:
+            return str(p)
 
     def _record_undo(target: Path) -> None:
         if undo_stack is None:
@@ -88,7 +110,7 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None) 
 
     # ---- read_file ----
     def read_file(path: str) -> str:
-        target = _resolve(root_path, path)
+        target = _resolve_path(path)
         if not target.is_file():
             return f"ERROR: {path} is not a file"
         data = target.read_bytes()[:MAX_READ_BYTES]
@@ -104,7 +126,7 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None) 
     # constantly, and a bare TypeError just wastes a round-trip.
     def list_files(directory: str = ".", pattern: str = "*", path: str | None = None) -> list[str]:
         directory = path if path is not None else directory
-        base = _resolve(root_path, directory)
+        base = _resolve_path(directory)
         if not base.is_dir():
             return [f"ERROR: {directory} is not a directory"]
         out: list[str] = []
@@ -112,7 +134,7 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None) 
             if any(part in _SKIP_DIRS for part in p.parts):
                 continue
             if p.is_file():
-                out.append(str(p.relative_to(root_path)))
+                out.append(_display(p))
             if len(out) >= MAX_LIST_ENTRIES:
                 break
         return out
@@ -120,7 +142,7 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None) 
     # ---- search_files (grep-like) ----
     def search_files(query: str, directory: str = ".", path: str | None = None) -> list[dict]:
         directory = path if path is not None else directory
-        base = _resolve(root_path, directory)
+        base = _resolve_path(directory)
         hits: list[dict] = []
         for p in base.rglob("*"):
             if any(part in _SKIP_DIRS for part in p.parts):
@@ -130,7 +152,7 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None) 
             try:
                 for n, line in enumerate(p.read_text(encoding="utf-8", errors="ignore").splitlines(), 1):
                     if query in line:
-                        hits.append({"file": str(p.relative_to(root_path)), "line": n, "text": line.strip()[:200]})
+                        hits.append({"file": _display(p), "line": n, "text": line.strip()[:200]})
                         if len(hits) >= 100:
                             return hits
             except OSError:
@@ -139,7 +161,7 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None) 
 
     # ---- write_file (SENSITIVE) ----
     def write_file(path: str, content: str) -> str:
-        target = _resolve(root_path, path)
+        target = _resolve_path(path)
         _record_undo(target)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
@@ -147,7 +169,7 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None) 
 
     # ---- edit_file (SENSITIVE) — Claude Code's core primitive: surgical replace ----
     def edit_file(path: str, old_string: str, new_string: str) -> str:
-        target = _resolve(root_path, path)
+        target = _resolve_path(path)
         if not target.is_file():
             return f"ERROR: {path} does not exist (use write_file to create it)"
         content = target.read_text(encoding="utf-8")
@@ -169,7 +191,7 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None) 
     # ---- glob (find files by pattern) ----
     def glob(pattern: str, directory: str = ".", path: str | None = None) -> list[str]:
         directory = path if path is not None else directory
-        base = _resolve(root_path, directory)
+        base = _resolve_path(directory)
         if not base.is_dir():
             return [f"ERROR: {directory} is not a directory"]
         out: list[str] = []
@@ -177,14 +199,14 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None) 
             if any(part in _SKIP_DIRS for part in p.parts):
                 continue
             if p.is_file():
-                out.append(str(p.relative_to(root_path)))
+                out.append(_display(p))
             if len(out) >= MAX_LIST_ENTRIES:
                 break
         return out
 
     # ---- multi_edit (SENSITIVE) — several surgical replaces in ONE file/approval ----
     def multi_edit(path: str, edits: list) -> str:
-        target = _resolve(root_path, path)
+        target = _resolve_path(path)
         if not target.is_file():
             return f"ERROR: {path} does not exist (use write_file to create it)"
         content = target.read_text(encoding="utf-8")
@@ -203,6 +225,10 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None) 
         return f"applied {len(edits)} edit(s) to {path}"
 
     # ---- run_command (SENSITIVE) ----
+    # Full-access mode gets a longer timeout + bigger output caps.
+    _timeout = 600 if not sandbox else 120
+    _out_cap, _err_cap = (40000, 20000) if not sandbox else (8000, 4000)
+
     def run_command(command: str) -> str:
         proc = subprocess.run(
             command,
@@ -210,10 +236,10 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None) 
             cwd=root_path,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=_timeout,
         )
-        out = (proc.stdout or "")[:8000]
-        err = (proc.stderr or "")[:4000]
+        out = (proc.stdout or "")[:_out_cap]
+        err = (proc.stderr or "")[:_err_cap]
         return f"exit={proc.returncode}\n--- stdout ---\n{out}\n--- stderr ---\n{err}"
 
     def _tool(name, desc, schema, handler) -> Tool:
