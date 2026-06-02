@@ -1307,11 +1307,14 @@ def run_code_session(
     # model. Off → ledger stays None and nothing changes.
     _routing_on = bool(config.route_fast and config.route_strong)
     ledger = None
+    _rstats = None
     if _routing_on:
         from .cost import CostLedger
+        from .router_stats import load_stats
         from .routing import baseline_for
         _bp, _bm = baseline_for(config)
         ledger = CostLedger(baseline_provider=_bp, baseline_model=_bm)
+        _rstats = load_stats(root)   # self-tuning: learned per-blade reliability
 
     pending: list[str] = []  # messages typed while the agent was working
     while True:
@@ -1414,11 +1417,16 @@ def run_code_session(
         from .embeddings import build_semantic_tools
         from .input_queue import InputQueue
         from .vision_tools import build_vision_tools
-        # Cost Router: route this turn to the fast/free or strong blade.
+        # Cost Router (+ self-tuning): route this turn to the fast/free or strong
+        # blade, escalating if the cheap blade has proven unreliable in this repo.
         turn_cfg = config
+        _decision = None
         if _routing_on:
             from .routing import route_turn_config
-            turn_cfg, _decision = route_turn_config(config, user)
+            turn_cfg, _decision = route_turn_config(config, user, stats=_rstats)
+            if _decision is not None and _decision.escalated:
+                console.print(f"[#6b7089]↑ self-tuning: escalated to "
+                              f"{turn_cfg.provider} (cheap blade unreliable here)[/#6b7089]")
         _iq = InputQueue(console)
         with _iq:
             result = run_code_agent(
@@ -1435,6 +1443,10 @@ def run_code_session(
             _u = result.usage or {}
             ledger.record(turn_cfg.provider, turn_cfg.resolved_model(),
                           _u.get("input_tokens", 0), _u.get("output_tokens", 0))
+        if _rstats is not None and _decision is not None:
+            from .router_stats import save_stats
+            _rstats.record(_decision.tier, turn_cfg.provider, result.success)
+            save_stats(root, _rstats)   # learn from this outcome
         transcript.append(f"USER: {user}")
         transcript.append(f"ASSISTANT: {result.output}")
         save_session(root, transcript)  # persist so `ronin code --continue` can resume
@@ -1535,11 +1547,14 @@ def run_unified_session(
     # Cost Router: tally routed-turn savings vs the strong model (when routing on).
     _routing_on = bool(config.route_fast and config.route_strong)
     ledger = None
+    _rstats = None
     if _routing_on:
         from .cost import CostLedger
+        from .router_stats import load_stats
         from .routing import baseline_for
         _bp, _bm = baseline_for(config)
         ledger = CostLedger(baseline_provider=_bp, baseline_model=_bm)
+        _rstats = load_stats(root)   # self-tuning: learned per-blade reliability
 
     pending: list[str] = []  # messages typed while the agent was working
     while True:
@@ -1628,10 +1643,14 @@ def run_unified_session(
         if transcript:
             history_prefix = "Conversation so far:\n" + "\n".join(transcript[-6:])
 
-        # Cost Router: route this turn to the fast/free or strong blade (may be
-        # a different *provider*, not just a different model on the same one).
+        # Cost Router (+ self-tuning): route this turn to the fast/free or strong
+        # blade (a different *provider*, not just a model), escalating an
+        # unreliable cheap blade based on this repo's learned outcomes.
         from .routing import route_turn_config
-        turn_cfg, _decision = route_turn_config(config, user)
+        turn_cfg, _decision = route_turn_config(config, user, stats=_rstats)
+        if _decision is not None and _decision.escalated:
+            console.print(f"[#6b7089]↑ self-tuning: escalated to {turn_cfg.provider} "
+                          f"(cheap blade unreliable here)[/#6b7089]")
 
         # Shift+Tab edit mode: plan → read-only, auto-accept → yolo, normal → default
         from .prompt_box import current_mode
@@ -1677,6 +1696,10 @@ def run_unified_session(
             _u = result.usage or {}
             ledger.record(turn_cfg.provider, turn_cfg.resolved_model(),
                           _u.get("input_tokens", 0), _u.get("output_tokens", 0))
+        if _rstats is not None and _decision is not None:
+            from .router_stats import save_stats
+            _rstats.record(_decision.tier, turn_cfg.provider, result.success)
+            save_stats(root, _rstats)
         transcript.append(f"USER: {user}")
         transcript.append(f"ASSISTANT: {result.output}")
         save_session(root, transcript)

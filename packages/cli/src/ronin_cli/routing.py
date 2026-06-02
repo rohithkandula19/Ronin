@@ -50,6 +50,7 @@ class RouteDecision:
     provider: str        # resolved provider for this turn
     model: str | None    # resolved model (None → provider default)
     free: bool           # is this turn free?
+    escalated: bool = False  # self-tuning bumped this off the cheap blade
 
 
 def _parse_target(target: str, default_provider: str) -> tuple[str, str | None]:
@@ -75,13 +76,23 @@ def route_decision(config: RoninConfig, message: str) -> RouteDecision | None:
                          free=is_free(provider, model))
 
 
-def route_turn_config(config: RoninConfig, message: str) -> tuple[RoninConfig, RouteDecision | None]:
+def route_turn_config(config: RoninConfig, message: str,
+                      stats: "object | None" = None) -> tuple[RoninConfig, RouteDecision | None]:
     """Resolve the actual config a turn should run on (possibly a *different*
-    provider), plus the decision. Returns ``(config, None)`` when routing is off
-    so the caller stays on the default provider unchanged."""
+    provider), plus the decision. Returns ``(config, None)`` when routing is off.
+
+    Self-tuning: when ``stats`` (a RouterStats) shows the routed cheap blade has
+    proven unreliable for this tier *in this repo*, the router escalates the turn
+    to the strong blade and flags ``decision.escalated``."""
     decision = route_decision(config, message)
     if decision is None:
         return config, None
+    if stats is not None and stats.should_escalate(decision.tier, decision.provider):
+        from .cost import is_free
+        sp, sm = _parse_target(config.route_strong, config.provider)
+        if (sp, sm) != (decision.provider, decision.model):  # not already on strong
+            decision = RouteDecision(tier=decision.tier, provider=sp, model=sm,
+                                     free=is_free(sp, sm), escalated=True)
     from .runner import config_for_spec
     turn_cfg = config_for_spec(config, {"provider": decision.provider, "model": decision.model})
     return turn_cfg, decision
