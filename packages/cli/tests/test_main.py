@@ -132,9 +132,9 @@ def test_root_no_tui_starts_unified_session_outside_code_repo(tmp_path: Path, mo
     run_code.assert_not_called()
 
 
-def test_root_opens_tui_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Bare ronin (no flags) opens the full-screen TUI by default; the inline REPL
-    is the `--no-tui` opt-out."""
+def test_root_opens_repl_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bare ronin (no flags) opens the minimal inline REPL (the Claude-Code-style
+    flow), not the full-screen TUI. `--tui` opts into the TUI."""
     monkeypatch.chdir(tmp_path)
     ctx = type("Ctx", (), {"invoked_subcommand": None, "get_help": lambda self: "help"})()
 
@@ -148,8 +148,8 @@ def test_root_opens_tui_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPat
              patch("sys.stdout.isatty", return_value=True):
             main_mod._root(ctx)
 
-    run_tui_mock.assert_called_once()
-    run_unified.assert_not_called()
+    run_unified.assert_called_once()
+    run_tui_mock.assert_not_called()
     run_code.assert_not_called()
 
 

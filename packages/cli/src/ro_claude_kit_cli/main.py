@@ -102,11 +102,12 @@ def _root(
 
     root = Path(".")
 
-    # Default: the full-screen Textual TUI — a managed input box separate from the
-    # output (type/queue while it works, no interleaving), streaming, a live tool
-    # trace, and an approval modal for edits/commands. Opt out with `--no-tui` /
-    # `--repl` for the minimal inline REPL. `--tui` is kept as a no-op alias.
-    if not no_tui:
+    # Default: the minimal, Claude-Code-style INLINE REPL — output flows in the
+    # terminal's normal scrollback under a tiny logo and a bordered input box (no
+    # full-screen takeover, no side panes). `ronin --tui` opts into the
+    # full-screen Textual app (panes + live trace + approval modal) for those who
+    # want it.
+    if tui and not no_tui:
         from .tui import run_tui
         run_tui(config=config, root=str(root))
         return

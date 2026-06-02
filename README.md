@@ -94,7 +94,7 @@ Because ronin is **provider-agnostic**, it can do things a single-vendor agent s
 
 Plus, on the coding agent itself:
 
-- **🖥️ Full-screen TUI by default** — a managed input box separate from the output, so you can **type and queue while it works** (no keystroke interleaving), with streaming, a live tool trace, and an approval modal for edits/commands. `--no-tui` drops to the inline REPL.
+- **⌨️ Type-ahead in the inline REPL** — the default is the minimal, Claude-Code-style inline flow (scrollback + a bordered input box); you can **type and queue messages while it works**. `ronin --tui` opts into an optional full-screen pane layout (live trace + approval modal) for those who want it.
 - **⚡ Prompt caching** (Anthropic) — the static system + tools prefix is cached on every turn (up to ~90% cheaper/faster); the status line shows `⚡N cached`.
 - **🧠 Semantic code intelligence** — `diagnostics` / `definition` / `references` via real language servers (pyright, ts-language-server, gopls, rust-analyzer), with graceful "install X" fallback. Plus **`repo_map`** (BM25) and optional **`semantic_search`** (embeddings, local-Ollama or OpenAI) to find code by meaning, and **auto context engineering** that front-loads the most relevant files each turn.
 - **🌳 Parallel mutating sub-agents** — `isolated_task` runs several editing agents at once, each in its **own git worktree**, so concurrent edits never collide; each returns a reviewable diff.

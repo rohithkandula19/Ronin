@@ -7,7 +7,7 @@ All notable changes to this project will be documented here. Format follows [Kee
 A reliability + UX pass on top of v0.52, plus three capability additions. **636 → 730 tests.**
 
 ### Added — experience
-- **Full-screen TUI is now the default.** Rewrote it into a real coding surface: drives `run_code_agent` off the UI thread with the whole toolbelt, streams tokens, shows a live `⏺` tool trace, and gates sensitive actions (write/edit/run/…) behind an approval modal bridged across threads. A managed input box means you can type + queue while it works with no interleaving. `--no-tui` / `--repl` keep the inline REPL.
+- **Full-screen TUI as a real coding surface (opt-in via `ronin --tui`).** Rewrote it to drive `run_code_agent` off the UI thread with the whole toolbelt, stream tokens, show a live `⏺` tool trace, and gate sensitive actions (write/edit/run/…) behind an approval modal bridged across threads. The **default stays the minimal, Claude-Code-style inline REPL** (scrollback + bordered input box).
 - **Type-ahead input queue** in the inline REPL — messages typed while the agent works are captured (via a cancellable `select` reader) and run as the next turn. No-op on non-TTY.
 - **Clarifying questions** — an `ask_user` tool lets the agent ask one sharp question before acting on an ambiguous task (interactive sessions only).
 
