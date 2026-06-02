@@ -400,6 +400,42 @@ def consensus(
 
 
 @app.command()
+def duel(
+    against: str = typer.Option(
+        ..., "--against", "-a",
+        help="provider[:model] of the RIVAL reviewer, e.g. 'gemini' or 'cerebras:gpt-oss-120b'."),
+    staged: bool = typer.Option(False, "--staged", help="Review the staged diff instead of the working tree."),
+) -> None:
+    """⚔ Have a RIVAL model adversarially red-team your current git diff.
+
+    The author model is a poor judge of its own code; a different provider hunts
+    for bugs, edge cases, and regressions it can't see. Read-only, advisory.
+    Something a single-vendor agent can't do: a real cross-vendor second opinion.
+    """
+    from .consensus import parse_model_spec
+    from .duel import render_verdict, review_diff
+    from .git_helper import _git
+
+    config = load_config()
+    if _git(".", "rev-parse", "--is-inside-work-tree").returncode != 0:
+        console.print("[yellow]not a git repository[/yellow]")
+        raise typer.Exit(2)
+    args = ["diff", "--cached"] if staged else ["diff"]
+    diff = _git(".", *args).stdout
+    if not diff.strip():
+        where = "staged" if staged else "working-tree"
+        console.print(f"[dim]no {where} changes to duel over[/dim]")
+        return
+    spec = parse_model_spec(against)
+    console.print(f"[dim]⚔ {spec['provider']} is reviewing your diff…[/dim]")
+    with console.status("[dim] cross-examining…[/dim]", spinner="dots"):
+        verdict = review_diff(config, diff, spec)
+    render_verdict(console, verdict)
+    if not verdict.passed:
+        raise typer.Exit(1)
+
+
+@app.command()
 def kaizen(
     goal: Optional[str] = typer.Argument(
         None, help="What to improve. Omit to auto-pick the top FIXME/TODO in ronin's own source."),
@@ -1079,6 +1115,7 @@ def code(
     init_memory: bool = typer.Option(False, "--init", help="Scaffold a RONIN.md project-memory file and exit."),
     continue_session: bool = typer.Option(False, "--continue", "-c", help="Resume this repo's last session."),
     plan: bool = typer.Option(False, "--plan", help="Propose a plan first (read-only), confirm, then execute."),
+    scout: bool = typer.Option(False, "--scout", help="Scout→Strike: a free model does recon, the strong one edits (needs routing)."),
 ) -> None:
     """Coding agent (Claude Code / Cline shaped): reads files, edits code, runs commands.
 
@@ -1136,7 +1173,12 @@ def code(
         text = f"Follow this plan:\n{plan_res.output}\n\nNow implement it: {text}"
         console.print()
 
-    result = run_code_agent(config, text, root=root, console=console, yolo=yolo, max_iterations=max_steps)
+    if scout and not plan:
+        from .scout import run_scout_strike
+        result = run_scout_strike(config, text, root=root, console=console,
+                                  max_steps=max_steps, yolo=yolo)
+    else:
+        result = run_code_agent(config, text, root=root, console=console, yolo=yolo, max_iterations=max_steps)
 
     console.print()
     if result.blocked:
