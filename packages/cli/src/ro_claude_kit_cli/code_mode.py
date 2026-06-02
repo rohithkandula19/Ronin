@@ -429,6 +429,11 @@ def run_code_agent(
         # Bushido: let the agent persist a standing, cross-repo preference.
         from .bushido import build_bushido_tool
         tools = tools + build_bushido_tool()
+        # Muscle memory: let the agent crystallize a solved workflow into a
+        # reusable repo-local /skill (only when it can actually mutate the repo).
+        if not read_only:
+            from .muscle_memory import build_muscle_tool
+            tools = tools + build_muscle_tool(root)
 
     # Offline mode: strip every network-touching tool so nothing can leave the
     # machine (the brain is already forced local in build_provider).
