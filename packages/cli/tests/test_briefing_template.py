@@ -104,12 +104,12 @@ def test_cli_uses_custom_template(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 
 
 def test_cli_auto_loads_project_template(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """If .csk/briefing-template.toml exists, the CLI uses it without --template."""
+    """If .ronin/briefing-template.toml exists, the CLI uses it without --template."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     runner.invoke(app, ["init", "--demo", "-y"])
 
-    (tmp_path / ".csk" / "briefing-template.toml").write_text(
+    (tmp_path / ".ronin" / "briefing-template.toml").write_text(
         'title = "Auto-loaded — {{date}}"\nsections = ["revenue"]\n',
         encoding="utf-8",
     )

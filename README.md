@@ -151,7 +151,7 @@ Demo mode lets you play with the CLI before connecting any real services. Withou
 ronin init                                        # interactive — picks provider + service creds
 ```
 
-Or write `.csk/config.toml`:
+Or write `.ronin/config.toml`:
 
 ```toml
 provider = "anthropic"
@@ -165,7 +165,7 @@ notion_token = "secret_..."
 database_url = "postgres://readonly_user:...@host:5432/db"   # a read-only role
 ```
 
-`.csk/` is gitignored — the file holds plaintext credentials. Keys are user-supplied and never committed.
+`.ronin/` is gitignored — the file holds plaintext credentials. Keys are user-supplied and never committed.
 
 ## Commands
 
@@ -201,7 +201,7 @@ ronin can write files and run commands, so safety is built into the core, not bo
 - **Gated mutations.** Every file write and shell command in the coding agent is held behind a **diff preview + your approval** — read operations run freely. **Plan mode** (`--plan`) is fully read-only.
 - **Prompt-injection scanning.** User input passes through an injection scanner (`packages/hardening`) before it reaches a tool-calling planner.
 - **Read-only data integrations.** The Stripe / Linear / Slack / Notion / Postgres MCP templates are read-only by default; the recommended Postgres setup uses a read-only DB role.
-- **Secrets discipline.** API keys are user-supplied and stored only in local `.csk/` (gitignored) — never committed (the repo is public). PII (emails, SSNs, cards, keys) is redacted from traces before anything leaves your process.
+- **Secrets discipline.** API keys are user-supplied and stored only in local `.ronin/` (gitignored) — never committed (the repo is public). PII (emails, SSNs, cards, keys) is redacted from traces before anything leaves your process.
 - **Offline guarantee.** `ronin --offline` forces a local brain and removes every network-touching tool — a hard guarantee for air-gapped / privacy-sensitive work.
 
 ### Running ronin for others / at scale

@@ -1,6 +1,6 @@
 """Config file management for csk.
 
-Config lives at ``./.csk/config.toml`` (project-local, takes priority) or
+Config lives at ``./.ronin/config.toml`` (project-local, takes priority) or
 ``~/.config/csk/config.toml`` (user-global). Demo mode skips all real creds.
 """
 from __future__ import annotations
@@ -15,8 +15,41 @@ from pydantic import BaseModel, Field, model_validator
 
 
 CONFIG_FILENAME = "config.toml"
-PROJECT_DIR = Path(".csk")
-USER_DIR = Path.home() / ".config" / "csk"
+PROJECT_DIR = Path(".ronin")
+USER_DIR = Path.home() / ".config" / "ronin"
+# Legacy dirs from the "csk / Claude kit" era — migrated to the ronin names on
+# first load so existing users keep their config, sessions, and skills.
+LEGACY_PROJECT_DIR = Path(".csk")
+LEGACY_USER_DIR = Path.home() / ".config" / "csk"
+
+
+def _merge_move(old: Path, new: Path) -> None:
+    """Recursively move ``old`` into ``new`` without clobbering. If ``new``
+    doesn't exist, move wholesale; if both are dirs, merge child-by-child; if a
+    file already exists at the destination, the legacy copy is left in place."""
+    import shutil
+    if not new.exists():
+        new.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(old), str(new))
+        return
+    if old.is_dir() and new.is_dir():
+        for child in list(old.iterdir()):
+            _merge_move(child, new / child.name)
+        if not any(old.iterdir()):
+            old.rmdir()
+
+
+def migrate_legacy_dirs() -> None:
+    """One-time migration of legacy .csk → .ronin (project, in cwd) and
+    ~/.config/csk → ~/.config/ronin, recursively merging so existing data is
+    never clobbered (and a .ronin created first doesn't strand old sessions).
+    Best-effort and silent on failure."""
+    for old, new in ((LEGACY_PROJECT_DIR, PROJECT_DIR), (LEGACY_USER_DIR, USER_DIR)):
+        try:
+            if old.exists():
+                _merge_move(old, new)
+        except OSError:
+            pass
 
 
 PROVIDER_PRESETS: dict[str, dict[str, str]] = {
@@ -175,6 +208,7 @@ def load_config() -> RoninConfig:
     ``ANTHROPIC_API_KEY``, ``STRIPE_API_KEY``, ``LINEAR_API_KEY``,
     ``SLACK_BOT_TOKEN``, ``NOTION_TOKEN``, ``DATABASE_URL``.
     """
+    migrate_legacy_dirs()  # carry .csk → .ronin forward (one-time, silent)
     path = find_config_path()
     raw: dict[str, Any] = {}
     if path is not None:

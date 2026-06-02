@@ -21,7 +21,7 @@ def test_normalize_name() -> None:
 def test_crystallize_writes_runnable_skill(tmp_path: Path) -> None:
     path, slug = crystallize(tmp_path, "Add Endpoint", "Add a REST endpoint for $ARGUMENTS")
     assert slug == "add-endpoint"
-    assert path == tmp_path / ".csk" / "commands" / "add-endpoint.md"
+    assert path == tmp_path / ".ronin" / "commands" / "add-endpoint.md"
     assert "Add a REST endpoint for $ARGUMENTS" in path.read_text(encoding="utf-8")
     assert list_skills(tmp_path) == ["add-endpoint"]
 

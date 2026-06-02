@@ -102,7 +102,7 @@ def test_briefing_cli_auto_saves(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     r = runner.invoke(app, ["briefing", "--raw"])
     assert r.exit_code == 0
 
-    briefings = list((tmp_path / ".csk" / "briefings").glob("*.json"))
+    briefings = list((tmp_path / ".ronin" / "briefings").glob("*.json"))
     assert len(briefings) == 1
     payload = json.loads(briefings[0].read_text())
     assert payload["mrr_cents"] > 0
@@ -145,5 +145,5 @@ def test_no_save_flag_skips_persistence(tmp_path: Path, monkeypatch: pytest.Monk
 
     r = runner.invoke(app, ["briefing", "--raw", "--no-save"])
     assert r.exit_code == 0
-    briefings_dir = tmp_path / ".csk" / "briefings"
+    briefings_dir = tmp_path / ".ronin" / "briefings"
     assert not briefings_dir.exists() or not any(briefings_dir.iterdir())

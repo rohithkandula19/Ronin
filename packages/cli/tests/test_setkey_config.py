@@ -28,8 +28,8 @@ def test_explicit_openai_key_wins_over_alias() -> None:
 def test_load_config_reads_api_key_alias(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    (tmp_path / ".csk").mkdir()
-    (tmp_path / ".csk" / "config.toml").write_text(
+    (tmp_path / ".ronin").mkdir()
+    (tmp_path / ".ronin" / "config.toml").write_text(
         'provider = "groq"\napi_key = "gsk_fromfile"\n', encoding="utf-8")
     cfg = load_config()
     assert cfg.provider == "groq" and cfg.openai_api_key == "gsk_fromfile"

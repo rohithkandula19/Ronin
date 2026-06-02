@@ -21,7 +21,7 @@ def test_plugins_no_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
 
 def test_plugins_lists_loaded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
-    plugin_dir = tmp_path / ".csk" / "plugins"
+    plugin_dir = tmp_path / ".ronin" / "plugins"
     plugin_dir.mkdir(parents=True)
     (plugin_dir / "echo.py").write_text(dedent("""
         from ronin_agent_patterns import Tool

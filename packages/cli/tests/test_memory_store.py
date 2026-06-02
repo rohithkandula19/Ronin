@@ -28,8 +28,8 @@ def test_add_and_load(home: Path) -> None:
     assert memory_store.add_memory("I use Groq") is True
     texts = [m["text"] for m in memory_store.load_memories()]
     assert texts == ["My name is Rohith", "I use Groq"]
-    # persisted to ~/.csk/memory.json
-    assert (home / ".csk" / "memory.json").is_file()
+    # persisted to ~/.ronin/memory.json
+    assert (home / ".ronin" / "memory.json").is_file()
 
 
 def test_dedupe_and_blank(home: Path) -> None:

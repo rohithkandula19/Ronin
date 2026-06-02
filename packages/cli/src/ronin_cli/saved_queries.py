@@ -1,6 +1,6 @@
 """Saved queries — give a question a short name, recall it later.
 
-Storage: ``.csk/queries.toml`` (project-local). Plaintext, safe to commit if you're
+Storage: ``.ronin/queries.toml`` (project-local). Plaintext, safe to commit if you're
 not embedding secrets in the query text.
 """
 from __future__ import annotations
@@ -65,4 +65,4 @@ class QueryStore(BaseModel):
 
 
 def default_path() -> Path:
-    return Path(".csk") / QUERIES_FILENAME
+    return Path(".ronin") / QUERIES_FILENAME

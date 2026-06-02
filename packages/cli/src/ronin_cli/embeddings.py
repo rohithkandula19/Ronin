@@ -23,7 +23,7 @@ import httpx
 from .config import RoninConfig
 from .repo_map import _extract_symbols, _walk
 
-_CACHE_DIR = Path(".csk") / "embeddings"
+_CACHE_DIR = Path(".ronin") / "embeddings"
 _MAX_FILES = 1500
 _REPR_CHARS = 1500          # representative text length embedded per file
 _EMBED_TIMEOUT = 30.0

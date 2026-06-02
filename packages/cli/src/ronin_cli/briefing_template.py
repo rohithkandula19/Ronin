@@ -4,7 +4,7 @@ Out of the box, ``csk briefing`` renders four sections in a fixed order:
 revenue / payments / engineering / actions. Some founders want to skip one,
 reorder them, or add a custom heading at the top.
 
-Drop a TOML file at ``.csk/briefing-template.toml`` (or pass ``--template
+Drop a TOML file at ``.ronin/briefing-template.toml`` (or pass ``--template
 <path>``) and ``csk`` uses your layout instead:
 
     title = "Monday brief — {{date}}"
@@ -38,7 +38,7 @@ from .briefing import (
 
 DEFAULT_SECTIONS = ["revenue", "payments", "engineering", "actions"]
 DEFAULT_TITLE = "Founder briefing — {{date}}"
-TEMPLATE_PATH = Path(".csk") / "briefing-template.toml"
+TEMPLATE_PATH = Path(".ronin") / "briefing-template.toml"
 
 
 class BriefingTemplate(BaseModel):

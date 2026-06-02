@@ -33,7 +33,7 @@ def test_init_demo_creates_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 
     result = runner.invoke(app, ["init", "--demo", "-y"])
     assert result.exit_code == 0, result.stdout
-    assert (tmp_path / ".csk" / "config.toml").exists()
+    assert (tmp_path / ".ronin" / "config.toml").exists()
     assert "Demo config" in result.stdout or "Ready" in result.stdout
 
 

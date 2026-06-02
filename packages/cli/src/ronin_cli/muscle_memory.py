@@ -1,7 +1,7 @@
 """Muscle Memory — ronin gets better at *your* repo over time.
 
 When the agent works out how to do something non-trivial in this codebase, it can
-**crystallize** that solution into a reusable skill: a ``.csk/commands/NAME.md``
+**crystallize** that solution into a reusable skill: a ``.ronin/commands/NAME.md``
 prompt template. Because that's the same format custom slash commands already
 use, a crystallized skill is immediately re-runnable as ``/NAME`` — the agent's
 hard-won approach becomes a one-liner you (or it) can replay.
@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-_SKILLS_DIR = Path(".csk") / "commands"
+_SKILLS_DIR = Path(".ronin") / "commands"
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9\-]{0,40}$")
 
 
@@ -38,7 +38,7 @@ def list_skills(root: Path | str) -> list[str]:
 
 
 def crystallize(root: Path | str, name: str, template: str) -> tuple[Path, str]:
-    """Save a reusable skill as ``.csk/commands/<name>.md``. Returns
+    """Save a reusable skill as ``.ronin/commands/<name>.md``. Returns
     ``(path, slug)``. Raises ``ValueError`` on a bad/reserved name or empty body.
 
     The slug is normalized to kebab-case; a name colliding with a builtin slash

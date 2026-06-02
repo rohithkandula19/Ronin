@@ -1,7 +1,7 @@
 """Minimal MCP (Model Context Protocol) stdio client.
 
 Lets ronin use tools from any MCP server — Anthropic's open protocol — e.g. the
-filesystem, GitHub, or Slack servers. Servers are declared in ``.csk/mcp.json``
+filesystem, GitHub, or Slack servers. Servers are declared in ``.ronin/mcp.json``
 using Claude Code's ``mcpServers`` shape:
 
     {
@@ -124,7 +124,7 @@ class MCPClient:
 
 # --- config + tool wiring ----------------------------------------------------
 def mcp_config_path(root: str | Path = ".") -> Path:
-    return Path(root) / ".csk" / "mcp.json"
+    return Path(root) / ".ronin" / "mcp.json"
 
 
 def load_mcp_servers(root: str | Path = ".") -> dict:
@@ -153,7 +153,7 @@ def add_mcp_server(name: str, command: str, args: list[str], root: str | Path = 
 
 
 def remove_mcp_server(name: str, root: str | Path = ".") -> bool:
-    """Remove a server from ``.csk/mcp.json``. Returns True if it was present."""
+    """Remove a server from ``.ronin/mcp.json``. Returns True if it was present."""
     p = mcp_config_path(root)
     if not p.is_file():
         return False
@@ -189,7 +189,7 @@ def _wrap_tool(client: MCPClient, spec: dict):
 
 
 def build_mcp_tools(root: str | Path = ".", *, console=None) -> list:
-    """Connect to every server in ``.csk/mcp.json`` and return their tools as
+    """Connect to every server in ``.ronin/mcp.json`` and return their tools as
     ronin Tools. Per-server failures are reported and skipped, never fatal."""
     tools: list = []
     for name, spec in load_mcp_servers(root).items():

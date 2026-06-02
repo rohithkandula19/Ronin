@@ -1,7 +1,7 @@
 """Briefing history — auto-save each run + compute week-over-week deltas.
 
 Storage layout:
-    .csk/briefings/<YYYY-MM-DD>.json   one file per briefing run, indexed by date
+    .ronin/briefings/<YYYY-MM-DD>.json   one file per briefing run, indexed by date
 
 The on-disk shape is a JSON-serializable view of the metrics we care about for
 trending (not the full ``BriefingData`` — issue lists rotate too quickly to be
@@ -18,7 +18,7 @@ from pathlib import Path
 from .briefing import BriefingData
 
 
-HISTORY_DIR = Path(".csk") / "briefings"
+HISTORY_DIR = Path(".ronin") / "briefings"
 
 
 @dataclass

@@ -2,14 +2,14 @@
 
 Previously ronin kept a single rolling file per project and **overwrote** it, so
 only the latest conversation survived. This module archives **every** session to
-its own timestamped file under ``.csk/sessions/`` (full transcript, not capped),
+its own timestamped file under ``.ronin/sessions/`` (full transcript, not capped),
 so the whole history of every conversation is kept:
 
 - ``ronin … --continue`` reloads the most recent session for the current project
   and *continues* it (writes back to the same file).
 - ``/resume`` lists past sessions; ``/resume <n>`` reloads one.
 
-Files live under ``.csk/`` which is gitignored, so conversations stay local and
+Files live under ``.ronin/`` which is gitignored, so conversations stay local and
 are never committed.
 """
 from __future__ import annotations
@@ -20,7 +20,7 @@ import json
 import uuid
 from pathlib import Path
 
-_SESSIONS_SUBDIR = Path(".csk") / "sessions"
+_SESSIONS_SUBDIR = Path(".ronin") / "sessions"
 
 # One session id per process run (lazily created), so all saves within a single
 # `ronin` invocation land in the same file — and a new run starts a new file.

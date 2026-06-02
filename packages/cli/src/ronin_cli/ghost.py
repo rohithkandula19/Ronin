@@ -25,7 +25,7 @@ PANDA: dict[str, str] = {
 }
 
 _SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", "dist",
-              "build", ".pytest_cache", ".csk", ".ronin"}
+              "build", ".pytest_cache", ".ronin", ".ronin"}
 _WATCH_SUFFIXES = {".py", ".js", ".ts", ".tsx", ".jsx", ".go", ".rs", ".java",
                    ".rb", ".md", ".toml", ".json", ".css", ".html"}
 

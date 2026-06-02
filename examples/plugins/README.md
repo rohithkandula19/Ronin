@@ -1,11 +1,11 @@
 # Custom plugins
 
-Drop a Python file in `.csk/plugins/` and `csk` will pick up any tools it exposes — no fork required.
+Drop a Python file in `.ronin/plugins/` and `csk` will pick up any tools it exposes — no fork required.
 
 ## Anatomy
 
 ```python
-# .csk/plugins/my_tool.py
+# .ronin/plugins/my_tool.py
 from ronin_agent_patterns import Tool
 
 
@@ -33,8 +33,8 @@ That's it. `csk ask "..."` now has `my_tool` available alongside the built-in se
 ## Try the example
 
 ```bash
-mkdir -p .csk/plugins
-cp examples/plugins/weather.py .csk/plugins/weather.py
+mkdir -p .ronin/plugins
+cp examples/plugins/weather.py .ronin/plugins/weather.py
 csk plugins                                                       # confirms it loaded
 csk ask "what's the weather in tokyo right now?"                  # invokes the plugin
 ```

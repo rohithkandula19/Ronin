@@ -1,6 +1,6 @@
 """User-defined hooks — run a shell command on tool events (Claude Code's hooks).
 
-Declare them in ``.csk/hooks.json``:
+Declare them in ``.ronin/hooks.json``:
 
     {
       "hooks": [
@@ -28,7 +28,7 @@ _EDIT_TOOLS = {"write_file", "edit_file", "multi_edit"}
 
 
 def load_hooks(root: str | Path = ".") -> list[dict]:
-    p = Path(root) / ".csk" / "hooks.json"
+    p = Path(root) / ".ronin" / "hooks.json"
     if not p.is_file():
         return []
     try:

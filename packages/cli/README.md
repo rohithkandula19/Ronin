@@ -49,7 +49,7 @@ Demo mode ships with a small set of fake customers, subscriptions, charges, and 
 csk init   # interactive — prompts for each service's credentials
 ```
 
-Or write `.csk/config.toml` directly:
+Or write `.ronin/config.toml` directly:
 
 ```toml
 anthropic_api_key = "sk-ant-..."
@@ -61,7 +61,7 @@ database_url = "postgres://readonly_user:...@host:5432/db"
 model = "claude-sonnet-4-6"
 ```
 
-`.gitignore` `.csk/` — the file is plaintext.
+`.gitignore` `.ronin/` — the file is plaintext.
 
 ## Commands
 

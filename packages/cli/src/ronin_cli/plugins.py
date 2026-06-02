@@ -1,10 +1,10 @@
-"""Plugin loader — drop a Python file in ``.csk/plugins/`` and its tools auto-load.
+"""Plugin loader — drop a Python file in ``.ronin/plugins/`` and its tools auto-load.
 
 Each plugin file must define a top-level ``register_tools()`` function returning a
 ``list[Tool]``. Plugins are discovered alphabetically; file names starting with
 ``_`` are skipped.
 
-Example plugin (``.csk/plugins/weather.py``)::
+Example plugin (``.ronin/plugins/weather.py``)::
 
     from ronin_agent_patterns import Tool
 
@@ -44,8 +44,8 @@ class PluginLoadResult:
 
 
 def find_plugin_dir() -> Path:
-    """Project-local plugin dir: ``.csk/plugins/``."""
-    return Path(".csk") / PLUGIN_DIR_NAME
+    """Project-local plugin dir: ``.ronin/plugins/``."""
+    return Path(".ronin") / PLUGIN_DIR_NAME
 
 
 def load_plugins(plugin_dir: Path | None = None) -> list[PluginLoadResult]:

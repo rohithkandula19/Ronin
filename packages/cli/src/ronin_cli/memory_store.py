@@ -2,7 +2,7 @@
 
 Durable facts and preferences ("my name is Rohith", "I use Groq", "my main repo
 is ~/ronin", "I prefer tabs") are saved to a user-global JSON file at
-``~/.csk/memory.json`` and injected into the agent's system prompt on every
+``~/.ronin/memory.json`` and injected into the agent's system prompt on every
 future run — so a brand-new `ronin` next week already knows you.
 
 The agent saves facts via the ``remember`` tool; recall is by injecting the most
@@ -22,7 +22,7 @@ _INJECT_RECENT = 40
 
 
 def _memory_path() -> Path:
-    return Path.home() / ".csk" / "memory.json"
+    return Path.home() / ".ronin" / "memory.json"
 
 
 def load_memories() -> list[dict]:

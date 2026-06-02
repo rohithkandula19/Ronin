@@ -10,7 +10,7 @@ back exactly the state you checkpointed.
 
 It's git plumbing under the hood (write-tree / commit-tree / checkout-index) but
 leaves your normal git state completely untouched — the snapshots live under
-``refs/ronin/checkpoints`` and a small ``.csk/checkpoints.json`` index.
+``refs/ronin/checkpoints`` and a small ``.ronin/checkpoints.json`` index.
 """
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from pathlib import Path
 
 from .worktree import NotAGitRepo, is_git_repo
 
-_META = Path(".csk") / "checkpoints.json"
+_META = Path(".ronin") / "checkpoints.json"
 _AUTHOR_ENV = {
     "GIT_AUTHOR_NAME": "ronin", "GIT_AUTHOR_EMAIL": "ronin@local",
     "GIT_COMMITTER_NAME": "ronin", "GIT_COMMITTER_EMAIL": "ronin@local",

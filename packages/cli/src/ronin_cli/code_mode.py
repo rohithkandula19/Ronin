@@ -116,13 +116,13 @@ _READONLY_CODE_TOOLS = {"read_file", "list_files", "search_files", "glob"}
 
 
 def _session_path(root: Path | str) -> _Path:
-    """Per-repo session file under .csk/sessions/."""
+    """Per-repo session file under .ronin/sessions/."""
     key = _hashlib.sha1(str(_Path(root).resolve()).encode()).hexdigest()[:12]
-    return _Path(".csk") / "sessions" / f"code-{key}.json"
+    return _Path(".ronin") / "sessions" / f"code-{key}.json"
 
 
 def save_session(root: Path | str, transcript: list[str]) -> None:
-    """Archive the FULL current-session transcript under .csk/sessions/ — every
+    """Archive the FULL current-session transcript under .ronin/sessions/ — every
     session is kept as its own file (resumable via /resume), never overwritten."""
     from .sessions import save_session as _archive
     _archive(root, transcript)
@@ -190,7 +190,7 @@ def expand_file_mentions(task: str, root: Path | str, *, offline: bool = False) 
 
 
 def expand_custom_command(user: str, root: Path | str) -> str | None:
-    """Custom slash commands: a file ``.csk/commands/NAME.md`` makes ``/NAME``
+    """Custom slash commands: a file ``.ronin/commands/NAME.md`` makes ``/NAME``
     available. Its contents are a prompt template sent to the agent, with
     ``$ARGUMENTS`` replaced by whatever follows ``/NAME`` (or appended if absent).
 
@@ -204,7 +204,7 @@ def expand_custom_command(user: str, root: Path | str) -> str | None:
     name, rest = parts[0], (parts[1] if len(parts) > 1 else "")
     if "/" in name or "\\" in name or name.lower() in SLASH_COMMANDS:
         return None  # a path, or a builtin command — not a custom one
-    cmd_file = _Path(root) / ".csk" / "commands" / f"{name}.md"
+    cmd_file = _Path(root) / ".ronin" / "commands" / f"{name}.md"
     if not cmd_file.is_file():
         return None
     try:
@@ -504,7 +504,7 @@ def run_code_agent(
     on_step = on_step_cb or (renderer.on_step if renderer is not None else None)
     on_text = on_text_cb or (renderer.on_text if renderer is not None else None)
 
-    # user-defined hooks (auto-format/test after edits, etc.) from .csk/hooks.json
+    # user-defined hooks (auto-format/test after edits, etc.) from .ronin/hooks.json
     from .hooks import build_after_tool, load_hooks
     _hooks = load_hooks(root)
     after_tool = build_after_tool(_hooks, root, console=console) if _hooks else None
@@ -1484,7 +1484,7 @@ def run_unified_session(
     data_tools = build_tools(config)
     # console=None → load MCP tools silently (no "🔌 MCP fs · N tool(s)" chrome
     # at launch; Claude Code doesn't announce its tool wiring either).
-    mcp_tools = build_mcp_tools(root, console=None)  # tools from .csk/mcp.json servers
+    mcp_tools = build_mcp_tools(root, console=None)  # tools from .ronin/mcp.json servers
     from .bg_processes import build_background_tools
     from .checkpoint import build_checkpoint_tools
     from .embeddings import build_semantic_tools

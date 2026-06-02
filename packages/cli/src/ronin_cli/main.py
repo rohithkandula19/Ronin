@@ -154,7 +154,7 @@ def _is_code_project(path: Path) -> bool:
 @app.command()
 def init(
     demo: bool = typer.Option(False, "--demo", help="Skip credential prompts; use built-in demo data."),
-    scope: str = typer.Option("project", "--scope", help="'project' (./.csk/) or 'user' (~/.config/csk/)."),
+    scope: str = typer.Option("project", "--scope", help="'project' (./.ronin/) or 'user' (~/.config/csk/)."),
     yes: bool = typer.Option(False, "-y", "--yes", help="Overwrite existing config without confirmation."),
 ) -> None:
     """Create a ronin config file."""
@@ -178,7 +178,7 @@ def init(
 
     console.print(Panel.fit(
         "[bold]ronin init[/bold] — pick an LLM provider, then add credentials for the services "
-        "you want it to query.\n[dim]Values are stored in plaintext at .csk/config.toml — .gitignore "
+        "you want it to query.\n[dim]Values are stored in plaintext at .ronin/config.toml — .gitignore "
         "that path.[/dim]",
         border_style="cyan",
     ))
@@ -197,7 +197,7 @@ def init(
     if model.strip().lower() in {"y", "n", "yes", "no", "true", "false", "ok"} and default_model:
         console.print(
             f"[yellow]'{model}' isn't a model name[/yellow] — using the default "
-            f"[bold]{default_model}[/bold] instead. (Pass --model or edit .csk/config.toml to change it.)"
+            f"[bold]{default_model}[/bold] instead. (Pass --model or edit .ronin/config.toml to change it.)"
         )
         model = default_model
     base_url: str | None = None
@@ -273,7 +273,7 @@ def _key_preview(key: str) -> str:
 def set_key(
     provider: str = typer.Option(None, "--provider", help="Set/override the provider (e.g. groq, openrouter, anthropic)."),
     model: str = typer.Option(None, "--model", help="Set/override the model (e.g. qwen/qwen3-coder:free)."),
-    scope: str = typer.Option("project", "--scope", help="'project' (./.csk/) or 'user' (~/.config/csk/)."),
+    scope: str = typer.Option("project", "--scope", help="'project' (./.ronin/) or 'user' (~/.config/csk/)."),
 ) -> None:
     """Set just the LLM API key — masked input with a length/preview confirmation
     so you can tell the paste actually worked (no more blind double-pasting)."""
@@ -873,7 +873,7 @@ def mcp_add(
 
 @app.command()
 def plugins() -> None:
-    """Discover and list user plugins from .csk/plugins/."""
+    """Discover and list user plugins from .ronin/plugins/."""
     from .plugins import find_plugin_dir, load_plugins
 
     plugin_dir = find_plugin_dir()
@@ -1005,16 +1005,16 @@ def briefing(
     raw: bool = typer.Option(False, "--raw", help="Print plain Markdown (no Rich panel)."),
     slack: Optional[str] = typer.Option(None, "--slack", help="Post the briefing to a Slack channel (#founders or C123…)."),
     email: Optional[str] = typer.Option(None, "--email", help="Send the briefing to an email address (requires RESEND_API_KEY)."),
-    template: Optional[Path] = typer.Option(None, "--template", help="Path to a briefing-template.toml. Defaults to .csk/briefing-template.toml if present."),
+    template: Optional[Path] = typer.Option(None, "--template", help="Path to a briefing-template.toml. Defaults to .ronin/briefing-template.toml if present."),
     history: bool = typer.Option(False, "--history", help="Show a trend table of past briefings instead of running a new one."),
-    no_save: bool = typer.Option(False, "--no-save", help="Don't persist this run to .csk/briefings/."),
+    no_save: bool = typer.Option(False, "--no-save", help="Don't persist this run to .ronin/briefings/."),
 ) -> None:
     """Weekly founder briefing: revenue, churn, payment failures, top engineering issues.
 
     Works offline in demo mode; uses Claude (or your configured provider) in real mode.
     Output is Markdown — paste into Slack, email, or a doc.
 
-    Each run is auto-saved to ``.csk/briefings/<date>.json`` so subsequent runs can
+    Each run is auto-saved to ``.ronin/briefings/<date>.json`` so subsequent runs can
     show week-over-week deltas inline. Use ``--history`` to see the trend table.
     Use ``--slack <channel>`` to post the briefing directly.
     """
@@ -1036,7 +1036,7 @@ def briefing(
         snapshots = load_snapshots()
         if not snapshots:
             console.print(
-                "[dim]no briefing history yet at[/dim] [cyan].csk/briefings/[/cyan][dim]. "
+                "[dim]no briefing history yet at[/dim] [cyan].ronin/briefings/[/cyan][dim]. "
                 "Run [bold]ronin briefing[/bold] once to start the trend.[/dim]"
             )
             return
@@ -1064,7 +1064,7 @@ def briefing(
     tools = build_tools(config)
     data = compute_briefing_data(tools)
 
-    # If a template TOML is configured (--template flag or .csk/briefing-template.toml),
+    # If a template TOML is configured (--template flag or .ronin/briefing-template.toml),
     # use it. Otherwise render the four default sections.
     from .briefing_template import BriefingTemplate, render_with_template
     template_obj = BriefingTemplate.load(template)
@@ -1381,7 +1381,7 @@ def memory(
 ) -> None:
     """Show (or edit) what ronin remembers about you across sessions.
 
-    Memory is persistent and user-global (~/.csk/memory.json): ronin recalls
+    Memory is persistent and user-global (~/.ronin/memory.json): ronin recalls
     these facts in every future session. The agent also saves facts itself via
     its `remember` tool when you share durable info.
     """

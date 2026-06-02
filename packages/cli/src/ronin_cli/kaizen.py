@@ -34,7 +34,7 @@ _MARKERS = ("FIXME", "BUG", "XXX", "TODO", "HACK")
 _MARKER_RE = re.compile(
     r"(?:#|//|/\*|<!--|;)\s*(" + "|".join(_MARKERS) + r")\b[:\s]+(.*)")
 _SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", "dist",
-              "build", ".pytest_cache", ".csk"}
+              "build", ".pytest_cache", ".ronin"}
 # pytest summary line, e.g. "734 passed, 5 warnings in 7.55s" / "2 failed, 730 passed"
 _PYTEST_SUMMARY = re.compile(r"(\d+) (passed|failed|error[s]?)")
 

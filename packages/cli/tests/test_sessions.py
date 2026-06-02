@@ -10,7 +10,7 @@ from ronin_cli import sessions
 
 @pytest.fixture(autouse=True)
 def _isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    # sessions live under ./.csk relative to cwd — chdir so tests don't pollute
+    # sessions live under ./.ronin relative to cwd — chdir so tests don't pollute
     # the repo, and reset the per-process session id between tests.
     monkeypatch.chdir(tmp_path)
     sessions._session_id = None
@@ -22,7 +22,7 @@ def test_every_session_is_archived_not_overwritten(tmp_path: Path) -> None:
     proj.mkdir()
     sessions.save_session(proj, ["USER: first q", "ASSISTANT: a1"], session_id="20260101-000001-aaaaaa")
     sessions.save_session(proj, ["USER: second q", "ASSISTANT: a2"], session_id="20260101-000002-bbbbbb")
-    files = list((tmp_path / ".csk" / "sessions").glob("*.json"))
+    files = list((tmp_path / ".ronin" / "sessions").glob("*.json"))
     assert len(files) == 2   # two distinct files — kept, not overwritten
 
 
@@ -52,7 +52,7 @@ def test_continue_writes_back_to_same_file(tmp_path: Path) -> None:
     sessions.save_session(proj, ["USER: q1"], session_id="20260101-000001-aaaaaa")
     sessions.set_current_session("20260101-000001-aaaaaa")   # continue it
     sessions.save_session(proj, ["USER: q1", "ASSISTANT: a1", "USER: q2"])   # no explicit id → uses current
-    files = list((tmp_path / ".csk" / "sessions").glob("*.json"))
+    files = list((tmp_path / ".ronin" / "sessions").glob("*.json"))
     assert len(files) == 1                                   # same file, not a new one
     assert sessions.load_session("20260101-000001-aaaaaa")[-1] == "USER: q2"
 

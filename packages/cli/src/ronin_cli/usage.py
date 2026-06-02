@@ -1,4 +1,4 @@
-"""Token / cost tracking. Records every agent run to ``.csk/usage.jsonl``.
+"""Token / cost tracking. Records every agent run to ``.ronin/usage.jsonl``.
 
 The pricing table covers common Anthropic / OpenAI / Together / Groq / Fireworks
 models in USD per million tokens. Local providers (Ollama, etc.) are free.
@@ -65,7 +65,7 @@ def estimate_cost(
 
 
 def usage_path() -> Path:
-    return Path(".csk") / "usage.jsonl"
+    return Path(".ronin") / "usage.jsonl"
 
 
 def record_usage(

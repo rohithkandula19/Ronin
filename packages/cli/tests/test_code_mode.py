@@ -324,7 +324,7 @@ def test_task_tool_delegates_to_readonly_subagent(tmp_path: Path) -> None:
 
 def test_expand_custom_command(tmp_path: Path) -> None:
     from ronin_cli.code_mode import expand_custom_command
-    cmds = tmp_path / ".csk" / "commands"
+    cmds = tmp_path / ".ronin" / "commands"
     cmds.mkdir(parents=True)
     (cmds / "review.md").write_text("Review $ARGUMENTS for bugs.")
     (cmds / "standup.md").write_text("Summarise today's changes.")

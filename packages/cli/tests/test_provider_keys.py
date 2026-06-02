@@ -55,7 +55,7 @@ def test_provider_keys_round_trip_through_save_load(tmp_path, monkeypatch) -> No
     """Per-provider keys persist to disk and reload — so they survive restarts."""
     import ronin_cli.config as cfgmod
 
-    monkeypatch.setattr(cfgmod, "PROJECT_DIR", tmp_path / ".csk")
+    monkeypatch.setattr(cfgmod, "PROJECT_DIR", tmp_path / ".ronin")
     monkeypatch.setattr(cfgmod, "USER_DIR", tmp_path / "user")
 
     cfg = RoninConfig(provider="cerebras")
