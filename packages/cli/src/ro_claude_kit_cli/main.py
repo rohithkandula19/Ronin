@@ -513,6 +513,8 @@ def kaizen(
         None, "--tests", help="Narrow the fitness gate to a path/expression (faster)."),
     yes: bool = typer.Option(
         False, "--yes", "-y", help="Auto-apply if the fitness gate passes (no prompt)."),
+    duel: Optional[str] = typer.Option(
+        None, "--duel", help="Have a RIVAL provider[:model] red-team the proven diff before you approve it."),
 ) -> None:
     """改善 — ronin sharpens its own blade. Finds a weakness, drafts a fix in an
     isolated git worktree, and PROVES it against the test suite before showing
@@ -525,7 +527,12 @@ def kaizen(
     from .kaizen import run_kaizen
 
     config = load_config()
-    result = run_kaizen(config, Path("."), console, goal=goal, target_tests=tests, auto_apply=yes)
+    duel_spec = None
+    if duel:
+        from .consensus import parse_model_spec
+        duel_spec = parse_model_spec(duel)
+    result = run_kaizen(config, Path("."), console, goal=goal, target_tests=tests,
+                        auto_apply=yes, duel_against=duel_spec)
     style = "green" if result.applied else "yellow"
     console.print(f"[{style}]改 {result.note}[/{style}]")
     if result.fitness is not None and not result.applied and result.diff:

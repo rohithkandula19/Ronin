@@ -8,7 +8,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ro_claude_kit_cli.kaizen import find_targets, parse_pytest
+from rich.console import Console
+
+from ro_claude_kit_cli.config import CSKConfig
+from ro_claude_kit_cli.kaizen import KaizenResult, find_targets, parse_pytest, run_kaizen
 
 
 def test_find_targets_picks_up_markers(tmp_path: Path) -> None:
@@ -77,3 +80,17 @@ def test_parse_pytest_errors_count_as_failed() -> None:
 def test_parse_pytest_no_output() -> None:
     f = parse_pytest("")
     assert not f.passed and f.total == 0
+
+
+def test_kaizen_result_has_verdict_field() -> None:
+    # the Duel-into-Kaizen wiring adds an optional verdict, defaulting to None
+    r = KaizenResult(None, None, "", False, "x")
+    assert r.verdict is None
+
+
+def test_run_kaizen_outside_git_is_clean(tmp_path: Path) -> None:
+    # the no-git early return must still produce a well-formed result (verdict None)
+    res = run_kaizen(CSKConfig(), tmp_path, Console(), goal="anything",
+                     duel_against={"provider": "gemini"})
+    assert not res.applied and res.verdict is None
+    assert "git" in res.note.lower()

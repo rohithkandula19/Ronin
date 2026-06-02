@@ -18,6 +18,7 @@ import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from rich.console import Console
 
@@ -66,6 +67,7 @@ class KaizenResult:
     diff: str
     applied: bool
     note: str
+    verdict: Any = None   # DuelVerdict from a rival reviewer, if --duel was used
 
 
 def find_targets(root: Path | str, *, limit: int = 25) -> list[Target]:
@@ -126,12 +128,17 @@ def run_fitness(root: Path | str, *, target_tests: str | None = None,
 
 def run_kaizen(config: CSKConfig, root: Path | str, console: Console, *,
                goal: str | None = None, target_tests: str | None = None,
-               auto_apply: bool = False) -> KaizenResult:
+               auto_apply: bool = False,
+               duel_against: dict[str, Any] | None = None) -> KaizenResult:
     """One Kaizen cycle: pick a weakness → fix it in an isolated worktree →
-    prove it with the test suite → surface the diff for approval.
+    prove it with the test suite → (optionally) have a RIVAL model review the
+    diff → surface it for approval.
 
-    Returns a ``KaizenResult``. The working tree is only modified if the diff is
-    approved (or ``auto_apply``)."""
+    ``duel_against`` is a provider[:model] spec for a cross-vendor reviewer: the
+    proven diff is red-teamed by a different model before you see it, so a self-
+    improvement clears both an objective gate (tests) and an adversarial one.
+    Returns a ``KaizenResult``. The working tree is only modified if approved
+    (or ``auto_apply`` — but a rival BLOCK forces a confirm even then)."""
     root_path = Path(root).resolve()
     if not is_git_repo(root_path):
         return KaizenResult(None, None, "", False, "not a git repository — Kaizen needs git")
@@ -171,20 +178,33 @@ def run_kaizen(config: CSKConfig, root: Path | str, console: Console, *,
 
     console.print(f"[green]  ✓ fitness passed[/green] [dim]({fitness.summary})[/dim]")
 
-    # 4. surface the proven diff for approval, then apply to the real tree
-    if not auto_apply:
+    # 4. cross-vendor review: a RIVAL model adversarially red-teams the proven
+    # diff before you ever see it. Advisory — but a BLOCK overrides auto-apply.
+    verdict = None
+    if duel_against is not None:
+        from .duel import render_verdict, review_diff
+        console.print("[dim]  ⚔ a rival model is reviewing the change…[/dim]")
+        verdict = review_diff(config, diff, duel_against)
+        render_verdict(console, verdict)
+
+    # 5. surface the proven diff for approval, then apply to the real tree
+    forced_confirm = verdict is not None and not verdict.passed
+    if not auto_apply or forced_confirm:
+        if auto_apply and forced_confirm:
+            console.print("[yellow]  rival flagged blocker(s) — confirming despite --yes[/yellow]")
         console.print("[bold]proposed self-improvement (proven against the suite):[/bold]")
         _print_diff(console, diff)
         console.print("  [yellow]apply to your working tree?[/yellow] [grey50]y / N[/grey50] ", end="")
         try:
             if input().strip().lower() not in ("y", "yes"):
-                return KaizenResult(target, fitness, diff, False, "aborted — tree untouched")
+                return KaizenResult(target, fitness, diff, False, "aborted — tree untouched", verdict)
         except (EOFError, KeyboardInterrupt):
-            return KaizenResult(target, fitness, diff, False, "aborted — tree untouched")
+            return KaizenResult(target, fitness, diff, False, "aborted — tree untouched", verdict)
 
     applied = _apply_diff(root_path, diff)
     return KaizenResult(target, fitness, diff, applied,
-                        "applied ✓" if applied else "could not apply the patch cleanly")
+                        "applied ✓" if applied else "could not apply the patch cleanly",
+                        verdict)
 
 
 def _apply_diff(root: Path, diff: str) -> bool:
