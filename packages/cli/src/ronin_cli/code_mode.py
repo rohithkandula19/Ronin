@@ -23,6 +23,7 @@ from .config import RoninConfig
 from .media import build_image_tool
 from .project_memory import load_project_memory, memory_system_block, write_memory_template
 from .self_command import detect_self_command
+from .sentinel import confidence_badge, is_low
 from .prompt_box import read_prompt
 from .runner import build_provider
 from .streaming import LiveRenderer
@@ -465,6 +466,10 @@ def run_code_agent(
     _bushido = bushido_system_block()
     if _bushido is not None:
         system += _bushido
+    # Sentinel mode: license to abstain + a CONFIDENCE signal on every reply.
+    if getattr(config, "sentinel", False):
+        from .sentinel import SENTINEL_SYSTEM
+        system += SENTINEL_SYSTEM
     mem = memory_system_block(root)
     if mem is not None:
         block, mem_name = mem
@@ -1438,6 +1443,29 @@ def run_code_session(
                              + build_semantic_tools(turn_cfg, root)),
             )
         pending.extend(_iq.drain())
+
+        # Escalation ladder: Sentinel flagged low confidence on a cheap blade →
+        # retry the turn once on the strong blade instead of shipping a guess.
+        if (getattr(config, "sentinel", False) and _routing_on
+                and result.success and is_low(result.output)):
+            from .routing import baseline_for
+            from .runner import config_for_spec
+            _sp, _sm = baseline_for(config)
+            if (_sp, _sm) != (turn_cfg.provider, turn_cfg.resolved_model()):
+                console.print("[#6b7089]▲ low confidence — escalating to the strong "
+                              f"blade ({_sp})…[/#6b7089]")
+                _strong = config_for_spec(config, {"provider": _sp, "model": _sm})
+                _retry = run_code_agent(
+                    _strong, user, root=root, console=console, yolo=_turn_yolo,
+                    max_iterations=max_iterations, undo_stack=undo_stack,
+                    history_prefix=history_prefix, read_only=_read_only,
+                    extra_tools=(build_background_tools(root) + build_checkpoint_tools(root)
+                                 + build_vision_tools(_strong, root)
+                                 + build_semantic_tools(_strong, root)),
+                )
+                if _retry.success:
+                    result, turn_cfg = _retry, _strong
+
         _elapsed = _time.time() - _t0
         if ledger is not None:
             _u = result.usage or {}
@@ -1455,6 +1483,10 @@ def run_code_session(
         else:
             if not result.streamed:
                 console.print(f"\n{result.output}")
+            if getattr(config, "sentinel", False):
+                _badge = confidence_badge(result.output)
+                if _badge:
+                    console.print("  " + _badge)
             console.print(_status_line(turn_cfg, result, _elapsed, ledger=ledger) + "\n")
 
 
@@ -1713,5 +1745,9 @@ def run_unified_session(
         else:
             if not result.streamed:
                 console.print(f"\n{result.output}")
+            if getattr(config, "sentinel", False):
+                _badge = confidence_badge(result.output)
+                if _badge:
+                    console.print("  " + _badge)
             console.print(_status_line(turn_cfg, result, _elapsed, ledger=ledger) + "\n")
         show_artifacts(artifacts)  # display any image/video produced

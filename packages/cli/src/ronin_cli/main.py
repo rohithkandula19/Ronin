@@ -70,6 +70,12 @@ def _root(
              "auto-approve every edit/command (no y/n), longer timeouts. Powerful "
              "and unsandboxed — only in a directory you trust.",
     ),
+    sentinel: bool = typer.Option(
+        False, "--sentinel",
+        help="Abstain over bluff: the agent declares CONFIDENCE: high/medium/low and "
+             "says what it's unsure about. Low confidence on a cheap blade escalates "
+             "to the strong one (with routing).",
+    ),
 ) -> None:
     if ctx.invoked_subcommand is not None:
         return
@@ -113,6 +119,11 @@ def _root(
         console.print("[bold #e0af68]⚠ FULL-ACCESS MODE[/bold #e0af68] [dim]— filesystem-wide, "
                       "auto-approving every edit & command, no sandbox. Use only in a directory "
                       "you trust.[/dim]")
+    if not isinstance(sentinel, bool):
+        sentinel = False
+    if sentinel:
+        config = config.model_copy(update={"sentinel": True})
+        console.print("[#6b7089]🛡 sentinel mode — the agent abstains over bluffing[/#6b7089]")
 
     root = Path(".")
 

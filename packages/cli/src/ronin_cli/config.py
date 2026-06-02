@@ -82,6 +82,9 @@ class RoninConfig(BaseModel):
     # Self-verification: after a turn that made changes, the agent reviews its own
     # work against the request and fixes gaps (Reflexion-style). Opt-in via /verify.
     verify: bool = False
+    # Sentinel mode: the agent declares CONFIDENCE: high|medium|low and abstains
+    # over bluffing. Low confidence on a routed cheap blade triggers escalation.
+    sentinel: bool = False
     # Cross-provider failover: ordered fallbacks tried (after the primary) when a
     # provider rate-limits or errors mid-turn. Each entry is a partial provider
     # spec: {provider, model?, base_url?, api_key?}. Empty → no failover.
