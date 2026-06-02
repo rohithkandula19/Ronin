@@ -400,6 +400,76 @@ def consensus(
 
 
 @app.command()
+def ghost(
+    root: Path = typer.Option(Path("."), "--root", help="Directory to watch."),
+    test: bool = typer.Option(False, "--test", help="Run the test suite after each save and react."),
+    watchful: bool = typer.Option(False, "--watchful", help="On a test failure, ask a model what likely broke."),
+    interval: float = typer.Option(1.5, "--interval", help="Poll interval (seconds)."),
+) -> None:
+    """👻 Ambient pair — the panda watches your saves and reacts. With --test it
+    runs your suite on each save (🐼✨ green / 🐼💥 broken); --watchful has a model
+    guess what broke. Dependency-free; Ctrl+C to dismiss.
+    """
+    from .ghost import run_ghost
+
+    config = load_config()
+    run_ghost(config, root, console, interval=interval, run_tests=test, watchful=watchful)
+
+
+@app.command()
+def dojo(
+    task: str = typer.Argument(..., help="The coding task all the models will fight over."),
+    models: str = typer.Option(
+        ..., "--models", "-m", help="Comma-separated provider[:model] fighters, e.g. 'anthropic,gemini,cerebras'."),
+    judge: Optional[str] = typer.Option(None, "--judge", help="provider[:model] that scores the diffs."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Auto-apply the winning diff."),
+) -> None:
+    """🥋 Rival models each attempt the SAME change in parallel isolated worktrees;
+    a judge crowns the best diff, which you can apply. Claude vs Gemini vs ….
+
+    Needs git (parallel worktree isolation). Only a provider-agnostic agent can
+    pit multiple vendors against each other on the same code.
+    """
+    from .consensus import parse_model_spec
+    from .dojo import run_dojo
+    from .kaizen import _apply_diff, _print_diff
+
+    config = load_config()
+    specs = [parse_model_spec(s) for s in models.split(",") if s.strip()]
+    if len(specs) < 2:
+        console.print("[yellow]the dojo needs at least 2 fighters[/yellow] — e.g. [cyan]-m anthropic,gemini[/cyan]")
+        raise typer.Exit(2)
+    judge_spec = parse_model_spec(judge) if judge else None
+    labels = ", ".join(f"{s['provider']}{':' + s['model'] if s.get('model') else ''}" for s in specs)
+    console.print(f"[dim]🥋 {len(specs)} fighters entering the dojo — {labels}…[/dim]")
+    with console.status("[dim] fighting in parallel worktrees + judging…[/dim]", spinner="dots"):
+        try:
+            result = run_dojo(config, task, specs, judge_spec=judge_spec)
+        except ValueError as e:
+            console.print(f"[yellow]{e}[/yellow]")
+            raise typer.Exit(2)
+
+    for f in result.fighters:
+        if f.changed:
+            mark = "[green]★ winner[/green]" if result.winner is f else "[dim]·[/dim]"
+            console.print(f"{mark} [bold]{f.label}[/bold] [dim]({len(f.diff.splitlines())} diff lines)[/dim]")
+        else:
+            why = f.error or "no changes"
+            console.print(f"[dim]✗ {f.label} — {why[:80]}[/dim]")
+    if result.winner is None:
+        console.print("[yellow]no winning diff[/yellow]")
+        raise typer.Exit(1)
+    console.print(f"\n[bold]winning diff[/bold] [dim]({result.winner.label})[/dim]:")
+    _print_diff(console, result.winner.diff)
+    if not yes:
+        if not Confirm.ask("[bold]apply the winning diff?[/bold]", default=False):
+            console.print("[dim]aborted — your tree is untouched[/dim]")
+            return
+    ok = _apply_diff(Path(".").resolve(), result.winner.diff)
+    console.print("[green]✓ applied[/green]" if ok else "[red]could not apply cleanly[/red]")
+
+
+@app.command()
 def duel(
     against: str = typer.Option(
         ..., "--against", "-a",

@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.55.0] — 2026-06-02
+
+ronin's signature pass — six provider-agnostic things a single-vendor agent
+**structurally can't do**, each shipped with its pure core unit-tested. **741 → 787 tests.**
+
+### Added — "only ronin can do this"
+- **Kaizen** (`ronin kaizen [goal]`) — the self-forging agent. Finds a weakness in ronin's own source (FIXME/BUG/XXX/TODO markers, strongest first), drafts a fix in an **isolated git worktree**, and runs the project's **own test suite as an objective fitness gate** — the diff only reaches your tree if the tests pass there. Point it at a free provider and it improves code for $0.
+- **The Dojo** (`ronin dojo "<task>" -m anthropic,gemini,cerebras`) — rival models each attempt the **same** change in **parallel isolated worktrees**; a judge scores the diffs and crowns a winner you can apply. Claude vs Gemini vs DeepSeek, swinging at one problem.
+- **Ronin Duel** (`ronin duel --against gemini`) — a **different** provider adversarially red-teams your git diff and returns structured blockers. The author model is a poor judge of its own code; a rival vendor isn't. Exits non-zero on BLOCK (CI-friendly).
+- **Scout → Strike** (`ronin code --scout "<task>"`) — read-only recon runs on a free/cheap blade (`route_fast`), then a strong blade (`route_strong`) executes only the edits. Frontier quality where it matters, free everywhere else.
+- **Bushido** — a global `~/.ronin/bushido.md` code of honor the agent carries into **every** repo (folded in before project memory; the repo always wins). `remember_preference` tool persists a standing cross-project convention.
+- **Muscle Memory** — the agent crystallizes a solved workflow into a reusable repo-local `/skill` (`.csk/commands/*.md`) via `crystallize_skill` — immediately re-runnable, committed with the code, compounding over time.
+- **Cost Router core** — pricing table ($/Mtok, free providers = $0) + a `CostLedger` that tracks spend and "saved vs all-anthropic"; routing now resolves cross-provider targets so a simple turn can run on a **free** provider, not just a cheaper model.
+
 ## [0.54.0] — 2026-06-02
 
 Closing the gap between what the README promises and what `ronin code` ships, plus VCS awareness and an opt-in unsandboxed mode. **730 → 741 tests.**

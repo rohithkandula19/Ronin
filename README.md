@@ -3,9 +3,9 @@
 > **A masterless, terminal-native Claude agent.** ronin is a **Claude-Code-style AI coding agent** — it reads, edits, and runs your code from the terminal — built on a **provider-agnostic agent framework** with first-class evals, memory, security hardening, and MCP tool integrations. Plug in Claude for top quality, or run it **free** on Gemini / Cerebras / Groq / Ollama.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-v0.54.0-blue)](CHANGELOG.md)
+[![Status](https://img.shields.io/badge/status-v0.55.0-blue)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-741%20passing-brightgreen.svg)](#-whats-under-the-hood)
+[![Tests](https://img.shields.io/badge/tests-787%20passing-brightgreen.svg)](#-whats-under-the-hood)
 [![Providers](https://img.shields.io/badge/providers-Claude%20·%20Gemini%20·%20Cerebras%20·%20Groq%20·%20OpenRouter%20·%20Ollama%20·%20OpenAI-d4a373)](#-supported-providers)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
@@ -36,7 +36,7 @@ Regenerate the walkthrough anytime with [`vhs`](https://github.com/charmbracelet
 
 **One front door:** type **`ronin`** and you get a single agent that reads, writes, and runs code (every edit and shell command gated behind a diff preview and your approval — reads run freely), generates images/video/speech, and queries your connected data — all in one conversation, in plain language. It's **provider-agnostic**: the same agent runs on Claude or on free open models.
 
-It's also a **reference implementation for building agents the right way**. The CLI is a thin wrapper over seven independently-usable packages — agent patterns, evals, memory, hardening, and MCP integrations — backed by **741 tests** that run offline in CI. (`ronin code` is the focused coding agent; `ronin chat` is the talk/media surface — both available when you want a single-purpose mode.)
+It's also a **reference implementation for building agents the right way**. The CLI is a thin wrapper over seven independently-usable packages — agent patterns, evals, memory, hardening, and MCP integrations — backed by **787 tests** that run offline in CI. (`ronin code` is the focused coding agent; `ronin chat` is the talk/media surface — both available when you want a single-purpose mode.)
 
 ## 🛠 `ronin code` — the coding agent (Claude-Code shaped)
 
@@ -91,6 +91,12 @@ Because ronin is **provider-agnostic**, it can do things a single-vendor agent s
 - **🔁 Cross-provider failover** — set `failover` in config and a turn that hits a rate-limit or outage on the primary **transparently continues on the next provider** instead of dying. (Tokens already streamed aren't silently re-answered.)
 - **🔒 Fully offline mode** — `ronin --offline` forces a **local brain** (Ollama / any localhost model) and **strips every network tool**, so ronin codes on a plane or in an air-gapped box with **zero egress** — nothing leaves the machine.
 - **📊 Eval-driven model bake-off** — `ronin bench -m anthropic,gemini,ollama:llama3.1` runs the **objective** eval battery (no LLM judge) across models and tells you the **cheapest model that clears your quality bar**. Pick a model with data, not vibes.
+- **🥷 Kaizen — the self-forging agent** — `ronin kaizen` finds a weakness in ronin's *own* source, drafts a fix in an **isolated git worktree**, and runs the **test suite as an objective fitness gate** — the diff only reaches your tree if the tests pass there. An agent that improves its own code, with eval-proof it worked, on a free model for $0.
+- **🥋 The Dojo — rival models fight over your code** — `ronin dojo "<task>" -m anthropic,gemini,cerebras` has each model attempt the *same* change in **parallel isolated worktrees**; a judge crowns the best diff. Claude vs Gemini vs DeepSeek, then you apply the winner.
+- **⚔️ Ronin Duel — cross-vendor review** — `ronin duel --against gemini` hands your diff to a **different** provider that adversarially hunts for what's wrong. The author model can't see its own blind spots; a rival vendor can. Advisory, CI-friendly.
+- **🔭 Scout → Strike — explore cheap, edit strong** — `ronin code --scout "<task>"` runs read-only recon on a free blade, then a strong blade executes only the edits. Frontier quality where it counts, $0 everywhere else.
+- **🗡 Bushido — your code of honor, everywhere** — a global `~/.ronin/bushido.md` of standing personal conventions the agent carries into **every** repo (a repo's own notes always override it).
+- **💪 Muscle Memory — gets better at *your* repo** — the agent crystallizes a solved workflow into a reusable `/skill` saved in your repo. Use it for a week and ronin has a custom playbook that compounds.
 
 Plus, on the coding agent itself:
 
@@ -221,7 +227,7 @@ ronin is MIT-licensed and meant to be picked up by other people. A few notes if 
 | `cli` | The `ronin` binary — agent loop, MCP client, web tools, subagents, eval, media | 382 |
 | `deployment-templates` | Docker Compose, Modal, Vercel, Railway | — |
 
-**741 tests** across all packages, green on every push (see CI). A `FakeProvider` makes them deterministic, offline, and free — no API calls in CI.
+**787 tests** across all packages, green on every push (see CI). A `FakeProvider` makes them deterministic, offline, and free — no API calls in CI.
 
 ## Use the modules without the CLI
 
