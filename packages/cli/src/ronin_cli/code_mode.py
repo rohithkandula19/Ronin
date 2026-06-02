@@ -268,8 +268,10 @@ def _fmt_tokens(n: int) -> str:
     return f"{n / 1000:.1f}k" if n >= 1000 else str(n)
 
 
-def _status_line(config: RoninConfig, result: "CodeRunResult", elapsed: float) -> str:
-    """A subtle per-turn footer: provider · model · ↑in ↓out · time."""
+def _status_line(config: RoninConfig, result: "CodeRunResult", elapsed: float,
+                 ledger: "object | None" = None) -> str:
+    """A subtle per-turn footer: provider · model · ↑in ↓out · time, plus a
+    Cost-Router savings line when routing is active."""
     u = result.usage or {}
     inp, out = u.get("input_tokens", 0), u.get("output_tokens", 0)
     cached = u.get("cache_read_input_tokens", 0)
@@ -280,7 +282,10 @@ def _status_line(config: RoninConfig, result: "CodeRunResult", elapsed: float) -
             tok += f" ⚡{_fmt_tokens(cached)} cached"
         bits.append(tok)
     bits.append(f"{elapsed:.1f}s")
-    return "  [#6b7089]" + "  ·  ".join(bits) + "[/#6b7089]"
+    line = "  [#6b7089]" + "  ·  ".join(bits) + "[/#6b7089]"
+    if ledger is not None and getattr(ledger, "turns", 0) > 0:
+        line += f"\n  [#6b7089]💰 {ledger.summary()}[/#6b7089]"
+    return line
 
 
 def _render_diff(console: Console, diff: str) -> None:
@@ -1297,6 +1302,17 @@ def run_code_session(
              title=f"ronin code{resumed}",
              hint="your request · @path to reference files · /help · /undo · /quit")
 
+    # Cost Router: when route_fast/route_strong are set, each turn runs on the
+    # routed (possibly free) provider and we tally what that saved vs the strong
+    # model. Off → ledger stays None and nothing changes.
+    _routing_on = bool(config.route_fast and config.route_strong)
+    ledger = None
+    if _routing_on:
+        from .cost import CostLedger
+        from .routing import baseline_for
+        _bp, _bm = baseline_for(config)
+        ledger = CostLedger(baseline_provider=_bp, baseline_model=_bm)
+
     pending: list[str] = []  # messages typed while the agent was working
     while True:
         if pending:
@@ -1398,18 +1414,27 @@ def run_code_session(
         from .embeddings import build_semantic_tools
         from .input_queue import InputQueue
         from .vision_tools import build_vision_tools
+        # Cost Router: route this turn to the fast/free or strong blade.
+        turn_cfg = config
+        if _routing_on:
+            from .routing import route_turn_config
+            turn_cfg, _decision = route_turn_config(config, user)
         _iq = InputQueue(console)
         with _iq:
             result = run_code_agent(
-                config, user, root=root, console=console, yolo=_turn_yolo,
+                turn_cfg, user, root=root, console=console, yolo=_turn_yolo,
                 max_iterations=max_iterations, undo_stack=undo_stack,
                 history_prefix=history_prefix, read_only=_read_only,
                 extra_tools=(build_background_tools(root) + build_checkpoint_tools(root)
-                             + build_vision_tools(config, root)
-                             + build_semantic_tools(config, root)),
+                             + build_vision_tools(turn_cfg, root)
+                             + build_semantic_tools(turn_cfg, root)),
             )
         pending.extend(_iq.drain())
         _elapsed = _time.time() - _t0
+        if ledger is not None:
+            _u = result.usage or {}
+            ledger.record(turn_cfg.provider, turn_cfg.resolved_model(),
+                          _u.get("input_tokens", 0), _u.get("output_tokens", 0))
         transcript.append(f"USER: {user}")
         transcript.append(f"ASSISTANT: {result.output}")
         save_session(root, transcript)  # persist so `ronin code --continue` can resume
@@ -1418,7 +1443,7 @@ def run_code_session(
         else:
             if not result.streamed:
                 console.print(f"\n{result.output}")
-            console.print(_status_line(config, result, _elapsed) + "\n")
+            console.print(_status_line(turn_cfg, result, _elapsed, ledger=ledger) + "\n")
 
 
 UNIFIED_SYSTEM = """You are ronin — one capable assistant living in the user's terminal.
@@ -1507,6 +1532,15 @@ def run_unified_session(
              title=f"ronin — one assistant for everything{resumed}",
              hint="talk · code · make images/video/voice · query data · @path · /help · /quit")
 
+    # Cost Router: tally routed-turn savings vs the strong model (when routing on).
+    _routing_on = bool(config.route_fast and config.route_strong)
+    ledger = None
+    if _routing_on:
+        from .cost import CostLedger
+        from .routing import baseline_for
+        _bp, _bm = baseline_for(config)
+        ledger = CostLedger(baseline_provider=_bp, baseline_model=_bm)
+
     pending: list[str] = []  # messages typed while the agent was working
     while True:
         if pending:
@@ -1594,10 +1628,10 @@ def run_unified_session(
         if transcript:
             history_prefix = "Conversation so far:\n" + "\n".join(transcript[-6:])
 
-        # smart routing: cheap model for simple turns, strong for complex ones
-        from .routing import pick_model
-        _chosen = pick_model(config, user)
-        turn_cfg = config.model_copy(update={"model": _chosen}) if _chosen else config
+        # Cost Router: route this turn to the fast/free or strong blade (may be
+        # a different *provider*, not just a different model on the same one).
+        from .routing import route_turn_config
+        turn_cfg, _decision = route_turn_config(config, user)
 
         # Shift+Tab edit mode: plan → read-only, auto-accept → yolo, normal → default
         from .prompt_box import current_mode
@@ -1639,6 +1673,10 @@ def run_unified_session(
             if _vres.success and _vres.output:
                 result.output = f"{result.output}\n\n[verified] {_vres.output}"
 
+        if ledger is not None:
+            _u = result.usage or {}
+            ledger.record(turn_cfg.provider, turn_cfg.resolved_model(),
+                          _u.get("input_tokens", 0), _u.get("output_tokens", 0))
         transcript.append(f"USER: {user}")
         transcript.append(f"ASSISTANT: {result.output}")
         save_session(root, transcript)
@@ -1652,5 +1690,5 @@ def run_unified_session(
         else:
             if not result.streamed:
                 console.print(f"\n{result.output}")
-            console.print(_status_line(turn_cfg, result, _elapsed) + "\n")
+            console.print(_status_line(turn_cfg, result, _elapsed, ledger=ledger) + "\n")
         show_artifacts(artifacts)  # display any image/video produced

@@ -73,3 +73,23 @@ def route_decision(config: RoninConfig, message: str) -> RouteDecision | None:
     provider, model = _parse_target(target, config.provider)
     return RouteDecision(tier=tier, provider=provider, model=model,
                          free=is_free(provider, model))
+
+
+def route_turn_config(config: RoninConfig, message: str) -> tuple[RoninConfig, RouteDecision | None]:
+    """Resolve the actual config a turn should run on (possibly a *different*
+    provider), plus the decision. Returns ``(config, None)`` when routing is off
+    so the caller stays on the default provider unchanged."""
+    decision = route_decision(config, message)
+    if decision is None:
+        return config, None
+    from .runner import config_for_spec
+    turn_cfg = config_for_spec(config, {"provider": decision.provider, "model": decision.model})
+    return turn_cfg, decision
+
+
+def baseline_for(config: RoninConfig) -> tuple[str, str | None]:
+    """The (provider, model) the Cost Router measures savings against — the
+    strong route target if set, else the current provider/model."""
+    if config.route_strong:
+        return _parse_target(config.route_strong, config.provider)
+    return config.provider, config.resolved_model()

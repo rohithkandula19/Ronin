@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from ronin_cli.config import RoninConfig
 from ronin_cli.cost import CostLedger, estimate_cost, is_free, price_for
-from ronin_cli.routing import route_decision
+from ronin_cli.routing import baseline_for, route_decision, route_turn_config
 
 
 def test_free_providers_cost_nothing() -> None:
@@ -57,3 +57,41 @@ def test_route_decision_bare_model_keeps_provider() -> None:
                     route_strong="llama-3.3-70b-versatile")
     d = route_decision(cfg, "hello")
     assert d.provider == "groq" and d.model == "llama-3.1-8b-instant"
+
+
+def test_route_turn_config_off_returns_same_config() -> None:
+    cfg = RoninConfig(provider="anthropic")
+    turn_cfg, decision = route_turn_config(cfg, "fix the bug")
+    assert turn_cfg is cfg and decision is None
+
+
+def test_route_turn_config_switches_provider() -> None:
+    cfg = RoninConfig(provider="anthropic",
+                      route_fast="cerebras:gpt-oss-120b",
+                      route_strong="anthropic:claude-sonnet-4-6")
+    turn_cfg, decision = route_turn_config(cfg, "hey")   # simple → free blade
+    assert decision.tier == "simple"
+    assert turn_cfg.provider == "cerebras"
+    assert turn_cfg.resolved_model() == "gpt-oss-120b"
+    # a complex turn lands on the strong blade
+    turn_cfg2, decision2 = route_turn_config(cfg, "refactor the auth module and add tests")
+    assert turn_cfg2.provider == "anthropic" and decision2.tier == "complex"
+
+
+def test_baseline_for() -> None:
+    # routing on → baseline is the strong target
+    cfg = RoninConfig(provider="cerebras", route_fast="cerebras:gpt-oss-120b",
+                      route_strong="anthropic:claude-sonnet-4-6")
+    assert baseline_for(cfg) == ("anthropic", "claude-sonnet-4-6")
+    # routing off → baseline is the current provider/model
+    plain = RoninConfig(provider="anthropic")
+    assert baseline_for(plain) == ("anthropic", "claude-sonnet-4-6")
+
+
+def test_ledger_status_line_shows_savings() -> None:
+    # end-to-end: route a free turn + a strong turn, ledger reports savings
+    led = CostLedger(baseline_provider="anthropic", baseline_model="claude-sonnet-4-6")
+    led.record("cerebras", "gpt-oss-120b", 20_000, 4_000)   # free turn
+    led.record("anthropic", "claude-sonnet-4-6", 20_000, 4_000)
+    summary = led.summary()
+    assert "saved $" in summary and "1/2 turns free" in summary

@@ -14,7 +14,7 @@ ronin's signature pass — six provider-agnostic things a single-vendor agent
 - **Scout → Strike** (`ronin code --scout "<task>"`) — read-only recon runs on a free/cheap blade (`route_fast`), then a strong blade (`route_strong`) executes only the edits. Frontier quality where it matters, free everywhere else.
 - **Bushido** — a global `~/.ronin/bushido.md` code of honor the agent carries into **every** repo (folded in before project memory; the repo always wins). `remember_preference` tool persists a standing cross-project convention.
 - **Muscle Memory** — the agent crystallizes a solved workflow into a reusable repo-local `/skill` (`.ronin/commands/*.md`) via `crystallize_skill` — immediately re-runnable, committed with the code, compounding over time.
-- **Cost Router core** — pricing table ($/Mtok, free providers = $0) + a `CostLedger` that tracks spend and "saved vs all-anthropic"; routing now resolves cross-provider targets so a simple turn can run on a **free** provider, not just a cheaper model.
+- **Cost Router** — pricing table ($/Mtok, free providers = $0) + a `CostLedger` that tracks spend and "saved vs all-anthropic"; routing resolves cross-provider targets so a simple turn can run on a **free** provider, not just a cheaper model. **Wired live into both session loops**: with `route_fast`/`route_strong` set, each turn runs on the routed (possibly free) provider and the footer shows `💰 cost: $X · saved $Y vs all-<provider> · N/M turns free`.
 
 ## [0.54.0] — 2026-06-02
 
