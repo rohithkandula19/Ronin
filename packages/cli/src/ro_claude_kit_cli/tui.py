@@ -119,6 +119,9 @@ class RoninApp(App):
         self.queue: list[str] = []
         self._live = ""              # in-progress streamed assistant text
         self._trace_lines: list[str] = []
+        from .panda_art import PANDA_ACTIVITIES, normalize_frames
+        self._panda_frames = normalize_frames(PANDA_ACTIVITIES["dancing"])
+        self._panda_i = 0
         self.chat_md = self._initial_chat()
 
     def compose(self) -> ComposeResult:
@@ -134,10 +137,15 @@ class RoninApp(App):
             yield Input(placeholder="describe a change — I'll read, edit & run code…", id="prompt")
         yield Footer()
 
+    def _panda_block(self) -> str:
+        frame = self._panda_frames[self._panda_i % len(self._panda_frames)]
+        return "```\n" + "\n".join(frame) + "\n```"
+
     def _initial_chat(self) -> str:
         from . import __version__
         services = ", ".join(self.config.configured_services()) or "_(none)_"
         return (
+            f"{self._panda_block()}\n\n"
             f"**ronin** v{__version__} · coding agent in `{self.root}`\n\n"
             f"**provider:** `{self.config.provider}` · **model:** `{self.config.resolved_model()}`"
             f" · **services:** {services}\n\n"
@@ -146,6 +154,18 @@ class RoninApp(App):
 
     def on_mount(self) -> None:
         self.query_one("#prompt", Input).focus()
+        # the panda dances on the welcome screen until your first message
+        self.set_interval(0.45, self._dance)
+
+    def _dance(self) -> None:
+        if self.history or self.busy:
+            return  # conversation started → let the panda rest in the scrollback
+        self._panda_i += 1
+        self.chat_md = self._initial_chat()
+        try:
+            self.query_one("#chat-scroll", VerticalScroll).query_one(Markdown).update(self.chat_md)
+        except Exception:  # noqa: BLE001 — widget may not be mounted yet
+            pass
 
     # ---- input ----
     @on(Input.Submitted, "#prompt")
