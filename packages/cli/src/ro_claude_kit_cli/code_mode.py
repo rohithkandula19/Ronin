@@ -426,6 +426,9 @@ def run_code_agent(
     # (console set). Sub-agents and evals pass console=None and never block.
     if console is not None:
         tools = tools + [build_ask_user_tool(console)]
+        # Bushido: let the agent persist a standing, cross-repo preference.
+        from .bushido import build_bushido_tool
+        tools = tools + build_bushido_tool()
 
     # Offline mode: strip every network-touching tool so nothing can leave the
     # machine (the brain is already forced local in build_provider).
@@ -445,6 +448,12 @@ def run_code_agent(
     system = base_system or CODE_SYSTEM
     if extra_system:
         system += "\n\n" + extra_system
+    # Bushido: the user's global code of honor, carried across every repo. Folded
+    # in BEFORE project memory so a repo's own notes always override it.
+    from .bushido import bushido_system_block
+    _bushido = bushido_system_block()
+    if _bushido is not None:
+        system += _bushido
     mem = memory_system_block(root)
     if mem is not None:
         block, mem_name = mem
