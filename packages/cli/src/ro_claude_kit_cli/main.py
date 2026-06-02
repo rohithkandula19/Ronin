@@ -399,6 +399,33 @@ def consensus(
     render_consensus(console, result)
 
 
+@app.command()
+def kaizen(
+    goal: Optional[str] = typer.Argument(
+        None, help="What to improve. Omit to auto-pick the top FIXME/TODO in ronin's own source."),
+    tests: Optional[str] = typer.Option(
+        None, "--tests", help="Narrow the fitness gate to a path/expression (faster)."),
+    yes: bool = typer.Option(
+        False, "--yes", "-y", help="Auto-apply if the fitness gate passes (no prompt)."),
+) -> None:
+    """改善 — ronin sharpens its own blade. Finds a weakness, drafts a fix in an
+    isolated git worktree, and PROVES it against the test suite before showing
+    you anything. The diff only reaches your working tree if the tests pass.
+
+    Point it at a free provider (`/login cerebras`) and it improves code for $0.
+    Something a single-vendor agent structurally won't let you do: an agent that
+    edits its own source, with objective eval-proof it worked.
+    """
+    from .kaizen import run_kaizen
+
+    config = load_config()
+    result = run_kaizen(config, Path("."), console, goal=goal, target_tests=tests, auto_apply=yes)
+    style = "green" if result.applied else "yellow"
+    console.print(f"[{style}]改 {result.note}[/{style}]")
+    if result.fitness is not None and not result.applied and result.diff:
+        console.print(f"[dim]  fitness: {result.fitness.summary}[/dim]")
+
+
 # ---------- bench (model bake-off) ----------
 
 @app.command()
