@@ -1630,6 +1630,44 @@ def setup() -> None:
                   "[dim]every session now shows 💰 cost · saved $… and self-tunes over time.[/dim]")
 
 
+# ---------- diagram (architecture map) ----------
+
+@app.command()
+def diagram(
+    pkg: str = typer.Option(None, "--pkg", help="Package directory (default: auto-detect the biggest)."),
+    out: str = typer.Option(None, "--out", help="Write the Mermaid diagram to this file."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """🗺  Architecture map — extract the real import graph between your modules and
+    render it as Mermaid (paste into Markdown/GitHub). Deterministic; no model needed.
+    """
+    from .diagram import detect_package, import_graph, stats, to_mermaid
+
+    pkg_dir = Path(pkg) if pkg else detect_package(root)
+    if not pkg_dir or not pkg_dir.is_dir():
+        console.print("[yellow]couldn't find a Python package — pass --pkg <dir>.[/yellow]")
+        raise typer.Exit(1)
+    graph = import_graph(pkg_dir)
+    if not graph:
+        console.print(f"[dim]no modules in {pkg_dir}.[/dim]")
+        return
+    s = stats(graph)
+    mer = to_mermaid(graph, title=str(pkg_dir.name))
+    console.print(f"[#7aa2f7]🗺 {s['modules']} modules · {s['edges']} import edges[/#7aa2f7] "
+                  f"[dim]({pkg_dir})[/dim]")
+    if s["most_depended"]:
+        console.print(f"  [dim]most depended-on:[/dim] [bold]{', '.join(s['most_depended'])}[/bold]")
+    if out:
+        try:
+            Path(out).write_text(mer + "\n", encoding="utf-8")
+            console.print(f"[green]✓ wrote diagram →[/green] [cyan]{out}[/cyan]")
+        except OSError as e:
+            console.print(f"[red]couldn't write {out}: {e}[/red]")
+    else:
+        import sys
+        sys.stdout.write(mer + "\n")
+
+
 # ---------- coverage (find + fill test gaps) ----------
 
 @app.command()
