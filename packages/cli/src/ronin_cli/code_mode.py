@@ -169,6 +169,12 @@ _READONLY_CODE_TOOLS = {"read_file", "list_files", "search_files", "glob"}
 # tool payload (and thus latency + token cost) is a fraction of the full set.
 _FAST_TOOLS = {"read_file", "list_files", "search_files", "glob", "write_file",
                "edit_file", "multi_edit", "run_command", "update_todos"}
+# Tools that are read-only / idempotent and thread-safe → a batch of them can run
+# CONCURRENTLY (Claude-Code-style parallel tool use). Never includes writes,
+# commands, or anything with side effects.
+_PARALLEL_TOOLS = {"read_file", "list_files", "search_files", "glob",
+                   "git_status", "git_diff", "git_log", "web_search", "fetch_url",
+                   "semantic_search", "definition", "references", "diagnostics"}
 
 
 def _session_path(root: Path | str) -> _Path:
@@ -648,7 +654,8 @@ def run_code_agent(
         renderer.start()  # soft "thinking…" spinner until the first token
     try:
         result = agent.run(prompt, on_step=on_step, before_tool=before_tool,
-                           on_text=on_text, after_tool=after_tool)
+                           on_text=on_text, after_tool=after_tool,
+                           parallel_safe=lambda n: n in _PARALLEL_TOOLS)
     except KeyboardInterrupt:
         # Ctrl-C during a turn → stop THIS turn, keep the session alive.
         if renderer is not None:

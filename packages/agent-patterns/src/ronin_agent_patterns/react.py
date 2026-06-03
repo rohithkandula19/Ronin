@@ -68,6 +68,7 @@ class ReActAgent(BaseModel):
         before_tool: BeforeTool | None = None,
         on_text: OnText | None = None,
         after_tool: "AfterTool | None" = None,
+        parallel_safe: "Callable[[str], bool] | None" = None,
     ) -> AgentResult:
         """Run the agent.
 
@@ -145,52 +146,16 @@ class ReActAgent(BaseModel):
                 tool_calls=response.tool_calls,
             ))
 
-            for tc in response.tool_calls:
-                emit(Step(kind="tool_call", content={"name": tc.name, "input": tc.arguments}))
-                tool = tools_by_name.get(tc.name)
-                if tool is None:
-                    err = f"tool '{tc.name}' is not registered"
-                    emit(Step(kind="error", content=err))
-                    messages.append(Message(
-                        role="tool",
-                        tool_call_id=tc.id,
-                        name=tc.name,
-                        content=f"ERROR: {err}",
-                        is_error=True,
-                    ))
-                    continue
-
-                # Human-in-the-loop gate. If denied, the model sees a denial
-                # result and reasons around it (e.g. picks a different tool).
-                if before_tool is not None and not before_tool(tc.name, tc.arguments or {}):
-                    emit(Step(kind="error", content=f"tool '{tc.name}' denied by user"))
-                    messages.append(Message(
-                        role="tool",
-                        tool_call_id=tc.id,
-                        name=tc.name,
-                        content="DENIED: the user declined this action. Do not retry it; find another way or stop.",
-                        is_error=True,
-                    ))
-                    continue
-
-                result, is_err = execute_tool_call(tool, tc.arguments)
-                result = self._cap_result(result)
-                if after_tool is not None:
-                    try:
-                        after_tool(tc.name, tc.arguments or {}, result, is_err)
-                    except Exception:  # noqa: BLE001 - a hook must never break the run
-                        pass
-                emit(Step(
-                    kind="tool_result",
-                    content={"name": tc.name, "result": result, "is_error": is_err},
-                ))
-                messages.append(Message(
-                    role="tool",
-                    tool_call_id=tc.id,
-                    name=tc.name,
-                    content=result,
-                    is_error=is_err,
-                ))
+            calls = list(response.tool_calls)
+            # Parallelise a batch only when EVERY call is declared safe (read-only
+            # / idempotent) by the caller — never writes, commands, or anything
+            # gated. Order of results is preserved to match the tool_call ids.
+            if (len(calls) > 1 and parallel_safe is not None
+                    and all(parallel_safe(tc.name) for tc in calls)):
+                self._run_parallel(calls, tools_by_name, before_tool, after_tool, emit, messages)
+            else:
+                for tc in calls:
+                    self._run_one(tc, tools_by_name, before_tool, after_tool, emit, messages)
 
         return AgentResult(
             success=False,
@@ -200,6 +165,71 @@ class ReActAgent(BaseModel):
             error=f"hit max_iterations={self.max_iterations}",
             usage=usage,
         )
+
+    def _resolve_and_gate(self, tc, tools_by_name, before_tool, emit):
+        """Announce the call, resolve the tool, run the gate. Returns
+        (tool, denied_or_missing_message|None). A non-None message means don't
+        execute — append it as the tool result."""
+        emit(Step(kind="tool_call", content={"name": tc.name, "input": tc.arguments}))
+        tool = tools_by_name.get(tc.name)
+        if tool is None:
+            err = f"tool '{tc.name}' is not registered"
+            emit(Step(kind="error", content=err))
+            return None, f"ERROR: {err}"
+        if before_tool is not None and not before_tool(tc.name, tc.arguments or {}):
+            emit(Step(kind="error", content=f"tool '{tc.name}' denied by user"))
+            return None, ("DENIED: the user declined this action. Do not retry it; "
+                          "find another way or stop.")
+        return tool, None
+
+    def _record(self, tc, result, is_err, after_tool, emit, messages):
+        result = self._cap_result(result)
+        if after_tool is not None:
+            try:
+                after_tool(tc.name, tc.arguments or {}, result, is_err)
+            except Exception:  # noqa: BLE001 — a hook must never break the run
+                pass
+        emit(Step(kind="tool_result", content={"name": tc.name, "result": result, "is_error": is_err}))
+        messages.append(Message(role="tool", tool_call_id=tc.id, name=tc.name,
+                                content=result, is_error=is_err))
+
+    def _run_one(self, tc, tools_by_name, before_tool, after_tool, emit, messages):
+        """Execute a single tool call (announce → gate → run → record)."""
+        tool, blocked = self._resolve_and_gate(tc, tools_by_name, before_tool, emit)
+        if blocked is not None:
+            messages.append(Message(role="tool", tool_call_id=tc.id, name=tc.name,
+                                    content=blocked, is_error=True))
+            return
+        result, is_err = execute_tool_call(tool, tc.arguments)
+        self._record(tc, result, is_err, after_tool, emit, messages)
+
+    def _run_parallel(self, calls, tools_by_name, before_tool, after_tool, emit, messages):
+        """Run a batch of read-only/idempotent tool calls concurrently. Tool calls
+        are announced and gated up front (gates are non-blocking for these), the
+        handlers run on a thread pool, and results are appended in original order
+        so the assistant↔tool_call_id pairing the API needs is preserved."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        plan = [(tc, *self._resolve_and_gate(tc, tools_by_name, before_tool, emit)) for tc in calls]
+        runnable = [(i, tc, tool) for i, (tc, tool, blocked) in enumerate(plan) if blocked is None]
+        outcomes: dict[int, tuple] = {}
+        if runnable:
+            with ThreadPoolExecutor(max_workers=min(8, len(runnable))) as ex:
+                fut_to_i = {ex.submit(execute_tool_call, tool, tc.arguments): i
+                            for i, tc, tool in runnable}
+                for fut in fut_to_i:
+                    i = fut_to_i[fut]
+                    try:
+                        outcomes[i] = fut.result()
+                    except Exception as e:  # noqa: BLE001
+                        outcomes[i] = (f"ERROR: {e}", True)
+        for i, (tc, tool, blocked) in enumerate(plan):
+            if blocked is not None:
+                messages.append(Message(role="tool", tool_call_id=tc.id, name=tc.name,
+                                        content=blocked, is_error=True))
+            else:
+                result, is_err = outcomes[i]
+                self._record(tc, result, is_err, after_tool, emit, messages)
 
     def _cap_result(self, result: str) -> str:
         """Truncate a single tool result that's too large to enter context whole.
