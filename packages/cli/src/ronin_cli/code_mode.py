@@ -957,13 +957,14 @@ SLASH_COMMANDS: dict[str, str] = {
     "doctor": "health check: provider auth, model, services",
     "config": "show the active config (provider, model, paths)",
     "cost": "show lifetime Cost-Router spend + savings",
+    "router": "show routing + what the self-tuning router has learned",
     "quit": "exit the session",
 }
 
 
 # /help, grouped into sections for a calm, scannable layout.
 _HELP_GROUPS: list[tuple[str, list[str]]] = [
-    ("🧠  provider & model", ["login", "model", "models", "route", "cost"]),
+    ("🧠  provider & model", ["login", "model", "models", "route", "router", "cost"]),
     ("✏️  editing & git", ["undo", "diff", "commit", "pr"]),
     ("📁  context & memory", ["memory", "init", "context", "compact", "resume", "clear"]),
     ("🔧  tools & agents", ["tools", "mcp", "agents", "verify", "voice"]),
@@ -1013,6 +1014,14 @@ _TOOL_GROUPS: list[tuple[str, list[str]]] = [
     ("🧠  code intelligence", ["definition", "references", "diagnostics"]),
     ("📋  plan", ["update_todos"]),
 ]
+
+
+def render_bar(used: int, total: int, width: int = 26) -> str:
+    """A ▓░ fullness bar with a colour that warms as it fills. Pure (rich markup)."""
+    frac = 0.0 if total <= 0 else max(0.0, min(1.0, used / total))
+    fill = round(frac * width)
+    colour = "#9ece6a" if frac < 0.6 else "#e0af68" if frac < 0.85 else "#f7768e"
+    return f"[{colour}]{'▓' * fill}[/{colour}][#3b4261]{'░' * (width - fill)}[/#3b4261]"
 
 
 def _render_tools(console: "Console", root) -> None:
@@ -1468,14 +1477,33 @@ def handle_slash_command(
         convo = "\n".join(transcript)
         turns = sum(1 for e in transcript if e.startswith("USER: "))
         toks = _estimate_tokens(convo)
-        console.print(
-            f"[bold]context[/bold]  [dim]·[/dim]  {turns} turns  [dim]·[/dim]  "
-            f"{len(transcript)} entries  [dim]·[/dim]  ~{toks} tokens  [dim]·[/dim]  "
-            f"~{len(convo)} chars",
-            highlight=False,
-        )
-        console.print("[dim]shrink it with [bold]/compact[/bold] · wipe it with [bold]/clear[/bold][/dim]",
-                      highlight=False)
+        window = 120_000 if config.provider == "anthropic" else 28_000
+        pct = min(100, round(toks / window * 100)) if window else 0
+        console.print("[bold]context[/bold]")
+        console.print(f"  {render_bar(toks, window)} [dim]~{toks:,} / {window:,} tokens "
+                      f"({pct}%)[/dim]", highlight=False)
+        console.print(f"  [#6b7089]{turns} turns · {len(transcript)} entries · "
+                      f"~{len(convo):,} chars[/#6b7089]", highlight=False)
+        console.print("  [dim]shrink with [bold]/compact[/bold] · wipe with [bold]/clear[/bold][/dim]")
+        return "handled"
+    if cmd == "router":
+        from .router_stats import load_stats, rows
+        if not (config.route_fast and config.route_strong):
+            console.print("[dim]routing off — set it up with [bold]/route <fast> <strong>[/bold] "
+                          "or [bold]ronin setup[/bold].[/dim]")
+            return "handled"
+        console.print(f"[bold]router[/bold] [dim]· simple→[/dim][cyan]{config.route_fast}[/cyan] "
+                      f"[dim]· complex→[/dim][cyan]{config.route_strong}[/cyan]")
+        data = rows(load_stats(root))
+        if not data:
+            console.print("  [dim]no learned stats yet — run a few turns.[/dim]")
+            return "handled"
+        _st = {"reliable": "[green]reliable[/green]", "escalate": "[red]escalate[/red]",
+               "learning": "[#6b7089]learning[/#6b7089]"}
+        for r in data:
+            rate = f"{r['rate']*100:.0f}%" if r["rate"] is not None else "—"
+            console.print(f"  [dim]{r['tier']:<8}[/dim] [bold]{r['provider']:<12}[/bold] "
+                          f"{r['ok']}/{r['total']} [cyan]{rate:>4}[/cyan]  {_st.get(r['status'], '')}")
         return "handled"
     if cmd == "vim":
         from .prompt_box import set_vi_mode
