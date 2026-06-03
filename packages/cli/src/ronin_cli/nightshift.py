@@ -13,10 +13,13 @@ logic are pure and unit-tested; execution runs sandboxed in throwaway worktrees.
 """
 from __future__ import annotations
 
+import json
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
 _OUT_DIR = Path(".ronin") / "nightshift"
+_REPORT = _OUT_DIR / "report.json"
 
 
 @dataclass
@@ -65,6 +68,56 @@ def gather_tasks(root: Path | str, *, include_todos: bool = True,
 def patch_path(root: Path | str, index: int, task: Task) -> Path:
     safe = "".join(c if c.isalnum() else "-" for c in task.title.lower())[:40].strip("-")
     return Path(root) / _OUT_DIR / f"{index:02d}-{safe or 'task'}.patch"
+
+
+def save_report(root: Path | str, results: list[TaskResult]) -> None:
+    """Persist a run's results to .ronin/nightshift/report.json. Silent on failure."""
+    path = Path(root) / _REPORT
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = [{"title": r.task.title, "source": r.task.source, "ref": r.task.ref,
+                    "status": r.status, "note": r.note, "patch_path": r.patch_path,
+                    "blockers": r.blockers} for r in results]
+        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def load_report(root: Path | str) -> list[dict]:
+    """The last run's results (list of dicts), or [] if none."""
+    path = Path(root) / _REPORT
+    if not path.is_file():
+        return []
+    try:
+        return list(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        return []
+
+
+def apply_patch(root: Path | str, patch_file: str) -> bool:
+    """Apply one patch to the working tree via ``git apply``. True on success."""
+    if not patch_file or not Path(patch_file).is_file():
+        return False
+    try:
+        proc = subprocess.run(["git", "-C", str(Path(root).resolve()), "apply",
+                               "--whitespace=nowarn", patch_file],
+                              capture_output=True, text=True, timeout=30)
+        return proc.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def applicable(report: list[dict], *, clean_only: bool = False) -> list[dict]:
+    """Patches from a report worth applying: status 'patched', existing patch
+    file, and (if clean_only) no Duel blockers. Pure given the report."""
+    out = []
+    for r in report:
+        if r.get("status") != "patched" or not r.get("patch_path"):
+            continue
+        if clean_only and r.get("blockers"):
+            continue
+        out.append(r)
+    return out
 
 
 def summarize(results: list[TaskResult]) -> dict:
@@ -151,4 +204,5 @@ def run_nightshift(config, root, console, tasks: list[Task], *, execute: bool = 
         flag = f" [yellow]· {len(blockers)} blocker(s)[/yellow]" if blockers else ""
         console.print(f"[green]  ✓ patch ready[/green] [dim]({fitness.summary})[/dim]{flag}")
 
+    save_report(root, results)
     return results

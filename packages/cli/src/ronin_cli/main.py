@@ -1122,6 +1122,62 @@ def pr(
     open_pr(console, root, config)
 
 
+# ---------- patches (review/apply nightshift output) ----------
+
+@app.command()
+def patches(
+    apply: bool = typer.Option(False, "--apply", help="Apply the patches to your working tree."),
+    clean: bool = typer.Option(False, "--clean", help="With --apply: only patches with no Duel blockers."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """📦 Review (or apply) the patches from your last `ronin nightshift --execute`.
+
+    Lists each task + status + blockers. `--apply` applies the ready patches to
+    your working tree (`--clean` skips any a Duel flagged), so you review the
+    result as normal changes before committing.
+    """
+    from .nightshift import apply_patch, applicable, load_report
+
+    report = load_report(root)
+    if not report:
+        console.print("[dim]no nightshift report yet — run [bold]ronin nightshift --execute[/bold].[/dim]")
+        return
+
+    table = Table(title="🌙 last nightshift", box=box.ROUNDED)
+    table.add_column("status")
+    table.add_column("task", style="bold")
+    table.add_column("notes", style="#6b7089")
+    _style = {"patched": "[green]patched[/green]", "failed-tests": "[red]failed[/red]",
+              "no-change": "[dim]no-change[/dim]", "error": "[red]error[/red]",
+              "skipped-budget": "[yellow]skipped[/yellow]"}
+    for r in report:
+        note = r.get("note", "")
+        if r.get("blockers"):
+            note = f"⚠ {len(r['blockers'])} blocker(s) · {note}"
+        table.add_row(_style.get(r.get("status"), r.get("status", "?")), r.get("title", "")[:50], note[:40])
+    console.print(table)
+
+    if not apply:
+        ready = applicable(report)
+        if ready:
+            console.print(f"[dim]{len(ready)} patch(es) ready — [bold]ronin patches --apply[/bold] "
+                          "(add --clean to skip flagged ones).[/dim]")
+        return
+
+    to_apply = applicable(report, clean_only=clean)
+    if not to_apply:
+        console.print("[dim]nothing to apply.[/dim]")
+        return
+    ok = 0
+    for r in to_apply:
+        applied = apply_patch(root, r["patch_path"])
+        ok += 1 if applied else 0
+        mark = "[green]✓[/green]" if applied else "[red]✗ (conflict)[/red]"
+        console.print(f"  {mark} {r['title'][:50]}")
+    console.print(f"[green]applied {ok}/{len(to_apply)} patch(es)[/green] "
+                  "[dim]— review the changes, then commit.[/dim]")
+
+
 # ---------- swarm (multi-provider agent team) ----------
 
 @app.command()
