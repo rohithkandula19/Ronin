@@ -41,7 +41,7 @@ def web_search(query: str, max_results: int = 5) -> str:
     import httpx
     try:
         r = httpx.post("https://html.duckduckgo.com/html/", data={"q": query},
-                       headers={"User-Agent": _UA}, timeout=20, follow_redirects=True)
+                       headers={"User-Agent": _UA}, timeout=12, follow_redirects=True)
         r.raise_for_status()
     except Exception as e:  # noqa: BLE001
         return f"ERROR: web search failed: {e}"
@@ -64,7 +64,7 @@ def fetch_url(url: str, max_chars: int = 6000) -> str:
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
     try:
-        r = httpx.get(url, headers={"User-Agent": _UA}, timeout=25, follow_redirects=True)
+        r = httpx.get(url, headers={"User-Agent": _UA}, timeout=15, follow_redirects=True)
         r.raise_for_status()
     except Exception as e:  # noqa: BLE001
         return f"ERROR: fetch failed: {e}"

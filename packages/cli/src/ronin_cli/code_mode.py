@@ -34,32 +34,63 @@ from .theme import OK as _OK
 from .todo import TodoStore, build_todo_tool
 
 
+# Rotating launch tips — a different one greets you each session.
+_WELCOME_TIPS = [
+    "/help for commands · @ to add files · shift+tab to cycle mode",
+    "@path drops a file in · @https://… pulls a web page in",
+    "shift+tab cycles normal → auto-accept → plan",
+    "type a request, approve the diff — or --yolo to auto-accept",
+    "/model to switch models · /login to add a provider",
+    "ronin dojo pits models against each other · ronin kaizen fixes its own code",
+    "ronin nightshift works your backlog while you sleep",
+    "ronin failover groq,gemini → never wait on a rate-limit again",
+    "ronin --sentinel makes it abstain instead of bluffing",
+    "# jots a note to memory · ! runs a shell command inline",
+]
+
+
+def _greeting() -> str:
+    """A time-of-day greeting (best-effort; neutral fallback)."""
+    try:
+        import datetime
+        h = datetime.datetime.now().hour
+    except Exception:  # noqa: BLE001
+        return "ready"
+    return ("burning the midnight oil" if h < 5 else "good morning" if h < 12
+            else "good afternoon" if h < 17 else "good evening" if h < 22 else "working late")
+
+
 def _welcome(console: "Console", config: RoninConfig, root, yolo: bool, *, title: str, hint: str) -> None:
-    """Launch welcome: the **dancing panda** animates inline beside the
-    version/model/cwd block (ronin's signature mascot), then a one-line tips
-    row — Claude-Code-minimal chrome, but the panda still dances on every
-    launch. On a non-TTY (tests/pipes) the panda renders as a single static
-    frame, so output stays deterministic. (``title``/``hint`` are accepted for
-    call-site compatibility; the per-prompt hint line carries shortcuts now.)"""
+    """Launch welcome: the panda mascot animates inline beside the
+    version/model/cwd block. The panda pose, greeting, and tip all **rotate each
+    launch** so it feels alive — on a non-TTY (tests/pipes) it's deterministic so
+    output stays stable."""
+    import random
+
     from rich.text import Text
 
     from . import __version__
-    from .panda_art import animate_inline
+    from .panda_art import PANDA_ACTIVITIES, animate_inline
     from .theme import ACCENT, MUTE, SOFT
+
+    is_tty = bool(getattr(console, "is_terminal", False))
+    activity = random.choice(list(PANDA_ACTIVITIES)) if is_tty else "dancing"
+    tip = random.choice(_WELCOME_TIPS) if is_tty else _WELCOME_TIPS[0]
+    greeting = _greeting() if is_tty else "ready"
 
     info = Text()
     info.append("ronin ", style=f"bold {ACCENT}")
-    info.append(f"v{__version__}\n", style=MUTE)
+    info.append(f"v{__version__}", style=MUTE)
+    info.append(f"  · {greeting}\n", style=f"italic {SOFT}")
     info.append(f"{config.provider} · {config.resolved_model()}\n", style=SOFT)
     info.append(str(_Path(root).resolve()), style=MUTE)
     if yolo:
         info.append("  · auto-approve (YOLO)", style="yellow")
 
     console.print()
-    animate_inline(console, info, activity="dancing", loops=3)
+    animate_inline(console, info, activity=activity, loops=3)
     console.print()
-    console.print(Text("  /help for commands · @ to add files · shift+tab to cycle mode",
-                       style=MUTE))
+    console.print(Text(f"  💡 {tip}", style=MUTE))
     console.print()
 
 
