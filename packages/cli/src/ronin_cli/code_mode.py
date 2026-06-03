@@ -295,12 +295,29 @@ def _status_line(config: RoninConfig, result: "CodeRunResult", elapsed: float,
     return line
 
 
-def _render_diff(console: Console, diff: str) -> None:
+_EXT_LANG = {
+    ".py": "python", ".js": "javascript", ".ts": "typescript", ".tsx": "tsx",
+    ".jsx": "jsx", ".json": "json", ".md": "markdown", ".sh": "bash", ".bash": "bash",
+    ".toml": "toml", ".yaml": "yaml", ".yml": "yaml", ".html": "html", ".css": "css",
+    ".go": "go", ".rs": "rust", ".java": "java", ".rb": "ruby", ".c": "c", ".h": "c",
+    ".cpp": "cpp", ".sql": "sql", ".php": "php", ".swift": "swift", ".kt": "kotlin",
+}
+
+
+def _lang_for(path: str | None) -> str:
+    if not path:
+        return "text"
+    import os
+    return _EXT_LANG.get(os.path.splitext(path)[1].lower(), "text")
+
+
+def _render_diff(console: Console, diff: str, path: str | None = None) -> None:
     """Print a clean, line-numbered diff — Claude-Code style: a dim line-number
-    gutter, green/red +/- markers, subtle backgrounds, and no git ``--- a/`` /
-    ``@@`` noise."""
+    gutter, full-width green/red row backgrounds, **syntax-highlighted code**, and
+    no git ``--- a/`` / ``@@`` noise."""
     if not diff.strip():
         return
+    from rich.syntax import Syntax
     from rich.text import Text
 
     from .code_tools import diff_rows
@@ -309,20 +326,35 @@ def _render_diff(console: Console, diff: str) -> None:
         for line in diff.splitlines():
             console.print(f"[dim]{line}[/dim]")
         return
+
+    syn = Syntax("", _lang_for(path), theme="monokai", background_color="default")
+    width = min(console.width or 100, 120)
+    add_bg, del_bg = "#15291c", "#2c161b"   # subtle full-row tints
+    sign_style = {"add": "bold #73daca", "del": "bold #f7768e", "ctx": "#3b4261"}
+
     for r in rows:
         if r["kind"] == "sep":
-            console.print(Text("      ⋮", style="#3b4261"))
+            console.print(Text("       ⋮", style="#3b4261"))
             continue
         ln = f"{r['lineno']:>4}" if r["lineno"] is not None else "    "
-        gutter = Text(f" {ln} ", style="#3b4261")
-        if r["kind"] == "add":
-            body = Text("+ ", style="bold #9ece6a") + Text(r["text"], style="#b9e88a")
-            console.print(gutter + body, style="on #14241a")
-        elif r["kind"] == "del":
-            body = Text("- ", style="bold #f7768e") + Text(r["text"], style="#e0747c")
-            console.print(gutter + body, style="on #241519")
+        sign = {"add": "+", "del": "-", "ctx": " "}[r["kind"]]
+        # syntax-highlight the code content (keywords/strings/numbers coloured)
+        code = r["text"]
+        hl = syn.highlight(code) if code.strip() else Text(code)
+        hl.rstrip()  # highlight() appends a newline — drop it
+        if r["kind"] == "del":            # dim the highlight a touch on removals
+            hl.stylize("dim")
+
+        row = Text(f" {ln} ", style="#3b4261")
+        row.append(f"{sign} ", style=sign_style[r["kind"]])
+        row.append_text(hl)
+        if r["kind"] in ("add", "del"):
+            pad = width - row.cell_len
+            if pad > 0:
+                row.append(" " * pad)
+            console.print(row, style=f"on {add_bg if r['kind'] == 'add' else del_bg}")
         else:
-            console.print(gutter + Text("  ", style="dim") + Text(r["text"], style="#787c99"))
+            console.print(row)
 
 
 def _selective_gate(console: Console | None, yolo: bool, root: _Path) -> Callable[[str, dict], bool]:
@@ -354,7 +386,7 @@ def _selective_gate(console: Console | None, yolo: bool, root: _Path) -> Callabl
                 old, new = args.get("old_string", ""), args.get("new_string", "")
                 after = before.replace(old, new, 1) if old in before else before
             _after_content = after
-            _render_diff(console, unified_diff(rel, before, after))
+            _render_diff(console, unified_diff(rel, before, after), path=rel)
         elif name == "run_command":
             console.print(f"  [#7dcfff]$[/#7dcfff] [bold]{args.get('command')}[/bold]")
         elif name == "multi_edit":
@@ -367,7 +399,7 @@ def _selective_gate(console: Console | None, yolo: bool, root: _Path) -> Callabl
                 if old and old in after:
                     after = after.replace(old, new, 1)
             _after_content = after
-            _render_diff(console, unified_diff(rel, before, after))
+            _render_diff(console, unified_diff(rel, before, after), path=rel)
         else:
             console.print(f"  [grey50]{args}[/grey50]")
 
