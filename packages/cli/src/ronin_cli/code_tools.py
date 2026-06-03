@@ -62,6 +62,20 @@ def unified_diff(path: str, before: str, after: str) -> str:
     return "".join(lines) if lines else "(no change)"
 
 
+def split_git_diff(diff: str) -> list[tuple[str | None, str]]:
+    """Split a multi-file ``git diff`` into ``[(path, chunk), …]`` so each file's
+    hunk can be syntax-highlighted by its own language. Pure."""
+    import re
+    out: list[tuple[str | None, str]] = []
+    chunks = re.split(r"(?m)^(?=diff --git )", diff)
+    for ch in chunks:
+        if not ch.strip():
+            continue
+        m = re.search(r"^diff --git a/(?:.+?) b/(.+)$", ch, re.M)
+        out.append((m.group(1).strip() if m else None, ch))
+    return out
+
+
 def diff_rows(diff: str) -> list[dict]:
     """Parse a unified diff into clean, renderable rows (drops the git ``--- a/``,
     ``+++ b/``, ``@@`` noise; tracks real line numbers). Pure + testable.

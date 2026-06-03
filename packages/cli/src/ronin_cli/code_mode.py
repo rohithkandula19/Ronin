@@ -1126,9 +1126,14 @@ def _show_git_diff(console: Console, root: Path | str) -> None:
     if not diff:
         console.print("[dim]working tree clean (no unstaged changes)[/dim]")
         return
-    _render_diff(console, diff[:8000])
-    if len(diff) > 8000:
-        console.print("[dim]…(diff truncated)[/dim]")
+    from .code_tools import split_git_diff
+    files = split_git_diff(diff)
+    console.print(f"[#6b7089]{len(files)} file(s) changed[/#6b7089]")
+    for path, chunk in files:
+        console.print(f"\n  [bold #7dcfff]▸ {path or '(file)'}[/bold #7dcfff]")
+        _render_diff(console, chunk[:6000], path=path)
+        if len(chunk) > 6000:
+            console.print("  [dim]…(file diff truncated)[/dim]")
 
 
 def handle_slash_command(
@@ -1276,10 +1281,15 @@ def handle_slash_command(
                           f"(set a key with [bold]/login[/bold] first).[/dim]")
             return "handled"
         current = config.resolved_model()
-        console.print(f"[bold]{config.provider}[/bold] models [dim]({len(names)})[/dim]")
-        for n in names[:40]:
-            mark = " [green]← active[/green]" if n == current else ""
-            console.print(f"  [cyan]{n}[/cyan]{mark}")
+        from rich.columns import Columns
+        from rich.text import Text
+        items = [
+            Text(f"● {n}", style="bold #9ece6a") if n == current else Text(f"  {n}", style="cyan")
+            for n in names[:60]
+        ]
+        console.print(f"[bold]{config.provider}[/bold] models [dim]({len(names)})[/dim] "
+                      "[#6b7089]· ● = active[/#6b7089]")
+        console.print(Columns(items, padding=(0, 3), equal=True))
         console.print("[dim]switch with [bold]/model <name>[/bold][/dim]")
         return "handled"
     if cmd == "memory":
