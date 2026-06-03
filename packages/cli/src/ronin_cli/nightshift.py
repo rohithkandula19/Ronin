@@ -162,81 +162,112 @@ def summarize(results: list[TaskResult]) -> dict:
     return out
 
 
+def _work_one(config, root, task: Task, index: int, *, duel_against, roster,
+              max_iterations: int, console=None) -> tuple[TaskResult, float]:
+    """Work one task in an isolated worktree → (result, estimated cost). No shared
+    state: the patch file path is unique per index. Safe to run concurrently."""
+    from .code_mode import run_code_agent
+    from .cost import estimate_cost
+    from .kaizen import run_fitness
+    from .worktree import git_worktree, worktree_diff
+
+    try:
+        with git_worktree(root, label="nightshift") as wt:
+            if roster is not None:
+                from .swarm import run_swarm
+                res = run_swarm(config, task.prompt(), root=wt, console=console,
+                                roster=roster, yolo=True, max_iterations=max_iterations)
+            else:
+                res = run_code_agent(config, task.prompt(), root=wt, console=None,
+                                     yolo=True, read_only=False, max_iterations=max_iterations)
+            u = res.usage or {}
+            cost = estimate_cost(config.provider, config.resolved_model(),
+                                 u.get("input_tokens", 0), u.get("output_tokens", 0))
+            fitness = run_fitness(wt)
+            diff = worktree_diff(wt)
+    except Exception as e:  # noqa: BLE001 — one task failing must not end the night
+        return TaskResult(task, "error", note=str(e)[:160]), 0.0
+
+    if not diff.strip():
+        return TaskResult(task, "no-change", note="agent made no changes"), cost
+    if not fitness.passed:
+        return TaskResult(task, "failed-tests", note=fitness.summary), cost
+
+    blockers: list[str] = []
+    if duel_against is not None:
+        from .duel import review_diff
+        blockers = review_diff(config, diff, duel_against).blockers
+
+    pp = patch_path(root, index, task)
+    try:
+        pp.write_text(diff, encoding="utf-8")
+    except OSError as e:
+        return TaskResult(task, "error", note=f"couldn't write patch: {e}"), cost
+    return TaskResult(task, "patched", note=fitness.summary,
+                      patch_path=str(pp), blockers=blockers), cost
+
+
+def _print_result(console, r: TaskResult) -> None:
+    if r.status == "patched":
+        flag = f" [yellow]· {len(r.blockers)} blocker(s)[/yellow]" if r.blockers else ""
+        console.print(f"[green]  ✓ {r.task.title[:50]}[/green] [dim]({r.note})[/dim]{flag}")
+    elif r.status == "failed-tests":
+        console.print(f"[red]  ✗ {r.task.title[:50]} — tests failed[/red] [dim]({r.note})[/dim]")
+    elif r.status == "error":
+        console.print(f"[red]  ✗ {r.task.title[:50]} — error[/red] [dim]{r.note[:60]}[/dim]")
+    else:
+        console.print(f"[dim]  – {r.task.title[:50]} ({r.status})[/dim]")
+
+
 def run_nightshift(config, root, console, tasks: list[Task], *, execute: bool = False,
                    duel_against: dict | None = None, budget: float | None = None,
-                   roster=None, max_iterations: int = 25) -> list[TaskResult]:
+                   roster=None, parallel: int = 1, max_iterations: int = 25) -> list[TaskResult]:
     """Work each task in isolation. Dry-run (default) just returns the plan as
     'skipped' results; execute=True does the real autonomous loop, writing a
     patch per task that passes the test suite. Never pushes; never edits the
-    working tree."""
-    results: list[TaskResult] = []
+    working tree. ``parallel`` runs up to N tasks concurrently (forced to 1 when
+    a budget is set, so the cap can be enforced precisely)."""
     if not execute:
         return [TaskResult(t, "skipped-budget", note="dry-run") for t in tasks]
 
-    from .cost import CostLedger, estimate_cost
-    from .kaizen import run_fitness
-    from .worktree import git_worktree, is_git_repo, worktree_diff
-
+    from .worktree import is_git_repo
     if not is_git_repo(root):
         console.print("[yellow]nightshift needs a git repository.[/yellow]")
-        return results
+        return []
 
-    out_dir = Path(root) / _OUT_DIR
-    out_dir.mkdir(parents=True, exist_ok=True)
-    ledger = CostLedger() if budget else None
+    (Path(root) / _OUT_DIR).mkdir(parents=True, exist_ok=True)
+    workers = 1 if budget else max(1, int(parallel))
 
-    from .code_mode import run_code_agent
-    for i, task in enumerate(tasks, 1):
-        if budget and ledger and ledger.spent >= budget:
-            results.append(TaskResult(task, "skipped-budget", note="budget cap reached"))
-            continue
-        console.print(f"[#7aa2f7]🌙 [{i}/{len(tasks)}] {task.title}[/#7aa2f7] [dim]({task.source})[/dim]")
-        try:
-            with git_worktree(root, label="nightshift") as wt:
-                if roster is not None:
-                    from .swarm import run_swarm
-                    res = run_swarm(config, task.prompt(), root=wt, console=console,
-                                    roster=roster, yolo=True, max_iterations=max_iterations)
-                else:
-                    res = run_code_agent(config, task.prompt(), root=wt, console=None,
-                                         yolo=True, read_only=False, max_iterations=max_iterations)
-                if ledger is not None:
-                    u = res.usage or {}
-                    ledger.record(config.provider, config.resolved_model(),
-                                  u.get("input_tokens", 0), u.get("output_tokens", 0))
-                fitness = run_fitness(wt)
-                diff = worktree_diff(wt)
-        except Exception as e:  # noqa: BLE001 — one task failing must not end the night
-            results.append(TaskResult(task, "error", note=str(e)[:160]))
-            console.print(f"[red]  ✗ error[/red] [dim]{str(e)[:80]}[/dim]")
-            continue
+    def _opts():
+        return dict(duel_against=duel_against, roster=roster, max_iterations=max_iterations)
 
-        if not diff.strip():
-            results.append(TaskResult(task, "no-change", note="agent made no changes"))
-            console.print("[dim]  – no change[/dim]")
-            continue
-        if not fitness.passed:
-            results.append(TaskResult(task, "failed-tests", note=fitness.summary))
-            console.print(f"[red]  ✗ tests failed[/red] [dim]({fitness.summary}) — discarded[/dim]")
-            continue
+    results: list[TaskResult] = []
+    if workers == 1:
+        spent = 0.0
+        for i, task in enumerate(tasks, 1):
+            if budget and spent >= budget:
+                results.append(TaskResult(task, "skipped-budget", note="budget cap reached"))
+                continue
+            console.print(f"[#7aa2f7]🌙 [{i}/{len(tasks)}] {task.title}[/#7aa2f7] [dim]({task.source})[/dim]")
+            res, cost = _work_one(config, root, task, i, console=console, **_opts())
+            spent += cost
+            results.append(res)
+            _print_result(console, res)
+    else:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        console.print(f"[#7aa2f7]🌙 working {len(tasks)} task(s), {workers} at a time…[/#7aa2f7]")
+        by_idx: dict[int, TaskResult] = {}
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futs = {ex.submit(_work_one, config, root, t, i, console=console, **_opts()): i
+                    for i, t in enumerate(tasks, 1)}
+            for fut in as_completed(futs):
+                res, _ = fut.result()
+                by_idx[futs[fut]] = res
+                _print_result(console, res)
+        results = [by_idx[i] for i in sorted(by_idx)]
 
-        blockers: list[str] = []
-        if duel_against is not None:
-            from .duel import review_diff
-            verdict = review_diff(config, diff, duel_against)
-            blockers = verdict.blockers
-
-        pp = patch_path(root, i, task)
-        try:
-            pp.write_text(diff, encoding="utf-8")
-        except OSError as e:
-            results.append(TaskResult(task, "error", note=f"couldn't write patch: {e}"))
-            continue
-        results.append(TaskResult(task, "patched", note=fitness.summary,
-                                  patch_path=str(pp), blockers=blockers))
-        mark_done(root, task)   # don't redo this task on the next (scheduled) run
-        flag = f" [yellow]· {len(blockers)} blocker(s)[/yellow]" if blockers else ""
-        console.print(f"[green]  ✓ patch ready[/green] [dim]({fitness.summary})[/dim]{flag}")
-
+    for r in results:                       # mark shipped tasks done (race-free, post-run)
+        if r.status == "patched":
+            mark_done(root, r.task)
     save_report(root, results)
     return results

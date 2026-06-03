@@ -1290,6 +1290,7 @@ def nightshift(
     swarm_roster: str = typer.Option(None, "--swarm", help="Work each task with a swarm (role=provider roster)."),
     budget: float = typer.Option(None, "--budget", help="USD spend cap for the run."),
     limit: int = typer.Option(10, "--limit", help="Max tasks."),
+    parallel: int = typer.Option(1, "--parallel", help="Work N tasks concurrently (forced to 1 with --budget)."),
     redo: bool = typer.Option(False, "--redo", help="Re-attempt tasks already shipped in past runs."),
     notify: str = typer.Option(None, "--notify", help="Webhook URL to ping with the morning report (Slack/Discord/…)."),
     schedule: str = typer.Option(None, "--schedule", help="Install a cron entry, e.g. '0 2 * * *' (runs nightly)."),
@@ -1370,7 +1371,8 @@ def nightshift(
         console.print("[dim]each task worked by a swarm (architect → implementer → reviewer).[/dim]")
     console.print("[dim]working the queue (isolated worktrees, test-gated)…[/dim]\n")
     results = run_nightshift(config, root, console, tasks, execute=True,
-                             duel_against=duel_spec, budget=budget, roster=_roster)
+                             duel_against=duel_spec, budget=budget, roster=_roster,
+                             parallel=parallel)
     counts = summarize(results)
     console.print(f"\n[bold]🌙 morning report[/bold] — [green]{counts['patched']} patch(es)[/green], "
                   f"{counts['failed-tests']} failed tests, {counts['no-change']} no-change, "
