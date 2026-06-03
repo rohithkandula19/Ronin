@@ -1122,6 +1122,69 @@ def pr(
     open_pr(console, root, config)
 
 
+# ---------- nightshift (autonomous backlog) ----------
+
+@app.command()
+def nightshift(
+    goal: str = typer.Argument(None, help="An explicit task to work. Omit to use TODOs/issues."),
+    todos: bool = typer.Option(True, "--todos/--no-todos", help="Include FIXME/TODO markers."),
+    issues: bool = typer.Option(False, "--issues", help="Include open GitHub issues (needs gh)."),
+    execute: bool = typer.Option(False, "--execute", help="Actually work the queue (default: dry-run plan)."),
+    duel: str = typer.Option(None, "--duel", help="Red-team each patch with a rival provider[:model]."),
+    budget: float = typer.Option(None, "--budget", help="USD spend cap for the run."),
+    limit: int = typer.Option(10, "--limit", help="Max tasks."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo to work in."),
+) -> None:
+    """🌙 Autonomous teammate — works your backlog unattended in isolated worktrees
+    and leaves reviewable, test-passing patches under .ronin/nightshift/.
+
+    Dry-run by default (shows the queue, no edits). `--execute` does the real loop:
+    each task is implemented in a throwaway worktree, proven against the test suite
+    (discarded if red), optionally Duel-reviewed, and saved as a patch. Never pushes,
+    never touches your working tree. `ronin nightshift report` shows the results.
+    """
+    config = load_config()
+    from .nightshift import gather_tasks, patch_path, run_nightshift, summarize
+
+    tasks = gather_tasks(root, include_todos=todos, include_issues=issues, goal=goal, limit=limit)
+    if not tasks:
+        console.print("[dim]empty backlog — no goal, no TODO/FIXME markers"
+                      f"{', no open issues' if issues else ''}.[/dim]")
+        return
+
+    console.print(f"[#7aa2f7]🌙 nightshift queue — {len(tasks)} task(s)[/#7aa2f7]"
+                  f"{' [dim](dry-run)[/dim]' if not execute else ''}")
+    for i, t in enumerate(tasks, 1):
+        ref = f" [dim]{t.ref}[/dim]" if t.ref else ""
+        console.print(f"  [cyan]{i:>2}[/cyan] [{t.source}] [bold]{t.title}[/bold]{ref}")
+
+    if not execute:
+        console.print("\n[dim]dry-run — nothing changed. Add [bold]--execute[/bold] to work the queue.[/dim]")
+        return
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold].")
+        raise typer.Exit(2)
+
+    duel_spec = None
+    if duel:
+        from .consensus import parse_model_spec
+        duel_spec = parse_model_spec(duel)
+    console.print("[dim]working the queue (isolated worktrees, test-gated)…[/dim]\n")
+    results = run_nightshift(config, root, console, tasks, execute=True,
+                             duel_against=duel_spec, budget=budget)
+    counts = summarize(results)
+    console.print(f"\n[bold]🌙 morning report[/bold] — [green]{counts['patched']} patch(es)[/green], "
+                  f"{counts['failed-tests']} failed tests, {counts['no-change']} no-change, "
+                  f"{counts['error']} error(s)")
+    patched = [r for r in results if r.status == "patched"]
+    if patched:
+        console.print("[dim]review + apply:[/dim]")
+        for r in patched:
+            warn = f" [yellow]⚠ {len(r.blockers)} blocker(s)[/yellow]" if r.blockers else ""
+            console.print(f"  [green]✓[/green] {r.task.title}{warn}\n"
+                          f"     [dim]git apply {r.patch_path}[/dim]")
+
+
 # ---------- config (view / set settings) ----------
 
 @app.command()
