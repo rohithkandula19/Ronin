@@ -467,6 +467,13 @@ def dojo(
             console.print(f"[yellow]{e}[/yellow]")
             raise typer.Exit(2)
 
+    # tally this dojo into the persistent leaderboard
+    from .leaderboard import load_leaderboard, save_leaderboard
+    _lb = load_leaderboard(Path("."))
+    _lb.record(result.winner.label if result.winner else None,
+               [f.label for f in result.contenders])
+    save_leaderboard(Path("."), _lb)
+
     for f in result.fighters:
         if f.changed:
             mark = "[green]★ winner[/green]" if result.winner is f else "[dim]·[/dim]"
@@ -1091,6 +1098,87 @@ def map_cmd(
             console.print(f"[green]✓ saved project memory →[/green] [cyan]{path}[/cyan]")
         except OSError as e:
             console.print(f"[yellow]couldn't write RONIN.md: {e}[/yellow]")
+
+
+# ---------- setup (first-run wizard) ----------
+
+@app.command()
+def setup() -> None:
+    """🧰 Get routing set up in one go — suggests a free/cheap blade for simple
+    turns and a strong blade for hard ones (the Cost Router + Scout→Strike), based
+    on the providers you already have keys for, and saves it.
+    """
+    config = load_config()
+    console.print(f"[#6b7089]current provider:[/#6b7089] [bold]{config.provider}[/bold] · "
+                  f"[#6b7089]model:[/#6b7089] {config.resolved_model()}")
+    if config.route_fast and config.route_strong:
+        console.print(f"[green]routing already on[/green] — simple→[bold]{config.route_fast}[/bold] · "
+                      f"complex→[bold]{config.route_strong}[/bold]")
+        if not Confirm.ask("Re-configure it?", default=False):
+            return
+
+    from .setup_wizard import suggest_routing
+    suggestion = suggest_routing(config)
+    if suggestion is None:
+        console.print("[yellow]Couldn't suggest a free+strong split[/yellow] — you only have one "
+                      "provider configured. Add a free one (e.g. [bold]ronin login cerebras[/bold]) "
+                      "then re-run [bold]ronin setup[/bold].")
+        return
+    fast, strong = suggestion
+    console.print("\n[bold]Suggested routing[/bold] (Cost Router):")
+    console.print(f"  simple turns  → [cyan]{fast}[/cyan]  [dim](free/cheap)[/dim]")
+    console.print(f"  complex turns → [cyan]{strong}[/cyan]  [dim](strong)[/dim]")
+    if not Confirm.ask("\nEnable this routing?", default=True):
+        console.print("[dim]left routing off.[/dim]")
+        return
+    from .config import save_config
+    config = config.model_copy(update={"route_fast": fast, "route_strong": strong})
+    path = save_config(config, scope="project")
+    console.print(f"[green]✓ routing enabled[/green] → saved to [cyan]{path}[/cyan]\n"
+                  "[dim]every session now shows 💰 cost · saved $… and self-tunes over time.[/dim]")
+
+
+# ---------- leaderboard (dojo standings) ----------
+
+@app.command()
+def leaderboard(
+    reset: bool = typer.Option(False, "--reset", help="Clear the dojo leaderboard."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo whose dojo history to show."),
+) -> None:
+    """🏆 Standings from every `ronin dojo` you've run here — which provider keeps
+    winning your tasks, and the route_strong it recommends.
+    """
+    from .leaderboard import leaderboard_path, load_leaderboard
+
+    if reset:
+        try:
+            leaderboard_path(root).unlink()
+            console.print("[green]✓ leaderboard cleared[/green]")
+        except OSError:
+            console.print("[dim]nothing to reset.[/dim]")
+        return
+
+    lb = load_leaderboard(root)
+    standings = lb.standings()
+    if not standings:
+        console.print("[dim]no dojos recorded yet. Run [bold]ronin dojo \"<task>\" -m a,b,c[/bold].[/dim]")
+        return
+    table = Table(title="🏆 dojo leaderboard", box=box.ROUNDED)
+    table.add_column("#", justify="right", style="#6b7089")
+    table.add_column("provider", style="bold")
+    table.add_column("wins", justify="right")
+    table.add_column("contests", justify="right")
+    table.add_column("win rate", justify="right", style="cyan")
+    for i, r in enumerate(standings, 1):
+        table.add_row(str(i), r["provider"], str(r["wins"]), str(r["contests"]),
+                      f"{r['rate']*100:.0f}%")
+    console.print(table)
+    rec = lb.recommend_strong()
+    if rec:
+        console.print(f"[green]→ recommended[/green] [bold]route_strong = {rec}[/bold] "
+                      "[dim](it keeps winning your dojos)[/dim]")
+    else:
+        console.print("[dim]not enough contests for a confident recommendation yet.[/dim]")
 
 
 # ---------- router (self-tuning insight) ----------

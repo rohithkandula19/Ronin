@@ -327,6 +327,7 @@ def _selective_gate(console: Console | None, yolo: bool, root: _Path) -> Callabl
         if console is None:
             return False  # no way to ask → deny by default
 
+        _after_content = None  # set for write paths → scanned for secrets below
         # Show what's actually about to happen, then ask.
         if name in ("write_file", "edit_file"):
             rel = args.get("path", "?")
@@ -337,6 +338,7 @@ def _selective_gate(console: Console | None, yolo: bool, root: _Path) -> Callabl
             else:  # edit_file
                 old, new = args.get("old_string", ""), args.get("new_string", "")
                 after = before.replace(old, new, 1) if old in before else before
+            _after_content = after
             verb = "Write" if name == "write_file" else "Edit"
             console.print(f"  [yellow]›[/yellow] [bold]{verb}[/bold] [cyan]{rel}[/cyan]")
             _render_diff(console, unified_diff(rel, before, after))
@@ -351,12 +353,21 @@ def _selective_gate(console: Console | None, yolo: bool, root: _Path) -> Callabl
                 old, new = e.get("old_string", ""), e.get("new_string", "")
                 if old and old in after:
                     after = after.replace(old, new, 1)
+            _after_content = after
             edits_n = len(args.get("edits", []))
             console.print(f"  [yellow]›[/yellow] [bold]Edit[/bold] [cyan]{rel}[/cyan] "
                           f"[grey50]({edits_n} change(s))[/grey50]")
             _render_diff(console, unified_diff(rel, before, after))
         else:
             console.print(f"  [yellow]›[/yellow] [bold]{name}[/bold] [grey50]{args}[/grey50]")
+
+        # Secret-leak guard: warn loudly (don't block) if the new content looks
+        # like it carries a live credential.
+        if _after_content is not None:
+            from .secret_guard import secret_warning
+            _w = secret_warning(_after_content)
+            if _w:
+                console.print(_w)
 
         console.print("    [yellow]approve?[/yellow] [grey50]y / N[/grey50] ", end="")
         try:
