@@ -1630,6 +1630,36 @@ def setup() -> None:
                   "[dim]every session now shows 💰 cost · saved $… and self-tunes over time.[/dim]")
 
 
+# ---------- spec (design-doc-first) ----------
+
+@app.command()
+def spec(
+    feature: str = typer.Argument(..., help="The feature/change to spec out."),
+    out: str = typer.Option(None, "--out", help="Write the spec to this file (e.g. SPEC.md)."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo to ground the spec in."),
+) -> None:
+    """📐 Design-doc-first — ronin explores the repo (read-only) and writes a
+    concrete design spec (problem · approach · files to change · edge cases · test
+    plan · open questions) before any code is written. --out saves it.
+    """
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold].")
+        raise typer.Exit(2)
+    from .code_mode import run_code_agent
+    from .spec import spec_prompt
+
+    console.print(f"[#7aa2f7]📐 speccing[/#7aa2f7] [dim]{feature[:80]}[/dim]")
+    result = run_code_agent(config, spec_prompt(feature), root=root, console=console,
+                            read_only=True, include_image_tool=False, max_iterations=12)
+    if out and result.output:
+        try:
+            Path(out).write_text(result.output.strip() + "\n", encoding="utf-8")
+            console.print(f"\n[green]✓ spec written →[/green] [cyan]{out}[/cyan]")
+        except OSError as e:
+            console.print(f"[red]couldn't write {out}: {e}[/red]")
+
+
 # ---------- diagram (architecture map) ----------
 
 @app.command()
