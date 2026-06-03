@@ -1630,6 +1630,108 @@ def setup() -> None:
                   "[dim]every session now shows 💰 cost · saved $… and self-tunes over time.[/dim]")
 
 
+# ---------- tournament (single-elim model bracket) ----------
+
+@app.command()
+def tournament(
+    question: str = typer.Argument(..., help="The question the models compete on."),
+    models: str = typer.Option(..., "--models", "-m", help="Contenders, e.g. 'anthropic,gemini,cerebras,groq'."),
+    judge: str = typer.Option(None, "--judge", help="provider[:model] judge (default: current)."),
+) -> None:
+    """🏟  A single-elimination bracket — models face off pairwise, a judge picks
+    each winner, advancing round by round until one champion remains.
+    """
+    from .bracket import run_tournament
+    from .consensus import parse_model_spec
+
+    config = load_config()
+    specs = [parse_model_spec(s) for s in models.split(",") if s.strip()]
+    if len(specs) < 2:
+        console.print("[yellow]a tournament needs at least 2 contenders.[/yellow]")
+        raise typer.Exit(2)
+    judge_spec = parse_model_spec(judge) if judge else None
+    console.print(f"[dim]🏟 {len(specs)} contenders enter the bracket…[/dim]")
+
+    def _on_match(m):
+        if m.b is None:
+            console.print(f"  [dim]{m.a} — bye →[/dim] [green]{m.winner}[/green]")
+        else:
+            console.print(f"  {m.a}  vs  {m.b}   →  [green]★ {m.winner}[/green]")
+
+    with console.status("[dim] running matchups…[/dim]", spinner="dots"):
+        result = run_tournament(config, question, specs, judge_spec=judge_spec, on_match=_on_match)
+    console.print(f"\n[bold #2dd4bf]🏆 champion: {result.champion}[/bold #2dd4bf] "
+                  f"[dim]({len(result.rounds)} round(s))[/dim]")
+
+
+# ---------- migrate (guided large refactor) ----------
+
+@app.command()
+def migrate(
+    change: str = typer.Argument(..., help="The migration, e.g. \"replace requests with httpx\"."),
+    match: str = typer.Option(None, "--match", help="Only files containing this substring (e.g. 'requests')."),
+    glob: str = typer.Option("*", "--glob", help="Only files matching this glob (e.g. '*.py')."),
+    execute: bool = typer.Option(False, "--execute", help="Actually do it (default: dry-run plan)."),
+    duel: str = typer.Option(None, "--duel", help="Red-team each patch with a rival provider."),
+    budget: float = typer.Option(None, "--budget", help="USD spend cap."),
+    limit: int = typer.Option(30, "--limit", help="Max files."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo to migrate."),
+) -> None:
+    """🛠  Guided large migration — find every file that needs a sweeping change,
+    work each ONE in isolation (test-gated), and leave a reviewable patch per file.
+    Dry-run by default; --execute to do it. `ronin patches` to review/apply.
+    """
+    from .migrate import find_targets, to_tasks
+
+    targets = find_targets(root, glob=glob, contains=match, limit=limit)
+    if not targets:
+        console.print(f"[dim]no files matched (glob={glob}"
+                      f"{', contains=' + match if match else ''}).[/dim]")
+        return
+    console.print(f"[#7aa2f7]🛠 migration plan — {len(targets)} file(s)[/#7aa2f7] [dim]{change}[/dim]")
+    for t in targets[:20]:
+        hits = f" [dim]({t.hits}×)[/dim]" if t.hits else ""
+        console.print(f"  [cyan]{t.path}[/cyan]{hits}")
+    if not execute:
+        console.print("\n[dim]dry-run — add [bold]--execute[/bold] to work the migration into patches.[/dim]")
+        return
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold].")
+        raise typer.Exit(2)
+    from .consensus import parse_model_spec
+    duel_spec = parse_model_spec(duel) if duel else None
+    from .nightshift import run_nightshift, summarize
+    from .migrate import to_tasks
+    tasks = to_tasks(change, targets)
+    console.print("[dim]working each file (isolated worktrees, test-gated)…[/dim]\n")
+    results = run_nightshift(config, root, console, tasks, execute=True,
+                             duel_against=duel_spec, budget=budget)
+    counts = summarize(results)
+    console.print(f"\n[bold]🛠 migration[/bold] — [green]{counts['patched']} patch(es)[/green], "
+                  f"{counts['failed-tests']} failed, {counts['no-change']} no-change")
+    console.print("[dim]review with [bold]ronin patches[/bold] · apply with "
+                  "[bold]ronin patches --apply --clean[/bold].[/dim]")
+
+
+# ---------- pair (ambient co-pilot) ----------
+
+@app.command()
+def pair(
+    interval: float = typer.Option(2.0, "--interval", help="Poll interval (seconds)."),
+    root: Path = typer.Option(Path("."), "--root", help="Directory to watch."),
+) -> None:
+    """👥 Ambient pair programmer — ronin watches your saves and chimes in with a
+    short suggestion on each change (a bug, a cleaner way, a missing test). Ctrl+C to stop.
+    """
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold].")
+        raise typer.Exit(2)
+    from .pair import run_pair
+    run_pair(config, root, console, interval=interval)
+
+
 # ---------- archaeology (why is this code here) ----------
 
 @app.command()
