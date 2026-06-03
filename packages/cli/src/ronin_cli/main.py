@@ -115,14 +115,28 @@ def _root(
         console.print(f"[dim]🔒 offline mode — local brain ([bold]{config.provider}[/bold]), "
                       "no network tools, nothing leaves this machine[/dim]")
     if not offline and not config.has_provider_auth():
-        from .theme import ACCENT
-        console.print(f"\n[bold {ACCENT}]ʕ•ᴥ•ʔ  ronin[/bold {ACCENT}]\n")
-        console.print(
-            "[dim]No provider configured yet. Run [bold]ronin init[/bold] "
-            "(or [bold]ronin init --demo[/bold]) to get started, or [bold]ronin --help[/bold] for all commands.[/dim]"
-        )
-        console.print(ctx.get_help())
-        return
+        import sys
+        # Interactive TTY → a friendly guided picker; otherwise the help fallback.
+        if sys.stdin.isatty() and sys.stdout.isatty():
+            from .onboard import onboard
+            picked = onboard(console, config)
+            if picked is not None:
+                config = picked
+            else:
+                from .theme import ACCENT
+                console.print(f"\n[bold {ACCENT}]ʕ•ᴥ•ʔ  ronin[/bold {ACCENT}]\n")
+                console.print("[dim]Set up any time with [bold]ronin init[/bold], or "
+                              "[bold]/login[/bold] inside a session.[/dim]")
+                return
+        else:
+            from .theme import ACCENT
+            console.print(f"\n[bold {ACCENT}]ʕ•ᴥ•ʔ  ronin[/bold {ACCENT}]\n")
+            console.print(
+                "[dim]No provider configured yet. Run [bold]ronin init[/bold] to get "
+                "started, or [bold]ronin --help[/bold] for all commands.[/dim]"
+            )
+            console.print(ctx.get_help())
+            return
 
     if full_access:
         config = config.model_copy(update={"full_access": True})
