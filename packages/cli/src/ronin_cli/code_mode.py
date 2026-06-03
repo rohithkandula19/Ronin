@@ -296,25 +296,33 @@ def _status_line(config: RoninConfig, result: "CodeRunResult", elapsed: float,
 
 
 def _render_diff(console: Console, diff: str) -> None:
-    """Print a unified diff with proper syntax highlighting (Claude-Code style)."""
+    """Print a clean, line-numbered diff — Claude-Code style: a dim line-number
+    gutter, green/red +/- markers, subtle backgrounds, and no git ``--- a/`` /
+    ``@@`` noise."""
     if not diff.strip():
         return
-    try:
-        from rich.syntax import Syntax
-        console.print(Syntax(diff, "diff", theme="monokai",
-                             background_color="default", word_wrap=True))
-        return
-    except Exception:  # noqa: BLE001 - fall back to plain +/- coloring
-        pass
-    for line in diff.splitlines():
-        if line.startswith("+") and not line.startswith("+++"):
-            console.print(f"[green]{line}[/green]")
-        elif line.startswith("-") and not line.startswith("---"):
-            console.print(f"[red]{line}[/red]")
-        elif line.startswith("@@"):
-            console.print(f"[cyan]{line}[/cyan]")
-        else:
+    from rich.text import Text
+
+    from .code_tools import diff_rows
+    rows = diff_rows(diff)
+    if not rows:  # not a unified diff we can parse → show raw, dimmed
+        for line in diff.splitlines():
             console.print(f"[dim]{line}[/dim]")
+        return
+    for r in rows:
+        if r["kind"] == "sep":
+            console.print(Text("      ⋮", style="#3b4261"))
+            continue
+        ln = f"{r['lineno']:>4}" if r["lineno"] is not None else "    "
+        gutter = Text(f" {ln} ", style="#3b4261")
+        if r["kind"] == "add":
+            body = Text("+ ", style="bold #9ece6a") + Text(r["text"], style="#b9e88a")
+            console.print(gutter + body, style="on #14241a")
+        elif r["kind"] == "del":
+            body = Text("- ", style="bold #f7768e") + Text(r["text"], style="#e0747c")
+            console.print(gutter + body, style="on #241519")
+        else:
+            console.print(gutter + Text("  ", style="dim") + Text(r["text"], style="#787c99"))
 
 
 def _selective_gate(console: Console | None, yolo: bool, root: _Path) -> Callable[[str, dict], bool]:
@@ -334,7 +342,8 @@ def _selective_gate(console: Console | None, yolo: bool, root: _Path) -> Callabl
             return False  # no way to ask → deny by default
 
         _after_content = None  # set for write paths → scanned for secrets below
-        # Show what's actually about to happen, then ask.
+        # The renderer already announced the tool (● Write(path)); here we just
+        # show the diff / command and ask — no duplicate header.
         if name in ("write_file", "edit_file"):
             rel = args.get("path", "?")
             target = (root / rel)
@@ -345,11 +354,9 @@ def _selective_gate(console: Console | None, yolo: bool, root: _Path) -> Callabl
                 old, new = args.get("old_string", ""), args.get("new_string", "")
                 after = before.replace(old, new, 1) if old in before else before
             _after_content = after
-            verb = "Write" if name == "write_file" else "Edit"
-            console.print(f"  [yellow]›[/yellow] [bold]{verb}[/bold] [cyan]{rel}[/cyan]")
             _render_diff(console, unified_diff(rel, before, after))
         elif name == "run_command":
-            console.print(f"  [yellow]›[/yellow] [bold]Run[/bold] [cyan]{args.get('command')}[/cyan]")
+            console.print(f"  [#7dcfff]$[/#7dcfff] [bold]{args.get('command')}[/bold]")
         elif name == "multi_edit":
             rel = args.get("path", "?")
             target = (root / rel)
@@ -360,12 +367,9 @@ def _selective_gate(console: Console | None, yolo: bool, root: _Path) -> Callabl
                 if old and old in after:
                     after = after.replace(old, new, 1)
             _after_content = after
-            edits_n = len(args.get("edits", []))
-            console.print(f"  [yellow]›[/yellow] [bold]Edit[/bold] [cyan]{rel}[/cyan] "
-                          f"[grey50]({edits_n} change(s))[/grey50]")
             _render_diff(console, unified_diff(rel, before, after))
         else:
-            console.print(f"  [yellow]›[/yellow] [bold]{name}[/bold] [grey50]{args}[/grey50]")
+            console.print(f"  [grey50]{args}[/grey50]")
 
         # Secret-leak guard: warn loudly (don't block) if the new content looks
         # like it carries a live credential.

@@ -62,6 +62,42 @@ def unified_diff(path: str, before: str, after: str) -> str:
     return "".join(lines) if lines else "(no change)"
 
 
+def diff_rows(diff: str) -> list[dict]:
+    """Parse a unified diff into clean, renderable rows (drops the git ``--- a/``,
+    ``+++ b/``, ``@@`` noise; tracks real line numbers). Pure + testable.
+
+    Each row: ``{"kind": "add"|"del"|"ctx"|"sep", "lineno": int|None, "text": str}``.
+    """
+    import re
+    hunk_re = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+    rows: list[dict] = []
+    new_no = 0
+    seen_hunk = False
+    for raw in diff.splitlines():
+        if raw.startswith(("--- ", "+++ ", "diff --git", "index ", "new file mode",
+                           "deleted file mode", "rename ", "similarity ", "\\ No newline")):
+            continue
+        m = hunk_re.match(raw)
+        if m:
+            new_no = int(m.group(1))
+            if seen_hunk:
+                rows.append({"kind": "sep", "lineno": None, "text": ""})
+            seen_hunk = True
+            continue
+        if not raw:
+            continue
+        sign, text = raw[0], raw[1:]
+        if sign == "+":
+            rows.append({"kind": "add", "lineno": new_no, "text": text})
+            new_no += 1
+        elif sign == "-":
+            rows.append({"kind": "del", "lineno": None, "text": text})
+        elif sign == " ":
+            rows.append({"kind": "ctx", "lineno": new_no, "text": text})
+            new_no += 1
+    return rows
+
+
 def _resolve(root: Path, rel: str) -> Path:
     """Resolve ``rel`` under ``root``; raise if it escapes root."""
     target = (root / rel).resolve()
