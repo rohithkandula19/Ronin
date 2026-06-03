@@ -49,6 +49,25 @@ _WELCOME_TIPS = [
 ]
 
 
+# Rotating input placeholders — a fresh suggestion in the prompt each turn.
+_PLACEHOLDERS = [
+    'Describe a change — / for commands, @ to add files',
+    'Try "add a --json flag and update the tests"',
+    'Try "explain @main.py and fix the bug in @utils.py"',
+    'Try "build me a landing page"',
+    'Try "add retry + backoff to the http client"',
+    'Try "write tests for the parser module"',
+    'Try "refactor this file into smaller functions"',
+    '@path adds a file · @https://… adds a web page',
+    'Try "find and fix the failing test"',
+]
+
+
+def _placeholder() -> str:
+    import random
+    return random.choice(_PLACEHOLDERS)
+
+
 def _greeting() -> str:
     """A time-of-day greeting (best-effort; neutral fallback)."""
     try:
@@ -1484,7 +1503,7 @@ def run_code_session(
                 user = read_prompt(
                     console,
                     hint="/ commands · @ files · ⇧⭾ mode · ⌃c stop · /q quit",
-                    placeholder='Describe a change — / for commands, @ to add files',
+                    placeholder=_placeholder(),
                     status=config.provider,
                     root=root,
                 ).strip()
@@ -1763,7 +1782,7 @@ def run_unified_session(
                 user = read_prompt(
                     console,
                     hint="/ commands · @ files · ⇧⭾ mode · ⌃c stop · /q quit",
-                    placeholder='Try "build me a landing page" — / for commands, @ to add files',
+                    placeholder=_placeholder(),
                     status=config.provider,
                     root=root,
                 ).strip()
