@@ -9,6 +9,7 @@ from ronin_cli.router_stats import (
     MIN_SAMPLES,
     RouterStats,
     load_stats,
+    rows,
     save_stats,
 )
 from ronin_cli.routing import route_turn_config
@@ -61,6 +62,20 @@ def test_route_escalates_unreliable_cheap_blade() -> None:
     turn_cfg, decision = route_turn_config(cfg, "hey", stats=stats)
     # escalated off the cheap blade to the strong one
     assert decision.escalated and turn_cfg.provider == "anthropic"
+
+
+def test_rows_classifies_status() -> None:
+    s = RouterStats()
+    s.record("simple", "learning_one", True)             # <MIN_SAMPLES → learning
+    for ok in (True, True, True, True, True):
+        s.record("simple", "good", ok)                    # reliable
+    for ok in (False, False, False, True):
+        s.record("complex", "bad", ok)                    # 1/4 → escalate
+    by_key = {(r["tier"], r["provider"]): r for r in rows(s)}
+    assert by_key[("simple", "learning_one")]["status"] == "learning"
+    assert by_key[("simple", "good")]["status"] == "reliable"
+    assert by_key[("complex", "bad")]["status"] == "escalate"
+    assert by_key[("simple", "good")]["rate"] == 1.0
 
 
 def test_route_keeps_reliable_cheap_blade() -> None:

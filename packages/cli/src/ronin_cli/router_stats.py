@@ -57,6 +57,25 @@ def stats_path(root: Path | str) -> Path:
     return Path(root) / _STATS_FILE
 
 
+def rows(stats: "RouterStats") -> list[dict]:
+    """Flatten the stats into display rows (one per tier+provider), sorted by
+    tier then provider. Each row: tier, provider, ok, total, rate, status."""
+    out: list[dict] = []
+    for tier in sorted(stats.data):
+        for provider in sorted(stats.data[tier]):
+            ok, total = stats.data[tier][provider]
+            rate = stats.rate(tier, provider)
+            if total < MIN_SAMPLES:
+                status = "learning"
+            elif stats.should_escalate(tier, provider):
+                status = "escalate"   # proven unreliable here
+            else:
+                status = "reliable"
+            out.append({"tier": tier, "provider": provider, "ok": ok, "total": total,
+                        "rate": rate, "status": status})
+    return out
+
+
 def load_stats(root: Path | str) -> RouterStats:
     path = stats_path(root)
     if not path.is_file():
