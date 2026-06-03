@@ -3,9 +3,9 @@
 > **A masterless, terminal-native Claude agent.** ronin is a **Claude-Code-style AI coding agent** — it reads, edits, and runs your code from the terminal — built on a **provider-agnostic agent framework** with first-class evals, memory, security hardening, and MCP tool integrations. Plug in Claude for top quality, or run it **free** on Gemini / Cerebras / Groq / Ollama.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-v0.55.0-blue)](CHANGELOG.md)
+[![Status](https://img.shields.io/badge/status-v0.56.0-blue)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-803%20passing-brightgreen.svg)](#-whats-under-the-hood)
+[![Tests](https://img.shields.io/badge/tests-821%20passing-brightgreen.svg)](#-whats-under-the-hood)
 [![Providers](https://img.shields.io/badge/providers-Claude%20·%20Gemini%20·%20Cerebras%20·%20Groq%20·%20OpenRouter%20·%20Ollama%20·%20OpenAI-d4a373)](#-supported-providers)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
@@ -36,7 +36,7 @@ Regenerate the walkthrough anytime with [`vhs`](https://github.com/charmbracelet
 
 **One front door:** type **`ronin`** and you get a single agent that reads, writes, and runs code (every edit and shell command gated behind a diff preview and your approval — reads run freely), generates images/video/speech, and queries your connected data — all in one conversation, in plain language. It's **provider-agnostic**: the same agent runs on Claude or on free open models.
 
-It's also a **reference implementation for building agents the right way**. The CLI is a thin wrapper over seven independently-usable packages — agent patterns, evals, memory, hardening, and MCP integrations — backed by **803 tests** that run offline in CI. (`ronin code` is the focused coding agent; `ronin chat` is the talk/media surface — both available when you want a single-purpose mode.)
+It's also a **reference implementation for building agents the right way**. The CLI is a thin wrapper over seven independently-usable packages — agent patterns, evals, memory, hardening, and MCP integrations — backed by **821 tests** that run offline in CI. (`ronin code` is the focused coding agent; `ronin chat` is the talk/media surface — both available when you want a single-purpose mode.)
 
 ## 🛠 `ronin code` — the coding agent (Claude-Code shaped)
 
@@ -227,7 +227,7 @@ ronin is MIT-licensed and meant to be picked up by other people. A few notes if 
 | `cli` | The `ronin` binary — agent loop, MCP client, web tools, subagents, eval, media | 382 |
 | `deployment-templates` | Docker Compose, Modal, Vercel, Railway | — |
 
-**803 tests** across all packages, green on every push (see CI). A `FakeProvider` makes them deterministic, offline, and free — no API calls in CI.
+**821 tests** across all packages, green on every push (see CI). A `FakeProvider` makes them deterministic, offline, and free — no API calls in CI.
 
 ## Use the modules without the CLI
 

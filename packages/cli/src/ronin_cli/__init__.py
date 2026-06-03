@@ -1,2 +1,2 @@
-"""ronin — the Claude-powered agent CLI for startup ops, code, and media."""
-__version__ = "0.55.0"
+"""ronin — a masterless, terminal-native, provider-agnostic coding agent."""
+__version__ = "0.56.0"

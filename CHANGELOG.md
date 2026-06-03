@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.56.0] — 2026-06-02
+
+Full rebrand to **ronin** (internals, config dir, packages — no more "claude-kit/csk"), plus a learning/trust pass: the router now learns, the agent can abstain, and ronin reaches GitHub. **803 → 821 tests.**
+
+### Added — learns & adapts
+- **Self-tuning Router** — after each routed turn the outcome (clean finish vs error/block) is recorded per (tier, provider) in `.ronin/router_stats.json`. When the cheap blade proves unreliable for a tier *in this repo* (≥4 samples, <60% success), the router escalates that tier to the strong blade on its own.
+- **Cost Router wired live** — `route_fast`/`route_strong` now actually switch the per-turn provider; the footer shows `💰 cost · saved $Y vs all-<provider> · N/M turns free`.
+
+### Added — trust
+- **Sentinel mode** (`ronin --sentinel`) — abstain over bluff: every reply ends with `CONFIDENCE: high|medium|low` and names what it's unsure about. Directly counters confident hallucination.
+- **Escalation ladder** — low confidence on a cheap blade retries the turn once on the strong blade (uncertainty escalates instead of shipping).
+
+### Added — GitHub
+- **`ronin review --pr N`** — review a GitHub PR (diff via `gh`); `--comment` posts the review back onto it.
+- **`ronin triage`** — read open issues and draft labels + priority + a first response (read-only).
+
+### Changed
+- Renamed everything from "Claude kit / csk" to **ronin**: `ronin_*` modules, `RoninConfig`, `ronin-*` packages, `.ronin/` config dir (with a safe one-time `.csk`→`.ronin` merge-migration), project dir `~/ronin`, dropped the `csk` alias.
+
 ## [0.55.0] — 2026-06-02
 
 ronin's signature pass — six provider-agnostic things a single-vendor agent
