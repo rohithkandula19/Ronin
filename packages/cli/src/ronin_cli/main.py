@@ -1100,6 +1100,56 @@ def map_cmd(
             console.print(f"[yellow]couldn't write RONIN.md: {e}[/yellow]")
 
 
+# ---------- scan (secret scanning) ----------
+
+@app.command()
+def scan(
+    staged: bool = typer.Option(False, "--staged", help="Scan only files staged for commit."),
+    quiet: bool = typer.Option(False, "--quiet", help="No output; just the exit code (for hooks)."),
+    root: Path = typer.Option(Path("."), "--root", help="Directory to scan."),
+) -> None:
+    """🔍 Scan for committed secrets. Exits non-zero if any are found — wire it
+    into a pre-commit hook with [bold]ronin hook install[/bold].
+    """
+    from .scan import scan_staged, scan_tree
+
+    findings = scan_staged(root) if staged else scan_tree(root)
+    if not findings:
+        if not quiet:
+            console.print("[green]✓ no secrets found[/green]")
+        return
+    if not quiet:
+        console.print(f"[bold #f7768e]✗ {len(findings)} file(s) with possible secrets:[/bold #f7768e]")
+        for f in findings:
+            console.print(f"  [red]{f.path}[/red] [dim]({', '.join(f.labels)})[/dim]")
+    raise typer.Exit(1)
+
+
+hook_app = typer.Typer(help="Manage ronin's git pre-commit secret-scan hook.")
+app.add_typer(hook_app, name="hook")
+
+
+@hook_app.command("install")
+def hook_install(root: Path = typer.Option(Path("."), "--root", help="Repo root.")) -> None:
+    """Install the pre-commit hook that blocks commits containing secrets."""
+    from .git_hook import install_hook
+    try:
+        path, fresh = install_hook(root)
+    except FileNotFoundError as e:
+        console.print(f"[yellow]{e}[/yellow]")
+        raise typer.Exit(2)
+    console.print(f"[green]✓ hook installed[/green] → [cyan]{path}[/cyan]" if fresh
+                  else "[dim]hook already installed.[/dim]")
+
+
+@hook_app.command("uninstall")
+def hook_uninstall(root: Path = typer.Option(Path("."), "--root", help="Repo root.")) -> None:
+    """Remove ronin's pre-commit hook snippet (preserves any other hook content)."""
+    from .git_hook import uninstall_hook
+    console.print("[green]✓ hook removed[/green]" if uninstall_hook(root)
+                  else "[dim]no ronin hook to remove.[/dim]")
+
+
 # ---------- setup (first-run wizard) ----------
 
 @app.command()

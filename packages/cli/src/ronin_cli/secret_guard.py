@@ -17,16 +17,44 @@ def _scanner():
     return SecretLeakScanner()
 
 
+# Substrings that mark an obvious example/placeholder, not a live credential —
+# e.g. AWS's documented "AKIAIOSFODNN7EXAMPLE". Suppress these to avoid flagging
+# docs, fixtures, and test data.
+_PLACEHOLDER_MARKERS = ("EXAMPLE", "PLACEHOLDER", "YOUR_", "YOURKEY", "XXXXXX",
+                        "REDACTED", "1234567890", "DEADBEEF", "TEST_TOKEN")
+# Inline allow-pragmas: put one on the same line as a known-safe value (a fixture,
+# a doc example) to suppress it — the standard detect-secrets-style escape hatch.
+_ALLOW_PRAGMAS = ("ronin:allow-secret", "pragma: allowlist secret", "noqa: secret")
+
+
+def _line_of(text: str, start: int, end: int) -> str:
+    ls = text.rfind("\n", 0, start) + 1
+    le = text.find("\n", end)
+    return text[ls:le if le != -1 else len(text)]
+
+
 def scan_secrets(text: str) -> list[str]:
     """Return a list of secret *labels* found in ``text`` (e.g. ['aws-access-key',
-    'github-token']). Empty when clean. Never raises."""
+    'github-token']). Obvious example/placeholder values are suppressed. Empty
+    when clean. Never raises."""
     if not text:
         return []
     try:
         res = _scanner().scan(text)
     except Exception:  # noqa: BLE001 — a guard must never break the edit path
         return []
-    return [f.label for f in res.findings] if res.flagged else []
+    if not res.flagged:
+        return []
+    labels: list[str] = []
+    for f in res.findings:
+        match = text[f.span_start:f.span_end].upper()
+        if any(m in match for m in _PLACEHOLDER_MARKERS):
+            continue  # documented example / placeholder, not a real secret
+        line = _line_of(text, f.span_start, f.span_end).lower()
+        if any(p in line for p in _ALLOW_PRAGMAS):
+            continue  # explicitly allow-listed on this line
+        labels.append(f.label)
+    return labels
 
 
 def secret_warning(text: str) -> str | None:
