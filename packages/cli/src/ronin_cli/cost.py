@@ -69,11 +69,14 @@ class CostLedger:
     baseline_spent: float = 0.0
     turns: int = 0
     free_turns: int = 0
+    last_actual: float = 0.0     # most recent turn's cost / baseline — for persistence
+    last_baseline: float = 0.0
     _by_provider: dict[str, float] = field(default_factory=dict)
 
     def record(self, provider: str, model: str | None, in_tok: int, out_tok: int) -> None:
         actual = estimate_cost(provider, model, in_tok, out_tok)
         baseline = estimate_cost(self.baseline_provider, self.baseline_model, in_tok, out_tok)
+        self.last_actual, self.last_baseline = actual, baseline
         self.spent += actual
         self.baseline_spent += baseline
         self.turns += 1

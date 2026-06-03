@@ -85,11 +85,13 @@ class GhostState:
 
 def run_ghost(config, root, console, *, interval: float = 1.5,
               run_tests: bool = False, watchful: bool = False,
+              duel_against: dict | None = None,
               max_ticks: int | None = None) -> None:
     """Watch ``root`` and react to saves (dependency-free mtime poll).
 
     ``run_tests`` runs the suite after a save and reacts to the result;
-    ``watchful`` additionally asks a model what likely broke on failure.
+    ``watchful`` additionally asks a model what likely broke on failure;
+    ``duel_against`` has a RIVAL provider red-team the breaking diff.
     ``max_ticks`` bounds the loop (tests pass it; real use leaves it None)."""
     state = GhostState(prev=snapshot(root))
     console.print(f"[dim]{react('idle')} · ghost watching {Path(root).resolve()} "
@@ -105,12 +107,13 @@ def run_ghost(config, root, console, *, interval: float = 1.5,
             shown = ", ".join(changed[:3]) + (f" +{len(changed) - 3} more" if len(changed) > 3 else "")
             console.print(f"[#7dcfff]{react('saved', shown)}[/#7dcfff]")
             if run_tests:
-                _react_to_tests(config, root, console, changed, watchful)
+                _react_to_tests(config, root, console, changed, watchful, duel_against)
     except KeyboardInterrupt:
         console.print(f"\n[dim]{react('idle')} · ghost dismissed ({state.saves} saves seen)[/dim]")
 
 
-def _react_to_tests(config, root, console, changed: list[str], watchful: bool) -> None:
+def _react_to_tests(config, root, console, changed: list[str], watchful: bool,
+                    duel_against: dict | None = None) -> None:
     from .kaizen import run_fitness
 
     console.print(f"[dim]{react('thinking')}[/dim]")
@@ -119,8 +122,24 @@ def _react_to_tests(config, root, console, changed: list[str], watchful: bool) -
         console.print(f"[green]{react('pass', fitness.summary)}[/green]")
         return
     console.print(f"[red]{react('fail', fitness.summary)}[/red]")
+    if duel_against is not None:
+        _ghost_duel(config, root, console, duel_against)
     if watchful:
         _watchful_hint(config, root, console, changed)
+
+
+def _ghost_duel(config, root, console, duel_against: dict) -> None:
+    """A rival model red-teams the breaking diff — proactive, before you ask."""
+    try:
+        from .duel import render_verdict, review_diff
+        from .git_helper import _git
+        diff = _git(root, "diff").stdout
+        if not diff.strip():
+            return
+        verdict = review_diff(config, diff, duel_against)
+        render_verdict(console, verdict)
+    except Exception:  # noqa: BLE001 — proactive review is best-effort
+        pass
 
 
 def _watchful_hint(config, root, console, changed: list[str]) -> None:

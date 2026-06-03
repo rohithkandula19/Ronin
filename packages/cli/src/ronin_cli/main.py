@@ -415,16 +415,23 @@ def ghost(
     root: Path = typer.Option(Path("."), "--root", help="Directory to watch."),
     test: bool = typer.Option(False, "--test", help="Run the test suite after each save and react."),
     watchful: bool = typer.Option(False, "--watchful", help="On a test failure, ask a model what likely broke."),
+    duel: str = typer.Option(None, "--duel", help="On a test failure, have a RIVAL provider[:model] red-team the diff."),
     interval: float = typer.Option(1.5, "--interval", help="Poll interval (seconds)."),
 ) -> None:
     """👻 Ambient pair — the panda watches your saves and reacts. With --test it
     runs your suite on each save (🐼✨ green / 🐼💥 broken); --watchful has a model
-    guess what broke. Dependency-free; Ctrl+C to dismiss.
+    guess what broke; --duel gemini has a rival model red-team the breaking diff.
+    Dependency-free; Ctrl+C to dismiss.
     """
     from .ghost import run_ghost
 
     config = load_config()
-    run_ghost(config, root, console, interval=interval, run_tests=test, watchful=watchful)
+    duel_spec = None
+    if duel:
+        from .consensus import parse_model_spec
+        duel_spec = parse_model_spec(duel)
+    run_ghost(config, root, console, interval=interval, run_tests=test,
+              watchful=watchful, duel_against=duel_spec)
 
 
 @app.command()
@@ -946,6 +953,45 @@ def serve(
     uvicorn.run(app_obj, host=host, port=port, log_level="info")
 
 
+# ---------- replay (session history) ----------
+
+@app.command()
+def replay(
+    session_id: str = typer.Argument(None, help="Session id to replay. Omit for the latest."),
+    list_sessions_flag: bool = typer.Option(False, "--list", help="List this repo's sessions and exit."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo whose sessions to read."),
+) -> None:
+    """⏪ Replay a past session as a readable story (who said what, trimmed).
+
+    `ronin replay` plays the latest; `ronin replay --list` shows all sessions to
+    pick an id from.
+    """
+    from .replay import render_story, transcript_to_turns
+    from .sessions import latest_session, list_sessions, load_session
+
+    if list_sessions_flag:
+        sessions = list_sessions(root)
+        if not sessions:
+            console.print("[dim]no saved sessions for this repo yet.[/dim]")
+            return
+        table = Table(title="sessions", box=box.ROUNDED)
+        table.add_column("id", style="cyan", no_wrap=True)
+        table.add_column("turns", justify="right")
+        table.add_column("title")
+        for s in sessions[:40]:
+            table.add_row(str(s.get("id", "?"))[:12], str(s.get("turns", 0)), s.get("title", "")[:70])
+        console.print(table)
+        return
+
+    sid = session_id or latest_session(root)
+    if not sid:
+        console.print("[dim]no sessions to replay. Run [bold]ronin code[/bold] first.[/dim]")
+        raise typer.Exit(1)
+    turns = transcript_to_turns(load_session(sid))
+    console.print(f"[#6b7089]replaying session [bold]{str(sid)[:12]}[/bold] · {len(turns)} entries[/#6b7089]")
+    render_story(console, turns)
+
+
 # ---------- map (codebase onboarding) ----------
 
 @app.command(name="map")
@@ -1032,8 +1078,23 @@ def router(
 def costs(
     by: str = typer.Option("model", "--by", help="Group by 'model' or 'day'."),
 ) -> None:
-    """Show token + cost usage recorded by previous ronin commands."""
+    """Show token + cost usage recorded by previous ronin commands, plus lifetime
+    Cost-Router savings (when routing is in use)."""
     from .usage import load_records, summarize, usage_path
+
+    # Lifetime Cost-Router savings (from .ronin/savings.jsonl) — shown first so it
+    # appears even before any per-call usage records exist.
+    from .savings import load_summary
+    _sv = load_summary(Path("."))
+    if _sv["turns"]:
+        panel = Table(box=box.ROUNDED, show_header=False, title="🪙 Cost Router (lifetime)")
+        panel.add_column(style="cyan", no_wrap=True)
+        panel.add_column(style="bold")
+        panel.add_row("routed turns", str(_sv["turns"]))
+        panel.add_row("free turns", f"{_sv['free_turns']}/{_sv['turns']}")
+        panel.add_row("spent", f"${_sv['spent']:.4f}")
+        panel.add_row("saved vs all-strong", f"[green]${_sv['saved']:.4f}[/green]")
+        console.print(panel)
 
     records = load_records()
     if not records:
@@ -1413,6 +1474,42 @@ def investigate(
 
 
 # ---------- fix ----------
+
+@app.command()
+def tdd(
+    spec: str = typer.Argument(..., help="What to build, e.g. \"parse_duration handles '2h30m'\"."),
+    test: str = typer.Option("pytest -q", "--test", help="Command that runs the test(s)."),
+    rounds: int = typer.Option(6, "--rounds", help="Max implement→re-run rounds."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    yolo: bool = typer.Option(False, "--yolo", help="Auto-approve edits (sandbox use)."),
+) -> None:
+    """🔴🟢 Test-first: ronin writes a FAILING test for the spec, then implements
+    until it (and the suite) pass — red → green, the disciplined way.
+
+    Example:  ronin tdd "slugify lowercases and strips punctuation"
+    """
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold].")
+        raise typer.Exit(2)
+    from .code_mode import run_code_agent
+    from .fix_mode import run_fix
+
+    console.print("[bold #f7768e]🔴 writing a failing test first…[/bold #f7768e]")
+    run_code_agent(
+        config,
+        f"Write a FAILING test that captures this requirement: {spec}\n\n"
+        "Create or extend the appropriate test file using the project's existing "
+        "test conventions. Do NOT implement the feature yet — write only the test, "
+        "so it fails for the right reason.",
+        root=root, console=console, yolo=yolo, max_iterations=12,
+    )
+    console.print("[bold #9ece6a]🟢 now implementing until it passes…[/bold #9ece6a]")
+    ok = run_fix(config, test, root=root, console=console, max_rounds=rounds, yolo=yolo)
+    console.print("[bold green]✅ green[/bold green]" if ok
+                  else "[yellow]still red after the round limit — pick it up from here[/yellow]")
+    raise typer.Exit(0 if ok else 1)
+
 
 @app.command(name="fix")
 def fix_cmd(

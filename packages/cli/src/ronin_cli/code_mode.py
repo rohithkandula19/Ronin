@@ -1471,6 +1471,9 @@ def run_code_session(
             _u = result.usage or {}
             ledger.record(turn_cfg.provider, turn_cfg.resolved_model(),
                           _u.get("input_tokens", 0), _u.get("output_tokens", 0))
+            from .savings import append_turn
+            append_turn(root, ledger.last_actual, ledger.last_baseline,
+                        _decision.free if _decision is not None else False)
         if _rstats is not None and _decision is not None:
             from .router_stats import save_stats
             _rstats.record(_decision.tier, turn_cfg.provider, result.success)
@@ -1728,6 +1731,9 @@ def run_unified_session(
             _u = result.usage or {}
             ledger.record(turn_cfg.provider, turn_cfg.resolved_model(),
                           _u.get("input_tokens", 0), _u.get("output_tokens", 0))
+            from .savings import append_turn
+            append_turn(root, ledger.last_actual, ledger.last_baseline,
+                        _decision.free if _decision is not None else False)
         if _rstats is not None and _decision is not None:
             from .router_stats import save_stats
             _rstats.record(_decision.tier, turn_cfg.provider, result.success)
