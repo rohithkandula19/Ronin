@@ -1630,6 +1630,119 @@ def setup() -> None:
                   "[dim]every session now shows 💰 cost · saved $… and self-tunes over time.[/dim]")
 
 
+# ---------- archaeology (why is this code here) ----------
+
+@app.command()
+def archaeology(
+    file: str = typer.Argument(..., help="The file to investigate."),
+    limit: int = typer.Option(25, "--limit", help="How many commits of history to read."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """🏺 Why is this code the way it is? ronin reconstructs the file's story from
+    git history and explains what each significant change was for + any gotchas.
+    """
+    from .archaeology import file_history, history_brief
+
+    commits = file_history(root, file, limit=limit)
+    if not commits:
+        console.print(f"[yellow]no git history for[/yellow] [bold]{file}[/bold] [dim](new file, or not tracked?)[/dim]")
+        raise typer.Exit(1)
+    console.print(f"[#6b7089]🏺 {len(commits)} commit(s) shaped[/#6b7089] [bold]{file}[/bold]")
+    for c in commits[:12]:
+        console.print(f"  [dim]{c['date']}[/dim] [cyan]{c['short']}[/cyan] "
+                      f"[#6b7089]{c['author'][:16]}[/#6b7089]  {c['subject'][:60]}")
+
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print("[dim]set a provider for the AI history analysis.[/dim]")
+        return
+    from .code_mode import run_code_agent
+    console.print("\n[#6b7089]reading the story…[/#6b7089]")
+    run_code_agent(
+        config,
+        f"Read @{file} and its git history below. Explain its archaeology concisely: "
+        "the major phases it went through, what each significant change solved, and "
+        "any gotchas or load-bearing decisions the history reveals.\n\n"
+        f"History (newest first):\n{history_brief(commits)}",
+        root=root, console=console, read_only=True, include_image_tool=False, max_iterations=8)
+
+
+# ---------- perf (benchmark + analyze) ----------
+
+@app.command()
+def perf(
+    command: list[str] = typer.Argument(..., help="The command to benchmark, e.g. \"pytest -q\"."),
+    runs: int = typer.Option(5, "--runs", help="Timed runs (after a warmup)."),
+    analyze: bool = typer.Option(False, "--analyze", help="Have ronin suggest where the time goes."),
+    root: Path = typer.Option(Path("."), "--root", help="Working directory."),
+) -> None:
+    """⏱  Benchmark a command (min / mean / median / max over N runs), with optional
+    AI analysis of where the time goes.
+    """
+    from .perf import benchmark
+
+    cmd = " ".join(command)
+    console.print(f"[#7aa2f7]⏱ benchmarking[/#7aa2f7] [bold]{cmd}[/bold] [dim]({runs} runs + warmup)[/dim]")
+    with console.status("[dim] running…[/dim]", spinner="dots"):
+        r = benchmark(cmd, runs=runs, root=root)
+    if r["runs"] == 0:
+        console.print("[yellow]no successful runs.[/yellow]")
+        raise typer.Exit(1)
+    console.print(f"  mean   [bold]{r['mean']:.3f}s[/bold]  [dim]± {r['stdev']:.3f}[/dim]")
+    console.print(f"  median {r['median']:.3f}s   min {r['min']:.3f}s   max {r['max']:.3f}s")
+    if r["failures"]:
+        console.print(f"  [yellow]{r['failures']} run(s) exited non-zero[/yellow]")
+    if analyze:
+        config = load_config()
+        if not config.has_provider_auth():
+            return
+        from .code_mode import run_code_agent
+        console.print("\n[#6b7089]analyzing…[/#6b7089]")
+        run_code_agent(
+            config,
+            f"`{cmd}` runs in ~{r['mean']:.3f}s (median {r['median']:.3f}s). Explore the "
+            "code it exercises and suggest the 1-3 highest-leverage speedups. Be specific.",
+            root=root, console=console, read_only=True, include_image_tool=False, max_iterations=10)
+
+
+# ---------- debate (multi-round cross-vendor argument) ----------
+
+@app.command()
+def debate(
+    question: str = typer.Argument(..., help="The question to debate."),
+    models: str = typer.Option(..., "--models", "-m", help="Panelists, e.g. 'anthropic,gemini,cerebras'."),
+    rounds: int = typer.Option(2, "--rounds", help="Debate rounds (≥2 lets them critique each other)."),
+    judge: str = typer.Option(None, "--judge", help="provider[:model] to synthesize (default: current)."),
+) -> None:
+    """🥊 Several models DEBATE a question across rounds — each sees the others'
+    answers, critiques them, and refines its own — then a judge synthesizes the
+    converged answer. Cross-examination across vendors, not a one-shot vote.
+    """
+    from .consensus import parse_model_spec
+    from .debate import run_debate
+
+    config = load_config()
+    specs = [parse_model_spec(s) for s in models.split(",") if s.strip()]
+    if len(specs) < 2:
+        console.print("[yellow]a debate needs at least 2 panelists[/yellow] — e.g. [cyan]-m anthropic,gemini[/cyan]")
+        raise typer.Exit(2)
+    judge_spec = parse_model_spec(judge) if judge else None
+    labels = ", ".join(f"{s['provider']}{':' + s['model'] if s.get('model') else ''}" for s in specs)
+    console.print(f"[dim]🥊 {len(specs)} panelists · {rounds} rounds — {labels}[/dim]")
+
+    def _on_round(r, panelists):
+        console.print(f"\n[bold #7aa2f7]── round {r + 1} ──[/bold #7aa2f7]")
+        for p in panelists:
+            if p.rounds and p.rounds[-1].strip():
+                console.print(f"[bold]{p.label}[/bold]")
+                console.print(f"  [#c0caf5]{p.rounds[-1][:500]}[/#c0caf5]")
+
+    result = run_debate(config, question, specs, rounds=rounds, judge_spec=judge_spec, on_round=_on_round)
+    from rich.panel import Panel
+    console.print(Panel(result.synthesis or "(no synthesis)",
+                        title="[bold #2dd4bf]⚖ synthesis[/bold #2dd4bf]", border_style="#2dd4bf", padding=(0, 1)))
+
+
 # ---------- bisect (autonomous regression hunt) ----------
 
 @app.command()
