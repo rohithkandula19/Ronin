@@ -1630,6 +1630,52 @@ def setup() -> None:
                   "[dim]every session now shows 💰 cost · saved $… and self-tunes over time.[/dim]")
 
 
+# ---------- bisect (autonomous regression hunt) ----------
+
+@app.command()
+def bisect(
+    command: list[str] = typer.Argument(..., help="The command that FAILS now but passed before, e.g. \"pytest -k test_login\"."),
+    good: str = typer.Option(None, "--good", help="A known-good ref (default: last tag, else HEAD~20)."),
+    bad: str = typer.Option("HEAD", "--bad", help="A known-bad ref (default: HEAD)."),
+    analyze: bool = typer.Option(True, "--analyze/--no-analyze", help="Have ronin explain the culprit diff."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo to bisect."),
+) -> None:
+    """🔬 Find the commit that broke something — automatically. ronin drives
+    git bisect (in an isolated worktree, your checkout untouched) using your
+    command as the oracle, then explains the culprit's diff and suggests a fix.
+    """
+    from .bisect import default_good, run_bisect
+
+    cmd = " ".join(command)
+    g = good or default_good(root)
+    if not g:
+        console.print("[yellow]couldn't find a known-good ref — pass --good <ref>.[/yellow]")
+        raise typer.Exit(2)
+    console.print(f"[#7aa2f7]🔬 bisecting[/#7aa2f7] [dim]{g[:12]} … {bad} · oracle: {cmd}[/dim]")
+    with console.status("[dim] running git bisect (isolated worktree)…[/dim]", spinner="dots"):
+        res = run_bisect(root, cmd, good=g, bad=bad)
+    if not res.culprit:
+        console.print(f"[yellow]no culprit found[/yellow] [dim]({res.note})[/dim]")
+        raise typer.Exit(1)
+    console.print(f"[bold #f7768e]✗ first bad commit:[/bold #f7768e] [bold]{res.subject}[/bold]")
+
+    if analyze:
+        config = load_config()
+        if not config.has_provider_auth():
+            console.print(f"[dim]commit {res.culprit[:12]} — set a provider to get an AI analysis.[/dim]")
+            return
+        from .code_mode import run_code_agent
+        console.print("[#6b7089]analyzing the culprit…[/#6b7089]")
+        run_code_agent(
+            config,
+            f"This commit introduced a regression that makes `{cmd}` fail. Read the "
+            f"diff and explain, concisely: (1) what change most likely caused it, and "
+            f"(2) a specific fix. Use read-only tools to check the current code if needed.\n\n"
+            f"```diff\n{res.diff[:12000]}\n```",
+            root=root, console=console, read_only=True, include_image_tool=False, max_iterations=8,
+        )
+
+
 # ---------- status (mission-control dashboard) ----------
 
 @app.command()
