@@ -4,3 +4,4 @@ test_secret_scanner.py
 test_secret_guard.py
 test_scan_hook.py
 test_roninignore.py
+test_cov_secrets.py
