@@ -1165,14 +1165,16 @@ def style(
 @app.command()
 def patches(
     apply: bool = typer.Option(False, "--apply", help="Apply the patches to your working tree."),
-    clean: bool = typer.Option(False, "--clean", help="With --apply: only patches with no Duel blockers."),
+    pr: bool = typer.Option(False, "--pr", help="Open a GitHub PR per patch (branch + push + gh)."),
+    clean: bool = typer.Option(False, "--clean", help="Only patches with no Duel blockers."),
     root: Path = typer.Option(Path("."), "--root", help="Repo root."),
 ) -> None:
-    """📦 Review (or apply) the patches from your last `ronin nightshift --execute`.
+    """📦 Review, apply, or PR the patches from your last `ronin nightshift --execute`.
 
     Lists each task + status + blockers. `--apply` applies the ready patches to
-    your working tree (`--clean` skips any a Duel flagged), so you review the
-    result as normal changes before committing.
+    your working tree; `--pr` opens a GitHub PR per patch (each on its own branch,
+    built in an isolated worktree so your checkout is untouched). `--clean` skips
+    any a Duel flagged.
     """
     from .nightshift import apply_patch, applicable, load_report
 
@@ -1195,11 +1197,35 @@ def patches(
         table.add_row(_style.get(r.get("status"), r.get("status", "?")), r.get("title", "")[:50], note[:40])
     console.print(table)
 
-    if not apply:
+    if not apply and not pr:
         ready = applicable(report)
         if ready:
             console.print(f"[dim]{len(ready)} patch(es) ready — [bold]ronin patches --apply[/bold] "
-                          "(add --clean to skip flagged ones).[/dim]")
+                          "or [bold]--pr[/bold] (add --clean to skip flagged ones).[/dim]")
+        return
+
+    if pr:
+        from .nightshift_pr import branch_commit_in_worktree, branch_name, open_pr, push_branch
+        ready = applicable(report, clean_only=clean)
+        if not ready:
+            console.print("[dim]nothing to open.[/dim]")
+            return
+        opened = 0
+        for i, r in enumerate(ready, 1):
+            br = branch_name(r["title"], i)
+            ok, note = branch_commit_in_worktree(root, r["patch_path"], br,
+                                                 f"nightshift: {r['title']}")
+            if not ok:
+                console.print(f"  [red]✗[/red] {r['title'][:45]} [dim]({note})[/dim]")
+                continue
+            if not push_branch(root, br):
+                console.print(f"  [yellow]⊘[/yellow] {r['title'][:45]} [dim](committed {br}, push failed)[/dim]")
+                continue
+            url = open_pr(root, br, f"nightshift: {r['title']}",
+                          f"Autonomous patch from `ronin nightshift`.\n\n{r.get('note','')}")
+            opened += 1 if url else 0
+            console.print(f"  [green]✓[/green] {r['title'][:45]} [dim]→ {url or br}[/dim]")
+        console.print(f"[green]opened {opened} PR(s)[/green]")
         return
 
     to_apply = applicable(report, clean_only=clean)

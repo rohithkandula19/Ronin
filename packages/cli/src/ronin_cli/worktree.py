@@ -56,6 +56,36 @@ def worktree_diff(worktree: Path) -> str:
 
 
 @contextmanager
+def git_worktree_branch(root: Path | str, branch: str, label: str = "pr") -> Iterator[Path]:
+    """Create a worktree on a NEW branch ``branch`` (off HEAD) and clean up the
+    worktree on exit — but keep the branch (so it can be pushed). Use for turning
+    an autonomous patch into a real PR branch without touching the main checkout.
+    """
+    root_path = Path(root).resolve()
+    if not is_git_repo(root_path):
+        raise NotAGitRepo(f"{root_path} is not a git repository — worktree isolation needs git")
+
+    tmp = Path(tempfile.mkdtemp(prefix=f"ronin-wt-{label}-"))
+    target = tmp / "wt"
+    try:
+        with _WT_LOCK:
+            _git(root_path, "worktree", "add", "-b", branch, str(target), "HEAD")
+        yield target
+    finally:
+        with _WT_LOCK:
+            _git(root_path, "worktree", "remove", "--force", str(target), check=False)
+        try:
+            target.rmdir()
+        except OSError:
+            pass
+        try:
+            tmp.rmdir()
+        except OSError:
+            pass
+        _git(root_path, "worktree", "prune", check=False)
+
+
+@contextmanager
 def git_worktree(root: Path | str, label: str = "agent") -> Iterator[Path]:
     """Create a detached worktree at HEAD and clean it up on exit.
 
