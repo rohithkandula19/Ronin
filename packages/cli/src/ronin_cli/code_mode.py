@@ -934,6 +934,49 @@ SLASH_COMMANDS: dict[str, str] = {
 }
 
 
+# /help, grouped into sections for a calm, scannable layout.
+_HELP_GROUPS: list[tuple[str, list[str]]] = [
+    ("🧠  provider & model", ["login", "model", "models", "route"]),
+    ("✏️  editing & git", ["undo", "diff", "commit", "pr"]),
+    ("📁  context & memory", ["memory", "init", "context", "compact", "resume", "clear"]),
+    ("🔧  tools & agents", ["tools", "mcp", "agents", "verify", "voice"]),
+    ("⚙️  session", ["copy", "export", "vim", "doctor", "config", "help", "quit"]),
+]
+
+
+def _render_help(console: "Console") -> None:
+    """A grouped, aligned, premium /help screen."""
+    from rich.text import Text
+
+    from .theme import ACCENT, MUTE, SOFT, gradient_text
+
+    console.print()
+    title = gradient_text("ronin")
+    title.append("  ·  in-session commands", style=f"bold {SOFT}")
+    console.print(Text("  ") + title)
+    console.print()
+    shown: set[str] = set()
+    for header, names in _HELP_GROUPS:
+        console.print(f"  [bold {ACCENT}]{header}[/bold {ACCENT}]")
+        for name in names:
+            desc = SLASH_COMMANDS.get(name)
+            if not desc:
+                continue
+            shown.add(name)
+            console.print(f"    [cyan]/{name:<9}[/cyan] [dim]{desc}[/dim]")
+        console.print()
+    # any command not placed in a group (future-proofing) still shows
+    extra = [n for n in SLASH_COMMANDS if n not in shown]
+    if extra:
+        console.print(f"  [bold {ACCENT}]…more[/bold {ACCENT}]")
+        for name in extra:
+            console.print(f"    [cyan]/{name:<9}[/cyan] [dim]{SLASH_COMMANDS[name]}[/dim]")
+        console.print()
+    console.print(Text("  @path / @url to add context · ! to run a shell command · "
+                       "# to note a memory · shift+tab to cycle mode", style=MUTE))
+    console.print()
+
+
 def _copy_to_clipboard(text: str) -> bool:
     """Best-effort copy to the OS clipboard. Returns True on success.
     Tries pbcopy (macOS), clip (Windows), then xclip/xsel (Linux)."""
@@ -1094,9 +1137,7 @@ def handle_slash_command(
         console.print("[dim]bye[/dim]")
         return "exit"
     if cmd in ("help", "h", "?"):
-        console.print("[bold]commands[/bold]")
-        for name, desc in SLASH_COMMANDS.items():
-            console.print(f"  [cyan]/{name}[/cyan]  [dim]{desc}[/dim]")
+        _render_help(console)
         return "handled"
     if cmd in ("login", "key"):
         # Switch provider + set its key from inside the session — masked input,
