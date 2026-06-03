@@ -1122,6 +1122,44 @@ def pr(
     open_pr(console, root, config)
 
 
+# ---------- style (fine-tuning dataset from your sessions) ----------
+
+@app.command()
+def style(
+    out: str = typer.Option("ronin-style.jsonl", "--out", help="Output JSONL path."),
+    with_bushido: bool = typer.Option(True, "--bushido/--no-bushido", help="Prepend your code-of-honor as the system message."),
+    here: bool = typer.Option(False, "--here", help="Only this repo's sessions (default: all)."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo (with --here)."),
+) -> None:
+    """🧬 Export your past sessions as a fine-tuning dataset (chat JSONL) — the first
+    step toward a local model that codes in *your* style, free.
+
+    Pairs each request with ronin's response; --bushido prepends your standing
+    conventions as the system message. Train a local/hosted model on the result.
+    """
+    from .sessions import list_sessions, load_session
+    from .style import build_dataset, to_jsonl
+
+    metas = list_sessions(root if here else None)
+    transcripts = [load_session(str(m.get("id"))) for m in metas]
+    system = None
+    if with_bushido:
+        from .bushido import load_bushido
+        system = load_bushido()
+    rows = build_dataset(transcripts, system=system)
+    if not rows:
+        console.print("[dim]no usable session data yet — code with ronin a while, then re-run.[/dim]")
+        return
+    try:
+        Path(out).write_text(to_jsonl(rows), encoding="utf-8")
+    except OSError as e:
+        console.print(f"[red]couldn't write {out}: {e}[/red]")
+        raise typer.Exit(1)
+    sysline = " (with Bushido system prompt)" if system else ""
+    console.print(f"[green]✓ {len(rows)} training example(s){sysline} →[/green] [cyan]{out}[/cyan]\n"
+                  "[dim]fine-tune a local model on this to make ronin code in your style, free.[/dim]")
+
+
 # ---------- patches (review/apply nightshift output) ----------
 
 @app.command()
@@ -1226,6 +1264,7 @@ def nightshift(
     swarm_roster: str = typer.Option(None, "--swarm", help="Work each task with a swarm (role=provider roster)."),
     budget: float = typer.Option(None, "--budget", help="USD spend cap for the run."),
     limit: int = typer.Option(10, "--limit", help="Max tasks."),
+    redo: bool = typer.Option(False, "--redo", help="Re-attempt tasks already shipped in past runs."),
     schedule: str = typer.Option(None, "--schedule", help="Install a cron entry, e.g. '0 2 * * *' (runs nightly)."),
     unschedule: bool = typer.Option(False, "--unschedule", help="Remove ronin's scheduled nightshift."),
     root: Path = typer.Option(Path("."), "--root", help="Repo to work in."),
@@ -1271,10 +1310,11 @@ def nightshift(
             console.print("[yellow]couldn't write the crontab[/yellow] [dim](is `crontab` available?)[/dim]")
         return
 
-    tasks = gather_tasks(root, include_todos=todos, include_issues=issues, goal=goal, limit=limit)
+    tasks = gather_tasks(root, include_todos=todos, include_issues=issues, goal=goal,
+                         limit=limit, skip_done=not redo)
     if not tasks:
         console.print("[dim]empty backlog — no goal, no TODO/FIXME markers"
-                      f"{', no open issues' if issues else ''}.[/dim]")
+                      f"{', no open issues' if issues else ''} (or all already shipped; --redo to re-attempt).[/dim]")
         return
 
     console.print(f"[#7aa2f7]🌙 nightshift queue — {len(tasks)} task(s)[/#7aa2f7]"

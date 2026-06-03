@@ -8,9 +8,33 @@ from ronin_cli.nightshift import (
     TaskResult,
     applicable,
     apply_patch,
+    gather_tasks,
+    load_done,
     load_report,
+    mark_done,
     save_report,
+    task_signature,
 )
+
+
+def test_task_signature_stable_and_distinct() -> None:
+    a = Task("todo", "fix x", "d", ref="a.py:1")
+    a2 = Task("todo", "fix x", "different detail", ref="a.py:1")  # detail not in sig
+    b = Task("todo", "fix x", "d", ref="a.py:2")
+    assert task_signature(a) == task_signature(a2)
+    assert task_signature(a) != task_signature(b)
+
+
+def test_done_ledger_skips_completed(tmp_path) -> None:
+    (tmp_path / "m.py").write_text("# TODO: alpha\n# TODO: beta\n", encoding="utf-8")
+    first = gather_tasks(tmp_path)
+    assert len(first) == 2
+    mark_done(tmp_path, first[0])              # ship the first
+    again = gather_tasks(tmp_path)             # skip_done default
+    assert len(again) == 1 and again[0].title == first[1].title
+    # --redo equivalent: skip_done=False brings it back
+    assert len(gather_tasks(tmp_path, skip_done=False)) == 2
+    assert task_signature(first[0]) in load_done(tmp_path)
 
 
 def _results() -> list[TaskResult]:

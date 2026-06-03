@@ -20,6 +20,7 @@ from pathlib import Path
 
 _OUT_DIR = Path(".ronin") / "nightshift"
 _REPORT = _OUT_DIR / "report.json"
+_DONE = _OUT_DIR / "done.json"
 
 
 @dataclass
@@ -45,10 +46,39 @@ class TaskResult:
     blockers: list[str] = field(default_factory=list)
 
 
+def task_signature(task: Task) -> str:
+    """Stable id for a task, so completed work isn't redone. Pure."""
+    import hashlib
+    return hashlib.sha1(f"{task.source}|{task.ref}|{task.title}".encode()).hexdigest()[:16]
+
+
+def load_done(root: Path | str) -> set[str]:
+    """Signatures of tasks already shipped (patched) in past runs."""
+    path = Path(root) / _DONE
+    if not path.is_file():
+        return set()
+    try:
+        return set(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, ValueError, TypeError):
+        return set()
+
+
+def mark_done(root: Path | str, task: Task) -> None:
+    done = load_done(root)
+    done.add(task_signature(task))
+    path = Path(root) / _DONE
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(sorted(done)), encoding="utf-8")
+    except OSError:
+        pass
+
+
 def gather_tasks(root: Path | str, *, include_todos: bool = True,
                  include_issues: bool = False, goal: str | None = None,
-                 limit: int = 20) -> list[Task]:
-    """Build the backlog from the requested sources. Pure given the sources."""
+                 limit: int = 20, skip_done: bool = True) -> list[Task]:
+    """Build the backlog from the requested sources, skipping tasks already
+    shipped in a past run (unless ``skip_done`` is False). Pure given sources."""
     tasks: list[Task] = []
     if goal:
         tasks.append(Task("goal", goal.strip()[:80], goal.strip()))
@@ -62,6 +92,9 @@ def gather_tasks(root: Path | str, *, include_todos: bool = True,
         from .gh_helper import open_issues
         for i in open_issues(root, limit=limit):
             tasks.append(Task("issue", i["title"], i["body"], ref=f"#{i['number']}"))
+    if skip_done:
+        done = load_done(root)
+        tasks = [t for t in tasks if task_signature(t) not in done]
     return tasks[:limit]
 
 
@@ -201,6 +234,7 @@ def run_nightshift(config, root, console, tasks: list[Task], *, execute: bool = 
             continue
         results.append(TaskResult(task, "patched", note=fitness.summary,
                                   patch_path=str(pp), blockers=blockers))
+        mark_done(root, task)   # don't redo this task on the next (scheduled) run
         flag = f" [yellow]· {len(blockers)} blocker(s)[/yellow]" if blockers else ""
         console.print(f"[green]  ✓ patch ready[/green] [dim]({fitness.summary})[/dim]{flag}")
 
