@@ -956,13 +956,14 @@ SLASH_COMMANDS: dict[str, str] = {
     "vim": "toggle vi-style keybindings in the input box (/vim on|off)",
     "doctor": "health check: provider auth, model, services",
     "config": "show the active config (provider, model, paths)",
+    "cost": "show lifetime Cost-Router spend + savings",
     "quit": "exit the session",
 }
 
 
 # /help, grouped into sections for a calm, scannable layout.
 _HELP_GROUPS: list[tuple[str, list[str]]] = [
-    ("🧠  provider & model", ["login", "model", "models", "route"]),
+    ("🧠  provider & model", ["login", "model", "models", "route", "cost"]),
     ("✏️  editing & git", ["undo", "diff", "commit", "pr"]),
     ("📁  context & memory", ["memory", "init", "context", "compact", "resume", "clear"]),
     ("🔧  tools & agents", ["tools", "mcp", "agents", "verify", "voice"]),
@@ -1001,6 +1002,44 @@ def _render_help(console: "Console") -> None:
     console.print(Text("  @path / @url to add context · ! to run a shell command · "
                        "# to note a memory · shift+tab to cycle mode", style=MUTE))
     console.print()
+
+
+_TOOL_GROUPS: list[tuple[str, list[str]]] = [
+    ("📖  read & search", ["read_file", "list_files", "search_files", "glob"]),
+    ("✏️  edit", ["write_file", "edit_file", "multi_edit"]),
+    ("🖥️  run", ["run_command"]),
+    ("🔀  git", ["git_status", "git_diff", "git_log"]),
+    ("🌐  web", ["web_search", "fetch_url"]),
+    ("🧠  code intelligence", ["definition", "references", "diagnostics"]),
+    ("📋  plan", ["update_todos"]),
+]
+
+
+def _render_tools(console: "Console", root) -> None:
+    """A grouped, described view of the agent's tools (matches /help)."""
+    from .git_tools import build_git_tools
+    from .lsp import build_lsp_tools
+    from .theme import ACCENT
+    from .web_tools import build_web_tools
+
+    by_name = {}
+    for t in (build_code_tools(root) + build_lsp_tools(root) + build_web_tools()
+              + build_git_tools(root) + [build_todo_tool(TodoStore())]):
+        by_name[t.name] = t
+    console.print(f"[bold]tools[/bold] [dim]({len(by_name)} available to the agent)[/dim]")
+    shown: set[str] = set()
+    for header, names in _TOOL_GROUPS:
+        present = [n for n in names if n in by_name]
+        if not present:
+            continue
+        console.print(f"  [bold {ACCENT}]{header}[/bold {ACCENT}]")
+        for n in present:
+            shown.add(n)
+            desc = (by_name[n].description or "").replace("\n", " ").split(".")[0].strip()[:58]
+            console.print(f"    [cyan]{n:<14}[/cyan] [dim]{desc}[/dim]")
+    extra = [n for n in by_name if n not in shown]
+    if extra:
+        console.print(f"  [dim]+ {', '.join(extra)}[/dim]")
 
 
 def _copy_to_clipboard(text: str) -> bool:
@@ -1312,10 +1351,20 @@ def handle_slash_command(
         console.print(f"[green]✓[/green] project memory at [cyan]{path}[/cyan]")
         return "handled"
     if cmd == "tools":
-        from .lsp import build_lsp_tools
-        names = ([t.name for t in build_code_tools(root)]
-                 + [t.name for t in build_lsp_tools(root)] + ["update_todos"])
-        console.print("[dim]" + ", ".join(names) + "[/dim]")
+        _render_tools(console, root)
+        return "handled"
+    if cmd in ("cost", "costs"):
+        from .savings import load_summary
+        s = load_summary(root)
+        if not s["turns"]:
+            console.print("[dim]no routed turns yet — set up the Cost Router with "
+                          "[bold]ronin setup[/bold] to track savings.[/dim]")
+            return "handled"
+        console.print(f"[bold]💰 Cost Router[/bold] [dim](lifetime)[/dim]")
+        console.print(f"  routed turns   [bold]{s['turns']}[/bold] "
+                      f"[dim]({s['free_turns']} free)[/dim]")
+        console.print(f"  spent          [bold]${s['spent']:.4f}[/bold]")
+        console.print(f"  saved          [green]${s['saved']:.4f}[/green] [dim]vs all-strong[/dim]")
         return "handled"
     if cmd == "mcp":
         from rich.table import Table as _Table
