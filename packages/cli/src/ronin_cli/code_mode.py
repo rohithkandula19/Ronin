@@ -145,6 +145,11 @@ _URL_MENTION_RE = _re.compile(r"(?:^|\s)@(https?://[^\s]+)")
 
 # read-only tool subset (for plan mode — explore but don't mutate)
 _READONLY_CODE_TOOLS = {"read_file", "list_files", "search_files", "glob"}
+# Fast mode keeps only the essential coding tools — the heavy extras (LSP, web,
+# git, vision, semantic, background, checkpoint, …) are dropped so the per-call
+# tool payload (and thus latency + token cost) is a fraction of the full set.
+_FAST_TOOLS = {"read_file", "list_files", "search_files", "glob", "write_file",
+               "edit_file", "multi_edit", "run_command", "update_todos"}
 
 
 def _session_path(root: Path | str) -> _Path:
@@ -358,7 +363,8 @@ def _render_diff(console: Console, diff: str, path: str | None = None) -> None:
             console.print(f"[dim]{line}[/dim]")
         return
 
-    syn = Syntax("", _lang_for(path), theme="monokai", background_color="default")
+    from .theme import CODE_THEME
+    syn = Syntax("", _lang_for(path), theme=CODE_THEME, background_color="default")
     width = min(console.width or 100, 120)
     add_bg, del_bg = "#15291c", "#2c161b"   # subtle full-row tints
     sign_style = {"add": "bold #73daca", "del": "bold #f7768e", "ctx": "#3b4261"}
@@ -537,6 +543,12 @@ def run_code_agent(
     # providers reject the request outright.
     _seen: set[str] = set()
     tools = [t for t in tools if not (t.name in _seen or _seen.add(t.name))]
+
+    # Fast mode: ship only the core coding tools so the per-call tool-schema
+    # payload (the bulk of input tokens on a 20-tool agent) shrinks dramatically
+    # — fewer tokens = faster turns + fewer rate-limit hits on free tiers.
+    if getattr(config, "fast", False):
+        tools = [t for t in tools if t.name in _FAST_TOOLS]
 
     # Project memory: fold RONIN.md / CLAUDE.md / AGENTS.md into the system
     # prompt so the agent follows the repo's conventions. Announce it once (on

@@ -81,15 +81,23 @@ class LiveRenderer:
     def _is_term(self) -> bool:
         return bool(getattr(self.console, "is_terminal", False))
 
+    # On-brand thinking verbs — a different one each turn (the samurai-panda is busy).
+    _THINKING = ("thinking", "forging", "sharpening", "pondering", "tracking",
+                 "scheming", "reasoning", "hunting", "plotting", "weighing")
+
     # --- thinking spinner ----------------------------------------------------
     def start(self) -> None:
-        """Begin the soft 'thinking…' animation (only on a real terminal)."""
+        """Begin the soft 'thinking…' animation (only on a real terminal), with a
+        rotating ronin-flavoured verb."""
         if not self._is_term():
             return
         try:
+            import random
+
             from rich.text import Text
+            verb = random.choice(self._THINKING)
             self._status = self.console.status(
-                Text(" thinking…", style=SOFT), spinner="dots", spinner_style=ACCENT)
+                Text(f" {verb}…", style=SOFT), spinner="dots", spinner_style=ACCENT)
             self._status.start()
         except Exception:  # noqa: BLE001
             self._status = None
@@ -105,7 +113,9 @@ class LiveRenderer:
     # --- text block (live Markdown on a TTY) ---------------------------------
     def _markdown(self):
         from rich.markdown import Markdown
-        return Markdown(self._buf, code_theme="monokai")
+
+        from .theme import CODE_THEME
+        return Markdown(self._buf, code_theme=CODE_THEME)
 
     def _end_text(self) -> None:
         """Finalise the current streamed block so tool lines / dividers follow it."""

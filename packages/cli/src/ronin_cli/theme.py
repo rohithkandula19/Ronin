@@ -19,6 +19,10 @@ SOFT = "#9aa0b8"            # soft foreground for secondary text
 BULLET = f"[{ACCENT}]⏺[/{ACCENT}]"   # filled turn/action marker (Claude-Code style)
 CONNECTOR = "⎿"                       # result connector under a tool call (CC's ⎿)
 
+# One syntax-highlight theme for everything ronin renders (diffs, code blocks in
+# answers) so the look is cohesive. Vivid, on-brand (purple/cyan).
+CODE_THEME = "dracula"
+
 # gradient stops for the ronin wordmark (cyan → teal → mint)
 GRADIENT = ((0x22, 0xD3, 0xEE), (0x2D, 0xD4, 0xBF), (0x34, 0xD3, 0x99))
 

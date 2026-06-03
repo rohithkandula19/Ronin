@@ -88,6 +88,9 @@ class RoninConfig(BaseModel):
     # Spend cap (USD) for an interactive session: ronin tracks estimated cost and
     # warns once the session crosses it. None → no cap.
     budget: float | None = None
+    # Fast mode: ship only the core coding tools (smaller per-call payload →
+    # snappier turns + fewer rate-limit hits). Trades breadth for speed.
+    fast: bool = False
     # Cross-provider failover: ordered fallbacks tried (after the primary) when a
     # provider rate-limits or errors mid-turn. Each entry is a partial provider
     # spec: {provider, model?, base_url?, api_key?}. Empty → no failover.

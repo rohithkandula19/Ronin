@@ -81,6 +81,11 @@ def _root(
         help="Spend cap (USD) for this session — ronin warns once estimated cost "
              "crosses it. The footer shows 💸 spent $X of $cap.",
     ),
+    fast: bool = typer.Option(
+        False, "--fast",
+        help="Snappier turns: ship only the core coding tools (smaller per-call "
+             "payload → less latency + fewer rate-limit hits). Trades breadth for speed.",
+    ),
 ) -> None:
     if ctx.invoked_subcommand is not None:
         return
@@ -132,6 +137,11 @@ def _root(
     if isinstance(budget, (int, float)) and budget > 0:
         config = config.model_copy(update={"budget": float(budget)})
         console.print(f"[#6b7089]💸 budget cap — ${budget:.2f} for this session[/#6b7089]")
+    if not isinstance(fast, bool):
+        fast = False
+    if fast:
+        config = config.model_copy(update={"fast": True})
+        console.print("[#6b7089]⚡ fast mode — core tools only, snappier turns[/#6b7089]")
 
     root = Path(".")
 
