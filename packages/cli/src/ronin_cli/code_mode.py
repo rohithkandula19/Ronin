@@ -1708,7 +1708,8 @@ def run_code_session(
         if ledger is not None:
             _u = result.usage or {}
             ledger.record(turn_cfg.provider, turn_cfg.resolved_model(),
-                          _u.get("input_tokens", 0), _u.get("output_tokens", 0))
+                          _u.get("input_tokens", 0), _u.get("output_tokens", 0),
+                          cached_tok=_u.get("cache_read_input_tokens", 0))
             if _routing_on:
                 from .savings import append_turn
                 append_turn(root, ledger.last_actual, ledger.last_baseline,
@@ -1977,7 +1978,8 @@ def run_unified_session(
         if ledger is not None:
             _u = result.usage or {}
             ledger.record(turn_cfg.provider, turn_cfg.resolved_model(),
-                          _u.get("input_tokens", 0), _u.get("output_tokens", 0))
+                          _u.get("input_tokens", 0), _u.get("output_tokens", 0),
+                          cached_tok=_u.get("cache_read_input_tokens", 0))
             if _routing_on:
                 from .savings import append_turn
                 append_turn(root, ledger.last_actual, ledger.last_baseline,

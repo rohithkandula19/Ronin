@@ -49,10 +49,16 @@ def price_for(provider: str, model: str | None) -> tuple[float, float]:
     return _FALLBACK
 
 
-def estimate_cost(provider: str, model: str | None, in_tok: int, out_tok: int) -> float:
-    """USD cost of a turn with ``in_tok``/``out_tok`` tokens on provider+model."""
+def estimate_cost(provider: str, model: str | None, in_tok: int, out_tok: int,
+                  cached_tok: int = 0) -> float:
+    """USD cost of a turn. ``cached_tok`` (of the ``in_tok``) are prompt-cache
+    reads, billed at ~10% of the input rate."""
     pin, pout = price_for(provider, model)
-    return (in_tok / 1_000_000) * pin + (out_tok / 1_000_000) * pout
+    cached = max(0, min(cached_tok, in_tok))
+    fresh_in = in_tok - cached
+    return ((fresh_in / 1_000_000) * pin
+            + (cached / 1_000_000) * pin * 0.10
+            + (out_tok / 1_000_000) * pout)
 
 
 def is_free(provider: str, model: str | None) -> bool:
@@ -73,8 +79,9 @@ class CostLedger:
     last_baseline: float = 0.0
     _by_provider: dict[str, float] = field(default_factory=dict)
 
-    def record(self, provider: str, model: str | None, in_tok: int, out_tok: int) -> None:
-        actual = estimate_cost(provider, model, in_tok, out_tok)
+    def record(self, provider: str, model: str | None, in_tok: int, out_tok: int,
+               cached_tok: int = 0) -> None:
+        actual = estimate_cost(provider, model, in_tok, out_tok, cached_tok)
         baseline = estimate_cost(self.baseline_provider, self.baseline_model, in_tok, out_tok)
         self.last_actual, self.last_baseline = actual, baseline
         self.spent += actual

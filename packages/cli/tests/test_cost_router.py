@@ -12,6 +12,23 @@ def test_free_providers_cost_nothing() -> None:
     assert estimate_cost("gemini", "gemini-flash-latest", 100_000, 50_000) == 0.0
 
 
+def test_cache_reads_discounted() -> None:
+    # cached input tokens bill at ~10% of the input rate
+    full = estimate_cost("anthropic", "claude-sonnet-4-6", 1_000_000, 0)
+    all_cached = estimate_cost("anthropic", "claude-sonnet-4-6", 1_000_000, 0, cached_tok=1_000_000)
+    assert abs(full - 3.0) < 1e-9
+    assert abs(all_cached - 0.30) < 1e-9        # 90% cheaper
+    # half cached → halfway-ish
+    half = estimate_cost("anthropic", "claude-sonnet-4-6", 1_000_000, 0, cached_tok=500_000)
+    assert abs(half - (1.5 + 0.15)) < 1e-9
+
+
+def test_ledger_records_cached() -> None:
+    led = CostLedger()
+    led.record("anthropic", "claude-sonnet-4-6", 1_000_000, 0, cached_tok=1_000_000)
+    assert abs(led.spent - 0.30) < 1e-9         # the turn was mostly cache-read
+
+
 def test_anthropic_priced() -> None:
     # 1M in + 1M out on sonnet = 3 + 15 = $18
     assert estimate_cost("anthropic", "claude-sonnet-4-6", 1_000_000, 1_000_000) == 18.0

@@ -90,6 +90,17 @@ def _to_anthropic_messages(messages: list[Message]) -> list[dict[str, Any]]:
 _EPHEMERAL = {"type": "ephemeral"}
 
 
+def _mark_cached(msg: dict) -> None:
+    """Put a cache_control breakpoint on a message's last content block (so the
+    whole conversation up to and including it is cached). String content is
+    promoted to a single text block first."""
+    content = msg.get("content")
+    if isinstance(content, str):
+        msg["content"] = [{"type": "text", "text": content, "cache_control": _EPHEMERAL}]
+    elif isinstance(content, list) and content:
+        content[-1] = {**content[-1], "cache_control": _EPHEMERAL}
+
+
 class AnthropicProvider(LLMProvider):
     """Calls the Anthropic Messages API."""
 
@@ -107,16 +118,22 @@ class AnthropicProvider(LLMProvider):
     ) -> dict[str, Any]:
         """Assemble the create()/stream() kwargs, applying cache breakpoints.
 
-        We place breakpoints on the two large, stable prefixes — the tool
-        schemas and the system prompt — so every turn after the first reads them
-        from cache. Anthropic caches everything *before* a breakpoint, so the
-        tools block (sent before system) and the system block together cover the
-        whole static preamble. The conversation tail stays uncached (it grows
-        every turn, so caching it would thrash)."""
+        Breakpoints go on the large, stable prefixes so each turn reads them from
+        cache: the tool schemas, the system prompt, AND the conversation prefix.
+        Anthropic caches everything *before* a breakpoint and caches incrementally,
+        so marking the last message caches the whole prior conversation — a long
+        agent loop then re-reads its history at ~10% cost instead of full price,
+        and only the newest delta is written. (Below the ~1k-token minimum the
+        breakpoint is simply ignored, so short turns cost nothing.)"""
+        msgs = _to_anthropic_messages(messages)
+        # Cache the conversation prefix (only worth a breakpoint past the first
+        # exchange — a single short user turn won't reach the cache minimum).
+        if self.cache_prompt and len(msgs) >= 2:
+            _mark_cached(msgs[-1])
         kwargs: dict[str, Any] = {
             "model": self.model,
             "system": system,
-            "messages": _to_anthropic_messages(messages),
+            "messages": msgs,
             "max_tokens": max_tokens,
         }
         if tools:
