@@ -1291,6 +1291,7 @@ def nightshift(
     budget: float = typer.Option(None, "--budget", help="USD spend cap for the run."),
     limit: int = typer.Option(10, "--limit", help="Max tasks."),
     redo: bool = typer.Option(False, "--redo", help="Re-attempt tasks already shipped in past runs."),
+    notify: str = typer.Option(None, "--notify", help="Webhook URL to ping with the morning report (Slack/Discord/…)."),
     schedule: str = typer.Option(None, "--schedule", help="Install a cron entry, e.g. '0 2 * * *' (runs nightly)."),
     unschedule: bool = typer.Option(False, "--unschedule", help="Remove ronin's scheduled nightshift."),
     root: Path = typer.Option(Path("."), "--root", help="Repo to work in."),
@@ -1328,6 +1329,8 @@ def nightshift(
             cmd_parts += ["--budget", str(budget)]
         if swarm_roster:
             cmd_parts += ["--swarm", shlex.quote(swarm_roster)]
+        if notify:
+            cmd_parts += ["--notify", shlex.quote(notify)]
         command = " ".join(cmd_parts)
         if install(schedule, command):
             console.print(f"[green]✓ scheduled[/green] [dim]({schedule})[/dim] → ronin will work this "
@@ -1379,6 +1382,13 @@ def nightshift(
             warn = f" [yellow]⚠ {len(r.blockers)} blocker(s)[/yellow]" if r.blockers else ""
             console.print(f"  [green]✓[/green] {r.task.title}{warn}\n"
                           f"     [dim]git apply {r.patch_path}[/dim]")
+
+    if notify:
+        from .notify import format_report, post_webhook
+        text = format_report(counts, [r.task.title for r in patched])
+        ok = post_webhook(notify, text)
+        console.print("[dim]📣 morning report sent[/dim]" if ok
+                      else "[yellow]📣 couldn't reach the webhook[/yellow]")
 
 
 # ---------- config (view / set settings) ----------
