@@ -48,6 +48,22 @@ def coerce_value(field: str, raw: str):
     return raw  # str
 
 
+def failover_specs(spec_str: str) -> list[dict]:
+    """Parse 'groq,gemini,openrouter:qwen/...' → an ordered failover spec list.
+    Each entry is a provider[:model] dict. Pure."""
+    out: list[dict] = []
+    for part in (spec_str or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if ":" in part:
+            provider, _, model = part.partition(":")
+            out.append({"provider": provider.strip(), "model": model.strip()})
+        else:
+            out.append({"provider": part})
+    return out
+
+
 def parse_set(arg: str) -> tuple[str, str]:
     """Split a 'field=value' (or 'field value') assignment. Raises BadSetting."""
     if "=" in arg:

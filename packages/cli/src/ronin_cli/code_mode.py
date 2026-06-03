@@ -602,6 +602,10 @@ def run_code_agent(
         )
     if renderer is not None:
         renderer.finish()
+    # Surface a failover so the user knows a different provider answered.
+    _fell_to = getattr(provider, "failed_over_to", None)
+    if _fell_to and console is not None:
+        console.print(f"[#7dcfff]⚡ failed over to {_fell_to}[/#7dcfff] [dim](primary was unavailable)[/dim]")
     return CodeRunResult(
         success=result.success,
         output=result.output,

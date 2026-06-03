@@ -92,6 +92,10 @@ class OpenAICompatProvider(LLMProvider):
     api_key: str | None = None
     timeout: float = 120.0
     extra_headers: dict[str, str] = {}
+    # How many times to retry a transient status (429/5xx) before giving up.
+    # Lowered to fail FAST when this provider is a non-last link in a failover
+    # chain, so a rate-limit hops to the next provider instead of waiting ~60s.
+    max_retries: int = _MAX_RETRIES
     # Optional callback fired before each retry sleep: on_retry(attempt, wait, status).
     # The CLI uses it to tell the user "rate-limited — retrying in Ns" instead of
     # appearing frozen during the (up to ~60s) backoff.
@@ -171,9 +175,9 @@ class OpenAICompatProvider(LLMProvider):
     ) -> LLMResponse:
         body = self._build_body(system, messages, tools, max_tokens)
         with httpx.Client(timeout=self.timeout) as client:
-            for attempt in range(_MAX_RETRIES + 1):
+            for attempt in range(self.max_retries + 1):
                 response = client.post(self._url(), json=body, headers=self._headers())
-                if response.status_code in _RETRY_STATUSES and attempt < _MAX_RETRIES:
+                if response.status_code in _RETRY_STATUSES and attempt < self.max_retries:
                     wait = _retry_wait(attempt, response.headers.get("retry-after"))
                     self._notify_retry(attempt + 1, wait, response.status_code)
                     time.sleep(wait)
@@ -231,10 +235,10 @@ class OpenAICompatProvider(LLMProvider):
         usage: dict[str, Any] = {}
 
         with httpx.Client(timeout=self.timeout) as client:
-            for attempt in range(_MAX_RETRIES + 1):
+            for attempt in range(self.max_retries + 1):
                 with client.stream("POST", self._url(), json=body, headers=self._headers()) as r:
                     # Retry transient statuses before we start consuming the body.
-                    if r.status_code in _RETRY_STATUSES and attempt < _MAX_RETRIES:
+                    if r.status_code in _RETRY_STATUSES and attempt < self.max_retries:
                         r.read()  # drain so the connection can be reused
                         wait = _retry_wait(attempt, r.headers.get("retry-after"))
                         self._notify_retry(attempt + 1, wait, r.status_code)

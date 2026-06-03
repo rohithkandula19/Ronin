@@ -28,6 +28,18 @@ def _summarize_result(result) -> str:
     s = str(result).strip()
     if not s:
         return ""
+    # run_command output: "exit=N\n--- stdout ---\n…\n--- stderr ---\n…"
+    if s.startswith("exit="):
+        lines0 = s.splitlines()
+        code = lines0[0][len("exit="):].strip() if lines0 else "?"
+        body = ""
+        if "--- stdout ---" in s:
+            out = s.split("--- stdout ---", 1)[1].split("--- stderr ---")[0].strip()
+            err = s.split("--- stderr ---", 1)[1].strip() if "--- stderr ---" in s else ""
+            pick = (out or err).splitlines()
+            body = pick[0] if pick else ""
+        mark = "✓" if code == "0" else "✗"
+        return f"{mark} exit {code}" + (f" · {_short(body, 68)}" if body else "")
     if s.startswith("[") and s.endswith("]"):
         import ast
         import json

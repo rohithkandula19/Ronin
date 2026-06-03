@@ -166,6 +166,13 @@ def build_provider(config: RoninConfig) -> LLMProvider:
         sub = config_for_spec(config, spec)
         providers.append(build_single_provider(sub))
         labels.append(f"{sub.provider}:{sub.resolved_model()}")
+
+    # Fail FAST on the non-last links: a rate-limit (429) should hop to the next
+    # provider after one quick retry instead of waiting out the full ~60s backoff.
+    # The LAST provider keeps full retries — there's nowhere left to fall to.
+    for p in providers[:-1]:
+        if hasattr(p, "max_retries"):
+            p.max_retries = 1
     return FailoverProvider(providers=providers, labels=labels, model="failover")
 
 

@@ -1393,6 +1393,43 @@ def nightshift(
                       else "[yellow]📣 couldn't reach the webhook[/yellow]")
 
 
+# ---------- failover (cross-provider resilience) ----------
+
+@app.command()
+def failover(
+    providers: str = typer.Argument(None, help="Ordered fallbacks, e.g. 'groq,gemini'. Omit to show current."),
+    off: bool = typer.Option(False, "--off", help="Turn failover off."),
+    scope: str = typer.Option("user", "--scope", help="Where to save: 'user' or 'project'."),
+) -> None:
+    """🔁 Cross-provider failover — when your provider rate-limits or errors, ronin
+    instantly continues on the next instead of waiting out a ~60s backoff.
+
+    Example:  ronin failover groq,gemini   (Cerebras → Groq → Gemini)
+    Non-last providers fail FAST (one quick retry) so a 429 hops onward.
+    """
+    from .config import save_config
+    cfg = load_config()
+    if off:
+        cfg = cfg.model_copy(update={"failover": []})
+        save_config(cfg, scope=scope)
+        console.print("[green]✓ failover off[/green]")
+        return
+    if not providers:
+        if cfg.failover:
+            chain = " → ".join([cfg.provider] + [f.get("provider", "?") for f in cfg.failover])
+            console.print(f"[#6b7089]failover:[/#6b7089] [bold]{chain}[/bold]")
+        else:
+            console.print("[dim]failover off — set it with [bold]ronin failover groq,gemini[/bold].[/dim]")
+        return
+    from .config_cmd import failover_specs
+    specs = failover_specs(providers)
+    cfg = cfg.model_copy(update={"failover": specs})
+    path = save_config(cfg, scope=scope)
+    chain = " → ".join([cfg.provider] + [s["provider"] for s in specs])
+    console.print(f"[green]✓ failover on[/green] — [bold]{chain}[/bold] → [cyan]{path}[/cyan]\n"
+                  "[dim]a rate-limit on one now hops to the next in ~1s instead of waiting.[/dim]")
+
+
 # ---------- config (view / set settings) ----------
 
 @app.command()
