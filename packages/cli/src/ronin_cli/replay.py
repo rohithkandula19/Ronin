@@ -32,6 +32,20 @@ def transcript_to_turns(transcript: list[str]) -> list[Turn]:
     return turns
 
 
+def session_to_markdown(turns: list[Turn], *, title: str = "ronin session") -> str:
+    """Render turns as a shareable markdown transcript. Pure."""
+    lines = [f"# {title}", "", f"*Exported from a ronin session — {len(turns)} entries.*", ""]
+    n = 0
+    for t in turns:
+        body = t.text.strip()
+        if t.role == "user":
+            n += 1
+            lines += [f"## Turn {n} — you", "", body, ""]
+        else:
+            lines += ["**ronin:**", "", body, ""]
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def render_story(console, turns: list[Turn], *, max_chars: int = 1200) -> None:
     """Print the turns as a readable back-and-forth."""
     if not turns:

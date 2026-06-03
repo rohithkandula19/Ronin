@@ -953,6 +953,70 @@ def serve(
     uvicorn.run(app_obj, host=host, port=port, log_level="info")
 
 
+# ---------- export (session → markdown) ----------
+
+@app.command()
+def export(
+    session_id: str = typer.Argument(None, help="Session id to export. Omit for the latest."),
+    out: str = typer.Option(None, "--out", help="Write to this file (default: print to stdout)."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo whose session to export."),
+) -> None:
+    """📤 Export a session as shareable markdown (to a file with --out, else stdout)."""
+    from .replay import session_to_markdown, transcript_to_turns
+    from .sessions import latest_session, list_sessions, load_session
+
+    sid = session_id or latest_session(root)
+    if not sid:
+        console.print("[dim]no sessions to export.[/dim]")
+        raise typer.Exit(1)
+    turns = transcript_to_turns(load_session(sid))
+    title = next((s.get("title") for s in list_sessions() if str(s.get("id")) == str(sid)), "ronin session")
+    md = session_to_markdown(turns, title=title or "ronin session")
+    if out:
+        try:
+            Path(out).write_text(md, encoding="utf-8")
+            console.print(f"[green]✓ exported →[/green] [cyan]{out}[/cyan] ({len(turns)} entries)")
+        except OSError as e:
+            console.print(f"[red]couldn't write {out}: {e}[/red]")
+            raise typer.Exit(1)
+    else:
+        import sys
+        sys.stdout.write(md)
+
+
+# ---------- recall (search past sessions) ----------
+
+@app.command()
+def recall(
+    query: str = typer.Argument(..., help="What to search your past sessions for."),
+    here: bool = typer.Option(False, "--here", help="Only this repo's sessions (default: all)."),
+    limit: int = typer.Option(8, "--limit", help="Max results."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo (with --here)."),
+) -> None:
+    """🔎 Search your past sessions and show the best-matching turn from each.
+
+    `ronin recall "auth bug"` searches every stored session (use --here to scope
+    to this repo), then `ronin replay <id>` plays a hit back in full.
+    """
+    from .recall import rank
+    from .sessions import list_sessions, load_session
+
+    metas = list_sessions(root if here else None)
+    items = [(m, load_session(str(m.get("id")))) for m in metas]
+    hits = rank(items, query, limit=limit)
+    if not hits:
+        scope = "this repo's" if here else "any"
+        console.print(f"[dim]no {scope} sessions matched [bold]{query}[/bold].[/dim]")
+        return
+    console.print(f"[#6b7089]{len(hits)} match(es) for [bold]{query}[/bold]:[/#6b7089]")
+    for h in hits:
+        console.print(f"\n[cyan]{h.session_id[:14]}[/cyan] [dim]· score {h.score} ·[/dim] "
+                      f"[bold]{h.title[:60]}[/bold]")
+        if h.snippet:
+            console.print(f"  [#c0caf5]{h.snippet}[/#c0caf5]")
+    console.print(f"\n[dim]replay one with [bold]ronin replay <id>[/bold].[/dim]")
+
+
 # ---------- replay (session history) ----------
 
 @app.command()
