@@ -1122,6 +1122,54 @@ def pr(
     open_pr(console, root, config)
 
 
+# ---------- config (view / set settings) ----------
+
+@app.command()
+def config(
+    set_: str = typer.Option(None, "--set", help="Set a setting: --set field=value (e.g. budget=0.50)."),
+    scope: str = typer.Option("project", "--scope", help="Where to save: 'project' or 'user'."),
+) -> None:
+    """⚙ View core settings, or set one with --set field=value.
+
+    Settable: provider · model · route_fast · route_strong · budget · sentinel.
+    Example:  ronin config --set route_fast=cerebras:gpt-oss-120b
+    """
+    cfg = load_config()
+    if set_:
+        from .config import save_config
+        from .config_cmd import BadSetting, coerce_value, parse_set
+        try:
+            field, raw = parse_set(set_)
+            value = coerce_value(field, raw)
+        except BadSetting as e:
+            console.print(f"[red]✗ {e}[/red]")
+            raise typer.Exit(2)
+        cfg = cfg.model_copy(update={field: value})
+        path = save_config(cfg, scope=scope)
+        console.print(f"[green]✓ {field} = {value}[/green] → [cyan]{path}[/cyan]")
+        return
+
+    from .config_cmd import SETTABLE
+    table = Table(title="ronin config", box=box.ROUNDED)
+    table.add_column("setting", style="cyan")
+    table.add_column("value", style="bold")
+    table.add_column("", style="#6b7089")
+    rows = {
+        "provider": cfg.provider,
+        "model": cfg.resolved_model(),
+        "route_fast": cfg.route_fast or "—",
+        "route_strong": cfg.route_strong or "—",
+        "budget": f"${cfg.budget:.2f}" if cfg.budget else "—",
+        "sentinel": "on" if cfg.sentinel else "off",
+    }
+    for k, v in rows.items():
+        table.add_row(k, str(v), SETTABLE.get(k, ("", ""))[1])
+    console.print(table)
+    routing = "on" if (cfg.route_fast and cfg.route_strong) else "off"
+    console.print(f"[dim]Cost Router: [bold]{routing}[/bold] · set it up fast with "
+                  "[bold]ronin setup[/bold].[/dim]")
+
+
 # ---------- changelog (from commits) ----------
 
 @app.command()

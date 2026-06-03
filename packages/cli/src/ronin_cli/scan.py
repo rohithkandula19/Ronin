@@ -8,6 +8,7 @@ unit-tested.
 """
 from __future__ import annotations
 
+import fnmatch
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +17,7 @@ from .secret_guard import scan_secrets
 
 _SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", "dist",
               "build", ".pytest_cache", ".ronin"}
+_IGNORE_FILE = ".roninignore"
 _TEXT_SUFFIXES = {".py", ".js", ".ts", ".tsx", ".jsx", ".go", ".rs", ".java",
                   ".rb", ".sh", ".toml", ".json", ".yaml", ".yml", ".env", ".md",
                   ".txt", ".cfg", ".ini", ".tf", ".properties", ""}
@@ -25,6 +27,36 @@ _TEXT_SUFFIXES = {".py", ".js", ".ts", ".tsx", ".jsx", ".go", ".rs", ".java",
 class Finding:
     path: str
     labels: list[str]
+
+
+def load_ignore(root: Path | str) -> list[str]:
+    """Glob patterns from ``.roninignore`` (gitignore-ish; '#' comments, blanks
+    skipped). Empty list when absent."""
+    path = Path(root) / _IGNORE_FILE
+    if not path.is_file():
+        return []
+    out: list[str] = []
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#"):
+                out.append(line)
+    except OSError:
+        return []
+    return out
+
+
+def is_ignored(rel: str, patterns: list[str]) -> bool:
+    """True if relative path ``rel`` matches any ignore glob. Matches the full
+    path, the basename, and any path segment (so 'tests' ignores tests/…)."""
+    parts = rel.split("/")
+    for pat in patterns:
+        p = pat.rstrip("/")
+        if (fnmatch.fnmatch(rel, p) or fnmatch.fnmatch(parts[-1], p)
+                or any(fnmatch.fnmatch(seg, p) for seg in parts)
+                or rel.startswith(p + "/")):
+            return True
+    return False
 
 
 def _scan_one(path: Path, root: Path) -> Finding | None:
@@ -43,13 +75,17 @@ def _scan_one(path: Path, root: Path) -> Finding | None:
 
 
 def scan_tree(root: Path | str) -> list[Finding]:
-    """Scan all text files under ``root`` for secrets."""
+    """Scan all text files under ``root`` for secrets (respecting .roninignore)."""
     root_path = Path(root).resolve()
+    ignore = load_ignore(root_path)
     out: list[Finding] = []
     for p in root_path.rglob("*"):
         if any(part in _SKIP_DIRS for part in p.parts):
             continue
         if p.is_file() and p.suffix in _TEXT_SUFFIXES:
+            rel = str(p.relative_to(root_path))
+            if ignore and is_ignored(rel, ignore):
+                continue
             f = _scan_one(p, root_path)
             if f:
                 out.append(f)
@@ -71,10 +107,13 @@ def staged_files(root: Path | str) -> list[str]:
 
 
 def scan_staged(root: Path | str) -> list[Finding]:
-    """Scan only the files staged for commit."""
+    """Scan only the files staged for commit (respecting .roninignore)."""
     root_path = Path(root).resolve()
+    ignore = load_ignore(root_path)
     out: list[Finding] = []
     for rel in staged_files(root_path):
+        if ignore and is_ignored(rel, ignore):
+            continue
         p = root_path / rel
         if p.is_file():
             f = _scan_one(p, root_path)

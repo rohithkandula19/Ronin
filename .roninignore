@@ -1,0 +1,6 @@
+# Paths ronin's secret scanner should skip (gitignore-style globs).
+# Secret-scanner test fixtures contain intentional fake/example credentials.
+test_secret_scanner.py
+test_secret_guard.py
+test_scan_hook.py
+test_roninignore.py
