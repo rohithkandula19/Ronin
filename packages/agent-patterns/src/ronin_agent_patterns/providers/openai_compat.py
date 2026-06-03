@@ -195,6 +195,12 @@ class OpenAICompatProvider(LLMProvider):
                 provider_meta={"extra_content": tc["extra_content"]} if tc.get("extra_content") else None,
             ))
 
+        # Fallback: many open models WRITE the tool call into the content instead
+        # of the structured field. Recover those so the agent actually acts.
+        if not tool_calls and text and tools:
+            from .text_tools import extract_text_tool_calls
+            tool_calls = extract_text_tool_calls(text, [t.name for t in tools])
+
         usage = data.get("usage") or {}
         return LLMResponse(
             text=text,
@@ -276,8 +282,13 @@ class OpenAICompatProvider(LLMProvider):
             )
             for _, slot in sorted(acc.items())
         ]
+        full_text = "".join(text_parts).strip()
+        # Fallback for open models that stream the tool call as text content.
+        if not tool_calls and full_text and tools:
+            from .text_tools import extract_text_tool_calls
+            tool_calls = extract_text_tool_calls(full_text, [t.name for t in tools])
         yield StreamEvent(type="done", response=LLMResponse(
-            text="".join(text_parts).strip(),
+            text=full_text,
             tool_calls=tool_calls,
             stop_reason=self._stop_reason(finish, tool_calls),
             usage={
