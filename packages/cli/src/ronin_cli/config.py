@@ -85,6 +85,9 @@ class RoninConfig(BaseModel):
     # Sentinel mode: the agent declares CONFIDENCE: high|medium|low and abstains
     # over bluffing. Low confidence on a routed cheap blade triggers escalation.
     sentinel: bool = False
+    # Spend cap (USD) for an interactive session: ronin tracks estimated cost and
+    # warns once the session crosses it. None → no cap.
+    budget: float | None = None
     # Cross-provider failover: ordered fallbacks tried (after the primary) when a
     # provider rate-limits or errors mid-turn. Each entry is a partial provider
     # spec: {provider, model?, base_url?, api_key?}. Empty → no failover.

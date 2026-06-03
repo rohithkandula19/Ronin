@@ -88,6 +88,22 @@ def test_baseline_for() -> None:
     assert baseline_for(plain) == ("anthropic", "claude-sonnet-4-6")
 
 
+def test_status_line_budget_mode() -> None:
+    from ronin_cli.code_mode import _status_line
+
+    class _R:
+        usage = {"input_tokens": 50_000, "output_tokens": 3_000}
+        streamed = False
+    led = CostLedger(baseline_provider="anthropic", baseline_model="claude-sonnet-4-6")
+    led.record("anthropic", "claude-sonnet-4-6", 50_000, 3_000)
+    out = _status_line(RoninConfig(provider="anthropic"), _R(), 0.5, ledger=led, budget=0.10)
+    assert "budget" in out and "over!" in out          # spent > cap → over
+    # under budget → no "over"
+    led2 = CostLedger(baseline_provider="anthropic", baseline_model="claude-sonnet-4-6")
+    led2.record("anthropic", "claude-sonnet-4-6", 1_000, 100)
+    assert "over!" not in _status_line(RoninConfig(), _R(), 0.1, ledger=led2, budget=5.0)
+
+
 def test_ledger_status_line_shows_savings() -> None:
     # end-to-end: route a free turn + a strong turn, ledger reports savings
     led = CostLedger(baseline_provider="anthropic", baseline_model="claude-sonnet-4-6")

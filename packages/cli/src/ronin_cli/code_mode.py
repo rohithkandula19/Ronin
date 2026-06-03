@@ -270,9 +270,9 @@ def _fmt_tokens(n: int) -> str:
 
 
 def _status_line(config: RoninConfig, result: "CodeRunResult", elapsed: float,
-                 ledger: "object | None" = None) -> str:
+                 ledger: "object | None" = None, budget: float | None = None) -> str:
     """A subtle per-turn footer: provider · model · ↑in ↓out · time, plus a
-    Cost-Router savings line when routing is active."""
+    Cost-Router savings line (routing) or a spend-vs-budget line (budget)."""
     u = result.usage or {}
     inp, out = u.get("input_tokens", 0), u.get("output_tokens", 0)
     cached = u.get("cache_read_input_tokens", 0)
@@ -285,7 +285,13 @@ def _status_line(config: RoninConfig, result: "CodeRunResult", elapsed: float,
     bits.append(f"{elapsed:.1f}s")
     line = "  [#6b7089]" + "  ·  ".join(bits) + "[/#6b7089]"
     if ledger is not None and getattr(ledger, "turns", 0) > 0:
-        line += f"\n  [#6b7089]💰 {ledger.summary()}[/#6b7089]"
+        if budget:
+            over = ledger.spent >= budget
+            colour = "#f7768e" if over else "#6b7089"
+            line += (f"\n  [{colour}]💸 spent ${ledger.spent:.4f} of ${budget:.2f} budget"
+                     f"{' — over!' if over else ''}[/{colour}]")
+        else:
+            line += f"\n  [#6b7089]💰 {ledger.summary()}[/#6b7089]"
     return line
 
 
@@ -1322,14 +1328,18 @@ def run_code_session(
     # routed (possibly free) provider and we tally what that saved vs the strong
     # model. Off → ledger stays None and nothing changes.
     _routing_on = bool(config.route_fast and config.route_strong)
+    _budget = getattr(config, "budget", None)
+    _track_cost = _routing_on or bool(_budget)   # cost ledger for routing OR budget
     ledger = None
     _rstats = None
-    if _routing_on:
+    _budget_warned = False
+    if _track_cost:
         from .cost import CostLedger
-        from .router_stats import load_stats
         from .routing import baseline_for
         _bp, _bm = baseline_for(config)
         ledger = CostLedger(baseline_provider=_bp, baseline_model=_bm)
+    if _routing_on:
+        from .router_stats import load_stats
         _rstats = load_stats(root)   # self-tuning: learned per-blade reliability
 
     pending: list[str] = []  # messages typed while the agent was working
@@ -1482,9 +1492,14 @@ def run_code_session(
             _u = result.usage or {}
             ledger.record(turn_cfg.provider, turn_cfg.resolved_model(),
                           _u.get("input_tokens", 0), _u.get("output_tokens", 0))
-            from .savings import append_turn
-            append_turn(root, ledger.last_actual, ledger.last_baseline,
-                        _decision.free if _decision is not None else False)
+            if _routing_on:
+                from .savings import append_turn
+                append_turn(root, ledger.last_actual, ledger.last_baseline,
+                            _decision.free if _decision is not None else False)
+            if _budget and not _budget_warned and ledger.spent >= _budget:
+                console.print(f"[bold #f7768e]💸 budget reached[/bold #f7768e] "
+                              f"[dim]— spent ${ledger.spent:.4f} of ${_budget:.2f} this session[/dim]")
+                _budget_warned = True
         if _rstats is not None and _decision is not None:
             from .router_stats import save_stats
             _rstats.record(_decision.tier, turn_cfg.provider, result.success)
@@ -1501,7 +1516,7 @@ def run_code_session(
                 _badge = confidence_badge(result.output)
                 if _badge:
                     console.print("  " + _badge)
-            console.print(_status_line(turn_cfg, result, _elapsed, ledger=ledger) + "\n")
+            console.print(_status_line(turn_cfg, result, _elapsed, ledger=ledger, budget=_budget) + "\n")
 
 
 UNIFIED_SYSTEM = """You are ronin — one capable assistant living in the user's terminal.
@@ -1592,14 +1607,18 @@ def run_unified_session(
 
     # Cost Router: tally routed-turn savings vs the strong model (when routing on).
     _routing_on = bool(config.route_fast and config.route_strong)
+    _budget = getattr(config, "budget", None)
+    _track_cost = _routing_on or bool(_budget)   # cost ledger for routing OR budget
     ledger = None
     _rstats = None
-    if _routing_on:
+    _budget_warned = False
+    if _track_cost:
         from .cost import CostLedger
-        from .router_stats import load_stats
         from .routing import baseline_for
         _bp, _bm = baseline_for(config)
         ledger = CostLedger(baseline_provider=_bp, baseline_model=_bm)
+    if _routing_on:
+        from .router_stats import load_stats
         _rstats = load_stats(root)   # self-tuning: learned per-blade reliability
 
     pending: list[str] = []  # messages typed while the agent was working
@@ -1742,9 +1761,14 @@ def run_unified_session(
             _u = result.usage or {}
             ledger.record(turn_cfg.provider, turn_cfg.resolved_model(),
                           _u.get("input_tokens", 0), _u.get("output_tokens", 0))
-            from .savings import append_turn
-            append_turn(root, ledger.last_actual, ledger.last_baseline,
-                        _decision.free if _decision is not None else False)
+            if _routing_on:
+                from .savings import append_turn
+                append_turn(root, ledger.last_actual, ledger.last_baseline,
+                            _decision.free if _decision is not None else False)
+            if _budget and not _budget_warned and ledger.spent >= _budget:
+                console.print(f"[bold #f7768e]💸 budget reached[/bold #f7768e] "
+                              f"[dim]— spent ${ledger.spent:.4f} of ${_budget:.2f} this session[/dim]")
+                _budget_warned = True
         if _rstats is not None and _decision is not None:
             from .router_stats import save_stats
             _rstats.record(_decision.tier, turn_cfg.provider, result.success)
@@ -1766,5 +1790,5 @@ def run_unified_session(
                 _badge = confidence_badge(result.output)
                 if _badge:
                     console.print("  " + _badge)
-            console.print(_status_line(turn_cfg, result, _elapsed, ledger=ledger) + "\n")
+            console.print(_status_line(turn_cfg, result, _elapsed, ledger=ledger, budget=_budget) + "\n")
         show_artifacts(artifacts)  # display any image/video produced

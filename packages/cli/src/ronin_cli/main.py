@@ -76,6 +76,11 @@ def _root(
              "says what it's unsure about. Low confidence on a cheap blade escalates "
              "to the strong one (with routing).",
     ),
+    budget: float = typer.Option(
+        None, "--budget",
+        help="Spend cap (USD) for this session — ronin warns once estimated cost "
+             "crosses it. The footer shows 💸 spent $X of $cap.",
+    ),
 ) -> None:
     if ctx.invoked_subcommand is not None:
         return
@@ -124,6 +129,9 @@ def _root(
     if sentinel:
         config = config.model_copy(update={"sentinel": True})
         console.print("[#6b7089]🛡 sentinel mode — the agent abstains over bluffing[/#6b7089]")
+    if isinstance(budget, (int, float)) and budget > 0:
+        config = config.model_copy(update={"budget": float(budget)})
+        console.print(f"[#6b7089]💸 budget cap — ${budget:.2f} for this session[/#6b7089]")
 
     root = Path(".")
 
