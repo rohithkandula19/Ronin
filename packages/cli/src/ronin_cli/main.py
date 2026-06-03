@@ -1226,6 +1226,8 @@ def nightshift(
     swarm_roster: str = typer.Option(None, "--swarm", help="Work each task with a swarm (role=provider roster)."),
     budget: float = typer.Option(None, "--budget", help="USD spend cap for the run."),
     limit: int = typer.Option(10, "--limit", help="Max tasks."),
+    schedule: str = typer.Option(None, "--schedule", help="Install a cron entry, e.g. '0 2 * * *' (runs nightly)."),
+    unschedule: bool = typer.Option(False, "--unschedule", help="Remove ronin's scheduled nightshift."),
     root: Path = typer.Option(Path("."), "--root", help="Repo to work in."),
 ) -> None:
     """🌙 Autonomous teammate — works your backlog unattended in isolated worktrees
@@ -1238,6 +1240,36 @@ def nightshift(
     """
     config = load_config()
     from .nightshift import gather_tasks, patch_path, run_nightshift, summarize
+
+    # Scheduling: install/remove a cron entry that re-runs this nightshift nightly.
+    if unschedule:
+        from .cron_install import uninstall
+        console.print("[green]✓ scheduled nightshift removed[/green]" if uninstall()
+                      else "[dim]no scheduled nightshift to remove.[/dim]")
+        return
+    if schedule:
+        from .cron_install import install
+        import shlex
+        cmd_parts = [f"cd {shlex.quote(str(root.resolve()))} &&", "ronin", "nightshift", "--execute"]
+        if goal:
+            cmd_parts.insert(3, shlex.quote(goal))
+        if issues:
+            cmd_parts.append("--issues")
+        if not todos:
+            cmd_parts.append("--no-todos")
+        if duel:
+            cmd_parts += ["--duel", shlex.quote(duel)]
+        if budget:
+            cmd_parts += ["--budget", str(budget)]
+        if swarm_roster:
+            cmd_parts += ["--swarm", shlex.quote(swarm_roster)]
+        command = " ".join(cmd_parts)
+        if install(schedule, command):
+            console.print(f"[green]✓ scheduled[/green] [dim]({schedule})[/dim] → ronin will work this "
+                          "backlog on that cron. [dim]Remove with --unschedule.[/dim]")
+        else:
+            console.print("[yellow]couldn't write the crontab[/yellow] [dim](is `crontab` available?)[/dim]")
+        return
 
     tasks = gather_tasks(root, include_todos=todos, include_issues=issues, goal=goal, limit=limit)
     if not tasks:
