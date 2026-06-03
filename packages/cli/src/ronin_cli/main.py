@@ -1122,6 +1122,42 @@ def pr(
     open_pr(console, root, config)
 
 
+# ---------- swarm (multi-provider agent team) ----------
+
+@app.command()
+def swarm(
+    task: str = typer.Argument(..., help="The task for the team to work."),
+    roster: str = typer.Option(
+        None, "--roster", "-r",
+        help="Role→provider, e.g. 'architect=anthropic,implementer=cerebras:gpt-oss-120b,reviewer=gemini'."),
+    yolo: bool = typer.Option(False, "--yolo", help="Auto-approve edits (trusted sandboxes)."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """🐝 A TEAM of role-specialized agents works one task — an architect plans, an
+    implementer codes, a reviewer critiques, the implementer revises. Each role can
+    run on a DIFFERENT vendor's model (a dream team only a provider-agnostic agent
+    can assemble).
+
+    Example:  ronin swarm "add retry to the http client" \\
+              -r architect=anthropic,implementer=cerebras,reviewer=gemini
+    """
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold].")
+        raise typer.Exit(2)
+    from .swarm import parse_roster, role_label, run_swarm
+
+    ra = parse_roster(roster)
+    line = " · ".join(f"{r}: [bold]{role_label(config, ra, r)}[/bold]" for r in ("architect", "implementer", "reviewer"))
+    console.print(f"[#7aa2f7]🐝 swarm[/#7aa2f7] {line}\n")
+    result = run_swarm(config, task, root=root, console=console, roster=ra, yolo=yolo)
+    console.print()
+    if result.blocked:
+        console.print(f"[red]✗[/red] {result.output}")
+        raise typer.Exit(2)
+    console.print("[bold green]✅ swarm done[/bold green]")
+
+
 # ---------- nightshift (autonomous backlog) ----------
 
 @app.command()
@@ -1131,6 +1167,7 @@ def nightshift(
     issues: bool = typer.Option(False, "--issues", help="Include open GitHub issues (needs gh)."),
     execute: bool = typer.Option(False, "--execute", help="Actually work the queue (default: dry-run plan)."),
     duel: str = typer.Option(None, "--duel", help="Red-team each patch with a rival provider[:model]."),
+    swarm_roster: str = typer.Option(None, "--swarm", help="Work each task with a swarm (role=provider roster)."),
     budget: float = typer.Option(None, "--budget", help="USD spend cap for the run."),
     limit: int = typer.Option(10, "--limit", help="Max tasks."),
     root: Path = typer.Option(Path("."), "--root", help="Repo to work in."),
@@ -1169,9 +1206,14 @@ def nightshift(
     if duel:
         from .consensus import parse_model_spec
         duel_spec = parse_model_spec(duel)
+    _roster = None
+    if swarm_roster is not None:
+        from .swarm import parse_roster
+        _roster = parse_roster(swarm_roster)
+        console.print("[dim]each task worked by a swarm (architect → implementer → reviewer).[/dim]")
     console.print("[dim]working the queue (isolated worktrees, test-gated)…[/dim]\n")
     results = run_nightshift(config, root, console, tasks, execute=True,
-                             duel_against=duel_spec, budget=budget)
+                             duel_against=duel_spec, budget=budget, roster=_roster)
     counts = summarize(results)
     console.print(f"\n[bold]🌙 morning report[/bold] — [green]{counts['patched']} patch(es)[/green], "
                   f"{counts['failed-tests']} failed tests, {counts['no-change']} no-change, "

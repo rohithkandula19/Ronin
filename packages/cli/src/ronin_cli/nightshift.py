@@ -78,7 +78,7 @@ def summarize(results: list[TaskResult]) -> dict:
 
 def run_nightshift(config, root, console, tasks: list[Task], *, execute: bool = False,
                    duel_against: dict | None = None, budget: float | None = None,
-                   max_iterations: int = 25) -> list[TaskResult]:
+                   roster=None, max_iterations: int = 25) -> list[TaskResult]:
     """Work each task in isolation. Dry-run (default) just returns the plan as
     'skipped' results; execute=True does the real autonomous loop, writing a
     patch per task that passes the test suite. Never pushes; never edits the
@@ -107,8 +107,13 @@ def run_nightshift(config, root, console, tasks: list[Task], *, execute: bool = 
         console.print(f"[#7aa2f7]🌙 [{i}/{len(tasks)}] {task.title}[/#7aa2f7] [dim]({task.source})[/dim]")
         try:
             with git_worktree(root, label="nightshift") as wt:
-                res = run_code_agent(config, task.prompt(), root=wt, console=None,
-                                     yolo=True, read_only=False, max_iterations=max_iterations)
+                if roster is not None:
+                    from .swarm import run_swarm
+                    res = run_swarm(config, task.prompt(), root=wt, console=console,
+                                    roster=roster, yolo=True, max_iterations=max_iterations)
+                else:
+                    res = run_code_agent(config, task.prompt(), root=wt, console=None,
+                                         yolo=True, read_only=False, max_iterations=max_iterations)
                 if ledger is not None:
                     u = res.usage or {}
                     ledger.record(config.provider, config.resolved_model(),
