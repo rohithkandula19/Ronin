@@ -1100,6 +1100,60 @@ def map_cmd(
             console.print(f"[yellow]couldn't write RONIN.md: {e}[/yellow]")
 
 
+# ---------- pr (open a PR with AI-drafted title/body) ----------
+
+@app.command()
+def pr(
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """🔀 Push the current branch and open a GitHub PR with an AI-drafted title +
+    body (from your commits). Gated — shows what it'll do and waits for y/N.
+    """
+    config = load_config()
+    from .git_helper import open_pr
+    open_pr(console, root, config)
+
+
+# ---------- changelog (from commits) ----------
+
+@app.command()
+def changelog(
+    since: str = typer.Option(None, "--since", help="Ref to start from (default: last tag, else all)."),
+    version: str = typer.Option("Unreleased", "--version", help="Version heading."),
+    write: bool = typer.Option(False, "--write", help="Prepend the section to CHANGELOG.md."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """🧾 Generate a changelog section from your commits (Conventional-Commits
+    aware: feat/fix/refactor/… grouped). Prints it, or --write prepends to CHANGELOG.md.
+    """
+    from .changelog import render_changelog
+    from .git_helper import _git
+
+    if _git(root, "rev-parse", "--is-inside-work-tree").returncode != 0:
+        console.print("[yellow]not a git repository[/yellow]")
+        raise typer.Exit(2)
+    if since is None:
+        tag = _git(root, "describe", "--tags", "--abbrev=0").stdout.strip()
+        since = tag or None
+    rng = f"{since}..HEAD" if since else "HEAD"
+    log = _git(root, "log", rng, "--pretty=%s", "--no-merges").stdout
+    subjects = [ln for ln in log.splitlines() if ln.strip()]
+    if not subjects:
+        console.print(f"[dim]no commits {('since ' + since) if since else 'found'}.[/dim]")
+        return
+    section = render_changelog(subjects, version=version)
+    if write:
+        cl = Path(root) / "CHANGELOG.md"
+        existing = cl.read_text(encoding="utf-8") if cl.is_file() else "# Changelog\n"
+        # insert after the first heading line
+        head, _, rest = existing.partition("\n")
+        cl.write_text(f"{head}\n\n{section}\n{rest.lstrip()}", encoding="utf-8")
+        console.print(f"[green]✓ prepended {len(subjects)} commit(s) →[/green] [cyan]{cl}[/cyan]")
+    else:
+        import sys
+        sys.stdout.write(section)
+
+
 # ---------- scan (secret scanning) ----------
 
 @app.command()
