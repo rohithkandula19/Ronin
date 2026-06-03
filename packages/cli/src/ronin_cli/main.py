@@ -1630,6 +1630,19 @@ def setup() -> None:
                   "[dim]every session now shows 💰 cost · saved $… and self-tunes over time.[/dim]")
 
 
+# ---------- status (mission-control dashboard) ----------
+
+@app.command()
+def status(root: Path = typer.Option(Path("."), "--root", help="Repo to summarize.")) -> None:
+    """🛰  Mission control — one view of every ronin system: Cost-Router savings,
+    the Dojo leaderboard, what the self-tuning router has learned, your sessions,
+    git state, and the last Nightshift.
+    """
+    from .dashboard import gather, render
+    config = load_config()
+    render(console, gather(root, config))
+
+
 # ---------- leaderboard (dojo standings) ----------
 
 @app.command()

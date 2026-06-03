@@ -958,6 +958,7 @@ SLASH_COMMANDS: dict[str, str] = {
     "config": "show the active config (provider, model, paths)",
     "cost": "show lifetime Cost-Router spend + savings",
     "router": "show routing + what the self-tuning router has learned",
+    "status": "mission control — every ronin system in one view",
     "quit": "exit the session",
 }
 
@@ -968,7 +969,7 @@ _HELP_GROUPS: list[tuple[str, list[str]]] = [
     ("✏️  editing & git", ["undo", "diff", "commit", "pr"]),
     ("📁  context & memory", ["memory", "init", "context", "compact", "resume", "clear"]),
     ("🔧  tools & agents", ["tools", "mcp", "agents", "verify", "voice"]),
-    ("⚙️  session", ["copy", "export", "vim", "doctor", "config", "help", "quit"]),
+    ("⚙️  session", ["status", "copy", "export", "vim", "doctor", "config", "help", "quit"]),
 ]
 
 
@@ -1485,6 +1486,10 @@ def handle_slash_command(
         console.print(f"  [#6b7089]{turns} turns · {len(transcript)} entries · "
                       f"~{len(convo):,} chars[/#6b7089]", highlight=False)
         console.print("  [dim]shrink with [bold]/compact[/bold] · wipe with [bold]/clear[/bold][/dim]")
+        return "handled"
+    if cmd == "status":
+        from .dashboard import gather, render
+        render(console, gather(root, config))
         return "handled"
     if cmd == "router":
         from .router_stats import load_stats, rows
