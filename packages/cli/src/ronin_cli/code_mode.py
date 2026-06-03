@@ -71,7 +71,7 @@ def _welcome(console: "Console", config: RoninConfig, root, yolo: bool, *, title
 
     from . import __version__
     from .panda_art import PANDA_ACTIVITIES, animate_inline
-    from .theme import ACCENT, MUTE, SOFT
+    from .theme import MUTE, SOFT, gradient_text
 
     is_tty = bool(getattr(console, "is_terminal", False))
     activity = random.choice(list(PANDA_ACTIVITIES)) if is_tty else "dancing"
@@ -79,8 +79,8 @@ def _welcome(console: "Console", config: RoninConfig, root, yolo: bool, *, title
     greeting = _greeting() if is_tty else "ready"
 
     info = Text()
-    info.append("ronin ", style=f"bold {ACCENT}")
-    info.append(f"v{__version__}", style=MUTE)
+    info.append_text(gradient_text("ronin"))   # cyan→teal→mint premium wordmark
+    info.append(f" v{__version__}", style=MUTE)
     info.append(f"  · {greeting}\n", style=f"italic {SOFT}")
     info.append(f"{config.provider} · {config.resolved_model()}\n", style=SOFT)
     info.append(str(_Path(root).resolve()), style=MUTE)
@@ -576,7 +576,9 @@ def run_code_agent(
     # Context engineering: front-load the files most relevant to THIS request so
     # the model starts aimed at the right code (non-blocking; interactive turns
     # only — sub-agents/evals pass console=None and stay deterministic).
-    if console is not None and getattr(config, "auto_context", False):
+    # Auto-context front-loads relevant files — skipped in fast mode (leaner
+    # context = faster turns; the agent can still read what it needs on demand).
+    if console is not None and getattr(config, "auto_context", False) and not getattr(config, "fast", False):
         from .context_engine import relevant_context
         _ctx = relevant_context(task, root)
         if _ctx:
@@ -591,14 +593,20 @@ def run_code_agent(
     # Compact old tool output before the context window fills. Claude has a 200k
     # window; most free/open models are far smaller (some 8–32k), so they'd error
     # long before a Claude-sized threshold — compact much earlier off-Anthropic.
+    _fast = getattr(config, "fast", False)
     _compact_at = 120_000 if config.provider == "anthropic" else 28_000
+    if _fast:
+        _compact_at = min(_compact_at, 16_000)   # compact sooner → leaner context
     agent = ReActAgent(
         system=system,
         tools=tools,
         provider=provider,
         max_iterations=max_iterations,
         compact_after_tokens=_compact_at,
-        compact_keep_recent=6,
+        compact_keep_recent=4 if _fast else 6,
+        # Fast mode caps each tool result tighter, so file dumps / command output
+        # don't balloon the per-call payload.
+        max_tool_result_chars=6000 if _fast else 16000,
     )
 
     before_tool = gate_cb or _selective_gate(console, yolo, _Path(root).resolve())

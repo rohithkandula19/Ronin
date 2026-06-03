@@ -22,6 +22,26 @@ def test_fast_mode_keeps_only_core_tools(tmp_path: Path) -> None:
     assert {"read_file", "write_file", "edit_file", "run_command"} <= names
 
 
+def test_fast_mode_uses_leaner_agent(tmp_path: Path, monkeypatch) -> None:
+    # fast mode constructs the agent with tighter context limits
+    import ronin_cli.code_mode as cm
+    captured: dict = {}
+    Real = cm.ReActAgent
+
+    def spy(**kw):
+        captured.update(kw)
+        return Real(**kw)
+
+    monkeypatch.setattr(cm, "ReActAgent", spy)
+    prov = FakeProvider(responses=[LLMResponse(text="ok", stop_reason="end_turn", usage={})])
+    with patch("ronin_cli.code_mode.build_provider", return_value=prov):
+        run_code_agent(RoninConfig(provider="cerebras", fast=True), "x",
+                       root=tmp_path, console=None, yolo=True)
+    assert captured["max_tool_result_chars"] == 6000     # tighter than the 16000 default
+    assert captured["compact_keep_recent"] == 4
+    assert captured["compact_after_tokens"] <= 16_000
+
+
 def test_normal_mode_has_more_tools(tmp_path: Path) -> None:
     normal = _tool_names_for(RoninConfig(provider="anthropic"), tmp_path)
     fast = _tool_names_for(RoninConfig(provider="anthropic", fast=True), tmp_path)
