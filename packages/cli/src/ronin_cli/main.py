@@ -1630,6 +1630,52 @@ def setup() -> None:
                   "[dim]every session now shows 💰 cost · saved $… and self-tunes over time.[/dim]")
 
 
+# ---------- coverage (find + fill test gaps) ----------
+
+@app.command()
+def coverage(
+    execute: bool = typer.Option(False, "--execute", help="Actually write tests (default: list the gaps)."),
+    limit: int = typer.Option(40, "--limit", help="Max symbols."),
+    duel: str = typer.Option(None, "--duel", help="Red-team each test with a rival provider."),
+    budget: float = typer.Option(None, "--budget", help="USD spend cap."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """🧪 Find public functions/classes with NO test coverage, then (with --execute)
+    write a passing test for each — in isolation, test-gated, as reviewable patches.
+    """
+    from .coverage import find_gaps, to_tasks
+
+    gaps = find_gaps(root, limit=limit)
+    if not gaps:
+        console.print("[green]✓ every public symbol is referenced in a test.[/green]")
+        return
+    by_file: dict[str, list[str]] = {}
+    for g in gaps:
+        by_file.setdefault(g.file, []).append(g.symbol)
+    console.print(f"[#7aa2f7]🧪 {len(gaps)} untested symbol(s)[/#7aa2f7] in {len(by_file)} file(s):")
+    for f, syms in list(by_file.items())[:20]:
+        console.print(f"  [cyan]{f}[/cyan] [dim]{', '.join(syms[:8])}"
+                      f"{' …' if len(syms) > 8 else ''}[/dim]")
+    if not execute:
+        console.print("\n[dim]add [bold]--execute[/bold] to write a passing test for each "
+                      "(reviewable patches via [bold]ronin patches[/bold]).[/dim]")
+        return
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold].")
+        raise typer.Exit(2)
+    from .consensus import parse_model_spec
+    duel_spec = parse_model_spec(duel) if duel else None
+    from .nightshift import run_nightshift, summarize
+    console.print("[dim]writing tests (isolated worktrees, test-gated)…[/dim]\n")
+    results = run_nightshift(config, root, console, to_tasks(gaps), execute=True,
+                             duel_against=duel_spec, budget=budget)
+    counts = summarize(results)
+    console.print(f"\n[bold]🧪 coverage[/bold] — [green]{counts['patched']} test(s) added[/green], "
+                  f"{counts['failed-tests']} failed, {counts['no-change']} no-change")
+    console.print("[dim]review with [bold]ronin patches[/bold].[/dim]")
+
+
 # ---------- tournament (single-elim model bracket) ----------
 
 @app.command()
