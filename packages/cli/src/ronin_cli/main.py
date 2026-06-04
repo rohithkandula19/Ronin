@@ -1901,6 +1901,74 @@ def grep(
                    read_only=True, include_image_tool=False, max_iterations=12)
 
 
+# ---------- commit (stage + Conventional Commit message) ----------
+
+@app.command()
+def commit(
+    all_changes: bool = typer.Option(True, "--all/--staged", "-a", help="Stage all tracked changes first (default), or commit only what's staged."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show the message; don't commit."),
+    no_ai: bool = typer.Option(False, "--no-ai", help="Use the offline heuristic message instead of the agent."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """✍️  Write a Conventional Commit from your diff — infers type + scope from the
+    changed files, drafts a clean subject + body grounded in the actual changes,
+    and commits. --dry-run to preview, --no-ai for the offline heuristic.
+    """
+    import subprocess
+
+    from .commit_msg import commit_prompt, fallback_subject, infer_type
+
+    def _git(args: list[str]) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", *args], cwd=str(root), capture_output=True, text=True, timeout=60)
+
+    if _git(["rev-parse", "--git-dir"]).returncode != 0:
+        console.print("[red]not a git repository.[/red]")
+        raise typer.Exit(1)
+    if all_changes and not dry_run:
+        _git(["add", "-A"])
+
+    names = _git(["diff", "--cached", "--name-only"]).stdout.split()
+    patch = _git(["diff", "--cached"]).stdout
+    if not names:
+        console.print("[yellow]nothing staged to commit.[/yellow] [dim](edit files, or drop --staged)[/dim]")
+        raise typer.Exit(1)
+
+    summary = f"{len(names)} file(s): {', '.join(names[:6])}" + (" …" if len(names) > 6 else "")
+    console.print(f"[#7aa2f7]✍️  {summary}[/#7aa2f7]")
+
+    message = ""
+    config = load_config()
+    if not no_ai and config.has_provider_auth():
+        try:
+            from ronin_agent_patterns import Message
+
+            from .runner import build_single_provider
+            provider = build_single_provider(config)
+            with console.status("[dim] drafting commit message…[/dim]", spinner="dots"):
+                resp = provider.complete(
+                    system="You write clean, conventional git commit messages.",
+                    messages=[Message(role="user", content=commit_prompt(summary, patch, infer_type(names)))],
+                    tools=[], max_tokens=400)
+            message = (resp.text or "").strip().strip("`")
+        except Exception as e:  # noqa: BLE001
+            console.print(f"[dim]AI draft failed ({e}); using heuristic.[/dim]")
+    if not message:
+        message = fallback_subject(names)
+
+    from rich.panel import Panel
+    console.print(Panel(message, title="commit message", border_style="#6b7089", padding=(1, 2)))
+    if dry_run:
+        console.print("[dim]--dry-run: not committing.[/dim]")
+        return
+    r = _git(["commit", "-m", message])
+    if r.returncode == 0:
+        short = _git(["rev-parse", "--short", "HEAD"]).stdout.strip()
+        console.print(f"[green]✓ committed[/green] [bold]{short}[/bold]")
+    else:
+        console.print(f"[red]commit failed:[/red] {(r.stderr or r.stdout).strip()[:300]}")
+        raise typer.Exit(1)
+
+
 # ---------- lint (detect + run + optional --fix) ----------
 
 @app.command()
