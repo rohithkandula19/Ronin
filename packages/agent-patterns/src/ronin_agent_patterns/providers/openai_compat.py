@@ -189,6 +189,9 @@ class OpenAICompatProvider(LLMProvider):
         choice = data["choices"][0]
         msg = choice["message"]
         text = (msg.get("content") or "").strip()
+        # Some open models loop and repeat the same block; trim the runaway tail.
+        from .repetition import collapse_repetition
+        text = collapse_repetition(text)
 
         tool_calls: list[ToolCall] = []
         for tc in msg.get("tool_calls") or []:
@@ -233,6 +236,8 @@ class OpenAICompatProvider(LLMProvider):
         acc: dict[int, dict[str, str]] = {}
         finish = "end_turn"
         usage: dict[str, Any] = {}
+        looped = False           # tripped when the model falls into a repetition loop
+        _since_check = 0         # chars streamed since the last repetition probe
 
         with httpx.Client(timeout=self.timeout) as client:
             for attempt in range(self.max_retries + 1):
@@ -262,6 +267,17 @@ class OpenAICompatProvider(LLMProvider):
                             if delta.get("content"):
                                 text_parts.append(delta["content"])
                                 yield StreamEvent(type="text", text=delta["content"])
+                                # Stop early if the model has started looping.
+                                _since_check += len(delta["content"])
+                                if _since_check >= 1500:
+                                    _since_check = 0
+                                    from .repetition import looks_repetitive
+                                    if looks_repetitive("".join(text_parts)):
+                                        looped = True
+                                        finish = "stop"
+                                        yield StreamEvent(type="text",
+                                                          text="\n\n…(ronin stopped a runaway repetition loop)…")
+                                        break
                             for tcd in delta.get("tool_calls") or []:
                                 idx = tcd.get("index", 0)
                                 slot = acc.setdefault(idx, {"id": "", "name": "", "args": "", "extra": None})
@@ -276,6 +292,8 @@ class OpenAICompatProvider(LLMProvider):
                                     slot["args"] += fn["arguments"]
                             if choice.get("finish_reason"):
                                 finish = choice["finish_reason"]
+                        if looped:
+                            break  # stop reading the stream — the model is looping
                 break  # streamed successfully; leave the retry loop
 
         tool_calls = [
@@ -287,6 +305,8 @@ class OpenAICompatProvider(LLMProvider):
             for _, slot in sorted(acc.items())
         ]
         full_text = "".join(text_parts).strip()
+        from .repetition import collapse_repetition
+        full_text = collapse_repetition(full_text)
         # Fallback for open models that stream the tool call as text content.
         if not tool_calls and full_text and tools:
             from .text_tools import extract_text_tool_calls
