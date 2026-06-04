@@ -857,6 +857,205 @@ def register_tools():
 '''
 
 
+_GHREPO = '''# ronin plugin: github_repo — stars/forks/language for a repo (GitHub API, no auth)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def github_repo(repo: str) -> dict:
+    r = httpx.get(f"https://api.github.com/repos/{repo.strip().strip('/')}",
+                  headers={"Accept": "application/vnd.github+json"},
+                  timeout=15, follow_redirects=True)
+    if r.status_code != 200:
+        return {"error": f"repo not found: {repo} (use 'owner/name')"}
+    d = r.json()
+    return {"full_name": d.get("full_name"), "description": d.get("description"),
+            "stars": d.get("stargazers_count"), "forks": d.get("forks_count"),
+            "open_issues": d.get("open_issues_count"), "language": d.get("language"),
+            "license": (d.get("license") or {}).get("name"), "url": d.get("html_url")}
+
+
+def register_tools():
+    return [Tool(
+        name="github_repo",
+        description="Stats for a GitHub repo (stars, forks, language, issues). Pass 'owner/name'. No auth.",
+        input_schema={"type": "object", "properties": {"repo": {"type": "string"}}, "required": ["repo"]},
+        handler=github_repo,
+    )]
+'''
+
+_TRIVIA = '''# ronin plugin: trivia — a random trivia question (Open Trivia DB, no key)
+from __future__ import annotations
+
+import html
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def trivia(category: str = "") -> dict:
+    r = httpx.get("https://opentdb.com/api.php",
+                  params={"amount": 1, "type": "multiple"},
+                  timeout=15, follow_redirects=True).json()
+    res = (r.get("results") or [{}])[0]
+    opts = [html.unescape(a) for a in res.get("incorrect_answers", [])] + \\
+           [html.unescape(res.get("correct_answer", ""))]
+    return {"category": res.get("category"), "difficulty": res.get("difficulty"),
+            "question": html.unescape(res.get("question", "")),
+            "options": sorted(opts), "answer": html.unescape(res.get("correct_answer", ""))}
+
+
+def register_tools():
+    return [Tool(
+        name="trivia",
+        description="A random multiple-choice trivia question with its answer. No key.",
+        input_schema={"type": "object", "properties": {"category": {"type": "string"}}},
+        handler=trivia,
+    )]
+'''
+
+_PROGJOKE = '''# ronin plugin: programming_joke — a programming joke (JokeAPI, no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def programming_joke() -> dict:
+    d = httpx.get("https://v2.jokeapi.dev/joke/Programming",
+                  params={"safe-mode": ""}, timeout=15, follow_redirects=True).json()
+    if d.get("type") == "single":
+        return {"joke": d.get("joke")}
+    return {"setup": d.get("setup"), "punchline": d.get("delivery")}
+
+
+def register_tools():
+    return [Tool(
+        name="programming_joke",
+        description="Fetch a programming joke. No key.",
+        input_schema={"type": "object", "properties": {}},
+        handler=programming_joke,
+    )]
+'''
+
+_RECIPE = '''# ronin plugin: recipe — find a recipe by name (TheMealDB, no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def recipe(query: str) -> dict:
+    r = httpx.get("https://www.themealdb.com/api/json/v1/1/search.php",
+                  params={"s": query}, timeout=15, follow_redirects=True).json()
+    meals = r.get("meals") or []
+    if not meals:
+        return {"error": f"no recipe found for '{query}'"}
+    m = meals[0]
+    ingredients = []
+    for i in range(1, 21):
+        ing, meas = m.get(f"strIngredient{i}"), m.get(f"strMeasure{i}")
+        if ing and ing.strip():
+            ingredients.append(f"{(meas or '').strip()} {ing.strip()}".strip())
+    return {"name": m.get("strMeal"), "category": m.get("strCategory"),
+            "area": m.get("strArea"), "ingredients": ingredients,
+            "instructions": (m.get("strInstructions") or "")[:600]}
+
+
+def register_tools():
+    return [Tool(
+        name="recipe",
+        description="Find a recipe by dish name: ingredients + instructions. No key.",
+        input_schema={"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+        handler=recipe,
+    )]
+'''
+
+_COCKTAIL = '''# ronin plugin: cocktail — a cocktail recipe by name (TheCocktailDB, no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def cocktail(name: str) -> dict:
+    r = httpx.get("https://www.thecocktaildb.com/api/json/v1/1/search.php",
+                  params={"s": name}, timeout=15, follow_redirects=True).json()
+    drinks = r.get("drinks") or []
+    if not drinks:
+        return {"error": f"no cocktail found for '{name}'"}
+    d = drinks[0]
+    ingredients = []
+    for i in range(1, 16):
+        ing, meas = d.get(f"strIngredient{i}"), d.get(f"strMeasure{i}")
+        if ing and ing.strip():
+            ingredients.append(f"{(meas or '').strip()} {ing.strip()}".strip())
+    return {"name": d.get("strDrink"), "glass": d.get("strGlass"),
+            "ingredients": ingredients, "instructions": d.get("strInstructions")}
+
+
+def register_tools():
+    return [Tool(
+        name="cocktail",
+        description="Find a cocktail recipe by name: ingredients + instructions. No key.",
+        input_schema={"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]},
+        handler=cocktail,
+    )]
+'''
+
+_ANIME = '''# ronin plugin: anime — look up an anime (Jikan / MyAnimeList, no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def anime(query: str) -> dict:
+    r = httpx.get("https://api.jikan.moe/v4/anime",
+                  params={"q": query, "limit": 1}, timeout=15, follow_redirects=True).json()
+    data = r.get("data") or []
+    if not data:
+        return {"error": f"no anime found for '{query}'"}
+    a = data[0]
+    return {"title": a.get("title"), "type": a.get("type"), "episodes": a.get("episodes"),
+            "score": a.get("score"), "year": a.get("year"), "status": a.get("status"),
+            "synopsis": (a.get("synopsis") or "")[:400]}
+
+
+def register_tools():
+    return [Tool(
+        name="anime",
+        description="Look up an anime: score, episodes, year, synopsis. No key.",
+        input_schema={"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+        handler=anime,
+    )]
+'''
+
+_QUOTE = '''# ronin plugin: quote — a random inspirational quote (ZenQuotes, no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def quote() -> dict:
+    d = httpx.get("https://zenquotes.io/api/random", timeout=15, follow_redirects=True).json()
+    item = (d or [{}])[0]
+    return {"quote": item.get("q"), "author": item.get("a")}
+
+
+def register_tools():
+    return [Tool(
+        name="quote",
+        description="A random inspirational quote with its author. No key.",
+        input_schema={"type": "object", "properties": {}},
+        handler=quote,
+    )]
+'''
+
+
 @dataclass(frozen=True)
 class LibraryPlugin:
     name: str
@@ -895,6 +1094,13 @@ LIBRARY: dict[str, LibraryPlugin] = {
     "synonyms": LibraryPlugin("synonyms", "Synonyms for a word", _SYNONYMS),
     "pokemon": LibraryPlugin("pokemon", "Stats for a Pokemon", _POKEMON),
     "advice": LibraryPlugin("advice", "A random piece of advice", _ADVICE),
+    "github_repo": LibraryPlugin("github_repo", "Stars/forks/language for a repo", _GHREPO),
+    "trivia": LibraryPlugin("trivia", "A random trivia question + answer", _TRIVIA),
+    "programming_joke": LibraryPlugin("programming_joke", "A programming joke", _PROGJOKE),
+    "recipe": LibraryPlugin("recipe", "Find a recipe by dish name", _RECIPE),
+    "cocktail": LibraryPlugin("cocktail", "A cocktail recipe by name", _COCKTAIL),
+    "anime": LibraryPlugin("anime", "Look up an anime (MyAnimeList)", _ANIME),
+    "quote": LibraryPlugin("quote", "A random inspirational quote", _QUOTE),
 }
 
 _ALIASES = {
@@ -912,6 +1118,9 @@ _ALIASES = {
     "aqi": "air_quality", "air": "air_quality", "ghuser": "github_user",
     "rhyme": "rhymes", "synonym": "synonyms", "thesaurus": "synonyms",
     "poke": "pokemon", "pokémon": "pokemon",
+    "repo": "github_repo", "ghrepo": "github_repo",
+    "progjoke": "programming_joke", "food": "recipe", "meal": "recipe",
+    "drink": "cocktail", "mal": "anime", "quotes": "quote",
 }
 
 
