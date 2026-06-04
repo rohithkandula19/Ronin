@@ -1630,6 +1630,70 @@ def setup() -> None:
                   "[dim]every session now shows 💰 cost · saved $… and self-tunes over time.[/dim]")
 
 
+# ---------- types (add missing type hints) ----------
+
+@app.command()
+def types(
+    execute: bool = typer.Option(False, "--execute", help="Add type hints (default: list gaps)."),
+    limit: int = typer.Option(60, "--limit", help="Max functions."),
+    budget: float = typer.Option(None, "--budget", help="USD spend cap."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """🏷  Find public functions missing parameter/return type hints, then (with
+    --execute) add precise hints — test-gated, as reviewable patches.
+    """
+    from .types_gap import find_type_gaps, to_tasks
+
+    gaps = find_type_gaps(root, limit=limit)
+    if not gaps:
+        console.print("[green]✓ every public function is annotated.[/green]")
+        return
+    by_file: dict[str, int] = {}
+    for g in gaps:
+        by_file[g.file] = by_file.get(g.file, 0) + 1
+    console.print(f"[#7aa2f7]🏷 {len(gaps)} under-annotated function(s)[/#7aa2f7] in {len(by_file)} file(s):")
+    for f, n in list(by_file.items())[:20]:
+        console.print(f"  [cyan]{f}[/cyan] [dim]{n} function(s)[/dim]")
+    if not execute:
+        console.print("\n[dim]add [bold]--execute[/bold] to add type hints (reviewable patches).[/dim]")
+        return
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold].")
+        raise typer.Exit(2)
+    from .nightshift import run_nightshift, summarize
+    console.print("[dim]adding type hints (isolated worktrees, test-gated)…[/dim]\n")
+    results = run_nightshift(config, root, console, to_tasks(gaps), execute=True, budget=budget)
+    counts = summarize(results)
+    console.print(f"\n[bold]🏷 types[/bold] — [green]{counts['patched']} file(s) annotated[/green]")
+    console.print("[dim]review with [bold]ronin patches[/bold].[/dim]")
+
+
+# ---------- deps (dependency audit) ----------
+
+@app.command()
+def deps(root: Path = typer.Option(Path("."), "--root", help="Repo root.")) -> None:
+    """📦 Audit dependencies — cross-checks what your code imports against what the
+    project declares: flags declared-but-unused deps and used-but-undeclared imports.
+    """
+    from .deps import audit
+
+    a = audit(root)
+    console.print(f"[#7aa2f7]📦 {len(a['used'])} third-party package(s) imported[/#7aa2f7]")
+    if a["undeclared"]:
+        console.print(f"\n[bold #f7768e]⚠ used but NOT declared[/bold #f7768e] "
+                      "[dim](add to pyproject/requirements?)[/dim]")
+        for d in a["undeclared"]:
+            console.print(f"  [#f7768e]{d}[/#f7768e]")
+    if a["unused"]:
+        console.print(f"\n[bold #e0af68]· declared but not imported[/bold #e0af68] "
+                      "[dim](unused, or used indirectly?)[/dim]")
+        for d in a["unused"]:
+            console.print(f"  [#e0af68]{d}[/#e0af68]")
+    if not a["undeclared"] and not a["unused"]:
+        console.print("[green]✓ declared deps and imports line up.[/green]")
+
+
 # ---------- release (bump + changelog + tag) ----------
 
 @app.command()
