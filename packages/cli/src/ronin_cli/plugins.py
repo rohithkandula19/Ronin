@@ -108,3 +108,24 @@ def load_plugin_tools(plugin_dir: Path | None = None) -> list[Tool]:
             seen.add(tool.name)
             tools.append(tool)
     return tools
+
+
+def build_plugin_tools(root: str | Path = ".", *, console=None) -> list[Tool]:
+    """Load user plugin tools from ``<root>/.ronin/plugins/`` for the agent.
+
+    Root-aware sibling of ``load_plugin_tools`` so an in-session agent picks up the
+    project's plugins. Per-plugin errors are surfaced (if ``console``) and skipped,
+    never fatal — exactly like the MCP loader."""
+    plugin_dir = Path(root) / ".ronin" / PLUGIN_DIR_NAME
+    tools: list[Tool] = []
+    seen: set[str] = set()
+    for result in load_plugins(plugin_dir):
+        if result.error:
+            if console:
+                console.print(f"[yellow]⚠ plugin '{result.name}': {result.error}[/yellow]")
+            continue
+        for tool in result.tools:
+            if tool.name not in seen:
+                seen.add(tool.name)
+                tools.append(tool)
+    return tools

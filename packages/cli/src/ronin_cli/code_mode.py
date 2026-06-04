@@ -1507,13 +1507,15 @@ def run_unified_session(
     # console=None → load MCP tools silently (no "🔌 MCP fs · N tool(s)" chrome
     # at launch; Claude Code doesn't announce its tool wiring either).
     mcp_tools = build_mcp_tools(root, console=None)  # tools from .ronin/mcp.json servers
+    from .plugins import build_plugin_tools
+    plugin_tools = build_plugin_tools(root, console=None)  # user tools from .ronin/plugins/
     from .bg_processes import build_background_tools
     from .checkpoint import build_checkpoint_tools
     from .embeddings import build_semantic_tools
     from .vision_tools import build_vision_tools
     # NB: web tools (web_search/fetch_url) are now built into the code agent
     # itself (run_code_agent), so they're intentionally NOT added here again.
-    extra = (media_tools + data_tools + mcp_tools
+    extra = (media_tools + data_tools + mcp_tools + plugin_tools
              + build_background_tools(root) + build_checkpoint_tools(root)
              + build_vision_tools(config, root) + build_semantic_tools(config, root)
              + [build_task_tool(config, root),
