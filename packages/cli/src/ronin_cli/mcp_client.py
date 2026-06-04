@@ -156,6 +156,26 @@ def add_mcp_server(name: str, command: str, args: list[str], root: str | Path = 
     return p
 
 
+def add_remote_mcp_server(name: str, url: str, root: str | Path = ".",
+                          headers: dict[str, str] | None = None) -> Path:
+    """Register a hosted (HTTP) MCP server by URL, with optional auth headers."""
+    p = mcp_config_path(root)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    data = {"mcpServers": {}}
+    if p.is_file():
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            data.setdefault("mcpServers", {})
+        except ValueError:
+            pass
+    spec: dict = {"url": url}
+    if headers:
+        spec["headers"] = headers
+    data["mcpServers"][name] = spec
+    p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return p
+
+
 def parse_env_pairs(pairs: list[str]) -> dict[str, str]:
     """Parse ``KEY=VALUE`` strings into a dict. A bare ``KEY`` (no ``=``) inherits
     the value from the current environment, so secrets needn't be typed. Pure-ish."""
@@ -212,10 +232,15 @@ def build_mcp_tools(root: str | Path = ".", *, console=None) -> list:
     ronin Tools. Per-server failures are reported and skipped, never fatal."""
     tools: list = []
     for name, spec in load_mcp_servers(root).items():
-        command = spec.get("command")
-        if not command:
-            continue
-        client = MCPClient(name, command, spec.get("args"), spec.get("env"))
+        # Remote (hosted) servers carry a "url"; local ones carry a "command".
+        if spec.get("url"):
+            from .mcp_remote import MCPRemoteClient
+            client = MCPRemoteClient(name, spec["url"], spec.get("headers"))
+        else:
+            command = spec.get("command")
+            if not command:
+                continue
+            client = MCPClient(name, command, spec.get("args"), spec.get("env"))
         try:
             discovered = client.start()
         except Exception as e:  # noqa: BLE001

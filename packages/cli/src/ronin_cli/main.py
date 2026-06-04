@@ -979,6 +979,31 @@ def mcp_install(
                   "[bold]ronin mcp list[/bold].[/dim]")
 
 
+@mcp_app.command("add-remote", help="Add a hosted MCP server by URL: ronin mcp add-remote NAME https://…/mcp")
+def mcp_add_remote(
+    name: str = typer.Argument(..., help="A short name, e.g. 'linear'."),
+    url: str = typer.Argument(..., help="The server's HTTP endpoint, e.g. https://mcp.example.com/mcp"),
+    header: Optional[list[str]] = typer.Option(None, "--header", "-H", help="Auth header, 'Name: value' (repeatable). Bare 'Authorization' inherits a Bearer token from $MCP_TOKEN."),
+) -> None:
+    import os
+
+    from .mcp_client import add_remote_mcp_server
+    headers: dict[str, str] = {}
+    for item in header or []:
+        if ":" in item:
+            k, v = item.split(":", 1)
+            headers[k.strip()] = v.strip()
+        elif item.strip().lower() == "authorization" and os.environ.get("MCP_TOKEN"):
+            headers["Authorization"] = f"Bearer {os.environ['MCP_TOKEN']}"
+    path = add_remote_mcp_server(name, url, ".", headers=headers or None)
+    console.print(f"[green]✓[/green] added remote MCP server [bold]{name}[/bold] "
+                  f"[dim]{url}[/dim] → [cyan]{path}[/cyan]")
+    if headers:
+        console.print(f"[dim]headers: {', '.join(headers)}[/dim]")
+    console.print("[dim]connects over HTTP next time you run [bold]ronin[/bold] · verify with "
+                  "[bold]ronin mcp list[/bold].[/dim]")
+
+
 # ---------- plugins ----------
 
 @app.command()
