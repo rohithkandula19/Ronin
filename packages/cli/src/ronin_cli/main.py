@@ -2060,6 +2060,49 @@ def checkup(
         console.print("\n[green]spotless. ship it. 🚀[/green]")
 
 
+# ---------- complexity (cyclomatic hotspots) ----------
+
+@app.command()
+def complexity(
+    threshold: int = typer.Option(10, "--threshold", "-t", help="Minimum complexity to report."),
+    limit: int = typer.Option(25, "--limit", help="Max functions to list."),
+    refactor: bool = typer.Option(False, "--refactor", help="Have ronin simplify the worst offender."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """🌀 Rank your most complex functions by cyclomatic complexity (branches per
+    function) — the hardest code to test and maintain. --refactor hands the worst
+    one to ronin to simplify without changing behaviour.
+    """
+    from .complexity import find_complex, rating, refactor_prompt
+
+    hits = find_complex(root, threshold=threshold, limit=limit)
+    if not hits:
+        console.print(f"[green]✓ nothing at or above complexity {threshold} — tidy.[/green]")
+        return
+    console.print(f"[#7aa2f7]🌀 {len(hits)} function(s) ≥ complexity {threshold}[/#7aa2f7] "
+                  "[dim](worst first)[/dim]")
+    worst = hits[0].score or 1
+    for c in hits:
+        bars = "█" * max(1, round(8 * c.score / worst))
+        tone = "#f7768e" if c.score >= 20 else "#e0af68" if c.score >= 10 else "#6b7089"
+        console.print(f"  [{tone}]{c.score:>3}[/{tone}] [dim]{bars:<8}[/dim] "
+                      f"[cyan]{c.file}:{c.line}[/cyan] [bold]{c.name}[/bold] "
+                      f"[dim]{rating(c.score)}[/dim]")
+
+    if not refactor:
+        console.print("\n[dim]add [bold]--refactor[/bold] to have ronin simplify the worst one.[/dim]")
+        return
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print("[dim]set a provider to refactor.[/dim]")
+        return
+    from .code_mode import run_code_agent
+    console.print(f"\n[#6b7089]refactoring[/#6b7089] [bold]{hits[0].name}[/bold] "
+                  f"[dim](complexity {hits[0].score})[/dim]\n")
+    run_code_agent(config, refactor_prompt(hits[0]), root=root, console=console,
+                   max_iterations=20)
+
+
 # ---------- release (bump + changelog + tag) ----------
 
 @app.command()
