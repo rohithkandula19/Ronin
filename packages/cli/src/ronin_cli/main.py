@@ -2103,6 +2103,33 @@ def complexity(
                    max_iterations=20)
 
 
+# ---------- tree (annotated project map) ----------
+
+@app.command()
+def tree(
+    depth: int = typer.Option(3, "--depth", "-d", help="How many directory levels to show."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """🌳 An annotated project map — directories with code-file and line counts,
+    noise folders skipped. Grok a repo's shape in one screen.
+    """
+    from .tree_map import biggest_dirs, build_tree, render_lines
+
+    node = build_tree(root, max_depth=depth)
+    if node.files == 0:
+        console.print("[yellow]no code files found[/yellow] [dim](empty repo, or all skipped?)[/dim]")
+        return
+    for i, line in enumerate(render_lines(node)):
+        if i == 0:
+            console.print(f"[#7aa2f7]🌳 {line}[/#7aa2f7]")
+        else:
+            console.print(f"[#6b7089]{line}[/#6b7089]", highlight=False)
+    top = biggest_dirs(node)
+    if top:
+        chips = "  ".join(f"[cyan]{n}[/cyan] [dim]{ln:,}[/dim]" for n, ln in top)
+        console.print(f"\n[dim]heaviest:[/dim] {chips}")
+
+
 # ---------- deadcode (probably-unused symbols) ----------
 
 @app.command()
