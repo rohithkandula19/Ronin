@@ -928,6 +928,22 @@ def plugin_library_cmd() -> None:
                   "make your own with [bold]ronin plugin new <name>[/bold][/dim]")
 
 
+@plugin_app.command("search", help="Search the plugin library: ronin plugin search finance")
+def plugin_search(
+    query: str = typer.Argument(..., help="A keyword, e.g. 'crypto', 'word', 'github'."),
+) -> None:
+    from .plugin_library import search
+    hits = search(query)
+    if not hits:
+        console.print(f"[yellow]no library plugins match[/yellow] '{query}' "
+                      "[dim](try [bold]ronin plugin library[/bold] for the full list)[/dim]")
+        raise typer.Exit(1)
+    console.print(f"[#7aa2f7]🔎 {len(hits)} match(es) for[/#7aa2f7] [bold]{query}[/bold]")
+    for p in hits:
+        console.print(f"  [cyan]{p.name:<16}[/cyan] [dim]{p.blurb}[/dim]")
+    console.print("[dim]install with [bold]ronin plugin add <name>[/bold].[/dim]")
+
+
 @plugin_app.command("add", help="Install a ready-made plugin from the library: ronin plugin add weather")
 def plugin_add(
     name: str = typer.Argument(..., help="A library name, e.g. 'weather', 'hackernews'. See 'ronin plugin library'."),

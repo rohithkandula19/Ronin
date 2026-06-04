@@ -694,6 +694,169 @@ def register_tools():
 
 
 
+_AIRQUALITY = '''# ronin plugin: air_quality — AQI for a city (open-meteo air quality, no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def air_quality(city: str) -> dict:
+    g = httpx.get("https://geocoding-api.open-meteo.com/v1/search",
+                  params={"name": city, "count": 1}, timeout=15, follow_redirects=True).json()
+    if not g.get("results"):
+        return {"error": f"city not found: {city}"}
+    loc = g["results"][0]
+    a = httpx.get("https://air-quality-api.open-meteo.com/v1/air-quality",
+                  params={"latitude": loc["latitude"], "longitude": loc["longitude"],
+                          "current": "us_aqi,pm2_5,pm10,ozone"},
+                  timeout=15, follow_redirects=True).json()
+    cur = a.get("current", {})
+    return {"city": loc["name"], "country": loc.get("country"),
+            "us_aqi": cur.get("us_aqi"), "pm2_5": cur.get("pm2_5"),
+            "pm10": cur.get("pm10"), "ozone": cur.get("ozone")}
+
+
+def register_tools():
+    return [Tool(
+        name="air_quality",
+        description="Current air quality (US AQI, PM2.5/PM10, ozone) for a city. No key.",
+        input_schema={"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]},
+        handler=air_quality,
+    )]
+'''
+
+_GHUSER = '''# ronin plugin: github_user — public profile stats (GitHub API, no auth)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def github_user(username: str) -> dict:
+    r = httpx.get(f"https://api.github.com/users/{username}",
+                  headers={"Accept": "application/vnd.github+json"},
+                  timeout=15, follow_redirects=True)
+    if r.status_code != 200:
+        return {"error": f"user not found: {username}"}
+    d = r.json()
+    return {"login": d.get("login"), "name": d.get("name"), "bio": d.get("bio"),
+            "company": d.get("company"), "location": d.get("location"),
+            "public_repos": d.get("public_repos"), "followers": d.get("followers"),
+            "following": d.get("following"), "url": d.get("html_url")}
+
+
+def register_tools():
+    return [Tool(
+        name="github_user",
+        description="Public GitHub profile: name, bio, repo count, followers. No auth (rate-limited).",
+        input_schema={"type": "object", "properties": {"username": {"type": "string"}}, "required": ["username"]},
+        handler=github_user,
+    )]
+'''
+
+_RHYMES = '''# ronin plugin: rhymes — words that rhyme with a word (Datamuse, no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def rhymes(word: str, limit: int = 15) -> dict:
+    r = httpx.get("https://api.datamuse.com/words",
+                  params={"rel_rhy": word, "max": min(int(limit or 15), 50)},
+                  timeout=15, follow_redirects=True).json()
+    return {"word": word, "rhymes": [w["word"] for w in r]}
+
+
+def register_tools():
+    return [Tool(
+        name="rhymes",
+        description="Words that rhyme with a given word. No key.",
+        input_schema={"type": "object", "properties": {
+            "word": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["word"]},
+        handler=rhymes,
+    )]
+'''
+
+_SYNONYMS = '''# ronin plugin: synonyms — synonyms for a word (Datamuse, no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def synonyms(word: str, limit: int = 15) -> dict:
+    r = httpx.get("https://api.datamuse.com/words",
+                  params={"rel_syn": word, "max": min(int(limit or 15), 50)},
+                  timeout=15, follow_redirects=True).json()
+    return {"word": word, "synonyms": [w["word"] for w in r]}
+
+
+def register_tools():
+    return [Tool(
+        name="synonyms",
+        description="Synonyms for a given word. No key.",
+        input_schema={"type": "object", "properties": {
+            "word": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["word"]},
+        handler=synonyms,
+    )]
+'''
+
+_POKEMON = '''# ronin plugin: pokemon — stats for a Pokemon (PokeAPI, no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def pokemon(name: str) -> dict:
+    r = httpx.get(f"https://pokeapi.co/api/v2/pokemon/{name.lower().strip()}",
+                  timeout=15, follow_redirects=True)
+    if r.status_code != 200:
+        return {"error": f"no Pokemon named '{name}'"}
+    d = r.json()
+    return {"name": d.get("name"), "id": d.get("id"),
+            "types": [t["type"]["name"] for t in d.get("types", [])],
+            "height_dm": d.get("height"), "weight_hg": d.get("weight"),
+            "abilities": [a["ability"]["name"] for a in d.get("abilities", [])]}
+
+
+def register_tools():
+    return [Tool(
+        name="pokemon",
+        description="Look up a Pokemon's types, abilities, height and weight. No key.",
+        input_schema={"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]},
+        handler=pokemon,
+    )]
+'''
+
+_ADVICE = '''# ronin plugin: advice — a random piece of advice (adviceslip, no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def advice() -> dict:
+    resp = httpx.get("https://api.adviceslip.com/advice", timeout=15, follow_redirects=True)
+    try:
+        d = resp.json()
+    except ValueError:
+        return {"error": "advice service unavailable"}
+    return {"advice": (d.get("slip") or {}).get("advice")}
+
+
+def register_tools():
+    return [Tool(
+        name="advice",
+        description="Fetch a random piece of advice. No key.",
+        input_schema={"type": "object", "properties": {}},
+        handler=advice,
+    )]
+'''
+
+
 @dataclass(frozen=True)
 class LibraryPlugin:
     name: str
@@ -726,6 +889,12 @@ LIBRARY: dict[str, LibraryPlugin] = {
     "unit_convert": LibraryPlugin("unit_convert", "Convert length/mass/temperature (offline)", _UNITCONV),
     "random_user": LibraryPlugin("random_user", "Generate a fake user profile", _RANDOMUSER),
     "iss_location": LibraryPlugin("iss_location", "Live position of the ISS", _ISS),
+    "air_quality": LibraryPlugin("air_quality", "Air quality (AQI) for a city", _AIRQUALITY),
+    "github_user": LibraryPlugin("github_user", "Public GitHub profile stats", _GHUSER),
+    "rhymes": LibraryPlugin("rhymes", "Words that rhyme with a word", _RHYMES),
+    "synonyms": LibraryPlugin("synonyms", "Synonyms for a word", _SYNONYMS),
+    "pokemon": LibraryPlugin("pokemon", "Stats for a Pokemon", _POKEMON),
+    "advice": LibraryPlugin("advice", "A random piece of advice", _ADVICE),
 }
 
 _ALIASES = {
@@ -740,6 +909,9 @@ _ALIASES = {
     "country": "country_info", "joke": "dad_joke", "sunrise": "sun_times",
     "sunset": "sun_times", "color": "color_info", "convert": "unit_convert",
     "units": "unit_convert", "user": "random_user", "iss": "iss_location",
+    "aqi": "air_quality", "air": "air_quality", "ghuser": "github_user",
+    "rhyme": "rhymes", "synonym": "synonyms", "thesaurus": "synonyms",
+    "poke": "pokemon", "pokémon": "pokemon",
 }
 
 
@@ -752,3 +924,17 @@ def resolve(name: str) -> LibraryPlugin | None:
 def library_rows() -> list[tuple[str, str, str]]:
     """(name, needs, blurb) for every library plugin, for display. Pure."""
     return [(p.name, p.needs, p.blurb) for p in LIBRARY.values()]
+
+
+def search(query: str) -> list[LibraryPlugin]:
+    """Library plugins whose name, blurb, or an alias matches ``query`` (substring,
+    case-insensitive). Empty query returns everything. Pure."""
+    q = (query or "").strip().lower()
+    if not q:
+        return list(LIBRARY.values())
+    alias_hits = {tgt for alias, tgt in _ALIASES.items() if q in alias}
+    out: list[LibraryPlugin] = []
+    for key, p in LIBRARY.items():
+        if q in key or q in p.blurb.lower() or key in alias_hits:
+            out.append(p)
+    return out

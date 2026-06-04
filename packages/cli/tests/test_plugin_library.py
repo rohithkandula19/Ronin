@@ -45,3 +45,13 @@ def test_resolve_aliases() -> None:
 def test_library_rows_cover_all() -> None:
     rows = library_rows()
     assert {r[0] for r in rows} == set(LIBRARY)
+
+
+def test_search_by_name_blurb_alias() -> None:
+    from ronin_cli.plugin_library import search
+    names = lambda q: {p.name for p in search(q)}
+    assert "crypto_price" in names("crypto")        # name/alias
+    assert "github_user" in names("github")         # name substring
+    assert "synonyms" in names("thesaurus")         # alias match
+    assert names("") == set(__import__("ronin_cli.plugin_library", fromlist=["LIBRARY"]).LIBRARY)
+    assert search("zzzznope") == []
