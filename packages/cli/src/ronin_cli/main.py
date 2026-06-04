@@ -1630,6 +1630,150 @@ def setup() -> None:
                   "[dim]every session now shows 💰 cost · saved $… and self-tunes over time.[/dim]")
 
 
+# ---------- release (bump + changelog + tag) ----------
+
+@app.command()
+def release(
+    kind: str = typer.Argument("patch", help="major | minor | patch."),
+    tag: bool = typer.Option(False, "--tag", help="Create a git tag for the new version."),
+    write_changelog: bool = typer.Option(True, "--changelog/--no-changelog", help="Prepend a CHANGELOG section."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """🚀 Cut a release — bump the version everywhere it's declared, generate the
+    changelog from commits since the last tag, and optionally create the git tag.
+    """
+    from .release import bump_version, current_version, find_version_files, set_version_in_text
+
+    files = find_version_files(root)
+    cur = current_version(files)
+    if not cur:
+        console.print("[yellow]couldn't find a version (__version__ / pyproject).[/yellow]")
+        raise typer.Exit(1)
+    try:
+        new = bump_version(cur, kind)
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(2)
+    console.print(f"[#7aa2f7]🚀 release[/#7aa2f7] [bold]{cur} → {new}[/bold]")
+    changed = 0
+    for f in files:
+        try:
+            text = f.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        new_text, n = set_version_in_text(text, new)
+        if n:
+            f.write_text(new_text, encoding="utf-8")
+            changed += n
+    console.print(f"  [green]✓[/green] bumped {changed} version declaration(s)")
+
+    if write_changelog:
+        from .changelog import render_changelog
+        from .git_helper import _git
+        since = _git(root, "describe", "--tags", "--abbrev=0").stdout.strip() or None
+        rng = f"{since}..HEAD" if since else "HEAD"
+        log = _git(root, "log", rng, "--pretty=%s", "--no-merges").stdout
+        subjects = [ln for ln in log.splitlines() if ln.strip()]
+        if subjects:
+            section = render_changelog(subjects, version=new)
+            cl = Path(root) / "CHANGELOG.md"
+            existing = cl.read_text(encoding="utf-8") if cl.is_file() else "# Changelog\n"
+            head, _, rest = existing.partition("\n")
+            cl.write_text(f"{head}\n\n{section}\n{rest.lstrip()}", encoding="utf-8")
+            console.print(f"  [green]✓[/green] CHANGELOG updated ({len(subjects)} commit(s))")
+    if tag:
+        from .git_helper import _git
+        r = _git(root, "tag", f"v{new}")
+        console.print(f"  [green]✓ tagged v{new}[/green]" if r.returncode == 0
+                      else f"[yellow]couldn't tag: {r.stderr.strip()[:80]}[/yellow]")
+    console.print("[dim]review the changes, then commit + push (and the tag).[/dim]")
+
+
+# ---------- docstring (find + write missing docstrings) ----------
+
+@app.command()
+def docstring(
+    execute: bool = typer.Option(False, "--execute", help="Write docstrings (default: list gaps)."),
+    limit: int = typer.Option(60, "--limit", help="Max symbols."),
+    budget: float = typer.Option(None, "--budget", help="USD spend cap."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """📝 Find public functions/classes with NO docstring, then (with --execute)
+    write one for each — test-gated, as reviewable patches.
+    """
+    from .docstring import find_doc_gaps, to_tasks
+
+    gaps = find_doc_gaps(root, limit=limit)
+    if not gaps:
+        console.print("[green]✓ every public symbol is documented.[/green]")
+        return
+    by_file: dict[str, int] = {}
+    for g in gaps:
+        by_file[g.file] = by_file.get(g.file, 0) + 1
+    console.print(f"[#7aa2f7]📝 {len(gaps)} undocumented symbol(s)[/#7aa2f7] in {len(by_file)} file(s):")
+    for f, n in list(by_file.items())[:20]:
+        console.print(f"  [cyan]{f}[/cyan] [dim]{n} symbol(s)[/dim]")
+    if not execute:
+        console.print("\n[dim]add [bold]--execute[/bold] to write docstrings (reviewable patches).[/dim]")
+        return
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold].")
+        raise typer.Exit(2)
+    from .nightshift import run_nightshift, summarize
+    console.print("[dim]writing docstrings (isolated worktrees, test-gated)…[/dim]\n")
+    results = run_nightshift(config, root, console, to_tasks(gaps), execute=True, budget=budget)
+    counts = summarize(results)
+    console.print(f"\n[bold]📝 docstrings[/bold] — [green]{counts['patched']} file(s) documented[/green]")
+    console.print("[dim]review with [bold]ronin patches[/bold].[/dim]")
+
+
+# ---------- todo (TODO/FIXME board) ----------
+
+@app.command()
+def todo(
+    execute: bool = typer.Option(False, "--execute", help="Work the TODOs autonomously (Nightshift)."),
+    duel: str = typer.Option(None, "--duel", help="Red-team each patch with a rival provider."),
+    budget: float = typer.Option(None, "--budget", help="USD spend cap."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """🗒  A board of every FIXME/TODO/HACK in your code; --execute works them
+    autonomously (each in isolation, test-gated) into reviewable patches.
+    """
+    from .kaizen import find_targets
+
+    targets = find_targets(root, limit=200)
+    if not targets:
+        console.print("[green]✓ no FIXME/TODO/HACK markers — clean.[/green]")
+        return
+    by_marker: dict[str, int] = {}
+    for t in targets:
+        by_marker[t.marker] = by_marker.get(t.marker, 0) + 1
+    summary = " · ".join(f"{m}: {n}" for m, n in by_marker.items())
+    console.print(f"[#7aa2f7]🗒 {len(targets)} marker(s)[/#7aa2f7] [dim]({summary})[/dim]")
+    for t in targets[:25]:
+        console.print(f"  [#e0af68]{t.marker:<6}[/#e0af68] [cyan]{t.file}:{t.line}[/cyan] "
+                      f"[dim]{t.text.strip()[:55]}[/dim]")
+    if not execute:
+        console.print("\n[dim]add [bold]--execute[/bold] to resolve them autonomously "
+                      "(reviewable patches via [bold]ronin patches[/bold]).[/dim]")
+        return
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold].")
+        raise typer.Exit(2)
+    from .consensus import parse_model_spec
+    duel_spec = parse_model_spec(duel) if duel else None
+    from .nightshift import gather_tasks, run_nightshift, summarize
+    tasks = gather_tasks(root, include_todos=True, limit=200)
+    console.print("[dim]working the board (isolated worktrees, test-gated)…[/dim]\n")
+    results = run_nightshift(config, root, console, tasks, execute=True,
+                             duel_against=duel_spec, budget=budget)
+    counts = summarize(results)
+    console.print(f"\n[bold]🗒 todo[/bold] — [green]{counts['patched']} resolved[/green], "
+                  f"{counts['failed-tests']} failed")
+
+
 # ---------- scaffold (generate a component) ----------
 
 @app.command()
