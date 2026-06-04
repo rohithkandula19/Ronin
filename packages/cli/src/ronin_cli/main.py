@@ -914,6 +914,44 @@ def plugin_list() -> None:
     plugins()
 
 
+@plugin_app.command("library", help="Browse ready-to-use plugins you can add in one command.")
+def plugin_library_cmd() -> None:
+    from .plugin_library import library_rows
+    grid = Table(box=box.ROUNDED, show_header=True, header_style="bold #7aa2f7")
+    grid.add_column("add", style="cyan", no_wrap=True)
+    grid.add_column("needs", style="#e0af68", no_wrap=True)
+    grid.add_column("what it does")
+    for name, needs, blurb in library_rows():
+        grid.add_row(name, needs, blurb)
+    console.print(grid)
+    console.print("[dim]add one with [bold]ronin plugin add <name>[/bold] · "
+                  "make your own with [bold]ronin plugin new <name>[/bold][/dim]")
+
+
+@plugin_app.command("add", help="Install a ready-made plugin from the library: ronin plugin add weather")
+def plugin_add(
+    name: str = typer.Argument(..., help="A library name, e.g. 'weather', 'hackernews'. See 'ronin plugin library'."),
+    force: bool = typer.Option(False, "--force", help="Overwrite if it already exists."),
+    root: Path = typer.Option(Path("."), "--root", help="Project root (writes to <root>/.ronin/plugins/)."),
+) -> None:
+    from .plugin_library import resolve
+    entry = resolve(name)
+    if entry is None:
+        console.print(f"[yellow]'{name}' isn't in the library[/yellow] — see "
+                      "[bold]ronin plugin library[/bold], or scaffold one with [bold]ronin plugin new[/bold].")
+        raise typer.Exit(1)
+    pdir = Path(root) / ".ronin" / "plugins"
+    pdir.mkdir(parents=True, exist_ok=True)
+    path = pdir / f"{entry.name}.py"
+    if path.exists() and not force:
+        console.print(f"[yellow]already exists:[/yellow] {path} [dim](use --force)[/dim]")
+        raise typer.Exit(1)
+    path.write_text(entry.source, encoding="utf-8")
+    console.print(f"[green]✓[/green] installed plugin [bold]{entry.name}[/bold] "
+                  f"[dim]{entry.blurb}[/dim] → [cyan]{path}[/cyan]")
+    console.print("  [dim]live in the agent next time you run [bold]ronin[/bold].[/dim]")
+
+
 # ---------- mcp ----------
 
 mcp_app = typer.Typer(help="Connect MCP servers (Anthropic's tool protocol) — their tools join the agent.")
