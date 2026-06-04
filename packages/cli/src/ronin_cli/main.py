@@ -1861,6 +1861,46 @@ def watch(
         console.print("\n[dim]👋 stopped watching.[/dim]")
 
 
+# ---------- grep (search code by intent) ----------
+
+@app.command()
+def grep(
+    query: list[str] = typer.Argument(..., help="What you're looking for, in plain words."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+    limit: int = typer.Option(12, "--limit", help="How many candidates to rank."),
+    no_ai: bool = typer.Option(False, "--no-ai", help="Just show ranked locations, don't ask the agent."),
+) -> None:
+    """🔎 Search by intent, not by string — "where do we handle retries?" ranks the
+    functions/classes most relevant to your question (name + docstring + body),
+    then the agent reads the winners and answers precisely.
+    """
+    from .intent_search import search, search_prompt
+
+    q = " ".join(query)
+    hits = search(root, q, limit=limit)
+    if not hits:
+        console.print(f"[yellow]nothing matched[/yellow] [bold]{q}[/bold] "
+                      "[dim](try different words?)[/dim]")
+        raise typer.Exit(1)
+    console.print(f"[#7aa2f7]🔎 \"{q}\"[/#7aa2f7] [dim]— top matches:[/dim]")
+    top = hits[0][1] or 1.0
+    for u, s in hits:
+        bars = "█" * max(1, round(5 * s / top))
+        console.print(f"  [#6b7089]{bars:<5}[/#6b7089] [cyan]{u.file}:{u.line}[/cyan] "
+                      f"[dim]{u.kind}[/dim] [bold]{u.name}[/bold]")
+
+    if no_ai:
+        return
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print("[dim]set a provider to have ronin read the winners and answer.[/dim]")
+        return
+    from .code_mode import run_code_agent
+    console.print("\n[#6b7089]reading the most relevant code…[/#6b7089]\n")
+    run_code_agent(config, search_prompt(q, hits), root=root, console=console,
+                   read_only=True, include_image_tool=False, max_iterations=12)
+
+
 # ---------- release (bump + changelog + tag) ----------
 
 @app.command()
