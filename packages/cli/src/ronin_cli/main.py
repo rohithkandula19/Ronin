@@ -1798,6 +1798,69 @@ def usages(
                    read_only=True, include_image_tool=False, max_iterations=12)
 
 
+# ---------- watch (re-run on save) ----------
+
+@app.command()
+def watch(
+    command: list[str] = typer.Argument(None, help="Command to run on change. Default: pytest -q."),
+    root: Path = typer.Option(Path("."), "--root", help="Directory to watch."),
+    interval: float = typer.Option(1.0, "--interval", help="Poll interval in seconds."),
+    fix: bool = typer.Option(False, "--fix", help="On failure, hand the output to ronin to fix it."),
+) -> None:
+    """👀 Re-run a command whenever your code changes — your tests by default.
+    With --fix, a failing run is handed straight to ronin to repair (then watching
+    resumes). Ctrl-C to stop.
+    """
+    import subprocess
+    import time
+
+    from .watch import changed, describe_change, snapshot
+
+    cmd = list(command) if command else ["pytest", "-q"]
+    cmd_str = " ".join(cmd)
+    console.print(f"[#7aa2f7]👀 watching[/#7aa2f7] [bold]{root}[/bold] "
+                  f"[dim]→ runs[/dim] [cyan]{cmd_str}[/cyan] [dim]on save · Ctrl-C to stop[/dim]")
+
+    def _run() -> int:
+        console.print(f"\n[#6b7089]── running[/#6b7089] [cyan]{cmd_str}[/cyan] [dim]──[/dim]")
+        try:
+            r = subprocess.run(cmd, cwd=str(root))
+            rc = r.returncode
+        except (OSError, subprocess.SubprocessError) as e:
+            console.print(f"[red]couldn't run: {e}[/red]")
+            return 1
+        if rc == 0:
+            console.print("[green]✓ passed[/green]")
+        else:
+            console.print(f"[#f7768e]✗ exit {rc}[/#f7768e]")
+            if fix:
+                config = load_config()
+                if config.has_provider_auth():
+                    from .code_mode import run_code_agent
+                    console.print("[#6b7089]handing the failure to ronin…[/#6b7089]")
+                    run_code_agent(
+                        config,
+                        f"The command `{cmd_str}` is failing. Run it, read the output, find "
+                        "the cause, and fix it. Keep changes minimal and re-run to confirm green.",
+                        root=root, console=console, max_iterations=20)
+        return rc
+
+    _run()
+    prev = snapshot(root)
+    try:
+        while True:
+            time.sleep(max(0.2, interval))
+            cur = snapshot(root)
+            hits = changed(prev, cur)
+            if hits:
+                prev = cur
+                console.print(f"\n[#e0af68]changed:[/#e0af68] [dim]{describe_change(hits, root)}[/dim]")
+                _run()
+                prev = snapshot(root)              # re-snapshot (a --fix run may edit files)
+    except KeyboardInterrupt:
+        console.print("\n[dim]👋 stopped watching.[/dim]")
+
+
 # ---------- release (bump + changelog + tag) ----------
 
 @app.command()
