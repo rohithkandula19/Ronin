@@ -1901,6 +1901,97 @@ def grep(
                    read_only=True, include_image_tool=False, max_iterations=12)
 
 
+# ---------- lint (detect + run + optional --fix) ----------
+
+@app.command()
+def lint(
+    fix: bool = typer.Option(False, "--fix", help="Apply safe autofixes, then have ronin fix the rest."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """🧹 Run the project's linter (ruff/flake8/eslint, auto-detected) and report
+    the issue count. With --fix, apply the linter's own autofixes then hand any
+    remaining failures to ronin to repair.
+    """
+    import shutil
+    import subprocess
+
+    from .lint import detect_linter, fix_command, parse_issue_count
+
+    avail = {t for t in ("ruff", "flake8", "npx", "eslint") if shutil.which(t)}
+    cmd = detect_linter(root, available=avail)
+    if not cmd:
+        console.print("[yellow]no linter detected[/yellow] [dim](install ruff: "
+                      "[bold]uv tool install ruff[/bold])[/dim]")
+        raise typer.Exit(1)
+    cmd_str = " ".join(cmd)
+
+    if fix:
+        fc = fix_command(cmd)
+        if fc:
+            console.print(f"[#6b7089]applying safe autofixes:[/#6b7089] [cyan]{' '.join(fc)}[/cyan]")
+            try:
+                subprocess.run(fc, cwd=str(root), capture_output=True, text=True, timeout=180)
+            except (OSError, subprocess.SubprocessError):
+                pass
+
+    console.print(f"[#7aa2f7]🧹 linting[/#7aa2f7] [cyan]{cmd_str}[/cyan]")
+    try:
+        r = subprocess.run(cmd, cwd=str(root), capture_output=True, text=True, timeout=180)
+    except (OSError, subprocess.SubprocessError) as e:
+        console.print(f"[red]couldn't run linter: {e}[/red]")
+        raise typer.Exit(1)
+    output = (r.stdout or "") + (r.stderr or "")
+    n = parse_issue_count(output, cmd)
+    if r.returncode == 0 and n == 0:
+        console.print("[green]✓ clean — no lint issues.[/green]")
+        return
+    console.print(f"[#f7768e]✗ {n or 'some'} issue(s) remain[/#f7768e]")
+    snippet = "\n".join(output.splitlines()[:20])
+    console.print(f"[dim]{snippet}[/dim]")
+    if not fix:
+        console.print("\n[dim]add [bold]--fix[/bold] to autofix + have ronin repair the rest.[/dim]")
+        return
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print("[dim]set a provider to have ronin fix the remaining issues.[/dim]")
+        return
+    from .code_mode import run_code_agent
+    console.print("\n[#6b7089]handing the remaining lint errors to ronin…[/#6b7089]\n")
+    run_code_agent(
+        config,
+        f"`{cmd_str}` still reports lint issues after autofix. Run it, read the "
+        "errors, and fix them properly (not by suppressing). Re-run to confirm clean.\n\n"
+        f"Current output:\n{output[:6000]}",
+        root=root, console=console, max_iterations=20)
+
+
+# ---------- checkup (repo health report) ----------
+
+@app.command()
+def checkup(
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """🩺 Full repo health checkup — README, license, tests, dependency hygiene,
+    committed secrets, TODO load, oversized files — rolled into a health grade.
+    (Distinct from [bold]ronin doctor[/bold], which checks your config/provider.)
+    """
+    from .checkup import grade, health_score, run_checks
+
+    checks = run_checks(root)
+    score = health_score(checks)
+    g = grade(score)
+    color = "green" if g in {"A", "B"} else "#e0af68" if g in {"C", "D"} else "#f7768e"
+    console.print(f"[{color}]🩺 health [bold]{g}[/bold]  ({score}/100)[/{color}]\n")
+    icon = {"ok": "[green]✓[/green]", "warn": "[#e0af68]●[/#e0af68]", "fail": "[#f7768e]✗[/#f7768e]"}
+    for c in checks:
+        console.print(f"  {icon.get(c.status, '·')} [bold]{c.name:<13}[/bold] [dim]{c.detail}[/dim]")
+    fails = [c for c in checks if c.status == "fail"]
+    if fails:
+        console.print(f"\n[#f7768e]{len(fails)} critical issue(s) to address first.[/#f7768e]")
+    elif score == 100:
+        console.print("\n[green]spotless. ship it. 🚀[/green]")
+
+
 # ---------- release (bump + changelog + tag) ----------
 
 @app.command()
