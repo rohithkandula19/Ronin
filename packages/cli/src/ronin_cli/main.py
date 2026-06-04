@@ -931,6 +931,54 @@ def mcp_add(
                   "Verify now with [bold]ronin mcp list[/bold].[/dim]")
 
 
+@mcp_app.command("catalog", help="Browse popular MCP servers you can install in one command.")
+def mcp_catalog() -> None:
+    from rich.table import Table as _Table
+
+    from .mcp_catalog import catalog_rows
+    grid = _Table(box=box.ROUNDED, show_header=True, header_style="bold #7aa2f7")
+    grid.add_column("install", style="cyan", no_wrap=True)
+    grid.add_column("needs", style="#e0af68", no_wrap=True)
+    grid.add_column("what it adds")
+    for key, env, blurb in catalog_rows():
+        grid.add_row(key, env, blurb)
+    console.print(grid)
+    console.print("[dim]add one with [bold]ronin mcp install <name>[/bold] · "
+                  "any other server with [bold]ronin mcp add NAME COMMAND …[/bold][/dim]")
+
+
+@mcp_app.command("install", help="Install a popular MCP server by name: ronin mcp install github")
+def mcp_install(
+    name: str = typer.Argument(..., help="A catalog name, e.g. 'github', 'gmail', 'slack'. See 'ronin mcp catalog'."),
+) -> None:
+    import os
+
+    from .mcp_catalog import resolve
+    from .mcp_client import add_mcp_server
+    server = resolve(name)
+    if server is None:
+        console.print(f"[yellow]'{name}' isn't in the catalog[/yellow] — see "
+                      "[bold]ronin mcp catalog[/bold], or use [bold]ronin mcp add[/bold] for any server.")
+        raise typer.Exit(1)
+    # Capture each required env var from the shell IF set. We deliberately omit
+    # unset ones rather than writing "" — an empty value in the spec would
+    # override (shadow) the real value the user exports later, since the server
+    # is launched with {**os.environ, **spec_env}.
+    present = {k: os.environ[k] for k in server.env if os.environ.get(k)}
+    missing = [k for k in server.env if not os.environ.get(k)]
+    path = add_mcp_server(server.key, server.command, list(server.args), ".",
+                          env=present or None)
+    console.print(f"[green]✓[/green] installed [bold]{server.key}[/bold] [dim]{server.blurb}[/dim] "
+                  f"→ [cyan]{path}[/cyan]")
+    if server.note:
+        console.print(f"  [#e0af68]note:[/#e0af68] {server.note}")
+    if missing:
+        console.print(f"  [#f7768e]set these before running ronin:[/#f7768e] {', '.join(missing)}")
+        console.print(f"  [dim]e.g.  export {missing[0]}=…   (then they're picked up automatically)[/dim]")
+    console.print("[dim]its tools load next time you run [bold]ronin[/bold] · verify with "
+                  "[bold]ronin mcp list[/bold].[/dim]")
+
+
 # ---------- plugins ----------
 
 @app.command()
