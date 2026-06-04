@@ -2103,6 +2103,38 @@ def complexity(
                    max_iterations=20)
 
 
+# ---------- deadcode (probably-unused symbols) ----------
+
+@app.command()
+def deadcode(
+    include_decorated: bool = typer.Option(False, "--include-decorated", help="Also flag decorated functions (CLI commands, fixtures, routes)."),
+    limit: int = typer.Option(100, "--limit", help="Max candidates to list."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """🪦 Find probably-unused code — public functions/classes whose name is never
+    referenced anywhere in the repo. Candidates to verify, not certainties:
+    decorated entry points, __all__ exports, tests and main are skipped; dynamic
+    dispatch can't be seen.
+    """
+    from .deadcode import find_dead
+
+    dead = find_dead(root, include_decorated=include_decorated, limit=limit)
+    if not dead:
+        console.print("[green]✓ no obviously-unused public symbols — lean.[/green]")
+        return
+    console.print(f"[#7aa2f7]🪦 {len(dead)} unused candidate(s)[/#7aa2f7] "
+                  "[dim](verify before deleting — dynamic use can't be detected)[/dim]")
+    by_file: dict[str, list] = {}
+    for d in dead:
+        by_file.setdefault(d.file, []).append(d)
+    for f, syms in by_file.items():
+        console.print(f"\n  [cyan]{f}[/cyan]")
+        for d in syms:
+            tag = " [#e0af68](decorated)[/#e0af68]" if d.decorated else ""
+            console.print(f"    [dim]{d.line:>4}[/dim]  [#6b7089]{d.kind}[/#6b7089] "
+                          f"[bold]{d.name}[/bold]{tag}")
+
+
 # ---------- release (bump + changelog + tag) ----------
 
 @app.command()
