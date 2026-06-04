@@ -2103,6 +2103,38 @@ def complexity(
                    max_iterations=20)
 
 
+# ---------- api (markdown API reference) ----------
+
+@app.command()
+def api(
+    out: Path = typer.Option(None, "--out", "-o", help="Write the reference to a file (default: print to stdout)."),
+    title: str = typer.Option("API Reference", "--title", help="Document title."),
+    root: Path = typer.Option(Path("."), "--root", help="Package/repo root."),
+) -> None:
+    """📚 Generate a Markdown API reference from public functions/classes and their
+    docstrings — no Sphinx, no config. Print it, or write it with --out.
+    """
+    from .api_ref import build_api, render_markdown
+
+    modules = build_api(root)
+    if not modules:
+        console.print("[yellow]no public API found[/yellow] [dim](no public defs, or all tests?)[/dim]")
+        raise typer.Exit(1)
+    md = render_markdown(modules, title=title)
+    total = sum(len(s) for _, s in modules)
+    if out:
+        try:
+            out.write_text(md, encoding="utf-8")
+        except OSError as e:
+            console.print(f"[red]write failed:[/red] {e}")
+            raise typer.Exit(1)
+        console.print(f"[green]✓[/green] {total} symbol(s) across {len(modules)} module(s) "
+                      f"→ [cyan]{out}[/cyan]")
+    else:
+        from rich.markdown import Markdown
+        console.print(Markdown(md))
+
+
 # ---------- tree (annotated project map) ----------
 
 @app.command()
