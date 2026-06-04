@@ -110,12 +110,29 @@ def load_plugin_tools(plugin_dir: Path | None = None) -> list[Tool]:
     return tools
 
 
+def harden(tool: Tool) -> Tool:
+    """Wrap a tool's handler so any exception becomes a structured error instead of
+    crashing the agent loop. A transient API hiccup (non-JSON, timeout, KeyError)
+    in a plugin then surfaces as ``{"error": ...}`` the model can read and recover
+    from. Returns a new Tool (handler swapped); pure given the tool."""
+    inner = tool.handler
+
+    def safe_handler(*args, **kwargs):
+        try:
+            return inner(*args, **kwargs)
+        except Exception as exc:  # noqa: BLE001 - a tool must never take down the agent
+            return {"error": f"{tool.name} failed: {type(exc).__name__}: {exc}"}
+
+    return tool.model_copy(update={"handler": safe_handler})
+
+
 def build_plugin_tools(root: str | Path = ".", *, console=None) -> list[Tool]:
     """Load user plugin tools from ``<root>/.ronin/plugins/`` for the agent.
 
     Root-aware sibling of ``load_plugin_tools`` so an in-session agent picks up the
     project's plugins. Per-plugin errors are surfaced (if ``console``) and skipped,
-    never fatal — exactly like the MCP loader."""
+    never fatal — exactly like the MCP loader. Each tool's handler is hardened so a
+    runtime failure returns a clean error rather than crashing the session."""
     plugin_dir = Path(root) / ".ronin" / PLUGIN_DIR_NAME
     tools: list[Tool] = []
     seen: set[str] = set()
@@ -127,5 +144,5 @@ def build_plugin_tools(root: str | Path = ".", *, console=None) -> list[Tool]:
         for tool in result.tools:
             if tool.name not in seen:
                 seen.add(tool.name)
-                tools.append(tool)
+                tools.append(harden(tool))
     return tools
