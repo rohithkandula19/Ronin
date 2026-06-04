@@ -1758,6 +1758,46 @@ def onboard(
             console.print(f"\n[dim]cloned repo kept at[/dim] {tmp}")
 
 
+# ---------- usages (deep-dive one symbol + its call sites) ----------
+
+@app.command()
+def usages(
+    symbol: str = typer.Argument(..., help="A function/class/method name to deep-dive."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+    no_ai: bool = typer.Option(False, "--no-ai", help="Just show where it's defined + used."),
+) -> None:
+    """🔍 Deep-dive a symbol — find where it's defined and every place it's used,
+    then explain its contract, behaviour, and how callers depend on it.
+    """
+    from .symbol_lens import explain_prompt, locate
+
+    loc = locate(root, symbol)
+    if not loc["definitions"] and loc["total_sites"] == 0:
+        console.print(f"[yellow]no definition or usage of[/yellow] [bold]{symbol}[/bold] [dim]found.[/dim]")
+        raise typer.Exit(1)
+
+    for d in loc["definitions"]:
+        console.print(f"[#7aa2f7]🔍 {d.kind}[/#7aa2f7] [bold]{symbol}[/bold] "
+                      f"[dim]→[/dim] [cyan]{d.file}:{d.line}[/cyan]")
+    if not loc["definitions"]:
+        console.print(f"[#e0af68]🔍 {symbol}[/#e0af68] [dim]used but not defined here (imported?)[/dim]")
+    console.print(f"[#6b7089]{loc['total_sites']} call site(s)[/#6b7089]"
+                  + ("[dim] — showing first few:[/dim]" if loc["call_sites"] else ""))
+    for s in loc["call_sites"][:8]:
+        console.print(f"  [dim]{s.file}:{s.line}[/dim]  {s.text[:80]}")
+
+    if no_ai:
+        return
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print("[dim]set a provider for the full explanation.[/dim]")
+        return
+    from .code_mode import run_code_agent
+    console.print("\n[#6b7089]reading the code…[/#6b7089]\n")
+    run_code_agent(config, explain_prompt(loc, symbol), root=root, console=console,
+                   read_only=True, include_image_tool=False, max_iterations=12)
+
+
 # ---------- release (bump + changelog + tag) ----------
 
 @app.command()
