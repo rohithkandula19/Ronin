@@ -1056,6 +1056,315 @@ def register_tools():
 '''
 
 
+_UUIDGEN = '''# ronin plugin: uuid_gen — generate UUIDs (offline)
+from __future__ import annotations
+
+import uuid
+
+from ronin_agent_patterns import Tool
+
+
+def uuid_gen(count: int = 1) -> dict:
+    n = max(1, min(int(count or 1), 50))
+    return {"uuids": [str(uuid.uuid4()) for _ in range(n)]}
+
+
+def register_tools():
+    return [Tool(name="uuid_gen", description="Generate one or more random UUID4s. Offline.",
+                 input_schema={"type": "object", "properties": {"count": {"type": "integer"}}},
+                 handler=uuid_gen)]
+'''
+
+_PASSWORD = '''# ronin plugin: password_gen — a strong random password (offline)
+from __future__ import annotations
+
+import secrets
+import string
+
+from ronin_agent_patterns import Tool
+
+
+def password_gen(length: int = 16, symbols: bool = True) -> dict:
+    length = max(6, min(int(length or 16), 128))
+    alphabet = string.ascii_letters + string.digits + ("!@#$%^&*-_=+" if symbols else "")
+    pw = "".join(secrets.choice(alphabet) for _ in range(length))
+    return {"password": pw, "length": length}
+
+
+def register_tools():
+    return [Tool(name="password_gen", description="Generate a strong random password. Offline.",
+                 input_schema={"type": "object", "properties": {
+                     "length": {"type": "integer"}, "symbols": {"type": "boolean"}}},
+                 handler=password_gen)]
+'''
+
+_BASE64 = '''# ronin plugin: base64_tool — encode/decode base64 (offline)
+from __future__ import annotations
+
+import base64
+
+from ronin_agent_patterns import Tool
+
+
+def base64_tool(text: str, mode: str = "encode") -> dict:
+    try:
+        if mode == "decode":
+            return {"mode": "decode", "result": base64.b64decode(text).decode("utf-8", "replace")}
+        return {"mode": "encode", "result": base64.b64encode(text.encode("utf-8")).decode("ascii")}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+def register_tools():
+    return [Tool(name="base64_tool", description="Base64 encode or decode text. Offline.",
+                 input_schema={"type": "object", "properties": {
+                     "text": {"type": "string"}, "mode": {"type": "string", "enum": ["encode", "decode"]}},
+                     "required": ["text"]},
+                 handler=base64_tool)]
+'''
+
+_HASH = '''# ronin plugin: hash_text — hash text (md5/sha1/sha256, offline)
+from __future__ import annotations
+
+import hashlib
+
+from ronin_agent_patterns import Tool
+
+
+def hash_text(text: str, algo: str = "sha256") -> dict:
+    algo = algo.lower()
+    if algo not in ("md5", "sha1", "sha256", "sha512"):
+        return {"error": f"unsupported algo '{algo}'"}
+    h = hashlib.new(algo, text.encode("utf-8")).hexdigest()
+    return {"algo": algo, "hash": h}
+
+
+def register_tools():
+    return [Tool(name="hash_text", description="Hash text with md5/sha1/sha256/sha512. Offline.",
+                 input_schema={"type": "object", "properties": {
+                     "text": {"type": "string"}, "algo": {"type": "string"}}, "required": ["text"]},
+                 handler=hash_text)]
+'''
+
+_LOREM = '''# ronin plugin: lorem_ipsum — placeholder text (offline)
+from __future__ import annotations
+
+from ronin_agent_patterns import Tool
+
+_P = ("Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod "
+      "tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, "
+      "quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.")
+
+
+def lorem_ipsum(paragraphs: int = 1) -> dict:
+    n = max(1, min(int(paragraphs or 1), 10))
+    return {"text": "\\n\\n".join([_P] * n), "paragraphs": n}
+
+
+def register_tools():
+    return [Tool(name="lorem_ipsum", description="Generate placeholder lorem-ipsum text. Offline.",
+                 input_schema={"type": "object", "properties": {"paragraphs": {"type": "integer"}}},
+                 handler=lorem_ipsum)]
+'''
+
+_JSONFMT = '''# ronin plugin: json_format — validate & pretty-print JSON (offline)
+from __future__ import annotations
+
+import json
+
+from ronin_agent_patterns import Tool
+
+
+def json_format(text: str, indent: int = 2) -> dict:
+    try:
+        obj = json.loads(text)
+    except json.JSONDecodeError as e:
+        return {"valid": False, "error": f"{e.msg} at line {e.lineno} col {e.colno}"}
+    return {"valid": True, "formatted": json.dumps(obj, indent=int(indent or 2), ensure_ascii=False)}
+
+
+def register_tools():
+    return [Tool(name="json_format", description="Validate and pretty-print a JSON string. Offline.",
+                 input_schema={"type": "object", "properties": {
+                     "text": {"type": "string"}, "indent": {"type": "integer"}}, "required": ["text"]},
+                 handler=json_format)]
+'''
+
+_TIMESTAMP = '''# ronin plugin: timestamp — convert unix <-> ISO time (offline)
+from __future__ import annotations
+
+import datetime
+
+from ronin_agent_patterns import Tool
+
+
+def timestamp(value: str = "") -> dict:
+    v = str(value).strip()
+    if not v:
+        now = datetime.datetime.now(datetime.timezone.utc)
+        return {"unix": int(now.timestamp()), "iso_utc": now.isoformat()}
+    try:
+        if v.lstrip("-").isdigit():
+            dt = datetime.datetime.fromtimestamp(int(v), datetime.timezone.utc)
+            return {"unix": int(v), "iso_utc": dt.isoformat()}
+        dt = datetime.datetime.fromisoformat(v)
+        return {"iso": v, "unix": int(dt.timestamp())}
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"could not parse '{value}': {e}"}
+
+
+def register_tools():
+    return [Tool(name="timestamp", description="Convert between unix epoch and ISO time (blank = now). Offline.",
+                 input_schema={"type": "object", "properties": {"value": {"type": "string"}}},
+                 handler=timestamp)]
+'''
+
+_URLCHECK = '''# ronin plugin: url_check — HTTP status & timing of a URL
+from __future__ import annotations
+
+import time
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def url_check(url: str) -> dict:
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    t0 = time.time()
+    try:
+        r = httpx.get(url, timeout=15, follow_redirects=True)
+    except Exception as e:  # noqa: BLE001
+        return {"url": url, "error": str(e)}
+    return {"url": str(r.url), "status": r.status_code, "ok": r.is_success,
+            "content_type": r.headers.get("content-type", ""),
+            "response_ms": round((time.time() - t0) * 1000), "size_bytes": len(r.content)}
+
+
+def register_tools():
+    return [Tool(name="url_check", description="Check a URL's HTTP status, content-type and response time.",
+                 input_schema={"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]},
+                 handler=url_check)]
+'''
+
+_DNS = '''# ronin plugin: dns_lookup — resolve DNS records (dns.google, no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def dns_lookup(name: str, type: str = "A") -> dict:
+    r = httpx.get("https://dns.google/resolve",
+                  params={"name": name, "type": type.upper()},
+                  timeout=15, follow_redirects=True).json()
+    answers = [{"data": a.get("data"), "ttl": a.get("TTL")} for a in r.get("Answer", [])]
+    return {"name": name, "type": type.upper(), "answers": answers}
+
+
+def register_tools():
+    return [Tool(name="dns_lookup", description="Resolve DNS records (A/AAAA/MX/TXT/CNAME...) for a domain. No key.",
+                 input_schema={"type": "object", "properties": {
+                     "name": {"type": "string"}, "type": {"type": "string"}}, "required": ["name"]},
+                 handler=dns_lookup)]
+'''
+
+_CHUCK = '''# ronin plugin: chuck_norris — a Chuck Norris joke (api.chucknorris.io, no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def chuck_norris() -> dict:
+    d = httpx.get("https://api.chucknorris.io/jokes/random", timeout=15, follow_redirects=True).json()
+    return {"joke": d.get("value")}
+
+
+def register_tools():
+    return [Tool(name="chuck_norris", description="A random Chuck Norris joke. No key.",
+                 input_schema={"type": "object", "properties": {}}, handler=chuck_norris)]
+'''
+
+_AGEGUESS = '''# ronin plugin: age_guess — predict age from a first name (agify.io, no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def age_guess(name: str) -> dict:
+    d = httpx.get("https://api.agify.io", params={"name": name}, timeout=15, follow_redirects=True).json()
+    return {"name": d.get("name"), "predicted_age": d.get("age"), "sample_size": d.get("count")}
+
+
+def register_tools():
+    return [Tool(name="age_guess", description="Predict the likely age for a first name. Fun. No key.",
+                 input_schema={"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]},
+                 handler=age_guess)]
+'''
+
+_DOGIMG = '''# ronin plugin: dog_image — a random dog photo URL (dog.ceo, no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def dog_image() -> dict:
+    d = httpx.get("https://dog.ceo/api/breeds/image/random", timeout=15, follow_redirects=True).json()
+    return {"image_url": d.get("message")}
+
+
+def register_tools():
+    return [Tool(name="dog_image", description="Get a random dog photo URL. No key.",
+                 input_schema={"type": "object", "properties": {}}, handler=dog_image)]
+'''
+
+_BOOK = '''# ronin plugin: book_search — find a book (Open Library, no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def book_search(query: str) -> dict:
+    r = httpx.get("https://openlibrary.org/search.json",
+                  params={"q": query, "limit": 3,
+                          "fields": "title,author_name,first_publish_year"},
+                  timeout=15, follow_redirects=True).json()
+    docs = r.get("docs") or []
+    return {"results": [{"title": d.get("title"),
+                         "author": (d.get("author_name") or [None])[0],
+                         "year": d.get("first_publish_year")} for d in docs]}
+
+
+def register_tools():
+    return [Tool(name="book_search", description="Search for a book: title, author, year (Open Library). No key.",
+                 input_schema={"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+                 handler=book_search)]
+'''
+
+_SPACEX = '''# ronin plugin: spacex_latest — the most recent SpaceX launch (no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def spacex_latest() -> dict:
+    d = httpx.get("https://api.spacexdata.com/v4/launches/latest", timeout=15, follow_redirects=True).json()
+    return {"name": d.get("name"), "date_utc": d.get("date_utc"),
+            "success": d.get("success"), "details": d.get("details"),
+            "flight_number": d.get("flight_number")}
+
+
+def register_tools():
+    return [Tool(name="spacex_latest", description="Details of the most recent SpaceX launch. No key.",
+                 input_schema={"type": "object", "properties": {}}, handler=spacex_latest)]
+'''
+
+
 @dataclass(frozen=True)
 class LibraryPlugin:
     name: str
@@ -1101,6 +1410,22 @@ LIBRARY: dict[str, LibraryPlugin] = {
     "cocktail": LibraryPlugin("cocktail", "A cocktail recipe by name", _COCKTAIL),
     "anime": LibraryPlugin("anime", "Look up an anime (MyAnimeList)", _ANIME),
     "quote": LibraryPlugin("quote", "A random inspirational quote", _QUOTE),
+    # --- offline dev utilities (never fail) ---
+    "uuid_gen": LibraryPlugin("uuid_gen", "Generate UUIDs (offline)", _UUIDGEN),
+    "password_gen": LibraryPlugin("password_gen", "Generate a strong password (offline)", _PASSWORD),
+    "base64_tool": LibraryPlugin("base64_tool", "Base64 encode/decode (offline)", _BASE64),
+    "hash_text": LibraryPlugin("hash_text", "md5/sha256 a string (offline)", _HASH),
+    "lorem_ipsum": LibraryPlugin("lorem_ipsum", "Placeholder text (offline)", _LOREM),
+    "json_format": LibraryPlugin("json_format", "Validate + pretty-print JSON (offline)", _JSONFMT),
+    "timestamp": LibraryPlugin("timestamp", "Unix <-> ISO time (offline)", _TIMESTAMP),
+    "url_check": LibraryPlugin("url_check", "HTTP status & timing of a URL", _URLCHECK),
+    # --- more online (no key) ---
+    "dns_lookup": LibraryPlugin("dns_lookup", "Resolve DNS records", _DNS),
+    "chuck_norris": LibraryPlugin("chuck_norris", "A Chuck Norris joke", _CHUCK),
+    "age_guess": LibraryPlugin("age_guess", "Predict age from a name", _AGEGUESS),
+    "dog_image": LibraryPlugin("dog_image", "A random dog photo", _DOGIMG),
+    "book_search": LibraryPlugin("book_search", "Find a book (Open Library)", _BOOK),
+    "spacex_latest": LibraryPlugin("spacex_latest", "Most recent SpaceX launch", _SPACEX),
 }
 
 _ALIASES = {
@@ -1121,6 +1446,13 @@ _ALIASES = {
     "repo": "github_repo", "ghrepo": "github_repo",
     "progjoke": "programming_joke", "food": "recipe", "meal": "recipe",
     "drink": "cocktail", "mal": "anime", "quotes": "quote",
+    "uuid": "uuid_gen", "password": "password_gen", "passwd": "password_gen",
+    "base64": "base64_tool", "b64": "base64_tool", "hash": "hash_text",
+    "sha256": "hash_text", "lorem": "lorem_ipsum", "json": "json_format",
+    "epoch": "timestamp", "unix": "timestamp", "url": "url_check",
+    "dns": "dns_lookup", "chuck": "chuck_norris", "age": "age_guess",
+    "dog": "dog_image", "book": "book_search", "books": "book_search",
+    "spacex": "spacex_latest",
 }
 
 
