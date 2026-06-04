@@ -3629,5 +3629,160 @@ def _print_result(result: AgentResultRich, *, raw: bool) -> None:
     console.print(f"[dim]{meta}[/dim]")
 
 
+# ---------- guard (intent / scope-creep gate) ----------
+
+@app.command()
+def guard(
+    intent: str = typer.Option(None, "--intent", help="What this change is meant to do — enables an LLM scope-creep check."),
+    analyze: bool = typer.Option(True, "--analyze/--no-analyze", help="With --intent, flag files that drift from it."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo to check."),
+) -> None:
+    """🛡  Pre-commit guard — scan your working diff for debug/secret leftovers
+    (stray breakpoints, console.log, merge markers, AWS keys) and, with --intent,
+    flag files that drift from the task. Exits non-zero on high-severity findings,
+    so it drops straight into a pre-commit hook or CI.
+    """
+    from .guard import collect_diff, run_guard
+
+    res = run_guard(root)
+    if res.note:
+        console.print(f"[dim]{res.note}[/dim]")
+        raise typer.Exit(0)
+    if not res.findings:
+        console.print(f"[green]✓ clean[/green] [dim]{len(res.changed_files)} file(s) changed, no leftovers[/dim]")
+    else:
+        table = Table(box=box.SIMPLE)
+        table.add_column("sev", no_wrap=True)
+        table.add_column("kind", style="bold", no_wrap=True)
+        table.add_column("file", style="cyan", no_wrap=True)
+        table.add_column("line", overflow="fold")
+        for f in res.findings:
+            color = "red" if f.severity == "high" else "yellow"
+            table.add_row(f"[{color}]{f.severity}[/{color}]", f.kind, f.file, f.text)
+        console.print(table)
+
+    if intent and analyze:
+        config = load_config()
+        if config.has_provider_auth():
+            from .code_mode import run_code_agent
+            console.print("[#6b7089]checking scope against intent…[/#6b7089]")
+            run_code_agent(
+                config,
+                f"The intended change was: {intent!r}. Files touched: {res.changed_files}. "
+                f"Read the diff and name, concisely, any file or hunk that does NOT serve that "
+                f"intent (scope creep) — or reply 'no scope creep'.\n\n"
+                f"```diff\n{collect_diff(root)[:12000]}\n```",
+                root=root, console=console, read_only=True, include_image_tool=False, max_iterations=6,
+            )
+    if res.high:
+        raise typer.Exit(1)
+
+
+# ---------- flake (flaky-test hunter) ----------
+
+@app.command()
+def flake(
+    command: list[str] = typer.Argument(..., help='Test command to repeat, e.g. "pytest -q -k login".'),
+    runs: int = typer.Option(5, "--runs", "-n", help="How many times to run it."),
+    root: Path = typer.Option(Path("."), "--root", help="Where to run."),
+) -> None:
+    """🎲 Flaky-test hunter — run your test command N times and report which tests
+    are non-deterministic (green on one run, red on the next), ranked by how often
+    they flip. A single run can't tell flaky from stable; this can.
+    """
+    from .flake import run_flake
+
+    cmd = " ".join(command)
+    console.print(f"[#7aa2f7]🎲 running[/#7aa2f7] [dim]{cmd} · {runs}×[/dim]")
+    with console.status("[dim] repeating test runs…[/dim]", spinner="dots"):
+        res = run_flake(root, cmd, runs=runs)
+    if res.note:
+        console.print(f"[yellow]{res.verdict}[/yellow] [dim]({res.note})[/dim]")
+        raise typer.Exit(2)
+    bar = "".join("[green]✓[/green]" if ok else "[red]✗[/red]" for ok in res.outcomes)
+    console.print(f"runs: {bar}  [dim]({res.verdict})[/dim]")
+    if res.verdict == "flaky":
+        table = Table(box=box.SIMPLE)
+        table.add_column("flaky test", style="cyan")
+        table.add_column("failed", justify="right")
+        for t, c in res.flaky:
+            table.add_row(t, f"{c}/{res.runs}")
+        console.print(table)
+        raise typer.Exit(1)
+    if res.verdict == "stable-pass":
+        console.print("[green]✓ green every run — no flakiness detected[/green]")
+    else:
+        console.print("[red]✗ stable failure — not flaky, just broken[/red]")
+        raise typer.Exit(1)
+
+
+# ---------- mutants (mutation-testing gate) ----------
+
+@app.command()
+def mutants(
+    target: str = typer.Argument(..., help="Source file to mutate, e.g. parser.py."),
+    test: str = typer.Option("python -m pytest -q", "--test", help="Test command that SHOULD catch mutations."),
+    max_mutants: int = typer.Option(40, "--max", help="Cap on mutants tried."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """🧬 Mutation testing — inject tiny faults into TARGET (== → !=, and → or, …),
+    run your suite against each, and list the mutants that SURVIVED: every survivor
+    is a bug your tests would have missed. Coverage says lines ran; this says they're
+    actually checked. The original file is always restored.
+    """
+    from .mutants import run_mutants
+
+    console.print(f"[#7aa2f7]🧬 mutating[/#7aa2f7] [dim]{target} · oracle: {test}[/dim]")
+    with console.status("[dim] running the suite per mutant…[/dim]", spinner="dots"):
+        res = run_mutants(root, target, test, max_mutants=max_mutants)
+    if res.note:
+        console.print(f"[yellow]{res.note}[/yellow]")
+        raise typer.Exit(2)
+    pct = round(res.score * 100)
+    color = "green" if res.score >= 0.8 else ("yellow" if res.score >= 0.5 else "red")
+    console.print(f"mutation score: [{color}]{res.killed}/{res.total} killed ({pct}%)[/{color}]")
+    if res.survivors:
+        table = Table(box=box.SIMPLE, title="survivors — tests didn't catch these")
+        table.add_column("line", justify="right", no_wrap=True)
+        table.add_column("mutation", style="bold")
+        for m in res.survivors:
+            table.add_row(str(m.lineno), m.label)
+        console.print(table)
+        raise typer.Exit(1)
+    console.print("[green]✓ every mutant killed — strong tests[/green]")
+
+
+# ---------- radius (blast radius + impact-aware tests) ----------
+
+@app.command()
+def radius(
+    run: bool = typer.Option(False, "--run", help="Also run the affected test files with pytest."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """🌐 Blast radius — from your uncommitted changes, walk the import graph
+    backwards to every module that depends on what you touched, and surface the
+    test modules in that radius so you can run only what matters.
+    """
+    from .radius import run_radius
+
+    res = run_radius(root)
+    if res.note:
+        console.print(f"[dim]{res.note}[/dim]")
+        raise typer.Exit(0)
+    console.print(f"[bold]changed:[/bold] {', '.join(res.changed)}")
+    extra = f" — {', '.join(res.radius)}" if res.radius else ""
+    console.print(f"[bold]blast radius:[/bold] {len(res.radius)} module(s){extra}")
+    if res.affected_tests:
+        console.print(f"[bold]affected tests:[/bold] {', '.join(res.affected_tests)}")
+    else:
+        console.print("[yellow]no test modules in the blast radius — this change may be untested[/yellow]")
+    if run and res.affected_tests:
+        import subprocess
+        console.print("[#6b7089]running affected tests…[/#6b7089]")
+        proc = subprocess.run(["python", "-m", "pytest", "-q", *res.affected_tests],
+                              cwd=str(Path(root).resolve()))
+        raise typer.Exit(proc.returncode)
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()

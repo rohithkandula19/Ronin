@@ -98,6 +98,15 @@ Because ronin is **provider-agnostic**, it can do things a single-vendor agent s
 - **🗡 Bushido — your code of honor, everywhere** — a global `~/.ronin/bushido.md` of standing personal conventions the agent carries into **every** repo (a repo's own notes always override it).
 - **💪 Muscle Memory — gets better at *your* repo** — the agent crystallizes a solved workflow into a reusable `/skill` saved in your repo. Use it for a week and ronin has a custom playbook that compounds.
 
+### 🧪 Quality gates — objective checks, not vibes
+
+The same "outcome over LLM-judge" philosophy as `eval` and `kaizen`, aimed at the code you're about to ship. Each is CI-friendly (non-zero exit on failure) and the core algorithms are pure + unit-tested.
+
+- **🧬 Mutation testing — `ronin mutants <file>`** — coverage tells you a line *ran*; this tells you your tests would *notice if it were wrong*. ronin injects one-operator faults (`==`→`!=`, `and`→`or`, `>`→`>=`, …), runs your suite against each, and lists the mutants that **survived** — every survivor is a bug your tests would miss. The original file is always restored. Requires a green baseline.
+- **🌐 Blast radius — `ronin radius`** — from your uncommitted changes, ronin walks the Python import graph *backwards* to every module that (transitively) depends on what you touched, and surfaces the **test modules in that radius** so you can run only what matters. `--run` executes them. A risk map + a fast, targeted feedback loop.
+- **🎲 Flaky-test hunter — `ronin flake "<cmd>" -n 7`** — a single run can't tell flaky from stable. ronin runs your command N times, diffs the failure sets, and ranks the tests that flip green↔red — the non-deterministic ones — separating them from tests that are simply broken.
+- **🛡 Scope-creep guard — `ronin guard`** — before you commit, ronin scans the lines you *added* for debug/secret leftovers (stray `breakpoint()`, `console.log`, unresolved merge markers, AWS keys, `TODO/FIXME`) and, with `--intent "…"`, flags files that drift from the task you set out to do. Drop it in a pre-commit hook.
+
 Plus, on the coding agent itself:
 
 - **⌨️ Type-ahead in the inline REPL** — the default is the minimal, Claude-Code-style inline flow (scrollback + a bordered input box); you can **type and queue messages while it works**. `ronin --tui` opts into an optional full-screen pane layout (live trace + approval modal) for those who want it.
@@ -192,6 +201,10 @@ database_url = "postgres://readonly_user:...@host:5432/db"   # a read-only role
 | `ronin tools` / `ronin doctor [--check]` | List tools / health-check provider + auth + services (live ping). |
 | `ronin image` / `video` / `say` / `see` | Media: text-to-image, video, text-to-speech, vision. |
 | `ronin set-key [--provider X] [--model Y]` | Set the LLM API key (masked). In-session, use `/login`. |
+| `ronin mutants <file> [--test "<cmd>"]` | Mutation-test a file: list mutants the suite fails to catch. |
+| `ronin radius [--run]` | Blast radius of your diff + the affected test modules. |
+| `ronin flake "<cmd>" [-n N]` | Run a test command N times; rank non-deterministic tests. |
+| `ronin guard [--intent "<task>"]` | Scan the diff for debug/secret leftovers + scope creep. |
 | `ronin version` | Print the version. |
 
 ## 🔒 Safety & security

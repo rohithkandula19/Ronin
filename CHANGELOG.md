@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.58.0] — 2026-06-04
+
+**Quality gates** — four objective, CI-friendly checks aimed at the code you're about to ship, in the same "outcome over LLM-judge" spirit as `eval`/`kaizen`. Each ships with a pure, unit-tested core. **1002 tests.**
+
+### Added — quality gates
+- **`ronin mutants <file>`** — mutation testing. Injects one-operator faults (`==`→`!=`, `and`→`or`, relational boundary toggles, `True`→`False`, `+`→`-`), runs your suite against each, and reports the mutants that **survived** (tests that catch nothing). Requires a green baseline; restores the original file in every path. Reports a mutation score and exits non-zero on survivors.
+- **`ronin radius`** — blast radius. Builds the repo's Python import graph (via `ast`), walks it backwards from your uncommitted diff to every transitively-dependent module, and surfaces the test modules in that radius. `--run` executes just those tests.
+- **`ronin flake "<cmd>" -n N`** — flaky-test hunter. Runs a test command N times, diffs the failure sets, and ranks tests that flip green↔red — distinguishing flaky from stably-broken.
+- **`ronin guard`** — scope-creep / leftover guard. Scans added diff lines for debug/secret leftovers (`breakpoint()`, `console.log`, merge markers, AWS keys, `TODO/FIXME`) and, with `--intent`, runs a read-only LLM check for files that drift from the task. Non-zero exit on high-severity findings.
+
 ## [0.56.0] — 2026-06-02
 
 Full rebrand to **ronin** (internals, config dir, packages — no more "claude-kit/csk"), plus a learning/trust pass: the router now learns, the agent can abstain, and ronin reaches GitHub. **803 → 821 tests.**
