@@ -881,6 +881,39 @@ def eval_drift(
     raise typer.Exit(eval_main(argv))
 
 
+# ---------- plugin (scaffold custom tools) ----------
+
+plugin_app = typer.Typer(help="Scaffold & manage custom Python tool plugins (.ronin/plugins/).")
+app.add_typer(plugin_app, name="plugin")
+
+
+@plugin_app.command("new", help="Scaffold a working plugin: ronin plugin new weather")
+def plugin_new(
+    name: str = typer.Argument(..., help="Tool name (lowercase, e.g. 'weather', 'github_trending')."),
+    desc: str = typer.Option("", "--desc", "-d", help="One-line description of what the tool does."),
+    force: bool = typer.Option(False, "--force", help="Overwrite if the plugin already exists."),
+    root: Path = typer.Option(Path("."), "--root", help="Project root (writes to <root>/.ronin/plugins/)."),
+) -> None:
+    from .plugin_scaffold import write_plugin
+    try:
+        path = write_plugin(name, root, description=desc, overwrite=force)
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(2)
+    except FileExistsError as e:
+        console.print(f"[yellow]already exists:[/yellow] {e} [dim](use --force to overwrite)[/dim]")
+        raise typer.Exit(1)
+    console.print(f"[green]✓[/green] scaffolded plugin [bold]{name}[/bold] → [cyan]{path}[/cyan]")
+    console.print(f"  [dim]edit the [bold]{name}()[/bold] function to call your API/logic, then run "
+                  "[bold]ronin[/bold] — the agent picks it up automatically.[/dim]")
+    console.print("  [dim]list plugins with [bold]ronin plugins[/bold].[/dim]")
+
+
+@plugin_app.command("list", help="List loaded plugins (alias of 'ronin plugins').")
+def plugin_list() -> None:
+    plugins()
+
+
 # ---------- mcp ----------
 
 mcp_app = typer.Typer(help="Connect MCP servers (Anthropic's tool protocol) — their tools join the agent.")
