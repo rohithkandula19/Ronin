@@ -1630,6 +1630,37 @@ def setup() -> None:
                   "[dim]every session now shows 💰 cost · saved $… and self-tunes over time.[/dim]")
 
 
+# ---------- estimate (scope a task before doing it) ----------
+
+@app.command()
+def estimate(
+    task: str = typer.Argument(..., help="The task to size up."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo to scope against."),
+) -> None:
+    """📊 Scope a task before doing it — ronin explores read-only and reports its
+    T-shirt size, files affected, risk, and a projected $ cost on your model.
+    """
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold].")
+        raise typer.Exit(2)
+    from .code_mode import run_code_agent
+    from .estimate import ESTIMATE_PROMPT, parse_estimate, project_cost
+
+    console.print(f"[#7aa2f7]📊 estimating[/#7aa2f7] [dim]{task[:80]}[/dim]")
+    result = run_code_agent(config, ESTIMATE_PROMPT.format(task=task), root=root,
+                            console=console, read_only=True, include_image_tool=False, max_iterations=10)
+    est = parse_estimate(result.output or "")
+    cost = project_cost(est.size, config.provider, config.resolved_model())
+    _risk_c = {"low": "green", "medium": "#e0af68", "high": "#f7768e"}.get(est.risk, "dim")
+    console.print()
+    console.print(f"  size   [bold]{est.size}[/bold]   files ~[bold]{est.files}[/bold]   "
+                  f"risk [{_risk_c}]{est.risk}[/{_risk_c}]")
+    cost_str = "free" if cost == 0 else f"~${cost:.4f}"
+    console.print(f"  projected cost on {config.provider}: [bold]{cost_str}[/bold] "
+                  "[dim](rough)[/dim]")
+
+
 # ---------- spec (design-doc-first) ----------
 
 @app.command()
