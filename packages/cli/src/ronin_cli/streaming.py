@@ -15,11 +15,24 @@ re-printing the final output in a panel.
 """
 from __future__ import annotations
 
+import re
+
 from rich.console import Console
 
 from ronin_agent_patterns import Step
 
 from .theme import ACCENT, BULLET, CONNECTOR, ERR, MUTE, OK, SOFT, TOOL, short as _short
+
+# Models (especially open ones) love GitHub-flavored HTML line breaks — `<br>`,
+# `<br/>`, `<br />` — inside table cells and paragraphs. Rich's Markdown treats
+# them as raw inline HTML and prints them LITERALLY, so the rendered output is
+# peppered with stray `<br>` tags. Convert them to real newlines before render.
+_BR_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
+
+
+def _normalize_markdown(text: str) -> str:
+    """Make LLM markdown render cleanly under rich: HTML `<br>` → newline."""
+    return _BR_RE.sub("\n", text)
 
 
 def _summarize_result(result) -> str:
@@ -115,7 +128,7 @@ class LiveRenderer:
         from rich.markdown import Markdown
 
         from .theme import CODE_THEME
-        return Markdown(self._buf, code_theme=CODE_THEME)
+        return Markdown(_normalize_markdown(self._buf), code_theme=CODE_THEME)
 
     def _end_text(self) -> None:
         """Finalise the current streamed block so tool lines / dividers follow it."""
