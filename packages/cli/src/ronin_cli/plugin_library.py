@@ -294,6 +294,206 @@ def register_tools():
 '''
 
 
+_HOLIDAYS = '''# ronin plugin: public_holidays — official holidays by country (nager.date, no key)
+from __future__ import annotations
+
+import datetime
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def public_holidays(country: str = "US", year: int = 0) -> dict:
+    year = int(year) or datetime.date.today().year
+    r = httpx.get(f"https://date.nager.at/api/v3/PublicHolidays/{year}/{country.upper()}",
+                  timeout=15, follow_redirects=True)
+    if r.status_code != 200:
+        return {"error": f"no holiday data for country '{country}'"}
+    return {"country": country.upper(), "year": year,
+            "holidays": [{"date": h["date"], "name": h["localName"], "english": h["name"]}
+                         for h in r.json()]}
+
+
+def register_tools():
+    return [Tool(
+        name="public_holidays",
+        description="Official public holidays for a country/year (ISO country code). No key.",
+        input_schema={"type": "object", "properties": {
+            "country": {"type": "string", "description": "ISO-2 code, e.g. 'US', 'IN', 'GB'."},
+            "year": {"type": "integer", "description": "Year (default: current)."}}},
+        handler=public_holidays,
+    )]
+'''
+
+_SHORTEN = '''# ronin plugin: shorten_url — shorten a link (is.gd, no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def shorten_url(url: str) -> dict:
+    resp = httpx.get("https://is.gd/create.php", params={"format": "json", "url": url},
+                     timeout=15, follow_redirects=True)
+    try:
+        r = resp.json()
+    except ValueError:
+        return {"error": "shortener unavailable (rate-limited?)", "url": url}
+    if r.get("errormessage"):
+        return {"error": r["errormessage"]}
+    return {"url": url, "short": r.get("shorturl")}
+
+
+def register_tools():
+    return [Tool(
+        name="shorten_url",
+        description="Shorten a long URL into an is.gd link. No key.",
+        input_schema={"type": "object", "properties": {
+            "url": {"type": "string"}}, "required": ["url"]},
+        handler=shorten_url,
+    )]
+'''
+
+_QRCODE = '''# ronin plugin: qr_code — build a QR-code image URL (qrserver, no key)
+from __future__ import annotations
+
+import urllib.parse
+
+from ronin_agent_patterns import Tool
+
+
+def qr_code(text: str, size: int = 220) -> dict:
+    size = max(80, min(int(size or 220), 1000))
+    data = urllib.parse.quote(text)
+    return {"text": text,
+            "image_url": f"https://api.qrserver.com/v1/create-qr-code/?size={size}x{size}&data={data}"}
+
+
+def register_tools():
+    return [Tool(
+        name="qr_code",
+        description="Generate a QR-code image URL encoding any text or link. No key.",
+        input_schema={"type": "object", "properties": {
+            "text": {"type": "string"}, "size": {"type": "integer", "description": "px (80-1000)."}},
+            "required": ["text"]},
+        handler=qr_code,
+    )]
+'''
+
+_TRANSLATE = '''# ronin plugin: translate — machine translation (MyMemory, no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def translate(text: str, to: str = "es", source: str = "en") -> dict:
+    r = httpx.get("https://api.mymemory.translated.net/get",
+                  params={"q": text, "langpair": f"{source}|{to}"},
+                  timeout=15, follow_redirects=True).json()
+    return {"text": text, "from": source, "to": to,
+            "translated": (r.get("responseData") or {}).get("translatedText")}
+
+
+def register_tools():
+    return [Tool(
+        name="translate",
+        description="Translate text between languages (ISO codes, e.g. en->es). No key.",
+        input_schema={"type": "object", "properties": {
+            "text": {"type": "string"},
+            "to": {"type": "string", "description": "Target lang code, e.g. 'fr'."},
+            "source": {"type": "string", "description": "Source lang code (default 'en')."}},
+            "required": ["text"]},
+        handler=translate,
+    )]
+'''
+
+_NPM = '''# ronin plugin: npm_package — npm package info (registry.npmjs.org, no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def npm_package(name: str) -> dict:
+    r = httpx.get(f"https://registry.npmjs.org/{name}/latest", timeout=15, follow_redirects=True)
+    if r.status_code != 200:
+        return {"error": f"npm package not found: {name}"}
+    d = r.json()
+    return {"name": d.get("name"), "version": d.get("version"),
+            "description": d.get("description"), "homepage": d.get("homepage"),
+            "license": d.get("license")}
+
+
+def register_tools():
+    return [Tool(
+        name="npm_package",
+        description="Look up an npm package: latest version, description, license. No key.",
+        input_schema={"type": "object", "properties": {
+            "name": {"type": "string"}}, "required": ["name"]},
+        handler=npm_package,
+    )]
+'''
+
+_PYPI = '''# ronin plugin: pypi_package — PyPI package info (pypi.org, no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def pypi_package(name: str) -> dict:
+    r = httpx.get(f"https://pypi.org/pypi/{name}/json", timeout=15, follow_redirects=True)
+    if r.status_code != 200:
+        return {"error": f"PyPI package not found: {name}"}
+    info = r.json().get("info", {})
+    return {"name": info.get("name"), "version": info.get("version"),
+            "summary": info.get("summary"), "home_page": info.get("home_page"),
+            "license": info.get("license")}
+
+
+def register_tools():
+    return [Tool(
+        name="pypi_package",
+        description="Look up a PyPI package: latest version, summary, license. No key.",
+        input_schema={"type": "object", "properties": {
+            "name": {"type": "string"}}, "required": ["name"]},
+        handler=pypi_package,
+    )]
+'''
+
+_STOCK = '''# ronin plugin: stock_price — latest quote for a ticker (Yahoo, no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def stock_price(symbol: str) -> dict:
+    r = httpx.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
+                  headers={"user-agent": "Mozilla/5.0"}, timeout=15, follow_redirects=True)
+    if r.status_code != 200:
+        return {"error": f"no data for symbol '{symbol}'"}
+    res = (r.json().get("chart") or {}).get("result") or []
+    if not res:
+        return {"error": f"unknown symbol '{symbol}'"}
+    m = res[0].get("meta", {})
+    return {"symbol": m.get("symbol"), "price": m.get("regularMarketPrice"),
+            "previous_close": m.get("previousClose"), "currency": m.get("currency"),
+            "exchange": m.get("exchangeName")}
+
+
+def register_tools():
+    return [Tool(
+        name="stock_price",
+        description="Latest market price for a stock ticker (e.g. AAPL). No key.",
+        input_schema={"type": "object", "properties": {
+            "symbol": {"type": "string"}}, "required": ["symbol"]},
+        handler=stock_price,
+    )]
+'''
+
+
 @dataclass(frozen=True)
 class LibraryPlugin:
     name: str
@@ -312,6 +512,13 @@ LIBRARY: dict[str, LibraryPlugin] = {
     "define": LibraryPlugin("define", "Dictionary definitions of a word", _DEFINE),
     "wikipedia": LibraryPlugin("wikipedia", "A topic summary from Wikipedia", _WIKIPEDIA),
     "ip_info": LibraryPlugin("ip_info", "Geolocate an IP address", _IPINFO),
+    "public_holidays": LibraryPlugin("public_holidays", "Official holidays by country/year", _HOLIDAYS),
+    "shorten_url": LibraryPlugin("shorten_url", "Shorten a link (is.gd)", _SHORTEN),
+    "qr_code": LibraryPlugin("qr_code", "Make a QR-code image for any text", _QRCODE),
+    "translate": LibraryPlugin("translate", "Translate text between languages", _TRANSLATE),
+    "npm_package": LibraryPlugin("npm_package", "npm package info (version, license)", _NPM),
+    "pypi_package": LibraryPlugin("pypi_package", "PyPI package info (version, summary)", _PYPI),
+    "stock_price": LibraryPlugin("stock_price", "Latest quote for a stock ticker", _STOCK),
 }
 
 _ALIASES = {
@@ -320,6 +527,9 @@ _ALIASES = {
     "crypto": "crypto_price", "btc": "crypto_price",
     "dictionary": "define", "definition": "define",
     "wiki": "wikipedia", "ip": "ip_info", "geoip": "ip_info",
+    "holidays": "public_holidays", "shorten": "shorten_url", "qr": "qr_code",
+    "npm": "npm_package", "pypi": "pypi_package", "pip": "pypi_package",
+    "stock": "stock_price", "stocks": "stock_price", "ticker": "stock_price",
 }
 
 

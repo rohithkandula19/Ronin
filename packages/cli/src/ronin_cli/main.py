@@ -952,6 +952,20 @@ def plugin_add(
     console.print("  [dim]live in the agent next time you run [bold]ronin[/bold].[/dim]")
 
 
+@plugin_app.command("remove", help="Delete a plugin file: ronin plugin remove weather")
+def plugin_remove(
+    name: str = typer.Argument(..., help="The plugin name (file stem) to remove."),
+    root: Path = typer.Option(Path("."), "--root", help="Project root."),
+) -> None:
+    path = Path(root) / ".ronin" / "plugins" / f"{name}.py"
+    if not path.is_file():
+        console.print(f"[yellow]no plugin '{name}'[/yellow] at [dim]{path}[/dim] "
+                      "[dim](see [bold]ronin plugins[/bold])[/dim]")
+        raise typer.Exit(1)
+    path.unlink()
+    console.print(f"[green]✓[/green] removed plugin [bold]{name}[/bold] [dim]({path})[/dim]")
+
+
 # ---------- mcp ----------
 
 mcp_app = typer.Typer(help="Connect MCP servers (Anthropic's tool protocol) — their tools join the agent.")
