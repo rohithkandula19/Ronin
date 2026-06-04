@@ -63,6 +63,41 @@ CATALOG: dict[str, KnownServer] = {
     "notion": KnownServer(
         "notion", "npx", ["-y", "@notionhq/notion-mcp-server"],
         ["NOTION_API_KEY"], "Read & update Notion pages/databases", note="community"),
+    # --- more reference servers ---
+    "git": KnownServer(
+        "git", "uvx", ["mcp-server-git"],
+        [], "Inspect & operate on a local git repo (log, diff, blame, commit)"),
+    "time": KnownServer(
+        "time", "uvx", ["mcp-server-time"],
+        [], "Current time & timezone conversion"),
+    "sequentialthinking": KnownServer(
+        "sequentialthinking", "npx", ["-y", "@modelcontextprotocol/server-sequential-thinking"],
+        [], "A structured step-by-step reasoning scratchpad for the agent"),
+    "everything": KnownServer(
+        "everything", "npx", ["-y", "@modelcontextprotocol/server-everything"],
+        [], "Reference server exercising every MCP feature (great for testing)"),
+    "google-maps": KnownServer(
+        "google-maps", "npx", ["-y", "@modelcontextprotocol/server-google-maps"],
+        ["GOOGLE_MAPS_API_KEY"], "Geocoding, directions, places search"),
+    "redis": KnownServer(
+        "redis", "npx", ["-y", "@modelcontextprotocol/server-redis"],
+        [], "Read/write a Redis store (append your connection URL as an arg)"),
+    "aws-kb": KnownServer(
+        "aws-kb", "npx", ["-y", "@modelcontextprotocol/server-aws-kb-retrieval"],
+        ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"], "Query an AWS Bedrock knowledge base"),
+    # --- vendor / community ---
+    "stripe": KnownServer(
+        "stripe", "npx", ["-y", "@stripe/mcp", "--tools=all"],
+        ["STRIPE_SECRET_KEY"], "Stripe customers, payments, invoices, products", note="official Stripe"),
+    "exa": KnownServer(
+        "exa", "npx", ["-y", "exa-mcp-server"],
+        ["EXA_API_KEY"], "Neural web search via Exa", note="community"),
+    "obsidian": KnownServer(
+        "obsidian", "uvx", ["mcp-obsidian"],
+        ["OBSIDIAN_API_KEY"], "Read & search an Obsidian vault", note="community · Local REST API plugin"),
+    "playwright": KnownServer(
+        "playwright", "npx", ["-y", "@playwright/mcp@latest"],
+        [], "Browser automation via Playwright (navigate, click, extract)", note="official Microsoft"),
 }
 
 # friendly aliases → catalog key
@@ -72,7 +107,8 @@ _ALIASES = {
     "pg": "postgres", "psql": "postgres",
     "drive": "gdrive", "google-drive": "gdrive",
     "search": "brave-search", "brave": "brave-search", "web": "fetch",
-    "browser": "puppeteer",
+    "browser": "playwright", "maps": "google-maps",
+    "think": "sequentialthinking", "payments": "stripe",
 }
 
 
