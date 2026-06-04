@@ -1694,6 +1694,70 @@ def deps(root: Path = typer.Option(Path("."), "--root", help="Repo root.")) -> N
         console.print("[green]✓ declared deps and imports line up.[/green]")
 
 
+# ---------- onboard (understand a new repo fast) ----------
+
+@app.command()
+def onboard(
+    repo: str = typer.Argument(".", help="A git URL to clone, or a local path."),
+    keep: bool = typer.Option(False, "--keep", help="Keep the cloned repo (don't delete the temp dir)."),
+) -> None:
+    """🧭 Drop into any repo and get oriented — clones a URL (or reads a local path),
+    gathers the stack, layout, entry points and architecture, then writes you an
+    onboarding guide: what it is, where to start, how to build/run/test.
+    """
+    import shutil
+    import subprocess
+    import tempfile
+
+    from .onboard_repo import gather_facts, onboard_prompt
+
+    tmp: str | None = None
+    from .onboard_repo import is_git_url
+    if is_git_url(repo):
+        tmp = tempfile.mkdtemp(prefix="ronin-onboard-")
+        console.print(f"[#7aa2f7]🧭 cloning[/#7aa2f7] [bold]{repo}[/bold] [dim]→ shallow[/dim]")
+        try:
+            r = subprocess.run(["git", "clone", "--depth", "1", repo, tmp],
+                               capture_output=True, text=True, timeout=180)
+        except (OSError, subprocess.SubprocessError) as e:
+            console.print(f"[red]clone failed: {e}[/red]")
+            raise typer.Exit(1)
+        if r.returncode != 0:
+            console.print(f"[red]clone failed:[/red] {r.stderr.strip()[:300]}")
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise typer.Exit(1)
+        root = Path(tmp)
+    else:
+        root = Path(repo)
+        if not root.is_dir():
+            console.print(f"[red]not a directory:[/red] {repo}")
+            raise typer.Exit(1)
+
+    try:
+        console.print("[#6b7089]gathering facts…[/#6b7089]")
+        facts = gather_facts(root)
+        stack = ", ".join(facts.get("stack", [])) or "unknown"
+        console.print(f"  stack [bold]{stack}[/bold]"
+                      + (f"  ·  [bold]{facts['modules']}[/bold] modules in [cyan]{facts['package']}[/cyan]"
+                         if facts.get("package") else ""))
+        if facts.get("entry_points"):
+            console.print(f"  entry points  [cyan]{', '.join(facts['entry_points'])}[/cyan]")
+
+        config = load_config()
+        if not config.has_provider_auth():
+            console.print("[dim]set a provider to generate the full onboarding guide.[/dim]")
+            return
+        from .code_mode import run_code_agent
+        console.print("\n[#6b7089]writing your onboarding guide…[/#6b7089]\n")
+        run_code_agent(config, onboard_prompt(facts), root=root, console=console,
+                       read_only=True, include_image_tool=False, max_iterations=14)
+    finally:
+        if tmp and not keep:
+            shutil.rmtree(tmp, ignore_errors=True)
+        elif tmp and keep:
+            console.print(f"\n[dim]cloned repo kept at[/dim] {tmp}")
+
+
 # ---------- release (bump + changelog + tag) ----------
 
 @app.command()
