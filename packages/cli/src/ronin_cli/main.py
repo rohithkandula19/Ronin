@@ -1630,6 +1630,36 @@ def setup() -> None:
                   "[dim]every session now shows 💰 cost · saved $… and self-tunes over time.[/dim]")
 
 
+# ---------- scaffold (generate a component) ----------
+
+@app.command()
+def scaffold(
+    what: str = typer.Argument(..., help="What to scaffold, e.g. \"a RetryClient with backoff\"."),
+    yolo: bool = typer.Option(False, "--yolo", help="Auto-approve the writes."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """🏗  Generate a new component that FITS your project — ronin detects your stack
+    and conventions, then writes the component + its test to match (not generic
+    boilerplate). Diffs are gated unless --yolo.
+    """
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold].")
+        raise typer.Exit(2)
+    from .code_mode import run_code_agent
+    from .scaffold import detect_stack, scaffold_prompt
+
+    stack = detect_stack(root)
+    console.print(f"[#7aa2f7]🏗 scaffolding[/#7aa2f7] [dim]{what[:70]}[/dim] "
+                  f"[#6b7089]· {', '.join(stack)}[/#6b7089]")
+    result = run_code_agent(config, scaffold_prompt(what, stack), root=root, console=console,
+                            yolo=yolo, max_iterations=20)
+    if result.blocked:
+        console.print(f"[red]✗[/red] {result.output}")
+        raise typer.Exit(2)
+    console.print("[bold green]✅ scaffolded[/bold green]")
+
+
 # ---------- estimate (scope a task before doing it) ----------
 
 @app.command()
