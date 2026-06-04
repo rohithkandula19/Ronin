@@ -1,7 +1,21 @@
 """Tests for the tool-result preview summarizer."""
 from __future__ import annotations
 
-from ronin_cli.streaming import _summarize_result
+from ronin_cli.streaming import _normalize_markdown, _summarize_result
+
+
+def test_normalize_markdown_converts_html_breaks() -> None:
+    # Models emit <br>, <br/>, <br /> (any case) inside cells/paragraphs; rich
+    # would print them literally. They must become real newlines, none left over.
+    src = "a<br>b<br/>c<BR />d<br   >e"
+    out = _normalize_markdown(src)
+    assert out == "a\nb\nc\nd\ne"
+    assert "<br" not in out.lower()
+
+
+def test_normalize_markdown_leaves_plain_text() -> None:
+    src = "## Heading\n\n- **bold** item\n- `code` item"
+    assert _normalize_markdown(src) == src
 
 
 def test_run_command_success() -> None:

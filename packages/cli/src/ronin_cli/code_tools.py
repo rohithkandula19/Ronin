@@ -29,6 +29,15 @@ MAX_LIST_ENTRIES = 500
 # of files). Shared with the repo map so the ignore policy is consistent.
 _SKIP_DIRS = IGNORE_DIRS
 
+# Junk files never worth surfacing in a listing — OS cruft and compiled
+# artifacts. They only add noise when the model asks "what's in this project".
+_SKIP_FILES = {".DS_Store", "Thumbs.db", "desktop.ini"}
+_SKIP_FILE_SUFFIXES = (".pyc", ".pyo")
+
+
+def _is_junk_file(p: Path) -> bool:
+    return p.name in _SKIP_FILES or p.suffix in _SKIP_FILE_SUFFIXES
+
 
 def undo_last(undo_stack: list) -> str:
     """Restore the most recent file modification recorded on ``undo_stack``.
@@ -183,7 +192,11 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None,
         for p in sorted(base.rglob(pattern)):
             if any(part in _SKIP_DIRS for part in p.parts):
                 continue
-            if p.is_file():
+            # Directories are listed too (trailing "/") so the model can see the
+            # project's shape — frontend/, backend/, … — not just a flat file dump.
+            if p.is_dir():
+                out.append(_display(p) + "/")
+            elif p.is_file() and not _is_junk_file(p):
                 out.append(_display(p))
             if len(out) >= MAX_LIST_ENTRIES:
                 break
@@ -248,7 +261,7 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None,
         for p in sorted(base.glob(pattern)):
             if any(part in _SKIP_DIRS for part in p.parts):
                 continue
-            if p.is_file():
+            if p.is_file() and not _is_junk_file(p):
                 out.append(_display(p))
             if len(out) >= MAX_LIST_ENTRIES:
                 break

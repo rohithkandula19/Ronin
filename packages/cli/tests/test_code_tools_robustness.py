@@ -30,6 +30,20 @@ def test_list_files_ignores_vendored_dirs(tmp_path) -> None:
                    for p in out)
 
 
+def test_list_files_shows_directories_and_skips_junk(tmp_path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / ".DS_Store").write_bytes(b"\x00junk")
+    (tmp_path / "src" / "mod.pyc").write_bytes(b"\x00bytecode")
+    out = _tools(tmp_path)["list_files"].handler(directory=".")
+    # directories surface (trailing slash) so the model sees project shape
+    assert "src/" in out
+    # the real source file is listed; OS cruft and compiled artifacts are not
+    assert "src/app.py" in out
+    assert ".DS_Store" not in out
+    assert not any(p.endswith(".pyc") for p in out)
+
+
 def test_search_files_ignores_vendored_dirs(tmp_path) -> None:
     _seed(tmp_path)
     # 'y = 2' only exists inside vendored dirs → should find nothing
