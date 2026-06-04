@@ -918,10 +918,15 @@ def mcp_add(
     name: str = typer.Argument(..., help="A short name, e.g. 'fs'."),
     command: str = typer.Argument(..., help="The server command, e.g. 'npx'."),
     args: Optional[list[str]] = typer.Argument(None, help="Args for the server command (flags like -y are passed through)."),
+    env: Optional[list[str]] = typer.Option(None, "--env", "-e", help="Env var for the server, KEY=VALUE (repeatable). Bare KEY inherits from your shell — good for secrets like tokens."),
 ) -> None:
-    from .mcp_client import add_mcp_server
-    path = add_mcp_server(name, command, list(args or []), ".")
+    from .mcp_client import add_mcp_server, parse_env_pairs
+    env_map = parse_env_pairs(list(env or []))
+    path = add_mcp_server(name, command, list(args or []), ".", env=env_map or None)
     console.print(f"[green]✓[/green] added MCP server [bold]{name}[/bold] → [cyan]{path}[/cyan]")
+    if env_map:
+        shown = ", ".join(f"{k}={'•••' if v else '(from shell)'}" for k, v in env_map.items())
+        console.print(f"[dim]env: {shown}[/dim]")
     console.print("[dim]its tools load automatically next time you run [bold]ronin[/bold]. "
                   "Verify now with [bold]ronin mcp list[/bold].[/dim]")
 

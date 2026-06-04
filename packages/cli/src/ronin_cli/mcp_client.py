@@ -137,7 +137,8 @@ def load_mcp_servers(root: str | Path = ".") -> dict:
         return {}
 
 
-def add_mcp_server(name: str, command: str, args: list[str], root: str | Path = ".") -> Path:
+def add_mcp_server(name: str, command: str, args: list[str], root: str | Path = ".",
+                   env: dict[str, str] | None = None) -> Path:
     p = mcp_config_path(root)
     p.parent.mkdir(parents=True, exist_ok=True)
     data = {"mcpServers": {}}
@@ -147,9 +148,27 @@ def add_mcp_server(name: str, command: str, args: list[str], root: str | Path = 
             data.setdefault("mcpServers", {})
         except ValueError:
             pass
-    data["mcpServers"][name] = {"command": command, "args": args}
+    spec: dict = {"command": command, "args": args}
+    if env:
+        spec["env"] = env
+    data["mcpServers"][name] = spec
     p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return p
+
+
+def parse_env_pairs(pairs: list[str]) -> dict[str, str]:
+    """Parse ``KEY=VALUE`` strings into a dict. A bare ``KEY`` (no ``=``) inherits
+    the value from the current environment, so secrets needn't be typed. Pure-ish."""
+    out: dict[str, str] = {}
+    for item in pairs or []:
+        if "=" in item:
+            k, v = item.split("=", 1)
+            out[k.strip()] = v
+        else:
+            k = item.strip()
+            if k:
+                out[k] = os.environ.get(k, "")
+    return out
 
 
 def remove_mcp_server(name: str, root: str | Path = ".") -> bool:
