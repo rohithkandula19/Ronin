@@ -494,6 +494,206 @@ def register_tools():
 '''
 
 
+_COUNTRY = '''# ronin plugin: country_info — facts about a country (restcountries, no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def country_info(name: str) -> dict:
+    r = httpx.get(f"https://restcountries.com/v3.1/name/{name}",
+                  params={"fields": "name,capital,population,region,subregion,currencies,languages,flag"},
+                  timeout=15, follow_redirects=True)
+    if r.status_code != 200:
+        return {"error": f"country not found: {name}"}
+    c = r.json()[0]
+    return {"name": c.get("name", {}).get("common"), "capital": (c.get("capital") or [None])[0],
+            "region": c.get("region"), "subregion": c.get("subregion"),
+            "population": c.get("population"), "flag": c.get("flag"),
+            "currencies": list((c.get("currencies") or {}).keys()),
+            "languages": list((c.get("languages") or {}).values())}
+
+
+def register_tools():
+    return [Tool(
+        name="country_info",
+        description="Capital, population, region, currencies and languages of a country. No key.",
+        input_schema={"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]},
+        handler=country_info,
+    )]
+'''
+
+_DADJOKE = '''# ronin plugin: dad_joke — a random dad joke (icanhazdadjoke, no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def dad_joke() -> dict:
+    r = httpx.get("https://icanhazdadjoke.com/",
+                  headers={"Accept": "application/json", "User-Agent": "ronin (https://github.com/ronin)"},
+                  timeout=15, follow_redirects=True)
+    return {"joke": r.json().get("joke")}
+
+
+def register_tools():
+    return [Tool(
+        name="dad_joke",
+        description="Fetch a random dad joke. No key.",
+        input_schema={"type": "object", "properties": {}},
+        handler=dad_joke,
+    )]
+'''
+
+_SUNRISE = '''# ronin plugin: sun_times — sunrise/sunset for a city (open-meteo + sunrise-sunset.org)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def sun_times(city: str) -> dict:
+    g = httpx.get("https://geocoding-api.open-meteo.com/v1/search",
+                  params={"name": city, "count": 1}, timeout=15, follow_redirects=True).json()
+    if not g.get("results"):
+        return {"error": f"city not found: {city}"}
+    loc = g["results"][0]
+    s = httpx.get("https://api.sunrise-sunset.org/json",
+                  params={"lat": loc["latitude"], "lng": loc["longitude"], "formatted": 0},
+                  timeout=15, follow_redirects=True).json()
+    res = s.get("results", {})
+    return {"city": loc["name"], "country": loc.get("country"),
+            "sunrise_utc": res.get("sunrise"), "sunset_utc": res.get("sunset"),
+            "day_length_s": res.get("day_length")}
+
+
+def register_tools():
+    return [Tool(
+        name="sun_times",
+        description="Sunrise and sunset times (UTC) for a city. No key.",
+        input_schema={"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]},
+        handler=sun_times,
+    )]
+'''
+
+_COLOR = '''# ronin plugin: color_info — name & values of a color (thecolorapi, no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def color_info(hex: str) -> dict:
+    h = hex.lstrip("#")
+    r = httpx.get("https://www.thecolorapi.com/id", params={"hex": h},
+                  timeout=15, follow_redirects=True).json()
+    return {"hex": f"#{h}", "name": r.get("name", {}).get("value"),
+            "rgb": r.get("rgb", {}).get("value"), "hsl": r.get("hsl", {}).get("value")}
+
+
+def register_tools():
+    return [Tool(
+        name="color_info",
+        description="Given a hex color, return its closest name plus RGB/HSL. No key.",
+        input_schema={"type": "object", "properties": {
+            "hex": {"type": "string", "description": "e.g. 'ff5733' or '#ff5733'."}}, "required": ["hex"]},
+        handler=color_info,
+    )]
+'''
+
+_UNITCONV = '''# ronin plugin: unit_convert — convert length/mass/temperature (offline, no network)
+from __future__ import annotations
+
+from ronin_agent_patterns import Tool
+
+_LENGTH = {"m": 1, "km": 1000, "cm": 0.01, "mm": 0.001, "mi": 1609.344,
+           "ft": 0.3048, "in": 0.0254, "yd": 0.9144, "nmi": 1852}
+_MASS = {"kg": 1000, "g": 1, "mg": 0.001, "lb": 453.59237, "oz": 28.349523, "t": 1_000_000}
+_TEMP = {"c", "f", "k"}
+
+
+def unit_convert(value: float, from_unit: str, to_unit: str) -> dict:
+    f, t = from_unit.lower(), to_unit.lower()
+    value = float(value)
+    if f in _TEMP and t in _TEMP:
+        c = value if f == "c" else (value - 32) * 5 / 9 if f == "f" else value - 273.15
+        out = c if t == "c" else c * 9 / 5 + 32 if t == "f" else c + 273.15
+        return {"value": value, "from": f, "to": t, "result": round(out, 4)}
+    for table in (_LENGTH, _MASS):
+        if f in table and t in table:
+            return {"value": value, "from": f, "to": t,
+                    "result": round(value * table[f] / table[t], 6)}
+    return {"error": f"cannot convert '{from_unit}' to '{to_unit}' "
+                     "(supported: length m/km/cm/mm/mi/ft/in/yd/nmi, mass kg/g/mg/lb/oz/t, temp c/f/k)"}
+
+
+def register_tools():
+    return [Tool(
+        name="unit_convert",
+        description="Convert between units of length, mass, or temperature. Works offline.",
+        input_schema={"type": "object", "properties": {
+            "value": {"type": "number"}, "from_unit": {"type": "string"},
+            "to_unit": {"type": "string"}}, "required": ["value", "from_unit", "to_unit"]},
+        handler=unit_convert,
+    )]
+'''
+
+_RANDOMUSER = '''# ronin plugin: random_user — a fake user profile for testing (randomuser.me, no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def random_user(nationality: str = "") -> dict:
+    params = {"nat": nationality} if nationality else {}
+    r = httpx.get("https://randomuser.me/api/", params=params, timeout=15, follow_redirects=True).json()
+    u = (r.get("results") or [{}])[0]
+    name = u.get("name", {})
+    loc = u.get("location", {})
+    return {"name": f"{name.get('first', '')} {name.get('last', '')}".strip(),
+            "email": u.get("email"), "phone": u.get("phone"),
+            "country": loc.get("country"), "city": loc.get("city"),
+            "username": u.get("login", {}).get("username")}
+
+
+def register_tools():
+    return [Tool(
+        name="random_user",
+        description="Generate a realistic fake user profile (for test data/seeding). No key.",
+        input_schema={"type": "object", "properties": {
+            "nationality": {"type": "string", "description": "Optional 2-letter nat, e.g. 'us', 'gb'."}}},
+        handler=random_user,
+    )]
+'''
+
+_ISS = '''# ronin plugin: iss_location — where the ISS is right now (wheretheiss.at, no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def iss_location() -> dict:
+    r = httpx.get("https://api.wheretheiss.at/v1/satellites/25544",
+                  timeout=15, follow_redirects=True).json()
+    return {"latitude": r.get("latitude"), "longitude": r.get("longitude"),
+            "altitude_km": r.get("altitude"), "velocity_kmh": r.get("velocity")}
+
+
+def register_tools():
+    return [Tool(
+        name="iss_location",
+        description="Current latitude/longitude, altitude and speed of the ISS. No key.",
+        input_schema={"type": "object", "properties": {}},
+        handler=iss_location,
+    )]
+'''
+
+
+
 @dataclass(frozen=True)
 class LibraryPlugin:
     name: str
@@ -519,6 +719,13 @@ LIBRARY: dict[str, LibraryPlugin] = {
     "npm_package": LibraryPlugin("npm_package", "npm package info (version, license)", _NPM),
     "pypi_package": LibraryPlugin("pypi_package", "PyPI package info (version, summary)", _PYPI),
     "stock_price": LibraryPlugin("stock_price", "Latest quote for a stock ticker", _STOCK),
+    "country_info": LibraryPlugin("country_info", "Capital, population, currencies of a country", _COUNTRY),
+    "dad_joke": LibraryPlugin("dad_joke", "A random dad joke", _DADJOKE),
+    "sun_times": LibraryPlugin("sun_times", "Sunrise/sunset for a city", _SUNRISE),
+    "color_info": LibraryPlugin("color_info", "Name + RGB/HSL of a hex color", _COLOR),
+    "unit_convert": LibraryPlugin("unit_convert", "Convert length/mass/temperature (offline)", _UNITCONV),
+    "random_user": LibraryPlugin("random_user", "Generate a fake user profile", _RANDOMUSER),
+    "iss_location": LibraryPlugin("iss_location", "Live position of the ISS", _ISS),
 }
 
 _ALIASES = {
@@ -530,6 +737,9 @@ _ALIASES = {
     "holidays": "public_holidays", "shorten": "shorten_url", "qr": "qr_code",
     "npm": "npm_package", "pypi": "pypi_package", "pip": "pypi_package",
     "stock": "stock_price", "stocks": "stock_price", "ticker": "stock_price",
+    "country": "country_info", "joke": "dad_joke", "sunrise": "sun_times",
+    "sunset": "sun_times", "color": "color_info", "convert": "unit_convert",
+    "units": "unit_convert", "user": "random_user", "iss": "iss_location",
 }
 
 
