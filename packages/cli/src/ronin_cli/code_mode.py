@@ -581,6 +581,12 @@ def run_code_agent(
     system = base_system or CODE_SYSTEM
     if extra_system:
         system += "\n\n" + extra_system
+    # Make the agent aware of ronin's own integration commands + what's connected,
+    # so it recommends `ronin mcp install github` instead of a generic git tutorial.
+    # Interactive turns only (console set) — sub-agents/evals stay deterministic.
+    if console is not None:
+        from .capabilities import capability_block
+        system += "\n\n" + capability_block([t.name for t in tools])
     # Bushido: the user's global code of honor, carried across every repo. Folded
     # in BEFORE project memory so a repo's own notes always override it.
     from .bushido import bushido_system_block
