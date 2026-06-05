@@ -916,16 +916,40 @@ def plugin_list() -> None:
 
 @plugin_app.command("library", help="Browse ready-to-use plugins you can add in one command.")
 def plugin_library_cmd() -> None:
-    from .plugin_library import library_rows
+    from .plugin_library import installed_names, library_rows
+    have = installed_names(".")
     grid = Table(box=box.ROUNDED, show_header=True, header_style="bold #7aa2f7")
+    grid.add_column("", no_wrap=True)
     grid.add_column("add", style="cyan", no_wrap=True)
     grid.add_column("needs", style="#e0af68", no_wrap=True)
     grid.add_column("what it does")
     for name, needs, blurb in library_rows():
-        grid.add_row(name, needs, blurb)
+        mark = "[green]✓[/green]" if name in have else " "
+        grid.add_row(mark, name, needs, blurb)
     console.print(grid)
-    console.print("[dim]add one with [bold]ronin plugin add <name>[/bold] · "
+    console.print(f"[dim]✓ = installed ({len(have & {r[0] for r in library_rows()})}/{len(library_rows())}) · "
+                  "add with [bold]ronin plugin add <name>[/bold] · "
                   "make your own with [bold]ronin plugin new <name>[/bold][/dim]")
+
+
+@plugin_app.command("update", help="Refresh installed library plugins to their latest version.")
+def plugin_update(
+    name: str = typer.Argument(None, help="A specific plugin to update (default: all outdated)."),
+    root: Path = typer.Option(Path("."), "--root", help="Project root."),
+) -> None:
+    from .plugin_library import LIBRARY, outdated
+    pdir = Path(root) / ".ronin" / "plugins"
+    targets = [name] if name else outdated(root)
+    if name and name not in LIBRARY:
+        console.print(f"[yellow]'{name}' isn't a library plugin[/yellow] — nothing to update.")
+        raise typer.Exit(1)
+    if not targets:
+        console.print("[green]✓ all installed library plugins are up to date.[/green]")
+        return
+    for n in targets:
+        (pdir / f"{n}.py").write_text(LIBRARY[n].source, encoding="utf-8")
+        console.print(f"[green]✓[/green] updated [bold]{n}[/bold]")
+    console.print(f"[dim]refreshed {len(targets)} plugin(s) — live next time you run ronin.[/dim]")
 
 
 @plugin_app.command("search", help="Search the plugin library: ronin plugin search finance")

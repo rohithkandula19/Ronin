@@ -55,3 +55,17 @@ def test_search_by_name_blurb_alias() -> None:
     assert "synonyms" in names("thesaurus")         # alias match
     assert names("") == set(__import__("ronin_cli.plugin_library", fromlist=["LIBRARY"]).LIBRARY)
     assert search("zzzznope") == []
+
+
+def test_installed_and_outdated(tmp_path) -> None:
+    from ronin_cli.plugin_library import LIBRARY, installed_names, outdated
+    pdir = tmp_path / ".ronin" / "plugins"
+    pdir.mkdir(parents=True)
+    # a current library plugin (up to date)
+    (pdir / "roman_numeral.py").write_text(LIBRARY["roman_numeral"].source, encoding="utf-8")
+    # a stale library plugin (old content)
+    (pdir / "weather.py").write_text("# old version\n", encoding="utf-8")
+    # a user plugin (not in library) — must be ignored by outdated()
+    (pdir / "mine.py").write_text("# custom\n", encoding="utf-8")
+    assert installed_names(tmp_path) == {"roman_numeral", "weather", "mine"}
+    assert outdated(tmp_path) == ["weather"]            # only the stale library one

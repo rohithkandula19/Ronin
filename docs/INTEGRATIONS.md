@@ -73,12 +73,13 @@ Any other server works too — `ronin mcp add <name> <command> [args]`.
 ## 🧩 Plugins (your own Python tools)
 
 ```bash
-ronin plugin library              # browse the 56 built-ins
+ronin plugin library              # browse the 60 built-ins
 ronin plugin search <keyword>     # find one (e.g. 'finance', 'word')
 ronin plugin add <name>           # install a built-in
 ronin plugin new <name>           # scaffold your own (ready to edit)
+ronin plugin update [name]        # refresh installed library plugins (bug fixes)
 ronin plugin remove <name>
-ronin plugins                     # what's loaded
+ronin plugins                     # what's loaded (✓ in `library` marks installed)
 ```
 
 ### Write your own in ~10 lines
@@ -106,7 +107,7 @@ def register_tools():
 Drop it in and the agent picks it up next run. `ronin plugin new <name>` writes
 exactly this shape for you, with a working example inside.
 
-### Built-in library (56 plugins, no keys)
+### Built-in library (60 plugins, no keys)
 
 | plugin | what it does |
 |---|---|
@@ -133,7 +134,11 @@ exactly this shape for you, with a working example inside.
 | `uuid_gen` | Generate UUIDs (offline) |
 | `password_gen` | Generate a strong password (offline) |
 | `base64_tool` | Base64 encode/decode (offline) |
+| `url_encode` | URL percent-encode/decode (offline) |
 | `hash_text` | md5/sha256 a string (offline) |
+| `jwt_decode` | Decode a JWT header/payload (offline) |
+| `regex_test` | Test a regex against text (offline) |
+| `roman_numeral` | Int ↔ Roman numeral (offline) |
 | `json_format` | Validate + pretty-print JSON (offline) |
 | `timestamp` | Unix ↔ ISO time (offline) |
 | `lorem_ipsum` | Placeholder text (offline) |
@@ -179,4 +184,4 @@ finds them.
 - It's a **hosted** MCP endpoint (Linear, Atlassian…) → `mcp add-remote`.
 - It's just an **API or some logic** and you want it fast → a plugin
   (`ronin plugin new`).
-- You want it **today, no setup** → `ronin plugin add` from the 56 built-ins.
+- You want it **today, no setup** → `ronin plugin add` from the 60 built-ins.

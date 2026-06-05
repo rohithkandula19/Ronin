@@ -7,6 +7,7 @@ are pure and unit-tested; each source is valid, loadable Python.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 # NB: sources use only '#' comments (no triple-quoted docstrings) so they nest
 # cleanly inside these module strings.
@@ -1529,6 +1530,124 @@ def register_tools():
 '''
 
 
+_REGEX = '''# ronin plugin: regex_test — test a regex against text (offline)
+from __future__ import annotations
+
+import re
+
+from ronin_agent_patterns import Tool
+
+
+def regex_test(pattern: str, text: str, ignorecase: bool = False) -> dict:
+    try:
+        rx = re.compile(pattern, re.IGNORECASE if ignorecase else 0)
+    except re.error as e:
+        return {"error": f"invalid regex: {e}"}
+    matches = [{"match": m.group(0), "groups": list(m.groups()), "start": m.start()}
+               for m in rx.finditer(text)]
+    return {"pattern": pattern, "match_count": len(matches), "matches": matches[:25]}
+
+
+def register_tools():
+    return [Tool(name="regex_test", description="Test a regular expression against text; returns matches + groups. Offline.",
+                 input_schema={"type": "object", "properties": {
+                     "pattern": {"type": "string"}, "text": {"type": "string"},
+                     "ignorecase": {"type": "boolean"}}, "required": ["pattern", "text"]},
+                 handler=regex_test)]
+'''
+
+_JWT = '''# ronin plugin: jwt_decode — decode a JWT without verifying (offline)
+from __future__ import annotations
+
+import base64
+import json
+
+from ronin_agent_patterns import Tool
+
+
+def _seg(s: str):
+    s += "=" * (-len(s) % 4)
+    return json.loads(base64.urlsafe_b64decode(s.encode()))
+
+
+def jwt_decode(token: str) -> dict:
+    parts = token.strip().split(".")
+    if len(parts) < 2:
+        return {"error": "not a JWT (expected header.payload.signature)"}
+    try:
+        return {"header": _seg(parts[0]), "payload": _seg(parts[1]),
+                "note": "signature NOT verified — decode only"}
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"could not decode: {e}"}
+
+
+def register_tools():
+    return [Tool(name="jwt_decode", description="Decode a JWT's header & payload (does NOT verify the signature). Offline.",
+                 input_schema={"type": "object", "properties": {"token": {"type": "string"}}, "required": ["token"]},
+                 handler=jwt_decode)]
+'''
+
+_URLENCODE = '''# ronin plugin: url_encode — percent-encode/decode text (offline)
+from __future__ import annotations
+
+import urllib.parse
+
+from ronin_agent_patterns import Tool
+
+
+def url_encode(text: str, mode: str = "encode") -> dict:
+    if mode == "decode":
+        return {"mode": "decode", "result": urllib.parse.unquote(text)}
+    return {"mode": "encode", "result": urllib.parse.quote(text, safe="")}
+
+
+def register_tools():
+    return [Tool(name="url_encode", description="URL percent-encode or decode a string. Offline.",
+                 input_schema={"type": "object", "properties": {
+                     "text": {"type": "string"}, "mode": {"type": "string", "enum": ["encode", "decode"]}},
+                     "required": ["text"]},
+                 handler=url_encode)]
+'''
+
+_ROMAN = '''# ronin plugin: roman_numeral — convert int <-> Roman numeral (offline)
+from __future__ import annotations
+
+from ronin_agent_patterns import Tool
+
+_TABLE = [(1000, "M"), (900, "CM"), (500, "D"), (400, "CD"), (100, "C"), (90, "XC"),
+          (50, "L"), (40, "XL"), (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I")]
+_VALUES = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100, "D": 500, "M": 1000}
+
+
+def roman_numeral(value: str) -> dict:
+    s = str(value).strip().upper()
+    if s.isdigit():
+        n = int(s)
+        if not (1 <= n <= 3999):
+            return {"error": "integer out of range (1-3999)"}
+        out = ""
+        for v, sym in _TABLE:
+            while n >= v:
+                out += sym
+                n -= v
+        return {"input": int(s), "roman": out}
+    if not s or any(c not in _VALUES for c in s):
+        return {"error": f"not an integer or Roman numeral: {value}"}
+    total, prev = 0, 0
+    for c in reversed(s):
+        v = _VALUES[c]
+        total += -v if v < prev else v
+        prev = v
+    return {"roman": s, "value": total}
+
+
+def register_tools():
+    return [Tool(name="roman_numeral", description="Convert an integer to a Roman numeral or vice-versa. Offline.",
+                 input_schema={"type": "object", "properties": {"value": {"type": "string"}}, "required": ["value"]},
+                 handler=roman_numeral)]
+'''
+
+
 @dataclass(frozen=True)
 class LibraryPlugin:
     name: str
@@ -1597,6 +1716,10 @@ LIBRARY: dict[str, LibraryPlugin] = {
     "diff_text": LibraryPlugin("diff_text", "Unified diff of two texts (offline)", _DIFFTEXT),
     "github_releases": LibraryPlugin("github_releases", "Latest release of a repo", _GHRELEASE),
     "rss_feed": LibraryPlugin("rss_feed", "Latest items from an RSS/Atom feed", _RSS),
+    "regex_test": LibraryPlugin("regex_test", "Test a regex against text (offline)", _REGEX),
+    "jwt_decode": LibraryPlugin("jwt_decode", "Decode a JWT header/payload (offline)", _JWT),
+    "url_encode": LibraryPlugin("url_encode", "URL encode/decode (offline)", _URLENCODE),
+    "roman_numeral": LibraryPlugin("roman_numeral", "Int <-> Roman numeral (offline)", _ROMAN),
 }
 
 _ALIASES = {
@@ -1639,6 +1762,33 @@ def resolve(name: str) -> LibraryPlugin | None:
 def library_rows() -> list[tuple[str, str, str]]:
     """(name, needs, blurb) for every library plugin, for display. Pure."""
     return [(p.name, p.needs, p.blurb) for p in LIBRARY.values()]
+
+
+def installed_names(root: Path | str = ".") -> set[str]:
+    """File stems of plugins installed under ``<root>/.ronin/plugins/``. Pure-ish."""
+    pdir = Path(root) / ".ronin" / "plugins"
+    if not pdir.is_dir():
+        return set()
+    return {p.stem for p in pdir.glob("*.py") if not p.name.startswith("_")}
+
+
+def outdated(root: Path | str = ".") -> list[str]:
+    """Installed *library* plugins whose on-disk source differs from the current
+    library source (i.e. a newer/fixed version is available). User-written plugins
+    (not in the library) are never reported."""
+    pdir = Path(root) / ".ronin" / "plugins"
+    stale: list[str] = []
+    for name in sorted(installed_names(root)):
+        entry = LIBRARY.get(name)
+        if entry is None:
+            continue
+        try:
+            current = (pdir / f"{name}.py").read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if current != entry.source:
+            stale.append(name)
+    return stale
 
 
 def search(query: str) -> list[LibraryPlugin]:
