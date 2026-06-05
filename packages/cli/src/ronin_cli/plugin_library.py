@@ -1365,6 +1365,170 @@ def register_tools():
 '''
 
 
+_TEXTSTATS = '''# ronin plugin: text_stats — word/char/reading-time stats (offline)
+from __future__ import annotations
+
+import re
+
+from ronin_agent_patterns import Tool
+
+
+def text_stats(text: str) -> dict:
+    words = re.findall(r"\\S+", text)
+    sentences = [s for s in re.split(r"[.!?]+", text) if s.strip()]
+    return {"characters": len(text), "words": len(words),
+            "sentences": len(sentences), "lines": text.count("\\n") + 1 if text else 0,
+            "reading_time_min": round(len(words) / 200, 1)}
+
+
+def register_tools():
+    return [Tool(name="text_stats", description="Word/character/sentence counts + reading time for text. Offline.",
+                 input_schema={"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
+                 handler=text_stats)]
+'''
+
+_SLUGIFY = '''# ronin plugin: slugify — turn text into a URL slug (offline)
+from __future__ import annotations
+
+import re
+
+from ronin_agent_patterns import Tool
+
+
+def slugify(text: str) -> dict:
+    s = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    return {"slug": s}
+
+
+def register_tools():
+    return [Tool(name="slugify", description="Convert text into a clean URL slug. Offline.",
+                 input_schema={"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
+                 handler=slugify)]
+'''
+
+_CASECONV = '''# ronin plugin: case_convert — snake/camel/kebab/pascal/title case (offline)
+from __future__ import annotations
+
+import re
+
+from ronin_agent_patterns import Tool
+
+
+def case_convert(text: str, to: str = "snake") -> dict:
+    spaced = re.sub(r"([a-z0-9])([A-Z])", r"\\1 \\2", text)
+    words = [w.lower() for w in re.findall(r"[A-Za-z0-9]+", spaced)]
+    if not words:
+        return {"result": "", "case": to}
+    if to == "snake":
+        r = "_".join(words)
+    elif to == "kebab":
+        r = "-".join(words)
+    elif to == "camel":
+        r = words[0] + "".join(w.capitalize() for w in words[1:])
+    elif to == "pascal":
+        r = "".join(w.capitalize() for w in words)
+    elif to == "title":
+        r = " ".join(w.capitalize() for w in words)
+    else:
+        return {"error": f"unknown case '{to}' (snake|kebab|camel|pascal|title)"}
+    return {"result": r, "case": to}
+
+
+def register_tools():
+    return [Tool(name="case_convert", description="Convert an identifier between snake/camel/kebab/pascal/title case. Offline.",
+                 input_schema={"type": "object", "properties": {
+                     "text": {"type": "string"}, "to": {"type": "string",
+                     "enum": ["snake", "kebab", "camel", "pascal", "title"]}}, "required": ["text"]},
+                 handler=case_convert)]
+'''
+
+_DIFFTEXT = '''# ronin plugin: diff_text — unified diff between two texts (offline)
+from __future__ import annotations
+
+import difflib
+
+from ronin_agent_patterns import Tool
+
+
+def diff_text(a: str, b: str) -> dict:
+    lines = list(difflib.unified_diff(a.splitlines(), b.splitlines(),
+                                      fromfile="a", tofile="b", lineterm="", n=2))
+    return {"diff": "\\n".join(lines) or "(identical)",
+            "changed": a != b}
+
+
+def register_tools():
+    return [Tool(name="diff_text", description="Show a unified diff between two blocks of text. Offline.",
+                 input_schema={"type": "object", "properties": {
+                     "a": {"type": "string"}, "b": {"type": "string"}}, "required": ["a", "b"]},
+                 handler=diff_text)]
+'''
+
+_GHRELEASE = '''# ronin plugin: github_releases — latest release of a repo (GitHub API, no auth)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def github_releases(repo: str) -> dict:
+    r = httpx.get(f"https://api.github.com/repos/{repo.strip().strip('/')}/releases/latest",
+                  headers={"Accept": "application/vnd.github+json"},
+                  timeout=15, follow_redirects=True)
+    if r.status_code != 200:
+        return {"error": f"no published release for {repo}"}
+    d = r.json()
+    return {"repo": repo, "tag": d.get("tag_name"), "name": d.get("name"),
+            "published": d.get("published_at"), "url": d.get("html_url")}
+
+
+def register_tools():
+    return [Tool(name="github_releases", description="Latest published release (tag, date) of a GitHub repo. Pass 'owner/name'. No auth.",
+                 input_schema={"type": "object", "properties": {"repo": {"type": "string"}}, "required": ["repo"]},
+                 handler=github_releases)]
+'''
+
+_RSS = '''# ronin plugin: rss_feed — latest items from an RSS/Atom feed (stdlib parser)
+from __future__ import annotations
+
+import xml.etree.ElementTree as ET
+
+import httpx
+from ronin_agent_patterns import Tool
+
+_ATOM = "{http://www.w3.org/2005/Atom}"
+
+
+def rss_feed(url: str, limit: int = 5) -> dict:
+    n = min(int(limit or 5), 20)
+    r = httpx.get(url, headers={"user-agent": "ronin-rss/1.0"}, timeout=15, follow_redirects=True)
+    try:
+        root = ET.fromstring(r.text)
+    except ET.ParseError:
+        return {"error": "could not parse feed"}
+    items = []
+    for item in root.iter("item"):                       # RSS 2.0
+        items.append({"title": item.findtext("title"), "link": item.findtext("link")})
+        if len(items) >= n:
+            break
+    if not items:                                        # Atom fallback
+        for entry in root.iter(f"{_ATOM}entry"):
+            link = entry.find(f"{_ATOM}link")
+            items.append({"title": entry.findtext(f"{_ATOM}title"),
+                          "link": link.get("href") if link is not None else None})
+            if len(items) >= n:
+                break
+    return {"feed": url, "items": items}
+
+
+def register_tools():
+    return [Tool(name="rss_feed", description="Latest items (title + link) from an RSS or Atom feed URL.",
+                 input_schema={"type": "object", "properties": {
+                     "url": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["url"]},
+                 handler=rss_feed)]
+'''
+
+
 @dataclass(frozen=True)
 class LibraryPlugin:
     name: str
@@ -1426,6 +1590,13 @@ LIBRARY: dict[str, LibraryPlugin] = {
     "dog_image": LibraryPlugin("dog_image", "A random dog photo", _DOGIMG),
     "book_search": LibraryPlugin("book_search", "Find a book (Open Library)", _BOOK),
     "spacex_latest": LibraryPlugin("spacex_latest", "Most recent SpaceX launch", _SPACEX),
+    # --- text / dev utilities ---
+    "text_stats": LibraryPlugin("text_stats", "Word/char counts + reading time (offline)", _TEXTSTATS),
+    "slugify": LibraryPlugin("slugify", "Text → URL slug (offline)", _SLUGIFY),
+    "case_convert": LibraryPlugin("case_convert", "snake/camel/kebab/pascal/title (offline)", _CASECONV),
+    "diff_text": LibraryPlugin("diff_text", "Unified diff of two texts (offline)", _DIFFTEXT),
+    "github_releases": LibraryPlugin("github_releases", "Latest release of a repo", _GHRELEASE),
+    "rss_feed": LibraryPlugin("rss_feed", "Latest items from an RSS/Atom feed", _RSS),
 }
 
 _ALIASES = {
@@ -1453,6 +1624,9 @@ _ALIASES = {
     "dns": "dns_lookup", "chuck": "chuck_norris", "age": "age_guess",
     "dog": "dog_image", "book": "book_search", "books": "book_search",
     "spacex": "spacex_latest",
+    "wordcount": "text_stats", "stats": "text_stats", "slug": "slugify",
+    "case": "case_convert", "diff": "diff_text", "releases": "github_releases",
+    "rss": "rss_feed", "feed": "rss_feed",
 }
 
 

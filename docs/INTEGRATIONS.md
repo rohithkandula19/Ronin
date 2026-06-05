@@ -73,7 +73,7 @@ Any other server works too — `ronin mcp add <name> <command> [args]`.
 ## 🧩 Plugins (your own Python tools)
 
 ```bash
-ronin plugin library              # browse the 50 built-ins
+ronin plugin library              # browse the 56 built-ins
 ronin plugin search <keyword>     # find one (e.g. 'finance', 'word')
 ronin plugin add <name>           # install a built-in
 ronin plugin new <name>           # scaffold your own (ready to edit)
@@ -106,7 +106,7 @@ def register_tools():
 Drop it in and the agent picks it up next run. `ronin plugin new <name>` writes
 exactly this shape for you, with a working example inside.
 
-### Built-in library (50 plugins, no keys)
+### Built-in library (56 plugins, no keys)
 
 | plugin | what it does |
 |---|---|
@@ -120,10 +120,16 @@ exactly this shape for you, with a working example inside.
 | `github_repo` | Stars/forks/language for a repo |
 | `github_user` | Public GitHub profile stats |
 | `github_trending` | Recently-rising GitHub repos |
+| `github_releases` | Latest release of a repo |
 | `npm_package` | npm package info (version, license) |
 | `pypi_package` | PyPI package info (version, summary) |
 | `dns_lookup` | Resolve DNS records |
 | `url_check` | HTTP status & timing of a URL |
+| `rss_feed` | Latest items from an RSS/Atom feed |
+| `text_stats` | Word/char counts + reading time (offline) |
+| `slugify` | Text → URL slug (offline) |
+| `case_convert` | snake/camel/kebab/pascal/title (offline) |
+| `diff_text` | Unified diff of two texts (offline) |
 | `uuid_gen` | Generate UUIDs (offline) |
 | `password_gen` | Generate a strong password (offline) |
 | `base64_tool` | Base64 encode/decode (offline) |
@@ -173,4 +179,4 @@ finds them.
 - It's a **hosted** MCP endpoint (Linear, Atlassian…) → `mcp add-remote`.
 - It's just an **API or some logic** and you want it fast → a plugin
   (`ronin plugin new`).
-- You want it **today, no setup** → `ronin plugin add` from the 50 built-ins.
+- You want it **today, no setup** → `ronin plugin add` from the 56 built-ins.
