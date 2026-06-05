@@ -1899,6 +1899,216 @@ def register_tools():
 '''
 
 
+_BASECONV = '''# ronin plugin: base_convert — convert a number between bases (offline)
+from __future__ import annotations
+
+from ronin_agent_patterns import Tool
+
+_DIGITS = "0123456789abcdefghijklmnopqrstuvwxyz"
+
+
+def base_convert(value: str, from_base: int = 10, to_base: int = 16) -> dict:
+    fb, tb = int(from_base), int(to_base)
+    if not (2 <= fb <= 36 and 2 <= tb <= 36):
+        return {"error": "bases must be 2-36"}
+    try:
+        n = int(str(value).strip(), fb)
+    except ValueError:
+        return {"error": f"'{value}' is not valid in base {fb}"}
+    neg, n = n < 0, abs(n)
+    if n == 0:
+        r = "0"
+    else:
+        r = ""
+        while n:
+            r = _DIGITS[n % tb] + r
+            n //= tb
+    return {"value": str(value), "from_base": fb, "to_base": tb, "result": ("-" + r) if neg else r}
+
+
+def register_tools():
+    return [Tool(name="base_convert", description="Convert a number between bases (2-36): dec/hex/bin/oct etc. Offline.",
+                 input_schema={"type": "object", "properties": {
+                     "value": {"type": "string"}, "from_base": {"type": "integer"},
+                     "to_base": {"type": "integer"}}, "required": ["value"]},
+                 handler=base_convert)]
+'''
+
+_DAYSBETWEEN = '''# ronin plugin: days_between — days between two dates (offline)
+from __future__ import annotations
+
+import datetime
+
+from ronin_agent_patterns import Tool
+
+
+def days_between(date1: str, date2: str = "") -> dict:
+    try:
+        d1 = datetime.date.fromisoformat(date1.strip())
+        d2 = datetime.date.fromisoformat(date2.strip()) if date2.strip() else datetime.date.today()
+    except ValueError as e:
+        return {"error": f"use YYYY-MM-DD ({e})"}
+    return {"date1": str(d1), "date2": str(d2), "days": abs((d2 - d1).days)}
+
+
+def register_tools():
+    return [Tool(name="days_between", description="Number of days between two YYYY-MM-DD dates (date2 blank = today). Offline.",
+                 input_schema={"type": "object", "properties": {
+                     "date1": {"type": "string"}, "date2": {"type": "string"}}, "required": ["date1"]},
+                 handler=days_between)]
+'''
+
+_AGECALC = '''# ronin plugin: age_calculator — age from a birthdate (offline)
+from __future__ import annotations
+
+import datetime
+
+from ronin_agent_patterns import Tool
+
+
+def age_calculator(birthdate: str) -> dict:
+    try:
+        b = datetime.date.fromisoformat(birthdate.strip())
+    except ValueError:
+        return {"error": "use YYYY-MM-DD"}
+    t = datetime.date.today()
+    years = t.year - b.year - ((t.month, t.day) < (b.month, b.day))
+    return {"birthdate": str(b), "age_years": years, "age_days": (t - b).days}
+
+
+def register_tools():
+    return [Tool(name="age_calculator", description="Exact age (years + days) from a YYYY-MM-DD birthdate. Offline.",
+                 input_schema={"type": "object", "properties": {"birthdate": {"type": "string"}}, "required": ["birthdate"]},
+                 handler=age_calculator)]
+'''
+
+_PCTCHANGE = '''# ronin plugin: percent_change — percentage change between two numbers (offline)
+from __future__ import annotations
+
+from ronin_agent_patterns import Tool
+
+
+def percent_change(old: float, new: float) -> dict:
+    if old == 0:
+        return {"error": "old value cannot be zero"}
+    pct = (new - old) / abs(old) * 100
+    return {"old": old, "new": new, "percent_change": round(pct, 2),
+            "direction": "up" if pct > 0 else "down" if pct < 0 else "flat"}
+
+
+def register_tools():
+    return [Tool(name="percent_change", description="Percentage change from an old value to a new value. Offline.",
+                 input_schema={"type": "object", "properties": {
+                     "old": {"type": "number"}, "new": {"type": "number"}}, "required": ["old", "new"]},
+                 handler=percent_change)]
+'''
+
+_WORDFREQ = '''# ronin plugin: word_frequency — most common words in text (offline)
+from __future__ import annotations
+
+import re
+from collections import Counter
+
+from ronin_agent_patterns import Tool
+
+
+def word_frequency(text: str, top: int = 10) -> dict:
+    words = re.findall(r"[a-z0-9']+", text.lower())
+    c = Counter(words)
+    return {"total_words": len(words), "unique_words": len(c),
+            "top": [{"word": w, "count": n} for w, n in c.most_common(int(top or 10))]}
+
+
+def register_tools():
+    return [Tool(name="word_frequency", description="Count the most frequent words in a block of text. Offline.",
+                 input_schema={"type": "object", "properties": {
+                     "text": {"type": "string"}, "top": {"type": "integer"}}, "required": ["text"]},
+                 handler=word_frequency)]
+'''
+
+_COMPOUND = '''# ronin plugin: compound_interest — investment growth (offline)
+from __future__ import annotations
+
+from ronin_agent_patterns import Tool
+
+
+def compound_interest(principal: float, annual_rate: float, years: float,
+                      compounds_per_year: int = 12) -> dict:
+    n = max(1, int(compounds_per_year or 12))
+    r = annual_rate / 100
+    amount = principal * (1 + r / n) ** (n * years)
+    return {"principal": principal, "final_amount": round(amount, 2),
+            "interest_earned": round(amount - principal, 2)}
+
+
+def register_tools():
+    return [Tool(name="compound_interest", description="Final value + interest of an investment with compound interest. Offline.",
+                 input_schema={"type": "object", "properties": {
+                     "principal": {"type": "number"}, "annual_rate": {"type": "number"},
+                     "years": {"type": "number"}, "compounds_per_year": {"type": "integer"}},
+                     "required": ["principal", "annual_rate", "years"]},
+                 handler=compound_interest)]
+'''
+
+_REDDIT = '''# ronin plugin: reddit_top — top posts in a subreddit (no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def reddit_top(subreddit: str, limit: int = 5) -> dict:
+    r = httpx.get(f"https://www.reddit.com/r/{subreddit.strip().strip('/')}/top.json",
+                  params={"limit": min(int(limit or 5), 15), "t": "day"},
+                  headers={"user-agent": "ronin/1.0"}, timeout=15, follow_redirects=True)
+    if r.status_code != 200:
+        return {"error": f"could not fetch r/{subreddit}"}
+    try:
+        children = r.json()["data"]["children"]
+    except Exception:  # noqa: BLE001
+        return {"error": "could not parse reddit response"}
+    return {"subreddit": subreddit, "posts": [
+        {"title": p["data"]["title"], "score": p["data"]["score"],
+         "url": "https://reddit.com" + p["data"]["permalink"]} for p in children]}
+
+
+def register_tools():
+    return [Tool(name="reddit_top", description="Top posts of the day in a subreddit. No key.",
+                 input_schema={"type": "object", "properties": {
+                     "subreddit": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["subreddit"]},
+                 handler=reddit_top)]
+'''
+
+_CRYPTOMKT = '''# ronin plugin: crypto_market — market cap & rank for a coin (CoinGecko, no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def crypto_market(coin: str = "bitcoin") -> dict:
+    r = httpx.get(f"https://api.coingecko.com/api/v3/coins/{coin.lower().strip()}",
+                  params={"localization": "false", "tickers": "false",
+                          "community_data": "false", "developer_data": "false"},
+                  timeout=15, follow_redirects=True)
+    if r.status_code != 200:
+        return {"error": f"unknown coin '{coin}' (use the CoinGecko id)"}
+    j = r.json()
+    m = j.get("market_data", {})
+    return {"name": j.get("name"), "symbol": j.get("symbol"),
+            "price_usd": m.get("current_price", {}).get("usd"),
+            "market_cap_usd": m.get("market_cap", {}).get("usd"),
+            "rank": j.get("market_cap_rank"),
+            "ath_usd": m.get("ath", {}).get("usd")}
+
+
+def register_tools():
+    return [Tool(name="crypto_market", description="Market cap, rank and all-time-high for a cryptocurrency. No key.",
+                 input_schema={"type": "object", "properties": {"coin": {"type": "string"}}},
+                 handler=crypto_market)]
+'''
+
+
 @dataclass(frozen=True)
 class LibraryPlugin:
     name: str
@@ -1982,6 +2192,14 @@ LIBRARY: dict[str, LibraryPlugin] = {
     "weather_forecast": LibraryPlugin("weather_forecast", "Multi-day forecast for a city", _FORECAST),
     "geocode": LibraryPlugin("geocode", "Place name → coordinates", _GEOCODE),
     "random_fact": LibraryPlugin("random_fact", "A random interesting fact", _RANDFACT),
+    "base_convert": LibraryPlugin("base_convert", "Number base conversion 2-36 (offline)", _BASECONV),
+    "days_between": LibraryPlugin("days_between", "Days between two dates (offline)", _DAYSBETWEEN),
+    "age_calculator": LibraryPlugin("age_calculator", "Age from a birthdate (offline)", _AGECALC),
+    "percent_change": LibraryPlugin("percent_change", "Percentage change (offline)", _PCTCHANGE),
+    "word_frequency": LibraryPlugin("word_frequency", "Most common words in text (offline)", _WORDFREQ),
+    "compound_interest": LibraryPlugin("compound_interest", "Investment growth (offline)", _COMPOUND),
+    "reddit_top": LibraryPlugin("reddit_top", "Top posts in a subreddit", _REDDIT),
+    "crypto_market": LibraryPlugin("crypto_market", "Market cap & rank for a coin", _CRYPTOMKT),
 }
 
 _ALIASES = {
@@ -2017,6 +2235,10 @@ _ALIASES = {
     "roll": "dice", "morse": "morse_code", "forecast": "weather_forecast",
     "geo": "geocode", "latlon": "geocode", "fact": "random_fact",
     "regex": "regex_test", "jwt": "jwt_decode", "roman": "roman_numeral",
+    "base": "base_convert", "hex": "base_convert", "binary": "base_convert",
+    "birthday": "age_calculator", "days": "days_between", "pct": "percent_change",
+    "wordfreq": "word_frequency", "compound": "compound_interest",
+    "reddit": "reddit_top", "marketcap": "crypto_market",
 }
 
 
