@@ -451,3 +451,23 @@ def test_prompt_toolkit_prompt_runs_with_dropdown_completer() -> None:
         got = session.prompt([("class:arrow", " > ")], completer=_C(),
                              complete_while_typing=True)
     assert got == "/he"
+
+
+def test_integrations_lists_servers_and_plugins(tmp_path: Path) -> None:
+    # set up one MCP server + one installed plugin, then /integrations shows both
+    from ronin_cli.mcp_client import add_mcp_server
+    from ronin_cli.plugin_library import LIBRARY
+    add_mcp_server("github", "npx", ["-y", "x"], tmp_path)
+    pdir = tmp_path / ".ronin" / "plugins"
+    pdir.mkdir(parents=True, exist_ok=True)
+    (pdir / "weather.py").write_text(LIBRARY["weather"].source, encoding="utf-8")
+    action, out = _call("/integrations", root=tmp_path)
+    assert action == "handled"
+    assert "github" in out and "weather" in out
+    assert "integrations" in out.lower()
+
+
+def test_integrations_empty_suggests_how_to_add(tmp_path: Path) -> None:
+    action, out = _call("/int", root=tmp_path)        # alias works
+    assert action == "handled"
+    assert "ronin mcp install" in out and "ronin plugin add" in out

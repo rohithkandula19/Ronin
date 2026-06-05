@@ -73,7 +73,7 @@ Any other server works too — `ronin mcp add <name> <command> [args]`.
 ## 🧩 Plugins (your own Python tools)
 
 ```bash
-ronin plugin library              # browse the 78 built-ins
+ronin plugin library              # browse the 84 built-ins
 ronin plugin search <keyword>     # find one (e.g. 'finance', 'word')
 ronin plugin add <name>           # install a built-in
 ronin plugin new <name>           # scaffold your own (ready to edit)
@@ -107,7 +107,7 @@ def register_tools():
 Drop it in and the agent picks it up next run. `ronin plugin new <name>` writes
 exactly this shape for you, with a working example inside.
 
-### Built-in library (78 plugins, no keys)
+### Built-in library (84 plugins, no keys)
 
 | plugin | what it does |
 |---|---|
@@ -143,6 +143,12 @@ exactly this shape for you, with a working example inside.
 | `timestamp` | Unix ↔ ISO time (offline) |
 | `lorem_ipsum` | Placeholder text (offline) |
 | `unit_convert` | Convert length/mass/temperature (offline) |
+| `prime_check` | Primality + prime factors (offline) |
+| `fibonacci` | Fibonacci sequence (offline) |
+| `caesar_cipher` | ROT-N shift cipher (offline) |
+| `anagram_check` | Are two words anagrams? (offline) |
+| `public_ip` | Your public IP address |
+| `wikipedia_random` | A random Wikipedia article |
 | `geo_distance` | Distance between two coordinates (offline) |
 | `base_convert` | Number base conversion 2-36 (offline) |
 | `loan_payment` | Loan/mortgage monthly payment (offline) |
@@ -202,4 +208,4 @@ finds them.
 - It's a **hosted** MCP endpoint (Linear, Atlassian…) → `mcp add-remote`.
 - It's just an **API or some logic** and you want it fast → a plugin
   (`ronin plugin new`).
-- You want it **today, no setup** → `ronin plugin add` from the 78 built-ins.
+- You want it **today, no setup** → `ronin plugin add` from the 84 built-ins.

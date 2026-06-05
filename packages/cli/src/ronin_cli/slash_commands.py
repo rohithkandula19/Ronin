@@ -277,6 +277,31 @@ def _slash_mcp(ctx: SlashCtx) -> str:
     return "handled"
 
 
+def _slash_integrations(ctx: SlashCtx) -> str:
+    from .mcp_client import load_mcp_servers
+    from .mcp_catalog import CATALOG
+    from .plugin_library import LIBRARY, installed_names
+    console, root = ctx.console, ctx.root
+    servers = load_mcp_servers(root)
+    plugins = sorted(installed_names(root))
+    console.print("[bold]🔌 integrations[/bold]")
+    if servers:
+        console.print(f"  [cyan]MCP servers[/cyan] [dim]({len(servers)})[/dim]  "
+                      + ", ".join(servers))
+    else:
+        console.print("  [dim]no MCP servers — add one: [bold]ronin mcp install github[/bold] "
+                      "(browse: [bold]ronin mcp catalog[/bold])[/dim]")
+    if plugins:
+        shown = ", ".join(plugins[:18]) + (f" +{len(plugins) - 18} more" if len(plugins) > 18 else "")
+        console.print(f"  [cyan]plugins[/cyan] [dim]({len(plugins)})[/dim]  {shown}")
+    else:
+        console.print("  [dim]no plugins — add one: [bold]ronin plugin add weather[/bold] "
+                      "(browse: [bold]ronin plugin library[/bold])[/dim]")
+    console.print(f"[dim]{len(LIBRARY)} built-in plugins · {len(CATALOG)}-server catalog · or "
+                  "[bold]ronin plugin new[/bold] to build your own.[/dim]")
+    return "handled"
+
+
 def _slash_agents(ctx: SlashCtx) -> str:
     from rich.table import Table as _Table
     console = ctx.console
@@ -469,6 +494,7 @@ SLASH_DISPATCH: dict[str, Callable[[SlashCtx], str]] = {
     "tools": _slash_tools,
     "cost": _slash_cost, "costs": _slash_cost,
     "mcp": _slash_mcp,
+    "integrations": _slash_integrations, "int": _slash_integrations,
     "agents": _slash_agents,
     "copy": _slash_copy,
     "resume": _slash_resume,

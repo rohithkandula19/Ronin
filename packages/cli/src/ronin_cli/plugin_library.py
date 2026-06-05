@@ -2109,6 +2109,141 @@ def register_tools():
 '''
 
 
+_PRIME = '''# ronin plugin: prime_check — primality + prime factors (offline)
+from __future__ import annotations
+
+from ronin_agent_patterns import Tool
+
+
+def prime_check(n: int) -> dict:
+    n = int(n)
+    if n < 2:
+        return {"n": n, "is_prime": False, "prime_factors": []}
+    factors, m, d = [], n, 2
+    while d * d <= m:
+        while m % d == 0:
+            factors.append(d)
+            m //= d
+        d += 1
+    if m > 1:
+        factors.append(m)
+    return {"n": n, "is_prime": len(factors) == 1, "prime_factors": sorted(set(factors))}
+
+
+def register_tools():
+    return [Tool(name="prime_check", description="Check if a number is prime and list its prime factors. Offline.",
+                 input_schema={"type": "object", "properties": {"n": {"type": "integer"}}, "required": ["n"]},
+                 handler=prime_check)]
+'''
+
+_FIB = '''# ronin plugin: fibonacci — the Fibonacci sequence (offline)
+from __future__ import annotations
+
+from ronin_agent_patterns import Tool
+
+
+def fibonacci(n: int = 10) -> dict:
+    n = max(0, min(int(n or 10), 1000))
+    a, b, seq = 0, 1, []
+    for _ in range(n):
+        seq.append(a)
+        a, b = b, a + b
+    return {"n": n, "sequence": seq[:60], "nth": seq[-1] if seq else 0}
+
+
+def register_tools():
+    return [Tool(name="fibonacci", description="First N Fibonacci numbers (and the Nth). Offline.",
+                 input_schema={"type": "object", "properties": {"n": {"type": "integer"}}},
+                 handler=fibonacci)]
+'''
+
+_CAESAR = '''# ronin plugin: caesar_cipher — shift-cipher encode/decode (offline)
+from __future__ import annotations
+
+from ronin_agent_patterns import Tool
+
+
+def caesar_cipher(text: str, shift: int = 3, mode: str = "encode") -> dict:
+    s = int(shift) * (-1 if mode == "decode" else 1)
+    out = []
+    for c in text:
+        if c.isupper():
+            out.append(chr((ord(c) - 65 + s) % 26 + 65))
+        elif c.islower():
+            out.append(chr((ord(c) - 97 + s) % 26 + 97))
+        else:
+            out.append(c)
+    return {"mode": mode, "shift": int(shift), "result": "".join(out)}
+
+
+def register_tools():
+    return [Tool(name="caesar_cipher", description="Caesar shift-cipher encode/decode (ROT-N). Offline.",
+                 input_schema={"type": "object", "properties": {
+                     "text": {"type": "string"}, "shift": {"type": "integer"},
+                     "mode": {"type": "string", "enum": ["encode", "decode"]}}, "required": ["text"]},
+                 handler=caesar_cipher)]
+'''
+
+_ANAGRAM = '''# ronin plugin: anagram_check — are two words anagrams? (offline)
+from __future__ import annotations
+
+from ronin_agent_patterns import Tool
+
+
+def anagram_check(word1: str, word2: str) -> dict:
+    norm = lambda w: sorted(c for c in w.lower() if c.isalnum())
+    return {"word1": word1, "word2": word2, "is_anagram": norm(word1) == norm(word2)}
+
+
+def register_tools():
+    return [Tool(name="anagram_check", description="Check whether two words/phrases are anagrams. Offline.",
+                 input_schema={"type": "object", "properties": {
+                     "word1": {"type": "string"}, "word2": {"type": "string"}}, "required": ["word1", "word2"]},
+                 handler=anagram_check)]
+'''
+
+_PUBLICIP = '''# ronin plugin: public_ip — your public IP address (ipify, no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def public_ip() -> dict:
+    d = httpx.get("https://api.ipify.org", params={"format": "json"},
+                  timeout=15, follow_redirects=True).json()
+    return {"ip": d.get("ip")}
+
+
+def register_tools():
+    return [Tool(name="public_ip", description="Your machine's current public IP address. No key.",
+                 input_schema={"type": "object", "properties": {}}, handler=public_ip)]
+'''
+
+_WIKIRAND = '''# ronin plugin: wikipedia_random — a random Wikipedia article (no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def wikipedia_random() -> dict:
+    r = httpx.get("https://en.wikipedia.org/api/rest_v1/page/random/summary",
+                  headers={"accept": "application/json", "user-agent": "ronin-plugin/1.0"},
+                  timeout=15, follow_redirects=True)
+    if r.status_code != 200:
+        return {"error": "wikipedia unavailable"}
+    d = r.json()
+    return {"title": d.get("title"), "summary": (d.get("extract") or "")[:320],
+            "url": (d.get("content_urls", {}).get("desktop", {}) or {}).get("page")}
+
+
+def register_tools():
+    return [Tool(name="wikipedia_random", description="A random Wikipedia article summary. No key.",
+                 input_schema={"type": "object", "properties": {}}, handler=wikipedia_random)]
+'''
+
+
 @dataclass(frozen=True)
 class LibraryPlugin:
     name: str
@@ -2200,6 +2335,12 @@ LIBRARY: dict[str, LibraryPlugin] = {
     "compound_interest": LibraryPlugin("compound_interest", "Investment growth (offline)", _COMPOUND),
     "reddit_top": LibraryPlugin("reddit_top", "Top posts in a subreddit", _REDDIT),
     "crypto_market": LibraryPlugin("crypto_market", "Market cap & rank for a coin", _CRYPTOMKT),
+    "prime_check": LibraryPlugin("prime_check", "Primality + prime factors (offline)", _PRIME),
+    "fibonacci": LibraryPlugin("fibonacci", "Fibonacci sequence (offline)", _FIB),
+    "caesar_cipher": LibraryPlugin("caesar_cipher", "ROT-N shift cipher (offline)", _CAESAR),
+    "anagram_check": LibraryPlugin("anagram_check", "Are two words anagrams? (offline)", _ANAGRAM),
+    "public_ip": LibraryPlugin("public_ip", "Your public IP address", _PUBLICIP),
+    "wikipedia_random": LibraryPlugin("wikipedia_random", "A random Wikipedia article", _WIKIRAND),
 }
 
 _ALIASES = {
@@ -2239,6 +2380,9 @@ _ALIASES = {
     "birthday": "age_calculator", "days": "days_between", "pct": "percent_change",
     "wordfreq": "word_frequency", "compound": "compound_interest",
     "reddit": "reddit_top", "marketcap": "crypto_market",
+    "prime": "prime_check", "fib": "fibonacci", "caesar": "caesar_cipher",
+    "rot13": "caesar_cipher", "anagram": "anagram_check", "myip": "public_ip",
+    "randomwiki": "wikipedia_random",
 }
 
 

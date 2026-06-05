@@ -953,6 +953,7 @@ SLASH_COMMANDS: dict[str, str] = {
     "init": "scaffold a RONIN.md project-memory file",
     "tools": "list the tools the agent can use",
     "mcp": "list connected MCP servers and their tools",
+    "integrations": "show connected MCP servers + plugins, and how to add more",
     "agents": "list the sub-agents ronin can delegate to",
     "compact": "summarize the conversation so far to free up context",
     "context": "show conversation size + a token estimate for this session",
@@ -974,7 +975,7 @@ _HELP_GROUPS: list[tuple[str, list[str]]] = [
     ("🧠  provider & model", ["login", "model", "models", "route", "router", "cost"]),
     ("✏️  editing & git", ["undo", "diff", "commit", "pr"]),
     ("📁  context & memory", ["memory", "init", "context", "compact", "resume", "clear"]),
-    ("🔧  tools & agents", ["tools", "mcp", "agents", "verify", "voice"]),
+    ("🔧  tools & agents", ["tools", "mcp", "integrations", "agents", "verify", "voice"]),
     ("⚙️  session", ["status", "copy", "export", "vim", "doctor", "config", "help", "quit"]),
 ]
 
