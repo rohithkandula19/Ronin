@@ -73,7 +73,7 @@ Any other server works too — `ronin mcp add <name> <command> [args]`.
 ## 🧩 Plugins (your own Python tools)
 
 ```bash
-ronin plugin library              # browse the 60 built-ins
+ronin plugin library              # browse the 70 built-ins
 ronin plugin search <keyword>     # find one (e.g. 'finance', 'word')
 ronin plugin add <name>           # install a built-in
 ronin plugin new <name>           # scaffold your own (ready to edit)
@@ -107,7 +107,7 @@ def register_tools():
 Drop it in and the agent picks it up next run. `ronin plugin new <name>` writes
 exactly this shape for you, with a working example inside.
 
-### Built-in library (60 plugins, no keys)
+### Built-in library (70 plugins, no keys)
 
 | plugin | what it does |
 |---|---|
@@ -143,6 +143,16 @@ exactly this shape for you, with a working example inside.
 | `timestamp` | Unix ↔ ISO time (offline) |
 | `lorem_ipsum` | Placeholder text (offline) |
 | `unit_convert` | Convert length/mass/temperature (offline) |
+| `geo_distance` | Distance between two coordinates (offline) |
+| `loan_payment` | Loan/mortgage monthly payment (offline) |
+| `tip_split` | Tip + split a bill (offline) |
+| `bmi` | Body mass index (offline) |
+| `dice` | Roll dice in NdM notation (offline) |
+| `morse_code` | Encode/decode Morse code (offline) |
+| `random_color` | Random hex colors (offline) |
+| `geocode` | Place name → coordinates |
+| `weather_forecast` | Multi-day forecast for a city |
+| `random_fact` | A random interesting fact |
 | `qr_code` | Make a QR-code image for any text |
 | `shorten_url` | Shorten a link (is.gd) |
 | `translate` | Translate text between languages |
@@ -184,4 +194,4 @@ finds them.
 - It's a **hosted** MCP endpoint (Linear, Atlassian…) → `mcp add-remote`.
 - It's just an **API or some logic** and you want it fast → a plugin
   (`ronin plugin new`).
-- You want it **today, no setup** → `ronin plugin add` from the 60 built-ins.
+- You want it **today, no setup** → `ronin plugin add` from the 70 built-ins.

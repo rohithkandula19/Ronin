@@ -1648,6 +1648,257 @@ def register_tools():
 '''
 
 
+_GEODIST = '''# ronin plugin: geo_distance — distance between two coordinates (offline)
+from __future__ import annotations
+
+import math
+
+from ronin_agent_patterns import Tool
+
+
+def geo_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> dict:
+    R = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dphi, dlmb = math.radians(lat2 - lat1), math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlmb / 2) ** 2
+    km = 2 * R * math.asin(math.sqrt(a))
+    return {"km": round(km, 2), "miles": round(km * 0.621371, 2)}
+
+
+def register_tools():
+    return [Tool(name="geo_distance", description="Great-circle distance between two lat/lon points (km + miles). Offline.",
+                 input_schema={"type": "object", "properties": {
+                     "lat1": {"type": "number"}, "lon1": {"type": "number"},
+                     "lat2": {"type": "number"}, "lon2": {"type": "number"}},
+                     "required": ["lat1", "lon1", "lat2", "lon2"]},
+                 handler=geo_distance)]
+'''
+
+_LOAN = '''# ronin plugin: loan_payment — monthly loan/mortgage payment (offline)
+from __future__ import annotations
+
+from ronin_agent_patterns import Tool
+
+
+def loan_payment(principal: float, annual_rate: float, years: float) -> dict:
+    r = annual_rate / 100 / 12
+    n = int(years * 12)
+    if n <= 0:
+        return {"error": "years must be > 0"}
+    m = principal / n if r == 0 else principal * r / (1 - (1 + r) ** -n)
+    return {"monthly_payment": round(m, 2), "total_paid": round(m * n, 2),
+            "total_interest": round(m * n - principal, 2), "months": n}
+
+
+def register_tools():
+    return [Tool(name="loan_payment", description="Monthly payment + total interest for a loan/mortgage. Offline.",
+                 input_schema={"type": "object", "properties": {
+                     "principal": {"type": "number"}, "annual_rate": {"type": "number", "description": "Annual % rate."},
+                     "years": {"type": "number"}}, "required": ["principal", "annual_rate", "years"]},
+                 handler=loan_payment)]
+'''
+
+_TIP = '''# ronin plugin: tip_split — tip + split a bill (offline)
+from __future__ import annotations
+
+from ronin_agent_patterns import Tool
+
+
+def tip_split(bill: float, tip_percent: float = 18, people: int = 1) -> dict:
+    people = max(1, int(people or 1))
+    tip = bill * tip_percent / 100
+    total = bill + tip
+    return {"tip": round(tip, 2), "total": round(total, 2),
+            "per_person": round(total / people, 2), "people": people}
+
+
+def register_tools():
+    return [Tool(name="tip_split", description="Calculate tip and split a bill among people. Offline.",
+                 input_schema={"type": "object", "properties": {
+                     "bill": {"type": "number"}, "tip_percent": {"type": "number"},
+                     "people": {"type": "integer"}}, "required": ["bill"]},
+                 handler=tip_split)]
+'''
+
+_BMI = '''# ronin plugin: bmi — body mass index (offline)
+from __future__ import annotations
+
+from ronin_agent_patterns import Tool
+
+
+def bmi(weight_kg: float, height_cm: float) -> dict:
+    h = height_cm / 100
+    if h <= 0:
+        return {"error": "height must be > 0"}
+    b = weight_kg / (h * h)
+    cat = ("underweight" if b < 18.5 else "normal" if b < 25
+           else "overweight" if b < 30 else "obese")
+    return {"bmi": round(b, 1), "category": cat}
+
+
+def register_tools():
+    return [Tool(name="bmi", description="Body Mass Index from weight (kg) and height (cm). Offline.",
+                 input_schema={"type": "object", "properties": {
+                     "weight_kg": {"type": "number"}, "height_cm": {"type": "number"}},
+                     "required": ["weight_kg", "height_cm"]},
+                 handler=bmi)]
+'''
+
+_DICE = '''# ronin plugin: dice — roll dice in NdM(+K) notation (offline)
+from __future__ import annotations
+
+import random
+import re
+
+from ronin_agent_patterns import Tool
+
+
+def dice(notation: str = "1d6") -> dict:
+    m = re.fullmatch(r"(\\d*)d(\\d+)([+-]\\d+)?", notation.strip().lower())
+    if not m:
+        return {"error": f"bad notation '{notation}' (try 2d6, d20, 3d8+2)"}
+    count = int(m.group(1) or 1)
+    sides = int(m.group(2))
+    mod = int(m.group(3) or 0)
+    if count > 100 or sides > 1000 or sides < 1 or count < 1:
+        return {"error": "out of range (1-100 dice, 1-1000 sides)"}
+    rolls = [random.randint(1, sides) for _ in range(count)]
+    return {"notation": notation, "rolls": rolls, "modifier": mod, "total": sum(rolls) + mod}
+
+
+def register_tools():
+    return [Tool(name="dice", description="Roll dice in NdM(+K) notation, e.g. '2d6' or '1d20+3'. Offline.",
+                 input_schema={"type": "object", "properties": {"notation": {"type": "string"}}},
+                 handler=dice)]
+'''
+
+_MORSE = '''# ronin plugin: morse_code — encode/decode Morse code (offline)
+from __future__ import annotations
+
+from ronin_agent_patterns import Tool
+
+_M = {"A": ".-", "B": "-...", "C": "-.-.", "D": "-..", "E": ".", "F": "..-.",
+      "G": "--.", "H": "....", "I": "..", "J": ".---", "K": "-.-", "L": ".-..",
+      "M": "--", "N": "-.", "O": "---", "P": ".--.", "Q": "--.-", "R": ".-.",
+      "S": "...", "T": "-", "U": "..-", "V": "...-", "W": ".--", "X": "-..-",
+      "Y": "-.--", "Z": "--..", "0": "-----", "1": ".----", "2": "..---",
+      "3": "...--", "4": "....-", "5": ".....", "6": "-....", "7": "--...",
+      "8": "---..", "9": "----.", ".": ".-.-.-", ",": "--..--", "?": "..--..",
+      "!": "-.-.--", "/": "-..-.", "@": ".--.-.", "-": "-....-"}
+
+
+def morse_code(text: str, mode: str = "encode") -> dict:
+    if mode == "decode":
+        rev = {v: k for k, v in _M.items()}
+        words = text.strip().split("   ")
+        out = " ".join("".join(rev.get(c, "") for c in w.split()) for w in words)
+        return {"mode": "decode", "result": out}
+    out = " ".join(_M.get(c.upper(), "") for c in text if c.strip())
+    return {"mode": "encode", "result": out.strip()}
+
+
+def register_tools():
+    return [Tool(name="morse_code", description="Encode text to Morse or decode Morse back to text. Offline.",
+                 input_schema={"type": "object", "properties": {
+                     "text": {"type": "string"}, "mode": {"type": "string", "enum": ["encode", "decode"]}},
+                     "required": ["text"]},
+                 handler=morse_code)]
+'''
+
+_RANDCOLOR = '''# ronin plugin: random_color — random hex colors (offline)
+from __future__ import annotations
+
+import random
+
+from ronin_agent_patterns import Tool
+
+
+def random_color(count: int = 1) -> dict:
+    n = max(1, min(int(count or 1), 20))
+    cols = ["#{:06x}".format(random.randint(0, 0xFFFFFF)) for _ in range(n)]
+    return {"colors": cols}
+
+
+def register_tools():
+    return [Tool(name="random_color", description="Generate one or more random hex colors. Offline.",
+                 input_schema={"type": "object", "properties": {"count": {"type": "integer"}}},
+                 handler=random_color)]
+'''
+
+_FORECAST = '''# ronin plugin: weather_forecast — multi-day forecast for a city (open-meteo)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def weather_forecast(city: str, days: int = 3) -> dict:
+    g = httpx.get("https://geocoding-api.open-meteo.com/v1/search",
+                  params={"name": city, "count": 1}, timeout=15, follow_redirects=True).json()
+    if not g.get("results"):
+        return {"error": f"city not found: {city}"}
+    loc = g["results"][0]
+    n = max(1, min(int(days or 3), 7))
+    f = httpx.get("https://api.open-meteo.com/v1/forecast",
+                  params={"latitude": loc["latitude"], "longitude": loc["longitude"],
+                          "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max",
+                          "forecast_days": n, "timezone": "auto"},
+                  timeout=15, follow_redirects=True).json()
+    d = f.get("daily", {})
+    out = [{"date": dt, "high_c": hi, "low_c": lo, "rain_pct": pr}
+           for dt, hi, lo, pr in zip(d.get("time", []), d.get("temperature_2m_max", []),
+                                     d.get("temperature_2m_min", []),
+                                     d.get("precipitation_probability_max", []))]
+    return {"city": loc["name"], "country": loc.get("country"), "forecast": out}
+
+
+def register_tools():
+    return [Tool(name="weather_forecast", description="Multi-day weather forecast (high/low/rain) for a city. No key.",
+                 input_schema={"type": "object", "properties": {
+                     "city": {"type": "string"}, "days": {"type": "integer"}}, "required": ["city"]},
+                 handler=weather_forecast)]
+'''
+
+_GEOCODE = '''# ronin plugin: geocode — place name -> coordinates (open-meteo, no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def geocode(place: str) -> dict:
+    g = httpx.get("https://geocoding-api.open-meteo.com/v1/search",
+                  params={"name": place, "count": 5}, timeout=15, follow_redirects=True).json()
+    return {"results": [{"name": r["name"], "country": r.get("country"),
+                         "admin": r.get("admin1"), "lat": r["latitude"], "lon": r["longitude"]}
+                        for r in g.get("results", [])]}
+
+
+def register_tools():
+    return [Tool(name="geocode", description="Look up the latitude/longitude of a place name. No key.",
+                 input_schema={"type": "object", "properties": {"place": {"type": "string"}}, "required": ["place"]},
+                 handler=geocode)]
+'''
+
+_RANDFACT = '''# ronin plugin: random_fact — a random interesting fact (uselessfacts, no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def random_fact() -> dict:
+    d = httpx.get("https://uselessfacts.jsph.pl/api/v2/facts/random",
+                  params={"language": "en"}, timeout=15, follow_redirects=True).json()
+    return {"fact": d.get("text")}
+
+
+def register_tools():
+    return [Tool(name="random_fact", description="A random interesting (useless) fact. No key.",
+                 input_schema={"type": "object", "properties": {}}, handler=random_fact)]
+'''
+
+
 @dataclass(frozen=True)
 class LibraryPlugin:
     name: str
@@ -1720,6 +1971,17 @@ LIBRARY: dict[str, LibraryPlugin] = {
     "jwt_decode": LibraryPlugin("jwt_decode", "Decode a JWT header/payload (offline)", _JWT),
     "url_encode": LibraryPlugin("url_encode", "URL encode/decode (offline)", _URLENCODE),
     "roman_numeral": LibraryPlugin("roman_numeral", "Int <-> Roman numeral (offline)", _ROMAN),
+    # --- calculators + more (offline unless noted) ---
+    "geo_distance": LibraryPlugin("geo_distance", "Distance between two coordinates (offline)", _GEODIST),
+    "loan_payment": LibraryPlugin("loan_payment", "Loan/mortgage monthly payment (offline)", _LOAN),
+    "tip_split": LibraryPlugin("tip_split", "Tip + split a bill (offline)", _TIP),
+    "bmi": LibraryPlugin("bmi", "Body mass index (offline)", _BMI),
+    "dice": LibraryPlugin("dice", "Roll dice in NdM notation (offline)", _DICE),
+    "morse_code": LibraryPlugin("morse_code", "Encode/decode Morse code (offline)", _MORSE),
+    "random_color": LibraryPlugin("random_color", "Random hex colors (offline)", _RANDCOLOR),
+    "weather_forecast": LibraryPlugin("weather_forecast", "Multi-day forecast for a city", _FORECAST),
+    "geocode": LibraryPlugin("geocode", "Place name → coordinates", _GEOCODE),
+    "random_fact": LibraryPlugin("random_fact", "A random interesting fact", _RANDFACT),
 }
 
 _ALIASES = {
@@ -1750,6 +2012,11 @@ _ALIASES = {
     "wordcount": "text_stats", "stats": "text_stats", "slug": "slugify",
     "case": "case_convert", "diff": "diff_text", "releases": "github_releases",
     "rss": "rss_feed", "feed": "rss_feed",
+    "distance": "geo_distance", "haversine": "geo_distance", "loan": "loan_payment",
+    "mortgage": "loan_payment", "tip": "tip_split", "bill": "tip_split",
+    "roll": "dice", "morse": "morse_code", "forecast": "weather_forecast",
+    "geo": "geocode", "latlon": "geocode", "fact": "random_fact",
+    "regex": "regex_test", "jwt": "jwt_decode", "roman": "roman_numeral",
 }
 
 
