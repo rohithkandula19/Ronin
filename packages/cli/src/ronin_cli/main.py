@@ -2371,6 +2371,50 @@ def api(
         console.print(Markdown(md))
 
 
+# ---------- api-test (assert on an endpoint) ----------
+
+@app.command(name="api-test")
+def api_test_cmd(
+    url: str = typer.Argument(..., help="The endpoint to test."),
+    status: int = typer.Option(None, "--status", "-s", help="Expected HTTP status code."),
+    field: Optional[list[str]] = typer.Option(None, "--field", "-f", help="Assert a JSON field: path=value (e.g. data.0.id=5). Repeatable."),
+) -> None:
+    """🧪 Smoke-test an API endpoint: assert its status and JSON fields. Exits
+    non-zero if any assertion fails (handy in scripts/CI).
+    """
+    import time
+
+    import httpx
+
+    from .api_test import check_response, parse_expect
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    t0 = time.time()
+    try:
+        r = httpx.get(url, timeout=20, follow_redirects=True)
+    except Exception as e:  # noqa: BLE001
+        console.print(f"[red]request failed:[/red] {e}")
+        raise typer.Exit(2)
+    ms = round((time.time() - t0) * 1000)
+    body = None
+    try:
+        body = r.json()
+    except ValueError:
+        pass
+    console.print(f"[#7aa2f7]🧪 {url}[/#7aa2f7] [dim]→ {r.status_code} · {ms}ms[/dim]")
+    outcome = check_response(r.status_code, body, expect_status=status, expect=parse_expect(list(field or [])))
+    for res in outcome["results"]:
+        mark = "[green]✓[/green]" if res["passed"] else "[#f7768e]✗[/#f7768e]"
+        detail = "" if res["passed"] else f" [dim](got {res['actual']!r})[/dim]"
+        console.print(f"  {mark} {res['check']}{detail}")
+    if not outcome["results"]:
+        console.print("  [dim]no assertions — pass --status or --field to check something.[/dim]")
+    if not outcome["passed"]:
+        console.print("\n[#f7768e]FAILED[/#f7768e]")
+        raise typer.Exit(1)
+    console.print("\n[green]PASSED[/green]")
+
+
 # ---------- user-agent (parse a UA string) ----------
 
 @app.command(name="user-agent")
