@@ -2371,6 +2371,27 @@ def api(
         console.print(Markdown(md))
 
 
+# ---------- curl2code (curl -> code) ----------
+
+@app.command(name="curl2code")
+def curl2code(
+    command: list[str] = typer.Argument(..., help="A curl command (quote it)."),
+    lang: str = typer.Option("python", "--lang", "-l", help="python | js | both."),
+) -> None:
+    """🔁 Convert a curl command into Python (httpx) or JavaScript (fetch) code."""
+    from rich.syntax import Syntax
+
+    from .curl_convert import parse_curl, to_javascript, to_python
+    parsed = parse_curl(" ".join(command))
+    if not parsed["url"]:
+        console.print("[yellow]couldn't find a URL in that curl command.[/yellow]")
+        raise typer.Exit(1)
+    if lang in ("python", "py", "both"):
+        console.print(Syntax(to_python(parsed), "python", theme="dracula", background_color="default"))
+    if lang in ("js", "javascript", "both"):
+        console.print(Syntax(to_javascript(parsed), "javascript", theme="dracula", background_color="default"))
+
+
 # ---------- count (wc-like) ----------
 
 @app.command()
