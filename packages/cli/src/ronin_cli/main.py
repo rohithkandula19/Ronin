@@ -2371,6 +2371,28 @@ def api(
         console.print(Markdown(md))
 
 
+# ---------- toc (markdown table of contents) ----------
+
+@app.command()
+def toc(
+    file: Path = typer.Argument(..., help="A Markdown file."),
+    min_level: int = typer.Option(2, "--min", help="Smallest heading level to include (1-6)."),
+    max_level: int = typer.Option(4, "--max", help="Largest heading level to include."),
+) -> None:
+    """📑 Generate a Markdown table of contents (with anchor links) from a file."""
+    from .toc_gen import extract_headings, generate_toc
+
+    if not file.is_file():
+        console.print(f"[red]no such file:[/red] {file}")
+        raise typer.Exit(1)
+    headings = extract_headings(file.read_text(encoding="utf-8"))
+    if not headings:
+        console.print("[yellow]no headings found.[/yellow]")
+        raise typer.Exit(1)
+    out = generate_toc(headings, min_level=min_level, max_level=max_level)
+    print(out)
+
+
 # ---------- curl2code (curl -> code) ----------
 
 @app.command(name="curl2code")
