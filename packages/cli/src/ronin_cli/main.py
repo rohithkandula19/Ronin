@@ -952,6 +952,39 @@ def plugin_update(
     console.print(f"[dim]refreshed {len(targets)} plugin(s) — live next time you run ronin.[/dim]")
 
 
+@plugin_app.command("from-api", help="Turn any REST endpoint into a tool: ronin plugin from-api dogpic https://dog.ceo/api/breeds/image/random --field message")
+def plugin_from_api(
+    name: str = typer.Argument(..., help="Tool name (lowercase), e.g. 'weather'."),
+    url: str = typer.Argument(..., help="Endpoint URL; use {placeholders} for parameters, e.g. .../{city}."),
+    field: Optional[list[str]] = typer.Option(None, "--field", "-f", help="JSON field to extract, dotted path (e.g. data.0.title). Repeatable; omit to return the whole response."),
+    desc: str = typer.Option("", "--desc", help="One-line description for the agent."),
+    method: str = typer.Option("GET", "--method", help="HTTP method."),
+    force: bool = typer.Option(False, "--force", help="Overwrite if it exists."),
+    root: Path = typer.Option(Path("."), "--root", help="Project root."),
+) -> None:
+    from .plugin_from_api import generate_api_plugin
+    try:
+        src = generate_api_plugin(name, url, fields=list(field or []), blurb=desc, method=method)
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(2)
+    pdir = Path(root) / ".ronin" / "plugins"
+    pdir.mkdir(parents=True, exist_ok=True)
+    path = pdir / f"{name}.py"
+    if path.exists() and not force:
+        console.print(f"[yellow]already exists:[/yellow] {path} [dim](use --force)[/dim]")
+        raise typer.Exit(1)
+    path.write_text(src, encoding="utf-8")
+    from .plugin_from_api import url_params
+    params = url_params(url)
+    console.print(f"[green]✓[/green] generated tool [bold]{name}[/bold] → [cyan]{path}[/cyan]")
+    if params:
+        console.print(f"  [dim]parameters:[/dim] {', '.join(params)}")
+    if field:
+        console.print(f"  [dim]extracts:[/dim] {', '.join(field)}")
+    console.print("  [dim]live in the agent next run · edit the file to refine.[/dim]")
+
+
 @plugin_app.command("search", help="Search the plugin library: ronin plugin search finance")
 def plugin_search(
     query: str = typer.Argument(..., help="A keyword, e.g. 'crypto', 'word', 'github'."),
