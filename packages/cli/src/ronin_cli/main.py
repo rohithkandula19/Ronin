@@ -2371,6 +2371,31 @@ def api(
         console.print(Markdown(md))
 
 
+# ---------- count (wc-like) ----------
+
+@app.command()
+def count(
+    source: str = typer.Argument(..., help="Text: a string, @file, or '-' for stdin."),
+) -> None:
+    """🔢 Count lines, words, characters and bytes (a friendly wc). Offline."""
+    import sys
+
+    from .text_count import count_text
+    if source == "-":
+        raw = sys.stdin.read()
+    elif source.startswith("@"):
+        try:
+            raw = Path(source[1:]).read_text(encoding="utf-8")
+        except OSError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+    else:
+        raw = source
+    c = count_text(raw)
+    console.print(f"[bold]{c['lines']}[/bold] lines · [bold]{c['words']}[/bold] words · "
+                  f"[bold]{c['characters']}[/bold] chars · [bold]{c['bytes']}[/bold] bytes")
+
+
 # ---------- api-test (assert on an endpoint) ----------
 
 @app.command(name="api-test")
