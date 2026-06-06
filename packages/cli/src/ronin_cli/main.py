@@ -2371,6 +2371,45 @@ def api(
         console.print(Markdown(md))
 
 
+# ---------- license (generate a LICENSE) ----------
+
+@app.command()
+def license(
+    kind: str = typer.Argument(None, help="License id: mit, isc, bsd-3-clause, unlicense. Omit to list."),
+    name: str = typer.Argument("", help="Copyright holder name."),
+    write: bool = typer.Option(False, "--write", help="Write to ./LICENSE."),
+    year: str = typer.Option("", "--year", help="Copyright year (default: from git/current)."),
+    root: Path = typer.Option(Path("."), "--root", help="Where to write."),
+) -> None:
+    """⚖️  Generate an open-source LICENSE file (mit/isc/bsd-3-clause/unlicense).
+    Offline. (Fixes the 'no LICENSE' finding from `ronin checkup`.)
+    """
+    import subprocess
+
+    from .license_gen import available, license_text
+
+    if not kind:
+        console.print("[bold]licenses[/bold]  " + ", ".join(available()))
+        console.print("[dim]e.g. [bold]ronin license mit \"Your Name\" --write[/bold][/dim]")
+        return
+    if not year:
+        # current year from git's last commit date, else leave to fill
+        try:
+            year = subprocess.run(["git", "-C", str(root), "log", "-1", "--format=%cd", "--date=format:%Y"],
+                                  capture_output=True, text=True, timeout=10).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            year = ""
+    text = license_text(kind, name, year)
+    if text is None:
+        console.print(f"[yellow]unknown license '{kind}'[/yellow] — try: {', '.join(available())}")
+        raise typer.Exit(1)
+    if write:
+        (Path(root) / "LICENSE").write_text(text, encoding="utf-8")
+        console.print(f"[green]✓[/green] wrote [cyan]{Path(root) / 'LICENSE'}[/cyan]")
+    else:
+        console.print(text)
+
+
 # ---------- gitignore (generate from templates) ----------
 
 @app.command()
