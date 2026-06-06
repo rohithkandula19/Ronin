@@ -43,11 +43,20 @@ ronin user-agent "<ua-string>"   # browser / OS / device
 ronin count @file                # lines / words / chars / bytes (friendly wc)
 ```
 
+## 🧑‍💻 Code & docs (offline)
+
+```bash
+ronin curl2code 'curl -X POST https://api.x.com -d "{...}"' --lang both  # curl -> httpx + fetch
+ronin toc README.md              # Markdown table of contents (GitHub anchors)
+ronin count @file                # lines / words / chars / bytes
+```
+
 ## 🔐 Security & hygiene (offline)
 
 ```bash
 ronin redact @app.log            # mask emails, IPs, API keys, tokens, JWTs -> [REDACTED-*]
 ronin env-example --write        # safe .env.example from .env (blanks secret values)
+ronin passphrase 5 --capitalize  # memorable strong passphrase (with entropy)
 ronin gitignore python node macos   # .gitignore from 17 stack templates
 ronin license mit "Your Name" --write   # generate a LICENSE
 ```
