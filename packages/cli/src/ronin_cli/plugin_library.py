@@ -2426,6 +2426,215 @@ def register_tools():
 '''
 
 
+_PWSTRENGTH = '''# ronin plugin: password_strength — rate a password (offline)
+from __future__ import annotations
+
+import re
+
+from ronin_agent_patterns import Tool
+
+
+def password_strength(password: str) -> dict:
+    p, score, tips = password, 0, []
+    if len(p) >= 8:
+        score += 1
+    else:
+        tips.append("use at least 8 characters")
+    if len(p) >= 12:
+        score += 1
+    if re.search(r"[a-z]", p) and re.search(r"[A-Z]", p):
+        score += 1
+    else:
+        tips.append("mix upper and lower case")
+    if re.search(r"\\d", p):
+        score += 1
+    else:
+        tips.append("add a digit")
+    if re.search(r"[^A-Za-z0-9]", p):
+        score += 1
+    else:
+        tips.append("add a symbol")
+    labels = ["very weak", "weak", "fair", "good", "strong", "very strong"]
+    return {"score": score, "rating": labels[score], "suggestions": tips}
+
+
+def register_tools():
+    return [Tool(name="password_strength", description="Rate a password's strength and suggest improvements. Offline.",
+                 input_schema={"type": "object", "properties": {"password": {"type": "string"}}, "required": ["password"]},
+                 handler=password_strength)]
+'''
+
+_BINTEXT = '''# ronin plugin: binary_text — text <-> binary (offline)
+from __future__ import annotations
+
+from ronin_agent_patterns import Tool
+
+
+def binary_text(text: str, mode: str = "encode") -> dict:
+    if mode == "decode":
+        try:
+            return {"mode": "decode", "result": "".join(chr(int(b, 2)) for b in text.split())}
+        except ValueError:
+            return {"error": "invalid binary (space-separate 8-bit groups)"}
+    return {"mode": "encode", "result": " ".join(format(ord(c), "08b") for c in text)}
+
+
+def register_tools():
+    return [Tool(name="binary_text", description="Convert text to binary or binary back to text. Offline.",
+                 input_schema={"type": "object", "properties": {
+                     "text": {"type": "string"}, "mode": {"type": "string", "enum": ["encode", "decode"]}},
+                     "required": ["text"]},
+                 handler=binary_text)]
+'''
+
+_CONTRAST = '''# ronin plugin: color_contrast — WCAG contrast ratio of two colors (offline)
+from __future__ import annotations
+
+from ronin_agent_patterns import Tool
+
+
+def _lum(h: str):
+    h = h.lstrip("#")
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    try:
+        rgb = [int(h[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+    except (ValueError, IndexError):
+        return None
+    f = lambda c: c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+    return 0.2126 * f(rgb[0]) + 0.7152 * f(rgb[1]) + 0.0722 * f(rgb[2])
+
+
+def color_contrast(hex1: str, hex2: str) -> dict:
+    l1, l2 = _lum(hex1), _lum(hex2)
+    if l1 is None or l2 is None:
+        return {"error": "invalid hex color"}
+    ratio = (max(l1, l2) + 0.05) / (min(l1, l2) + 0.05)
+    return {"ratio": round(ratio, 2), "AA_normal": ratio >= 4.5,
+            "AAA_normal": ratio >= 7, "AA_large": ratio >= 3}
+
+
+def register_tools():
+    return [Tool(name="color_contrast", description="WCAG contrast ratio between two hex colors (accessibility). Offline.",
+                 input_schema={"type": "object", "properties": {
+                     "hex1": {"type": "string"}, "hex2": {"type": "string"}}, "required": ["hex1", "hex2"]},
+                 handler=color_contrast)]
+'''
+
+_NATO = '''# ronin plugin: nato_alphabet — spell text in the NATO phonetic alphabet (offline)
+from __future__ import annotations
+
+from ronin_agent_patterns import Tool
+
+_NATO = {"A": "Alfa", "B": "Bravo", "C": "Charlie", "D": "Delta", "E": "Echo",
+         "F": "Foxtrot", "G": "Golf", "H": "Hotel", "I": "India", "J": "Juliett",
+         "K": "Kilo", "L": "Lima", "M": "Mike", "N": "November", "O": "Oscar",
+         "P": "Papa", "Q": "Quebec", "R": "Romeo", "S": "Sierra", "T": "Tango",
+         "U": "Uniform", "V": "Victor", "W": "Whiskey", "X": "X-ray", "Y": "Yankee",
+         "Z": "Zulu", "0": "Zero", "1": "One", "2": "Two", "3": "Three", "4": "Four",
+         "5": "Five", "6": "Six", "7": "Seven", "8": "Eight", "9": "Nine"}
+
+
+def nato_alphabet(text: str) -> dict:
+    out = [_NATO.get(c.upper(), c) for c in text if not c.isspace()]
+    return {"text": text, "nato": " ".join(out)}
+
+
+def register_tools():
+    return [Tool(name="nato_alphabet", description="Spell text using the NATO phonetic alphabet (Alfa Bravo Charlie...). Offline.",
+                 input_schema={"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
+                 handler=nato_alphabet)]
+'''
+
+_FACTORIAL = '''# ronin plugin: factorial — n! (offline)
+from __future__ import annotations
+
+import math
+
+from ronin_agent_patterns import Tool
+
+
+def factorial(n: int) -> dict:
+    n = int(n)
+    if n < 0:
+        return {"error": "n must be >= 0"}
+    if n > 1000:
+        return {"error": "n too large (max 1000)"}
+    return {"n": n, "factorial": str(math.factorial(n))}
+
+
+def register_tools():
+    return [Tool(name="factorial", description="Compute n! (factorial). Offline.",
+                 input_schema={"type": "object", "properties": {"n": {"type": "integer"}}, "required": ["n"]},
+                 handler=factorial)]
+'''
+
+_ASCIICODE = '''# ronin plugin: ascii_code — characters <-> code points (offline)
+from __future__ import annotations
+
+from ronin_agent_patterns import Tool
+
+
+def ascii_code(text: str) -> dict:
+    return {"text": text, "codes": [{"char": c, "code": ord(c), "hex": hex(ord(c))}
+                                    for c in text[:60]]}
+
+
+def register_tools():
+    return [Tool(name="ascii_code", description="Show the code point (decimal + hex) of each character. Offline.",
+                 input_schema={"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
+                 handler=ascii_code)]
+'''
+
+_URBAN = '''# ronin plugin: urban_dictionary — slang definitions (no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def urban_dictionary(term: str) -> dict:
+    d = httpx.get("https://api.urbandictionary.com/v0/define",
+                  params={"term": term}, timeout=15, follow_redirects=True).json()
+    defs = d.get("list") or []
+    if not defs:
+        return {"term": term, "error": "no definition found"}
+    top = defs[0]
+    clean = lambda s: (s or "").replace("[", "").replace("]", "")
+    return {"term": term, "definition": clean(top.get("definition"))[:400],
+            "example": clean(top.get("example"))[:200], "thumbs_up": top.get("thumbs_up")}
+
+
+def register_tools():
+    return [Tool(name="urban_dictionary", description="Slang/Urban Dictionary definition of a term. No key.",
+                 input_schema={"type": "object", "properties": {"term": {"type": "string"}}, "required": ["term"]},
+                 handler=urban_dictionary)]
+'''
+
+_RANDMEAL = '''# ronin plugin: random_meal — a random recipe (TheMealDB, no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def random_meal() -> dict:
+    d = httpx.get("https://www.themealdb.com/api/json/v1/1/random.php",
+                  timeout=15, follow_redirects=True).json()
+    meals = d.get("meals") or []
+    if not meals:
+        return {"error": "no meal returned"}
+    m = meals[0]
+    return {"name": m.get("strMeal"), "category": m.get("strCategory"),
+            "area": m.get("strArea"), "instructions": (m.get("strInstructions") or "")[:300]}
+
+
+def register_tools():
+    return [Tool(name="random_meal", description="A random recipe idea with instructions. No key.",
+                 input_schema={"type": "object", "properties": {}}, handler=random_meal)]
+'''
+
+
 @dataclass(frozen=True)
 class LibraryPlugin:
     name: str
@@ -2531,6 +2740,14 @@ LIBRARY: dict[str, LibraryPlugin] = {
     "gravatar": LibraryPlugin("gravatar", "Gravatar URL for an email (offline)", _GRAVATAR),
     "cat_fact": LibraryPlugin("cat_fact", "A random cat fact", _CATFACT),
     "nasa_apod": LibraryPlugin("nasa_apod", "NASA picture of the day", _NASA),
+    "password_strength": LibraryPlugin("password_strength", "Rate a password (offline)", _PWSTRENGTH),
+    "binary_text": LibraryPlugin("binary_text", "Text <-> binary (offline)", _BINTEXT),
+    "color_contrast": LibraryPlugin("color_contrast", "WCAG contrast of two colors (offline)", _CONTRAST),
+    "nato_alphabet": LibraryPlugin("nato_alphabet", "Spell text in NATO phonetics (offline)", _NATO),
+    "factorial": LibraryPlugin("factorial", "n! factorial (offline)", _FACTORIAL),
+    "ascii_code": LibraryPlugin("ascii_code", "Chars <-> code points (offline)", _ASCIICODE),
+    "urban_dictionary": LibraryPlugin("urban_dictionary", "Slang definitions", _URBAN),
+    "random_meal": LibraryPlugin("random_meal", "A random recipe idea", _RANDMEAL),
 }
 
 _ALIASES = {
@@ -2575,7 +2792,10 @@ _ALIASES = {
     "randomwiki": "wikipedia_random", "luhn": "luhn_check", "card": "luhn_check",
     "weekday": "day_of_week", "leap": "leap_year", "scrabble": "scrabble_score",
     "rgb": "hex_rgb", "avatar": "gravatar", "cat": "cat_fact", "nasa": "nasa_apod",
-    "apod": "nasa_apod",
+    "apod": "nasa_apod", "pwstrength": "password_strength", "strength": "password_strength",
+    "bintext": "binary_text", "contrast": "color_contrast", "nato": "nato_alphabet",
+    "phonetic": "nato_alphabet", "fact_n": "factorial", "ascii": "ascii_code",
+    "urban": "urban_dictionary", "slang": "urban_dictionary", "randommeal": "random_meal",
 }
 
 
