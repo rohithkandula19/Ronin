@@ -2371,6 +2371,22 @@ def api(
         console.print(Markdown(md))
 
 
+# ---------- user-agent (parse a UA string) ----------
+
+@app.command(name="user-agent")
+def user_agent_cmd(
+    ua: list[str] = typer.Argument(..., help="A User-Agent string (quote it)."),
+) -> None:
+    """🧭 Parse a User-Agent string into browser / OS / device. Offline."""
+    from .user_agent import parse_user_agent
+
+    info = parse_user_agent(" ".join(ua))
+    ver = f" {info['version']}" if info["version"] else ""
+    console.print(f"[#7aa2f7]🧭 browser[/#7aa2f7] [bold]{info['browser']}{ver}[/bold]")
+    console.print(f"   [cyan]os[/cyan]      {info['os']}")
+    console.print(f"   [cyan]device[/cyan]  {info['device']}")
+
+
 # ---------- env-example (.env -> .env.example) ----------
 
 @app.command(name="env-example")
