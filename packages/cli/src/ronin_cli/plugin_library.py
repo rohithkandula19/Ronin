@@ -2244,6 +2244,188 @@ def register_tools():
 '''
 
 
+_LUHN = '''# ronin plugin: luhn_check — validate a card/IMEI number via Luhn (offline)
+from __future__ import annotations
+
+from ronin_agent_patterns import Tool
+
+
+def luhn_check(number: str) -> dict:
+    digits = [int(c) for c in str(number) if c.isdigit()]
+    if not digits:
+        return {"error": "no digits found"}
+    total = 0
+    for i, d in enumerate(reversed(digits)):
+        if i % 2 == 1:
+            d *= 2
+            if d > 9:
+                d -= 9
+        total += d
+    return {"number": str(number), "valid": total % 10 == 0}
+
+
+def register_tools():
+    return [Tool(name="luhn_check", description="Validate a credit-card / IMEI number with the Luhn checksum. Offline.",
+                 input_schema={"type": "object", "properties": {"number": {"type": "string"}}, "required": ["number"]},
+                 handler=luhn_check)]
+'''
+
+_DOW = '''# ronin plugin: day_of_week — what weekday a date falls on (offline)
+from __future__ import annotations
+
+import datetime
+
+from ronin_agent_patterns import Tool
+
+
+def day_of_week(date: str) -> dict:
+    try:
+        d = datetime.date.fromisoformat(date.strip())
+    except ValueError:
+        return {"error": "use YYYY-MM-DD"}
+    return {"date": str(d), "day": d.strftime("%A"), "weekday": d.isoweekday()}
+
+
+def register_tools():
+    return [Tool(name="day_of_week", description="The weekday name for any YYYY-MM-DD date. Offline.",
+                 input_schema={"type": "object", "properties": {"date": {"type": "string"}}, "required": ["date"]},
+                 handler=day_of_week)]
+'''
+
+_LEAP = '''# ronin plugin: leap_year — is a year a leap year? (offline)
+from __future__ import annotations
+
+from ronin_agent_patterns import Tool
+
+
+def leap_year(year: int) -> dict:
+    y = int(year)
+    return {"year": y, "is_leap": (y % 4 == 0 and y % 100 != 0) or y % 400 == 0}
+
+
+def register_tools():
+    return [Tool(name="leap_year", description="Whether a given year is a leap year. Offline.",
+                 input_schema={"type": "object", "properties": {"year": {"type": "integer"}}, "required": ["year"]},
+                 handler=leap_year)]
+'''
+
+_SCRABBLE = '''# ronin plugin: scrabble_score — Scrabble points for a word (offline)
+from __future__ import annotations
+
+from ronin_agent_patterns import Tool
+
+_VALS = {}
+for letters, v in [("eaionrtlsu", 1), ("dg", 2), ("bcmp", 3), ("fhvwy", 4),
+                   ("k", 5), ("jx", 8), ("qz", 10)]:
+    for ch in letters:
+        _VALS[ch] = v
+
+
+def scrabble_score(word: str) -> dict:
+    score = sum(_VALS.get(c, 0) for c in word.lower())
+    return {"word": word, "score": score}
+
+
+def register_tools():
+    return [Tool(name="scrabble_score", description="Scrabble point value of a word. Offline.",
+                 input_schema={"type": "object", "properties": {"word": {"type": "string"}}, "required": ["word"]},
+                 handler=scrabble_score)]
+'''
+
+_HEXRGB = '''# ronin plugin: hex_rgb — convert between hex and RGB color (offline)
+from __future__ import annotations
+
+import re
+
+from ronin_agent_patterns import Tool
+
+
+def hex_rgb(value: str) -> dict:
+    v = value.strip()
+    if "," in v or v.lower().startswith("rgb"):
+        nums = [int(x) for x in re.findall(r"\\d+", v)][:3]
+        if len(nums) != 3 or any(not 0 <= x <= 255 for x in nums):
+            return {"error": "need three 0-255 values"}
+        return {"rgb": nums, "hex": "#{:02x}{:02x}{:02x}".format(*nums)}
+    h = v.lstrip("#")
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    if len(h) != 6:
+        return {"error": "invalid hex color"}
+    try:
+        rgb = [int(h[i:i + 2], 16) for i in (0, 2, 4)]
+    except ValueError:
+        return {"error": "invalid hex color"}
+    return {"hex": "#" + h.lower(), "rgb": rgb}
+
+
+def register_tools():
+    return [Tool(name="hex_rgb", description="Convert a color between hex (#ff5733) and RGB (255,87,51). Offline.",
+                 input_schema={"type": "object", "properties": {"value": {"type": "string"}}, "required": ["value"]},
+                 handler=hex_rgb)]
+'''
+
+_GRAVATAR = '''# ronin plugin: gravatar — build a Gravatar avatar URL for an email (offline)
+from __future__ import annotations
+
+import hashlib
+
+from ronin_agent_patterns import Tool
+
+
+def gravatar(email: str, size: int = 200) -> dict:
+    h = hashlib.md5(email.strip().lower().encode()).hexdigest()
+    return {"email": email,
+            "url": f"https://www.gravatar.com/avatar/{h}?s={int(size or 200)}&d=identicon"}
+
+
+def register_tools():
+    return [Tool(name="gravatar", description="Gravatar avatar image URL for an email address. Offline.",
+                 input_schema={"type": "object", "properties": {
+                     "email": {"type": "string"}, "size": {"type": "integer"}}, "required": ["email"]},
+                 handler=gravatar)]
+'''
+
+_CATFACT = '''# ronin plugin: cat_fact — a random cat fact (catfact.ninja, no key)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def cat_fact() -> dict:
+    d = httpx.get("https://catfact.ninja/fact", timeout=15, follow_redirects=True).json()
+    return {"fact": d.get("fact")}
+
+
+def register_tools():
+    return [Tool(name="cat_fact", description="A random fact about cats. No key.",
+                 input_schema={"type": "object", "properties": {}}, handler=cat_fact)]
+'''
+
+_NASA = '''# ronin plugin: nasa_apod — NASA Astronomy Picture of the Day (DEMO_KEY)
+from __future__ import annotations
+
+import httpx
+from ronin_agent_patterns import Tool
+
+
+def nasa_apod() -> dict:
+    r = httpx.get("https://api.nasa.gov/planetary/apod",
+                  params={"api_key": "DEMO_KEY"}, timeout=15, follow_redirects=True)
+    if r.status_code != 200:
+        return {"error": "NASA APOD unavailable (DEMO_KEY rate-limited — get a free key at api.nasa.gov)"}
+    j = r.json()
+    return {"title": j.get("title"), "date": j.get("date"),
+            "explanation": (j.get("explanation") or "")[:320], "image_url": j.get("url")}
+
+
+def register_tools():
+    return [Tool(name="nasa_apod", description="NASA's Astronomy Picture of the Day (title, image, blurb). DEMO_KEY.",
+                 input_schema={"type": "object", "properties": {}}, handler=nasa_apod)]
+'''
+
+
 @dataclass(frozen=True)
 class LibraryPlugin:
     name: str
@@ -2341,6 +2523,14 @@ LIBRARY: dict[str, LibraryPlugin] = {
     "anagram_check": LibraryPlugin("anagram_check", "Are two words anagrams? (offline)", _ANAGRAM),
     "public_ip": LibraryPlugin("public_ip", "Your public IP address", _PUBLICIP),
     "wikipedia_random": LibraryPlugin("wikipedia_random", "A random Wikipedia article", _WIKIRAND),
+    "luhn_check": LibraryPlugin("luhn_check", "Validate a card number (Luhn, offline)", _LUHN),
+    "day_of_week": LibraryPlugin("day_of_week", "Weekday for a date (offline)", _DOW),
+    "leap_year": LibraryPlugin("leap_year", "Is a year a leap year? (offline)", _LEAP),
+    "scrabble_score": LibraryPlugin("scrabble_score", "Scrabble points for a word (offline)", _SCRABBLE),
+    "hex_rgb": LibraryPlugin("hex_rgb", "Convert hex <-> RGB color (offline)", _HEXRGB),
+    "gravatar": LibraryPlugin("gravatar", "Gravatar URL for an email (offline)", _GRAVATAR),
+    "cat_fact": LibraryPlugin("cat_fact", "A random cat fact", _CATFACT),
+    "nasa_apod": LibraryPlugin("nasa_apod", "NASA picture of the day", _NASA),
 }
 
 _ALIASES = {
@@ -2382,7 +2572,10 @@ _ALIASES = {
     "reddit": "reddit_top", "marketcap": "crypto_market",
     "prime": "prime_check", "fib": "fibonacci", "caesar": "caesar_cipher",
     "rot13": "caesar_cipher", "anagram": "anagram_check", "myip": "public_ip",
-    "randomwiki": "wikipedia_random",
+    "randomwiki": "wikipedia_random", "luhn": "luhn_check", "card": "luhn_check",
+    "weekday": "day_of_week", "leap": "leap_year", "scrabble": "scrabble_score",
+    "rgb": "hex_rgb", "avatar": "gravatar", "cat": "cat_fact", "nasa": "nasa_apod",
+    "apod": "nasa_apod",
 }
 
 
