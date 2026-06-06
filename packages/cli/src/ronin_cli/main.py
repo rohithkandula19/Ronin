@@ -2371,6 +2371,33 @@ def api(
         console.print(Markdown(md))
 
 
+# ---------- subnet (CIDR calculator) ----------
+
+@app.command()
+def subnet(
+    cidr: str = typer.Argument(..., help="A CIDR or IP, e.g. 192.168.1.0/24 or 10.0.5.37/16."),
+) -> None:
+    """🌐 Subnet / CIDR calculator — network, broadcast, mask, usable host range.
+    IPv4 + IPv6. Offline.
+    """
+    from .subnet_calc import subnet_info
+
+    i = subnet_info(cidr)
+    if "error" in i:
+        console.print(f"[#f7768e]{i['error']}[/#f7768e]")
+        raise typer.Exit(1)
+    console.print(f"[#7aa2f7]🌐 {i['cidr']}[/#7aa2f7] [dim](IPv{i['version']}{', private' if i['is_private'] else ''})[/dim]")
+    console.print(f"   network    [bold]{i['network']}[/bold]")
+    if i.get("broadcast"):
+        console.print(f"   broadcast  [bold]{i['broadcast']}[/bold]")
+    console.print(f"   netmask    {i['netmask']}  [dim]/{i['prefix']}[/dim]")
+    if i.get("wildcard"):
+        console.print(f"   wildcard   {i['wildcard']}")
+    console.print(f"   hosts      [bold]{i['usable_hosts']:,}[/bold] usable "
+                  f"[dim]({i['first_host']} – {i['last_host']})[/dim]" if i["first_host"] else
+                  f"   addresses  [bold]{i['num_addresses']:,}[/bold]")
+
+
 # ---------- passphrase (memorable strong passwords) ----------
 
 @app.command()
