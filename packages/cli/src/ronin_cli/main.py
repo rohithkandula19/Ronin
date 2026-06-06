@@ -2371,6 +2371,42 @@ def api(
         console.print(Markdown(md))
 
 
+# ---------- diff-json (structural JSON diff) ----------
+
+@app.command(name="diff-json")
+def diff_json_cmd(
+    a: str = typer.Argument(..., help="First JSON: string or @file.json."),
+    b: str = typer.Argument(..., help="Second JSON: string or @file.json."),
+) -> None:
+    """🔀 Structural diff between two JSON docs — added / removed / changed paths."""
+    import json as _json
+
+    from .diff_json import diff_json, summarize
+
+    def load(src: str):
+        raw = Path(src[1:]).read_text(encoding="utf-8") if src.startswith("@") else src
+        return _json.loads(raw)
+    try:
+        ja, jb = load(a), load(b)
+    except (OSError, _json.JSONDecodeError) as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
+    changes = diff_json(ja, jb)
+    if not changes:
+        console.print("[green]✓ identical[/green]")
+        return
+    icon = {"added": "[green]+[/green]", "removed": "[#f7768e]-[/#f7768e]", "changed": "[#e0af68]~[/#e0af68]"}
+    for c in changes[:200]:
+        if c["type"] == "changed":
+            console.print(f"  {icon['changed']} [cyan]{c['path']}[/cyan]: {c['old']!r} → {c['new']!r}")
+        elif c["type"] == "added":
+            console.print(f"  {icon['added']} [cyan]{c['path']}[/cyan]: {c['new']!r}")
+        else:
+            console.print(f"  {icon['removed']} [cyan]{c['path']}[/cyan]: {c['old']!r}")
+    s = summarize(changes)
+    console.print(f"\n[dim]{s['added']} added · {s['removed']} removed · {s['changed']} changed[/dim]")
+
+
 # ---------- chmod (explain unix permissions) ----------
 
 @app.command()
