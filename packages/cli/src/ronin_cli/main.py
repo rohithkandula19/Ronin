@@ -2371,6 +2371,25 @@ def api(
         console.print(Markdown(md))
 
 
+# ---------- http (explain a status code) ----------
+
+@app.command()
+def http(
+    code: int = typer.Argument(..., help="An HTTP status code, e.g. 404."),
+) -> None:
+    """🌐 Explain an HTTP status code. Offline."""
+    from .http_status import explain_status
+
+    info = explain_status(code)
+    if info is None:
+        console.print(f"[yellow]unknown status code {code}[/yellow]")
+        raise typer.Exit(1)
+    color = {"success": "green", "redirect": "#7aa2f7", "client error": "#e0af68",
+             "server error": "#f7768e", "informational": "#6b7089"}.get(info["category"], "white")
+    console.print(f"[{color}]🌐 {info['code']} {info['name']}[/{color}] [dim]({info['category']})[/dim]")
+    console.print(f"   {info['explanation']}")
+
+
 # ---------- redact (strip secrets/PII from text) ----------
 
 @app.command()
