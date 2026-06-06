@@ -2371,6 +2371,25 @@ def api(
         console.print(Markdown(md))
 
 
+# ---------- chmod (explain unix permissions) ----------
+
+@app.command()
+def chmod(
+    spec: str = typer.Argument(..., help="A permission: 644, 0755, or rw-r--r--."),
+) -> None:
+    """🔐 Explain & convert unix file permissions (octal ↔ symbolic). Offline."""
+    from .chmod_explain import explain_perm
+
+    info = explain_perm(spec)
+    if "error" in info:
+        console.print(f"[#f7768e]{info['error']}[/#f7768e]")
+        raise typer.Exit(1)
+    console.print(f"[#7aa2f7]🔐 {info['octal']}[/#7aa2f7]  [bold]{info['symbolic']}[/bold]")
+    console.print(f"   [cyan]owner[/cyan]  {info['owner']}")
+    console.print(f"   [cyan]group[/cyan]  {info['group']}")
+    console.print(f"   [cyan]others[/cyan] {info['others']}")
+
+
 # ---------- json (query JSON with a path) ----------
 
 @app.command()
