@@ -2635,6 +2635,1075 @@ def register_tools():
 '''
 
 
+_W1 = {}
+
+_W1["reverse_text"] = ('Reverse a string (offline)', '''from ronin_agent_patterns import Tool
+def reverse_text(text: str) -> dict:
+    return {"result": text[::-1]}
+def register_tools():
+    return [Tool(name="reverse_text", description="Reverse a string. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=reverse_text)]
+''')
+
+_W1["reverse_words"] = ('Reverse word order (offline)', '''from ronin_agent_patterns import Tool
+def reverse_words(text: str) -> dict:
+    return {"result": " ".join(text.split()[::-1])}
+def register_tools():
+    return [Tool(name="reverse_words", description="Reverse the order of words in text. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=reverse_words)]
+''')
+
+_W1["count_vowels"] = ('Count vowels & consonants (offline)', '''from ronin_agent_patterns import Tool
+def count_vowels(text: str) -> dict:
+    v = sum(c in "aeiouAEIOU" for c in text)
+    cons = sum(c.isalpha() and c not in "aeiouAEIOU" for c in text)
+    return {"vowels": v, "consonants": cons, "letters": v + cons}
+def register_tools():
+    return [Tool(name="count_vowels", description="Count vowels and consonants in text. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=count_vowels)]
+''')
+
+_W1["acronym"] = ('Make an acronym from a phrase (offline)', '''from ronin_agent_patterns import Tool
+def acronym(text: str) -> dict:
+    return {"acronym": "".join(w[0].upper() for w in text.split() if w)}
+def register_tools():
+    return [Tool(name="acronym", description="Build an acronym from the first letter of each word. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=acronym)]
+''')
+
+_W1["pig_latin"] = ('Translate to Pig Latin (offline)', '''import re
+from ronin_agent_patterns import Tool
+def pig_latin(text: str) -> dict:
+    def conv(w):
+        if not w.isalpha(): return w
+        if w[0].lower() in "aeiou": return w + "way"
+        i = next((i for i, c in enumerate(w) if c.lower() in "aeiou"), len(w))
+        return w[i:] + w[:i] + "ay"
+    return {"result": " ".join(conv(w) for w in text.split())}
+def register_tools():
+    return [Tool(name="pig_latin", description="Translate text into Pig Latin. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=pig_latin)]
+''')
+
+_W1["leetspeak"] = ('Convert to leetspeak (offline)', '''from ronin_agent_patterns import Tool
+_L = {"a":"4","e":"3","i":"1","o":"0","s":"5","t":"7","l":"1","b":"8"}
+def leetspeak(text: str) -> dict:
+    return {"result": "".join(_L.get(c.lower(), c) for c in text)}
+def register_tools():
+    return [Tool(name="leetspeak", description="Convert text to l33tspeak. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=leetspeak)]
+''')
+
+_W1["atbash_cipher"] = ('Atbash cipher (offline)', '''from ronin_agent_patterns import Tool
+def atbash_cipher(text: str) -> dict:
+    def f(c):
+        if c.isupper(): return chr(155 - ord(c))
+        if c.islower(): return chr(219 - ord(c))
+        return c
+    return {"result": "".join(f(c) for c in text)}
+def register_tools():
+    return [Tool(name="atbash_cipher", description="Encode/decode with the Atbash cipher (self-inverse). Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=atbash_cipher)]
+''')
+
+_W1["rot47"] = ('ROT47 cipher (offline)', '''from ronin_agent_patterns import Tool
+def rot47(text: str) -> dict:
+    out = [chr(33 + (ord(c) - 33 + 47) % 94) if 33 <= ord(c) <= 126 else c for c in text]
+    return {"result": "".join(out)}
+def register_tools():
+    return [Tool(name="rot47", description="ROT47 cipher (self-inverse, covers punctuation+digits). Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=rot47)]
+''')
+
+_W1["vigenere_cipher"] = ('Vigenere cipher (offline)', '''from ronin_agent_patterns import Tool
+def vigenere_cipher(text: str, key: str, mode: str = "encode") -> dict:
+    key = [k for k in key.lower() if k.isalpha()]
+    if not key: return {"error": "key needs letters"}
+    out, j = [], 0
+    for c in text:
+        if c.isalpha():
+            s = (ord(key[j % len(key)]) - 97) * (-1 if mode == "decode" else 1)
+            base = 65 if c.isupper() else 97
+            out.append(chr((ord(c) - base + s) % 26 + base)); j += 1
+        else: out.append(c)
+    return {"mode": mode, "result": "".join(out)}
+def register_tools():
+    return [Tool(name="vigenere_cipher", description="Vigenere cipher encode/decode with a keyword. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"},"key":{"type":"string"},"mode":{"type":"string","enum":["encode","decode"]}},"required":["text","key"]}, handler=vigenere_cipher)]
+''')
+
+_W1["sort_lines"] = ('Sort lines of text (offline)', '''from ronin_agent_patterns import Tool
+def sort_lines(text: str, reverse: bool = False) -> dict:
+    return {"result": "\\n".join(sorted(text.splitlines(), reverse=bool(reverse)))}
+def register_tools():
+    return [Tool(name="sort_lines", description="Sort the lines of a block of text. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"},"reverse":{"type":"boolean"}},"required":["text"]}, handler=sort_lines)]
+''')
+
+_W1["dedupe_lines"] = ('Remove duplicate lines (offline)', '''from ronin_agent_patterns import Tool
+def dedupe_lines(text: str) -> dict:
+    seen, out = set(), []
+    for ln in text.splitlines():
+        if ln not in seen: seen.add(ln); out.append(ln)
+    return {"result": "\\n".join(out), "removed": len(text.splitlines()) - len(out)}
+def register_tools():
+    return [Tool(name="dedupe_lines", description="Remove duplicate lines, keeping order. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=dedupe_lines)]
+''')
+
+_W1["find_replace"] = ('Find and replace text (offline)', '''from ronin_agent_patterns import Tool
+def find_replace(text: str, find: str, replace: str = "") -> dict:
+    return {"result": text.replace(find, replace), "count": text.count(find)}
+def register_tools():
+    return [Tool(name="find_replace", description="Replace all occurrences of a substring. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"},"find":{"type":"string"},"replace":{"type":"string"}},"required":["text","find"]}, handler=find_replace)]
+''')
+
+_W1["word_wrap"] = ('Wrap text to a width (offline)', '''import textwrap
+from ronin_agent_patterns import Tool
+def word_wrap(text: str, width: int = 80) -> dict:
+    return {"result": textwrap.fill(text, width=max(1, int(width or 80)))}
+def register_tools():
+    return [Tool(name="word_wrap", description="Wrap text to a given column width. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"},"width":{"type":"integer"}},"required":["text"]}, handler=word_wrap)]
+''')
+
+_W1["html_escape"] = ('HTML escape/unescape (offline)', '''import html as _h
+from ronin_agent_patterns import Tool
+def html_escape(text: str, mode: str = "encode") -> dict:
+    return {"result": _h.unescape(text) if mode == "decode" else _h.escape(text)}
+def register_tools():
+    return [Tool(name="html_escape", description="HTML-escape text or unescape entities. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"},"mode":{"type":"string","enum":["encode","decode"]}},"required":["text"]}, handler=html_escape)]
+''')
+
+_W1["hex_encode"] = ('Text <-> hex (offline)', '''from ronin_agent_patterns import Tool
+def hex_encode(text: str, mode: str = "encode") -> dict:
+    try:
+        if mode == "decode": return {"result": bytes.fromhex(text.replace(" ", "")).decode("utf-8", "replace")}
+        return {"result": text.encode("utf-8").hex()}
+    except ValueError as e:
+        return {"error": str(e)}
+def register_tools():
+    return [Tool(name="hex_encode", description="Encode text to hex or decode hex back to text. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"},"mode":{"type":"string","enum":["encode","decode"]}},"required":["text"]}, handler=hex_encode)]
+''')
+
+_W1["char_frequency"] = ('Character frequency (offline)', '''from collections import Counter
+from ronin_agent_patterns import Tool
+def char_frequency(text: str, top: int = 10) -> dict:
+    c = Counter(ch for ch in text if not ch.isspace())
+    return {"top": [{"char": ch, "count": n} for ch, n in c.most_common(int(top or 10))]}
+def register_tools():
+    return [Tool(name="char_frequency", description="Most frequent characters in text. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"},"top":{"type":"integer"}},"required":["text"]}, handler=char_frequency)]
+''')
+
+_W1["extract_emails"] = ('Extract emails from text (offline)', '''import re
+from ronin_agent_patterns import Tool
+def extract_emails(text: str) -> dict:
+    return {"emails": sorted(set(re.findall(r"[\\w.+-]+@[\\w-]+\\.[\\w.-]+", text)))}
+def register_tools():
+    return [Tool(name="extract_emails", description="Find all email addresses in text. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=extract_emails)]
+''')
+
+_W1["extract_urls"] = ('Extract URLs from text (offline)', '''import re
+from ronin_agent_patterns import Tool
+def extract_urls(text: str) -> dict:
+    return {"urls": sorted(set(re.findall(r"https?://[^\\s)>\\]]+", text)))}
+def register_tools():
+    return [Tool(name="extract_urls", description="Find all URLs in text. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=extract_urls)]
+''')
+
+_W1["title_case"] = ('Smart title-case (offline)', '''from ronin_agent_patterns import Tool
+_SMALL = {"a","an","the","and","but","or","for","nor","on","at","to","by","of","in","with"}
+def title_case(text: str) -> dict:
+    words = text.split()
+    out = [w.capitalize() if (i == 0 or i == len(words) - 1 or w.lower() not in _SMALL) else w.lower() for i, w in enumerate(words)]
+    return {"result": " ".join(out)}
+def register_tools():
+    return [Tool(name="title_case", description="Title-case a heading (keeps small words lowercase). Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=title_case)]
+''')
+
+
+_W2 = {}
+
+_W2["gcd_lcm"] = ('GCD & LCM of two numbers (offline)', '''import math
+from ronin_agent_patterns import Tool
+def gcd_lcm(a: int, b: int) -> dict:
+    a, b = int(a), int(b)
+    g = math.gcd(a, b)
+    return {"gcd": g, "lcm": abs(a * b) // g if g else 0}
+def register_tools():
+    return [Tool(name="gcd_lcm", description="Greatest common divisor and least common multiple. Offline.",
+                 input_schema={"type":"object","properties":{"a":{"type":"integer"},"b":{"type":"integer"}},"required":["a","b"]}, handler=gcd_lcm)]
+''')
+
+_W2["sum_digits"] = ('Sum the digits of a number (offline)', '''from ronin_agent_patterns import Tool
+def sum_digits(n: int) -> dict:
+    s = sum(int(c) for c in str(abs(int(n))))
+    return {"n": int(n), "digit_sum": s}
+def register_tools():
+    return [Tool(name="sum_digits", description="Sum the digits of an integer. Offline.",
+                 input_schema={"type":"object","properties":{"n":{"type":"integer"}},"required":["n"]}, handler=sum_digits)]
+''')
+
+_W2["ordinal"] = ('Ordinal of a number, 1->1st (offline)', '''from ronin_agent_patterns import Tool
+def ordinal(n: int) -> dict:
+    n = int(n)
+    suf = "th" if 10 <= n % 100 <= 20 else {1:"st",2:"nd",3:"rd"}.get(n % 10, "th")
+    return {"n": n, "ordinal": f"{n}{suf}"}
+def register_tools():
+    return [Tool(name="ordinal", description="Ordinal form of a number (1 -> 1st). Offline.",
+                 input_schema={"type":"object","properties":{"n":{"type":"integer"}},"required":["n"]}, handler=ordinal)]
+''')
+
+_W2["number_format"] = ('Add thousands separators (offline)', '''from ronin_agent_patterns import Tool
+def number_format(n: float) -> dict:
+    return {"result": f"{float(n):,}"}
+def register_tools():
+    return [Tool(name="number_format", description="Format a number with thousands separators. Offline.",
+                 input_schema={"type":"object","properties":{"n":{"type":"number"}},"required":["n"]}, handler=number_format)]
+''')
+
+_W2["stats_summary"] = ('Mean/median/min/max of numbers (offline)', '''import statistics, re
+from ronin_agent_patterns import Tool
+def stats_summary(numbers: str) -> dict:
+    nums = [float(x) for x in re.findall(r"-?\\d+\\.?\\d*", numbers)]
+    if not nums: return {"error": "no numbers found"}
+    return {"count": len(nums), "sum": sum(nums), "mean": round(statistics.mean(nums), 4),
+            "median": statistics.median(nums), "min": min(nums), "max": max(nums)}
+def register_tools():
+    return [Tool(name="stats_summary", description="Mean/median/min/max/sum of a list of numbers. Offline.",
+                 input_schema={"type":"object","properties":{"numbers":{"type":"string","description":"comma or space separated"}},"required":["numbers"]}, handler=stats_summary)]
+''')
+
+_W2["round_to"] = ('Round to N decimals (offline)', '''from ronin_agent_patterns import Tool
+def round_to(value: float, decimals: int = 2) -> dict:
+    return {"result": round(float(value), int(decimals))}
+def register_tools():
+    return [Tool(name="round_to", description="Round a number to N decimal places. Offline.",
+                 input_schema={"type":"object","properties":{"value":{"type":"number"},"decimals":{"type":"integer"}},"required":["value"]}, handler=round_to)]
+''')
+
+_W2["clamp"] = ('Clamp a value to a range (offline)', '''from ronin_agent_patterns import Tool
+def clamp(value: float, low: float, high: float) -> dict:
+    return {"result": max(float(low), min(float(value), float(high)))}
+def register_tools():
+    return [Tool(name="clamp", description="Constrain a value between a low and high bound. Offline.",
+                 input_schema={"type":"object","properties":{"value":{"type":"number"},"low":{"type":"number"},"high":{"type":"number"}},"required":["value","low","high"]}, handler=clamp)]
+''')
+
+_W2["collatz"] = ('Collatz sequence length (offline)', '''from ronin_agent_patterns import Tool
+def collatz(n: int) -> dict:
+    n = int(n)
+    if n < 1: return {"error": "n must be >= 1"}
+    steps, x = 0, n
+    while x != 1:
+        x = x // 2 if x % 2 == 0 else 3 * x + 1
+        steps += 1
+        if steps > 100000: break
+    return {"n": n, "steps": steps}
+def register_tools():
+    return [Tool(name="collatz", description="Steps for n to reach 1 in the Collatz conjecture. Offline.",
+                 input_schema={"type":"object","properties":{"n":{"type":"integer"}},"required":["n"]}, handler=collatz)]
+''')
+
+_W2["quadratic"] = ('Solve a quadratic equation (offline)', '''import cmath
+from ronin_agent_patterns import Tool
+def quadratic(a: float, b: float, c: float) -> dict:
+    a, b, c = float(a), float(b), float(c)
+    if a == 0: return {"error": "a cannot be 0"}
+    d = (b * b - 4 * a * c)
+    r1 = (-b + cmath.sqrt(d)) / (2 * a)
+    r2 = (-b - cmath.sqrt(d)) / (2 * a)
+    fmt = lambda z: round(z.real, 4) if abs(z.imag) < 1e-9 else str(z)
+    return {"roots": [fmt(r1), fmt(r2)], "discriminant": d}
+def register_tools():
+    return [Tool(name="quadratic", description="Solve ax^2+bx+c=0 (real or complex roots). Offline.",
+                 input_schema={"type":"object","properties":{"a":{"type":"number"},"b":{"type":"number"},"c":{"type":"number"}},"required":["a","b","c"]}, handler=quadratic)]
+''')
+
+_W2["circle"] = ('Circle area & circumference (offline)', '''import math
+from ronin_agent_patterns import Tool
+def circle(radius: float) -> dict:
+    r = float(radius)
+    return {"radius": r, "area": round(math.pi * r * r, 4), "circumference": round(2 * math.pi * r, 4)}
+def register_tools():
+    return [Tool(name="circle", description="Area and circumference of a circle from its radius. Offline.",
+                 input_schema={"type":"object","properties":{"radius":{"type":"number"}},"required":["radius"]}, handler=circle)]
+''')
+
+_W2["pythagorean"] = ('Hypotenuse of a right triangle (offline)', '''import math
+from ronin_agent_patterns import Tool
+def pythagorean(a: float, b: float) -> dict:
+    return {"a": float(a), "b": float(b), "hypotenuse": round(math.hypot(float(a), float(b)), 4)}
+def register_tools():
+    return [Tool(name="pythagorean", description="Hypotenuse from the two legs of a right triangle. Offline.",
+                 input_schema={"type":"object","properties":{"a":{"type":"number"},"b":{"type":"number"}},"required":["a","b"]}, handler=pythagorean)]
+''')
+
+_W2["discount"] = ('Apply a discount to a price (offline)', '''from ronin_agent_patterns import Tool
+def discount(price: float, percent: float) -> dict:
+    price, percent = float(price), float(percent)
+    save = price * percent / 100
+    return {"original": price, "percent_off": percent, "saved": round(save, 2), "final": round(price - save, 2)}
+def register_tools():
+    return [Tool(name="discount", description="Final price after a percentage discount. Offline.",
+                 input_schema={"type":"object","properties":{"price":{"type":"number"},"percent":{"type":"number"}},"required":["price","percent"]}, handler=discount)]
+''')
+
+_W2["simple_interest"] = ('Simple interest (offline)', '''from ronin_agent_patterns import Tool
+def simple_interest(principal: float, rate: float, years: float) -> dict:
+    i = float(principal) * float(rate) / 100 * float(years)
+    return {"interest": round(i, 2), "total": round(float(principal) + i, 2)}
+def register_tools():
+    return [Tool(name="simple_interest", description="Simple interest + total over a period. Offline.",
+                 input_schema={"type":"object","properties":{"principal":{"type":"number"},"rate":{"type":"number"},"years":{"type":"number"}},"required":["principal","rate","years"]}, handler=simple_interest)]
+''')
+
+_W2["bytes_human"] = ('Humanize a byte count (offline)', '''from ronin_agent_patterns import Tool
+def bytes_human(bytes: float) -> dict:
+    n = float(bytes)
+    for unit in ["B","KB","MB","GB","TB","PB"]:
+        if abs(n) < 1024: return {"bytes": float(bytes), "human": f"{n:.2f} {unit}"}
+        n /= 1024
+    return {"bytes": float(bytes), "human": f"{n:.2f} EB"}
+def register_tools():
+    return [Tool(name="bytes_human", description="Convert a byte count to a human-readable size. Offline.",
+                 input_schema={"type":"object","properties":{"bytes":{"type":"number"}},"required":["bytes"]}, handler=bytes_human)]
+''')
+
+_W2["seconds_human"] = ('Humanize a duration (offline)', '''from ronin_agent_patterns import Tool
+def seconds_human(seconds: float) -> dict:
+    s = int(float(seconds)); parts = []
+    for label, size in [("d",86400),("h",3600),("m",60),("s",1)]:
+        if s >= size: parts.append(f"{s // size}{label}"); s %= size
+    return {"seconds": float(seconds), "human": " ".join(parts) or "0s"}
+def register_tools():
+    return [Tool(name="seconds_human", description="Convert seconds into a human duration (1d 2h 3m). Offline.",
+                 input_schema={"type":"object","properties":{"seconds":{"type":"number"}},"required":["seconds"]}, handler=seconds_human)]
+''')
+
+_W2["percent_of"] = ('What percent is X of Y (offline)', '''from ronin_agent_patterns import Tool
+def percent_of(part: float, whole: float) -> dict:
+    if float(whole) == 0: return {"error": "whole cannot be 0"}
+    return {"percent": round(float(part) / float(whole) * 100, 2)}
+def register_tools():
+    return [Tool(name="percent_of", description="What percentage part is of whole. Offline.",
+                 input_schema={"type":"object","properties":{"part":{"type":"number"},"whole":{"type":"number"}},"required":["part","whole"]}, handler=percent_of)]
+''')
+
+_W2["bit_ops"] = ('Bitwise AND/OR/XOR (offline)', '''from ronin_agent_patterns import Tool
+def bit_ops(a: int, b: int, op: str = "and") -> dict:
+    a, b = int(a), int(b)
+    r = {"and": a & b, "or": a | b, "xor": a ^ b}.get(op.lower())
+    if r is None: return {"error": "op must be and/or/xor"}
+    return {"a": a, "b": b, "op": op, "result": r, "binary": bin(r)}
+def register_tools():
+    return [Tool(name="bit_ops", description="Bitwise AND/OR/XOR of two integers. Offline.",
+                 input_schema={"type":"object","properties":{"a":{"type":"integer"},"b":{"type":"integer"},"op":{"type":"string","enum":["and","or","xor"]}},"required":["a","b"]}, handler=bit_ops)]
+''')
+
+_W2["temperature"] = ('Convert a temperature (offline)', '''from ronin_agent_patterns import Tool
+def temperature(value: float, from_unit: str = "c", to_unit: str = "f") -> dict:
+    v, f, t = float(value), from_unit.lower(), to_unit.lower()
+    c = v if f == "c" else (v - 32) * 5 / 9 if f == "f" else v - 273.15
+    out = c if t == "c" else c * 9 / 5 + 32 if t == "f" else c + 273.15
+    return {"value": v, "from": f, "to": t, "result": round(out, 2)}
+def register_tools():
+    return [Tool(name="temperature", description="Convert temperature between C/F/K. Offline.",
+                 input_schema={"type":"object","properties":{"value":{"type":"number"},"from_unit":{"type":"string"},"to_unit":{"type":"string"}},"required":["value"]}, handler=temperature)]
+''')
+
+_W2["is_perfect"] = ('Perfect-number check (offline)', '''from ronin_agent_patterns import Tool
+def is_perfect(n: int) -> dict:
+    n = int(n)
+    if n < 1: return {"n": n, "is_perfect": False}
+    divs = [i for i in range(1, n) if n % i == 0]
+    return {"n": n, "is_perfect": sum(divs) == n, "divisors": divs}
+def register_tools():
+    return [Tool(name="is_perfect", description="Whether a number equals the sum of its proper divisors. Offline.",
+                 input_schema={"type":"object","properties":{"n":{"type":"integer"}},"required":["n"]}, handler=is_perfect)]
+''')
+
+
+_W3 = {}
+
+_W3["add_days"] = ('Add/subtract days from a date (offline)', '''import datetime
+from ronin_agent_patterns import Tool
+def add_days(date: str, days: int) -> dict:
+    try: d = datetime.date.fromisoformat(date.strip())
+    except ValueError: return {"error": "use YYYY-MM-DD"}
+    out = d + datetime.timedelta(days=int(days))
+    return {"start": str(d), "days": int(days), "result": str(out), "weekday": out.strftime("%A")}
+def register_tools():
+    return [Tool(name="add_days", description="Add (or subtract) days from a date. Offline.",
+                 input_schema={"type":"object","properties":{"date":{"type":"string"},"days":{"type":"integer"}},"required":["date","days"]}, handler=add_days)]
+''')
+
+_W3["is_weekend"] = ('Is a date a weekend? (offline)', '''import datetime
+from ronin_agent_patterns import Tool
+def is_weekend(date: str) -> dict:
+    try: d = datetime.date.fromisoformat(date.strip())
+    except ValueError: return {"error": "use YYYY-MM-DD"}
+    return {"date": str(d), "day": d.strftime("%A"), "is_weekend": d.isoweekday() >= 6}
+def register_tools():
+    return [Tool(name="is_weekend", description="Whether a date falls on a weekend. Offline.",
+                 input_schema={"type":"object","properties":{"date":{"type":"string"}},"required":["date"]}, handler=is_weekend)]
+''')
+
+_W3["days_in_month"] = ('Days in a month (offline)', '''import calendar
+from ronin_agent_patterns import Tool
+def days_in_month(year: int, month: int) -> dict:
+    try: n = calendar.monthrange(int(year), int(month))[1]
+    except (ValueError, calendar.IllegalMonthError): return {"error": "invalid year/month"}
+    return {"year": int(year), "month": int(month), "days": n}
+def register_tools():
+    return [Tool(name="days_in_month", description="Number of days in a given month/year. Offline.",
+                 input_schema={"type":"object","properties":{"year":{"type":"integer"},"month":{"type":"integer"}},"required":["year","month"]}, handler=days_in_month)]
+''')
+
+_W3["week_number"] = ('ISO week number of a date (offline)', '''import datetime
+from ronin_agent_patterns import Tool
+def week_number(date: str) -> dict:
+    try: d = datetime.date.fromisoformat(date.strip())
+    except ValueError: return {"error": "use YYYY-MM-DD"}
+    iso = d.isocalendar()
+    return {"date": str(d), "iso_year": iso[0], "week": iso[1], "weekday": iso[2]}
+def register_tools():
+    return [Tool(name="week_number", description="ISO week number for a date. Offline.",
+                 input_schema={"type":"object","properties":{"date":{"type":"string"}},"required":["date"]}, handler=week_number)]
+''')
+
+_W3["mime_type"] = ('Guess a file MIME type (offline)', '''import mimetypes
+from ronin_agent_patterns import Tool
+def mime_type(filename: str) -> dict:
+    mt, enc = mimetypes.guess_type(filename)
+    return {"filename": filename, "mime_type": mt or "application/octet-stream", "encoding": enc}
+def register_tools():
+    return [Tool(name="mime_type", description="Guess the MIME type of a filename. Offline.",
+                 input_schema={"type":"object","properties":{"filename":{"type":"string"}},"required":["filename"]}, handler=mime_type)]
+''')
+
+_W3["parse_url"] = ('Break a URL into parts (offline)', '''import urllib.parse
+from ronin_agent_patterns import Tool
+def parse_url(url: str) -> dict:
+    p = urllib.parse.urlparse(url)
+    return {"scheme": p.scheme, "host": p.hostname, "port": p.port, "path": p.path,
+            "query": dict(urllib.parse.parse_qsl(p.query)), "fragment": p.fragment}
+def register_tools():
+    return [Tool(name="parse_url", description="Break a URL into scheme/host/path/query parts. Offline.",
+                 input_schema={"type":"object","properties":{"url":{"type":"string"}},"required":["url"]}, handler=parse_url)]
+''')
+
+_W3["json_minify"] = ('Minify JSON (offline)', '''import json
+from ronin_agent_patterns import Tool
+def json_minify(text: str) -> dict:
+    try: obj = json.loads(text)
+    except json.JSONDecodeError as e: return {"error": str(e)}
+    return {"result": json.dumps(obj, separators=(",", ":"), ensure_ascii=False)}
+def register_tools():
+    return [Tool(name="json_minify", description="Minify a JSON string (strip whitespace). Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=json_minify)]
+''')
+
+_W3["csv_to_json"] = ('Convert CSV to JSON (offline)', '''import csv, io, json
+from ronin_agent_patterns import Tool
+def csv_to_json(csv_text: str) -> dict:
+    try: rows = list(csv.DictReader(io.StringIO(csv_text.strip())))
+    except csv.Error as e: return {"error": str(e)}
+    return {"rows": len(rows), "json": json.dumps(rows, ensure_ascii=False)}
+def register_tools():
+    return [Tool(name="csv_to_json", description="Convert CSV text (with header row) to JSON. Offline.",
+                 input_schema={"type":"object","properties":{"csv_text":{"type":"string"}},"required":["csv_text"]}, handler=csv_to_json)]
+''')
+
+_W3["semver_compare"] = ('Compare two semver versions (offline)', '''import re
+from ronin_agent_patterns import Tool
+def semver_compare(v1: str, v2: str) -> dict:
+    def parse(v): return [int(x) for x in re.findall(r"\\d+", v)[:3]] + [0, 0, 0]
+    a, b = parse(v1)[:3], parse(v2)[:3]
+    cmp = (a > b) - (a < b)
+    return {"v1": v1, "v2": v2, "result": {1: "v1 > v2", 0: "equal", -1: "v1 < v2"}[cmp]}
+def register_tools():
+    return [Tool(name="semver_compare", description="Compare two semantic versions. Offline.",
+                 input_schema={"type":"object","properties":{"v1":{"type":"string"},"v2":{"type":"string"}},"required":["v1","v2"]}, handler=semver_compare)]
+''')
+
+_W3["crc32"] = ('CRC32 checksum of text (offline)', '''import zlib
+from ronin_agent_patterns import Tool
+def crc32(text: str) -> dict:
+    return {"crc32": format(zlib.crc32(text.encode()) & 0xffffffff, "08x")}
+def register_tools():
+    return [Tool(name="crc32", description="CRC32 checksum of text (hex). Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=crc32)]
+''')
+
+_W3["random_string"] = ('Random string generator (offline)', '''import secrets, string
+from ronin_agent_patterns import Tool
+def random_string(length: int = 16, alphanumeric: bool = True) -> dict:
+    n = max(1, min(int(length or 16), 256))
+    chars = (string.ascii_letters + string.digits) if alphanumeric else string.printable[:94]
+    return {"result": "".join(secrets.choice(chars) for _ in range(n))}
+def register_tools():
+    return [Tool(name="random_string", description="Generate a random string of a given length. Offline.",
+                 input_schema={"type":"object","properties":{"length":{"type":"integer"},"alphanumeric":{"type":"boolean"}}}, handler=random_string)]
+''')
+
+_W3["random_int"] = ('Random integer in a range (offline)', '''import random
+from ronin_agent_patterns import Tool
+def random_int(min: int = 1, max: int = 100, count: int = 1) -> dict:
+    lo, hi = int(min), int(max)
+    if lo > hi: lo, hi = hi, lo
+    return {"numbers": [random.randint(lo, hi) for _ in range(max(1, min(int(count or 1), 100)))]}
+def register_tools():
+    return [Tool(name="random_int", description="Random integers in an inclusive range. Offline.",
+                 input_schema={"type":"object","properties":{"min":{"type":"integer"},"max":{"type":"integer"},"count":{"type":"integer"}}}, handler=random_int)]
+''')
+
+_W3["coin_flip"] = ('Flip a coin (offline)', '''import random
+from ronin_agent_patterns import Tool
+def coin_flip(count: int = 1) -> dict:
+    n = max(1, min(int(count or 1), 100))
+    flips = [random.choice(["heads", "tails"]) for _ in range(n)]
+    return {"flips": flips, "heads": flips.count("heads"), "tails": flips.count("tails")}
+def register_tools():
+    return [Tool(name="coin_flip", description="Flip one or more coins. Offline.",
+                 input_schema={"type":"object","properties":{"count":{"type":"integer"}}}, handler=coin_flip)]
+''')
+
+_W3["magic_8_ball"] = ('Ask the Magic 8-Ball (offline)', '''import random
+from ronin_agent_patterns import Tool
+_A = ["It is certain.","Without a doubt.","Yes definitely.","Most likely.","Outlook good.",
+      "Signs point to yes.","Reply hazy, try again.","Ask again later.","Cannot predict now.",
+      "Don't count on it.","My reply is no.","Very doubtful.","Outlook not so good."]
+def magic_8_ball(question: str = "") -> dict:
+    return {"question": question, "answer": random.choice(_A)}
+def register_tools():
+    return [Tool(name="magic_8_ball", description="Ask the Magic 8-Ball a yes/no question. Offline.",
+                 input_schema={"type":"object","properties":{"question":{"type":"string"}}}, handler=magic_8_ball)]
+''')
+
+_W3["random_choice"] = ('Pick a random option (offline)', '''import random
+from ronin_agent_patterns import Tool
+def random_choice(options: str) -> dict:
+    opts = [o.strip() for o in options.split(",") if o.strip()]
+    if not opts: return {"error": "give comma-separated options"}
+    return {"options": opts, "chosen": random.choice(opts)}
+def register_tools():
+    return [Tool(name="random_choice", description="Randomly pick one of several comma-separated options. Offline.",
+                 input_schema={"type":"object","properties":{"options":{"type":"string"}},"required":["options"]}, handler=random_choice)]
+''')
+
+_W3["palindrome"] = ('Palindrome check (offline)', '''from ronin_agent_patterns import Tool
+def palindrome(text: str) -> dict:
+    s = [c.lower() for c in text if c.isalnum()]
+    return {"text": text, "is_palindrome": s == s[::-1]}
+def register_tools():
+    return [Tool(name="palindrome", description="Check whether text is a palindrome. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=palindrome)]
+''')
+
+_W3["percentage_bar"] = ('ASCII progress bar (offline)', '''from ronin_agent_patterns import Tool
+def percentage_bar(value: float, total: float = 100, width: int = 20) -> dict:
+    pct = max(0.0, min(float(value) / float(total) if total else 0, 1.0))
+    w = int(width or 20); filled = round(pct * w)
+    return {"percent": round(pct * 100, 1), "bar": "[" + "#" * filled + "-" * (w - filled) + "]"}
+def register_tools():
+    return [Tool(name="percentage_bar", description="Render an ASCII progress bar for a value. Offline.",
+                 input_schema={"type":"object","properties":{"value":{"type":"number"},"total":{"type":"number"},"width":{"type":"integer"}},"required":["value"]}, handler=percentage_bar)]
+''')
+
+_W3["count_substring"] = ('Count occurrences of a substring (offline)', '''from ronin_agent_patterns import Tool
+def count_substring(text: str, substring: str) -> dict:
+    return {"count": text.count(substring)}
+def register_tools():
+    return [Tool(name="count_substring", description="Count occurrences of a substring in text. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"},"substring":{"type":"string"}},"required":["text","substring"]}, handler=count_substring)]
+''')
+
+_W3["unix_now"] = ('Current unix timestamp (offline)', '''import datetime
+from ronin_agent_patterns import Tool
+def unix_now() -> dict:
+    now = datetime.datetime.now(datetime.timezone.utc)
+    return {"unix": int(now.timestamp()), "iso_utc": now.isoformat(), "millis": int(now.timestamp() * 1000)}
+def register_tools():
+    return [Tool(name="unix_now", description="The current Unix timestamp + ISO time. Offline.",
+                 input_schema={"type":"object","properties":{}}, handler=unix_now)]
+''')
+
+_W3["dedupe_list"] = ('Dedupe a comma list (offline)', '''from ronin_agent_patterns import Tool
+def dedupe_list(items: str) -> dict:
+    seen, out = set(), []
+    for it in (i.strip() for i in items.split(",")):
+        if it and it not in seen: seen.add(it); out.append(it)
+    return {"unique": out, "count": len(out)}
+def register_tools():
+    return [Tool(name="dedupe_list", description="Remove duplicates from a comma-separated list. Offline.",
+                 input_schema={"type":"object","properties":{"items":{"type":"string"}},"required":["items"]}, handler=dedupe_list)]
+''')
+
+
+_W4 = {}
+
+_W4["levenshtein"] = ('Edit distance between two strings (offline)', '''from ronin_agent_patterns import Tool
+def levenshtein(a: str, b: str) -> dict:
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return {"a": a, "b": b, "distance": prev[-1]}
+def register_tools():
+    return [Tool(name="levenshtein", description="Levenshtein edit distance between two strings. Offline.",
+                 input_schema={"type":"object","properties":{"a":{"type":"string"},"b":{"type":"string"}},"required":["a","b"]}, handler=levenshtein)]
+''')
+
+_W4["jaccard_similarity"] = ('Word-set similarity (offline)', '''import re
+from ronin_agent_patterns import Tool
+def jaccard_similarity(a: str, b: str) -> dict:
+    sa, sb = set(re.findall(r"\\w+", a.lower())), set(re.findall(r"\\w+", b.lower()))
+    u = sa | sb
+    return {"similarity": round(len(sa & sb) / len(u), 4) if u else 1.0}
+def register_tools():
+    return [Tool(name="jaccard_similarity", description="Jaccard word-set similarity of two texts (0-1). Offline.",
+                 input_schema={"type":"object","properties":{"a":{"type":"string"},"b":{"type":"string"}},"required":["a","b"]}, handler=jaccard_similarity)]
+''')
+
+_W4["hamming_distance"] = ('Hamming distance (offline)', '''from ronin_agent_patterns import Tool
+def hamming_distance(a: str, b: str) -> dict:
+    if len(a) != len(b): return {"error": "strings must be equal length"}
+    return {"distance": sum(x != y for x, y in zip(a, b))}
+def register_tools():
+    return [Tool(name="hamming_distance", description="Hamming distance between two equal-length strings. Offline.",
+                 input_schema={"type":"object","properties":{"a":{"type":"string"},"b":{"type":"string"}},"required":["a","b"]}, handler=hamming_distance)]
+''')
+
+_W4["shannon_entropy"] = ('Shannon entropy of text (offline)', '''import math
+from collections import Counter
+from ronin_agent_patterns import Tool
+def shannon_entropy(text: str) -> dict:
+    if not text: return {"entropy": 0.0}
+    counts = Counter(text); n = len(text)
+    e = -sum((c / n) * math.log2(c / n) for c in counts.values())
+    return {"entropy_bits_per_char": round(e, 4), "length": n}
+def register_tools():
+    return [Tool(name="shannon_entropy", description="Shannon entropy (bits/char) of text — randomness measure. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=shannon_entropy)]
+''')
+
+_W4["soundex"] = ('Soundex phonetic code (offline)', '''from ronin_agent_patterns import Tool
+_SX = {**dict.fromkeys("bfpv","1"),**dict.fromkeys("cgjkqsxz","2"),**dict.fromkeys("dt","3"),
+       **{"l":"4"},**dict.fromkeys("mn","5"),**{"r":"6"}}
+def soundex(word: str) -> dict:
+    w = [c.lower() for c in word if c.isalpha()]
+    if not w: return {"error": "no letters"}
+    code = w[0].upper(); prev = _SX.get(w[0], "")
+    for c in w[1:]:
+        d = _SX.get(c, "")
+        if d and d != prev: code += d
+        if c not in "hw": prev = d
+    return {"word": word, "soundex": (code + "000")[:4]}
+def register_tools():
+    return [Tool(name="soundex", description="Soundex phonetic code of a word (sounds-alike matching). Offline.",
+                 input_schema={"type":"object","properties":{"word":{"type":"string"}},"required":["word"]}, handler=soundex)]
+''')
+
+_W4["validate_email"] = ('Validate an email address (offline)', '''import re
+from ronin_agent_patterns import Tool
+def validate_email(email: str) -> dict:
+    ok = bool(re.fullmatch(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", email.strip()))
+    return {"email": email, "valid": ok}
+def register_tools():
+    return [Tool(name="validate_email", description="Check whether a string is a syntactically valid email. Offline.",
+                 input_schema={"type":"object","properties":{"email":{"type":"string"}},"required":["email"]}, handler=validate_email)]
+''')
+
+_W4["validate_ipv4"] = ('Validate an IPv4 address (offline)', '''from ronin_agent_patterns import Tool
+def validate_ipv4(ip: str) -> dict:
+    parts = ip.strip().split(".")
+    ok = len(parts) == 4 and all(p.isdigit() and 0 <= int(p) <= 255 and (p == "0" or not p.startswith("0")) for p in parts)
+    return {"ip": ip, "valid": ok}
+def register_tools():
+    return [Tool(name="validate_ipv4", description="Check whether a string is a valid IPv4 address. Offline.",
+                 input_schema={"type":"object","properties":{"ip":{"type":"string"}},"required":["ip"]}, handler=validate_ipv4)]
+''')
+
+_W4["credit_card_type"] = ('Detect a card network (offline)', '''import re
+from ronin_agent_patterns import Tool
+def credit_card_type(number: str) -> dict:
+    n = re.sub(r"\\D", "", number)
+    if re.match(r"^4", n): brand = "Visa"
+    elif re.match(r"^5[1-5]", n) or re.match(r"^2(2[2-9]|[3-6]|7[01]|720)", n): brand = "Mastercard"
+    elif re.match(r"^3[47]", n): brand = "American Express"
+    elif re.match(r"^6(011|5)", n): brand = "Discover"
+    elif re.match(r"^3(0[0-5]|[68])", n): brand = "Diners Club"
+    elif re.match(r"^35", n): brand = "JCB"
+    else: brand = "Unknown"
+    return {"number_prefix": n[:6], "brand": brand}
+def register_tools():
+    return [Tool(name="credit_card_type", description="Identify the card network from a card number prefix. Offline.",
+                 input_schema={"type":"object","properties":{"number":{"type":"string"}},"required":["number"]}, handler=credit_card_type)]
+''')
+
+_W4["initials"] = ('Initials from a name (offline)', '''from ronin_agent_patterns import Tool
+def initials(name: str) -> dict:
+    return {"initials": "".join(w[0].upper() for w in name.split() if w)}
+def register_tools():
+    return [Tool(name="initials", description="Initials from a full name. Offline.",
+                 input_schema={"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}, handler=initials)]
+''')
+
+_W4["password_entropy"] = ('Estimate password entropy (offline)', '''import math, re
+from ronin_agent_patterns import Tool
+def password_entropy(password: str) -> dict:
+    pool = (26 if re.search(r"[a-z]", password) else 0) + (26 if re.search(r"[A-Z]", password) else 0) + \\
+           (10 if re.search(r"\\d", password) else 0) + (33 if re.search(r"[^A-Za-z0-9]", password) else 0)
+    bits = len(password) * math.log2(pool) if pool else 0
+    label = "very weak" if bits < 28 else "weak" if bits < 36 else "reasonable" if bits < 60 else "strong" if bits < 128 else "very strong"
+    return {"bits": round(bits, 1), "rating": label}
+def register_tools():
+    return [Tool(name="password_entropy", description="Estimate a password's entropy in bits. Offline.",
+                 input_schema={"type":"object","properties":{"password":{"type":"string"}},"required":["password"]}, handler=password_entropy)]
+''')
+
+_W4["genderize"] = ('Guess gender from a name', '''import httpx
+from ronin_agent_patterns import Tool
+def genderize(name: str) -> dict:
+    d = httpx.get("https://api.genderize.io", params={"name": name}, timeout=15, follow_redirects=True).json()
+    return {"name": d.get("name"), "gender": d.get("gender"), "probability": d.get("probability")}
+def register_tools():
+    return [Tool(name="genderize", description="Predict the likely gender for a first name. No key.",
+                 input_schema={"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}, handler=genderize)]
+''')
+
+_W4["nationalize"] = ('Guess nationality from a name', '''import httpx
+from ronin_agent_patterns import Tool
+def nationalize(name: str) -> dict:
+    d = httpx.get("https://api.nationalize.io", params={"name": name}, timeout=15, follow_redirects=True).json()
+    return {"name": d.get("name"), "countries": [{"country": c["country_id"], "probability": round(c["probability"], 3)} for c in (d.get("country") or [])[:3]]}
+def register_tools():
+    return [Tool(name="nationalize", description="Predict likely nationalities for a name. No key.",
+                 input_schema={"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}, handler=nationalize)]
+''')
+
+_W4["kanye_quote"] = ('A random Kanye quote', '''import httpx
+from ronin_agent_patterns import Tool
+def kanye_quote() -> dict:
+    return {"quote": httpx.get("https://api.kanye.rest", timeout=15, follow_redirects=True).json().get("quote")}
+def register_tools():
+    return [Tool(name="kanye_quote", description="A random Kanye West quote. No key.",
+                 input_schema={"type":"object","properties":{}}, handler=kanye_quote)]
+''')
+
+_W4["yes_no"] = ('Random yes/no with a gif', '''import httpx
+from ronin_agent_patterns import Tool
+def yes_no() -> dict:
+    d = httpx.get("https://yesno.wtf/api", timeout=15, follow_redirects=True).json()
+    return {"answer": d.get("answer"), "gif": d.get("image")}
+def register_tools():
+    return [Tool(name="yes_no", description="A random yes/no answer with a matching gif. No key.",
+                 input_schema={"type":"object","properties":{}}, handler=yes_no)]
+''')
+
+_W4["fox_image"] = ('A random fox photo', '''import httpx
+from ronin_agent_patterns import Tool
+def fox_image() -> dict:
+    return {"image_url": httpx.get("https://randomfox.ca/floof/", timeout=15, follow_redirects=True).json().get("image")}
+def register_tools():
+    return [Tool(name="fox_image", description="A random fox photo URL. No key.",
+                 input_schema={"type":"object","properties":{}}, handler=fox_image)]
+''')
+
+_W4["word_count_lines"] = ('Words per line (offline)', '''from ronin_agent_patterns import Tool
+def word_count_lines(text: str) -> dict:
+    return {"lines": [{"line": i + 1, "words": len(ln.split())} for i, ln in enumerate(text.splitlines())]}
+def register_tools():
+    return [Tool(name="word_count_lines", description="Count words on each line of text. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=word_count_lines)]
+''')
+
+_W4["caesar_brute"] = ('Brute-force a Caesar cipher (offline)', '''from ronin_agent_patterns import Tool
+def caesar_brute(text: str) -> dict:
+    out = []
+    for s in range(1, 26):
+        shifted = "".join(chr((ord(c) - 97 + s) % 26 + 97) if c.islower() else chr((ord(c) - 65 + s) % 26 + 65) if c.isupper() else c for c in text)
+        out.append({"shift": s, "text": shifted})
+    return {"candidates": out}
+def register_tools():
+    return [Tool(name="caesar_brute", description="Show all 25 Caesar-shift decodings of text. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=caesar_brute)]
+''')
+
+_W4["snake_to_words"] = ('snake_case/camelCase -> words (offline)', '''import re
+from ronin_agent_patterns import Tool
+def snake_to_words(text: str) -> dict:
+    spaced = re.sub(r"([a-z0-9])([A-Z])", r"\\1 \\2", text).replace("_", " ").replace("-", " ")
+    return {"result": " ".join(w.capitalize() for w in spaced.split())}
+def register_tools():
+    return [Tool(name="snake_to_words", description="Turn snake_case / camelCase / kebab into Title Words. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=snake_to_words)]
+''')
+
+_W4["roman_today"] = ('Decimal to Roman numerals, clock style (offline)', '''from ronin_agent_patterns import Tool
+_T = [(1000,"M"),(900,"CM"),(500,"D"),(400,"CD"),(100,"C"),(90,"XC"),(50,"L"),(40,"XL"),(10,"X"),(9,"IX"),(5,"V"),(4,"IV"),(1,"I")]
+def roman_today(numbers: str) -> dict:
+    out = []
+    for tok in numbers.replace(",", " ").split():
+        if tok.isdigit() and 1 <= int(tok) <= 3999:
+            n = int(tok); r = ""
+            for v, sym in _T:
+                while n >= v: r += sym; n -= v
+            out.append({"n": int(tok), "roman": r})
+    return {"converted": out}
+def register_tools():
+    return [Tool(name="roman_today", description="Convert several integers to Roman numerals at once. Offline.",
+                 input_schema={"type":"object","properties":{"numbers":{"type":"string"}},"required":["numbers"]}, handler=roman_today)]
+''')
+
+
+_W5 = {}
+
+_W5["vowel_remove"] = ('Remove vowels from text (offline)', '''from ronin_agent_patterns import Tool
+def vowel_remove(text: str) -> dict:
+    return {"result": "".join(c for c in text if c.lower() not in "aeiou")}
+def register_tools():
+    return [Tool(name="vowel_remove", description="Remove all vowels from text (disemvowel). Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=vowel_remove)]
+''')
+
+_W5["alternating_case"] = ('mOcKiNg sPoNgEbOb case (offline)', '''from ronin_agent_patterns import Tool
+def alternating_case(text: str) -> dict:
+    out, up = [], False
+    for c in text:
+        if c.isalpha():
+            out.append(c.upper() if up else c.lower()); up = not up
+        else: out.append(c)
+    return {"result": "".join(out)}
+def register_tools():
+    return [Tool(name="alternating_case", description="Convert text to aLtErNaTiNg (mocking) case. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=alternating_case)]
+''')
+
+_W5["clap_text"] = ('Put 👏 between 👏 words (offline)', '''from ronin_agent_patterns import Tool
+def clap_text(text: str) -> dict:
+    return {"result": " 👏 ".join(text.split())}
+def register_tools():
+    return [Tool(name="clap_text", description="Insert clap emojis between words. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=clap_text)]
+''')
+
+_W5["reverse_each_word"] = ('Reverse letters in each word (offline)', '''from ronin_agent_patterns import Tool
+def reverse_each_word(text: str) -> dict:
+    return {"result": " ".join(w[::-1] for w in text.split())}
+def register_tools():
+    return [Tool(name="reverse_each_word", description="Reverse the letters within each word. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=reverse_each_word)]
+''')
+
+_W5["is_isogram"] = ('Isogram check (no repeated letters, offline)', '''from ronin_agent_patterns import Tool
+def is_isogram(word: str) -> dict:
+    letters = [c.lower() for c in word if c.isalpha()]
+    return {"word": word, "is_isogram": len(letters) == len(set(letters))}
+def register_tools():
+    return [Tool(name="is_isogram", description="Whether a word has no repeating letters (isogram). Offline.",
+                 input_schema={"type":"object","properties":{"word":{"type":"string"}},"required":["word"]}, handler=is_isogram)]
+''')
+
+_W5["is_pangram"] = ('Pangram check (offline)', '''import string
+from ronin_agent_patterns import Tool
+def is_pangram(text: str) -> dict:
+    present = {c for c in text.lower() if c.isalpha()}
+    missing = sorted(set(string.ascii_lowercase) - present)
+    return {"is_pangram": not missing, "missing": missing}
+def register_tools():
+    return [Tool(name="is_pangram", description="Whether text uses every letter of the alphabet. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=is_pangram)]
+''')
+
+_W5["number_to_words"] = ('Spell a number in English (offline)', '''from ronin_agent_patterns import Tool
+_O = ["zero","one","two","three","four","five","six","seven","eight","nine","ten","eleven","twelve","thirteen","fourteen","fifteen","sixteen","seventeen","eighteen","nineteen"]
+_T = ["","","twenty","thirty","forty","fifty","sixty","seventy","eighty","ninety"]
+def _u1000(x):
+    if x == 0: return ""
+    if x < 20: return _O[x]
+    if x < 100: return _T[x // 10] + ("-" + _O[x % 10] if x % 10 else "")
+    return _O[x // 100] + " hundred" + (" " + _u1000(x % 100) if x % 100 else "")
+def number_to_words(n: int) -> dict:
+    n = int(n)
+    if n == 0: return {"n": 0, "words": "zero"}
+    neg, n2, parts = n < 0, abs(n), []
+    for name, size in [("billion", 10**9), ("million", 10**6), ("thousand", 1000), ("", 1)]:
+        if n2 >= size:
+            parts.append(_u1000(n2 // size) + (" " + name if name else "")); n2 %= size
+    return {"n": int(n), "words": ("negative " if neg else "") + " ".join(p for p in parts if p)}
+def register_tools():
+    return [Tool(name="number_to_words", description="Spell an integer out in English words. Offline.",
+                 input_schema={"type":"object","properties":{"n":{"type":"integer"}},"required":["n"]}, handler=number_to_words)]
+''')
+
+_W5["tally"] = ('Count items in a comma list (offline)', '''from collections import Counter
+from ronin_agent_patterns import Tool
+def tally(items: str) -> dict:
+    c = Counter(i.strip() for i in items.split(",") if i.strip())
+    return {"counts": dict(c.most_common())}
+def register_tools():
+    return [Tool(name="tally", description="Count occurrences of each item in a comma-separated list. Offline.",
+                 input_schema={"type":"object","properties":{"items":{"type":"string"}},"required":["items"]}, handler=tally)]
+''')
+
+_W5["longest_word"] = ('Longest & shortest word (offline)', '''import re
+from ronin_agent_patterns import Tool
+def longest_word(text: str) -> dict:
+    words = re.findall(r"[A-Za-z']+", text)
+    if not words: return {"error": "no words"}
+    return {"longest": max(words, key=len), "shortest": min(words, key=len)}
+def register_tools():
+    return [Tool(name="longest_word", description="Find the longest and shortest word in text. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=longest_word)]
+''')
+
+_W5["count_syllables"] = ('Estimate syllables in a word (offline)', '''import re
+from ronin_agent_patterns import Tool
+def count_syllables(word: str) -> dict:
+    w = word.lower()
+    groups = re.findall(r"[aeiouy]+", w)
+    n = len(groups)
+    if w.endswith("e") and n > 1: n -= 1
+    return {"word": word, "syllables": max(1, n)}
+def register_tools():
+    return [Tool(name="count_syllables", description="Estimate the syllable count of a word (heuristic). Offline.",
+                 input_schema={"type":"object","properties":{"word":{"type":"string"}},"required":["word"]}, handler=count_syllables)]
+''')
+
+_W5["unique_chars"] = ('Distinct characters (offline)', '''from ronin_agent_patterns import Tool
+def unique_chars(text: str) -> dict:
+    chars = [c for c in text if not c.isspace()]
+    return {"total": len(chars), "unique": len(set(chars)), "characters": sorted(set(chars))}
+def register_tools():
+    return [Tool(name="unique_chars", description="Count and list the distinct characters in text. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=unique_chars)]
+''')
+
+_W5["remove_punctuation"] = ('Strip punctuation (offline)', '''import string
+from ronin_agent_patterns import Tool
+def remove_punctuation(text: str) -> dict:
+    return {"result": text.translate(str.maketrans("", "", string.punctuation))}
+def register_tools():
+    return [Tool(name="remove_punctuation", description="Remove all punctuation from text. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=remove_punctuation)]
+''')
+
+_W5["swapcase"] = ('Swap upper/lower case (offline)', '''from ronin_agent_patterns import Tool
+def swapcase(text: str) -> dict:
+    return {"result": text.swapcase()}
+def register_tools():
+    return [Tool(name="swapcase", description="Swap the case of every letter. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=swapcase)]
+''')
+
+_W5["capitalize_sentences"] = ('Capitalize each sentence (offline)', '''import re
+from ronin_agent_patterns import Tool
+def capitalize_sentences(text: str) -> dict:
+    out = re.sub(r"(^|[.!?]\\s+)([a-z])", lambda m: m.group(1) + m.group(2).upper(), text)
+    return {"result": out}
+def register_tools():
+    return [Tool(name="capitalize_sentences", description="Capitalize the first letter of each sentence. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=capitalize_sentences)]
+''')
+
+_W5["truncate_text"] = ('Truncate with ellipsis (offline)', '''from ronin_agent_patterns import Tool
+def truncate_text(text: str, length: int = 100) -> dict:
+    n = max(1, int(length or 100))
+    return {"result": text if len(text) <= n else text[:n].rstrip() + "…"}
+def register_tools():
+    return [Tool(name="truncate_text", description="Truncate text to N characters with an ellipsis. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"},"length":{"type":"integer"}},"required":["text"]}, handler=truncate_text)]
+''')
+
+_W5["repeat_text"] = ('Repeat text N times (offline)', '''from ronin_agent_patterns import Tool
+def repeat_text(text: str, times: int = 3, separator: str = " ") -> dict:
+    return {"result": separator.join([text] * max(1, min(int(times or 3), 1000)))}
+def register_tools():
+    return [Tool(name="repeat_text", description="Repeat text N times with a separator. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"},"times":{"type":"integer"},"separator":{"type":"string"}},"required":["text"]}, handler=repeat_text)]
+''')
+
+_W5["count_words"] = ('Word & character count (offline)', '''from ronin_agent_patterns import Tool
+def count_words(text: str) -> dict:
+    return {"words": len(text.split()), "characters": len(text), "characters_no_spaces": len(text.replace(" ", ""))}
+def register_tools():
+    return [Tool(name="count_words", description="Quick word and character count. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=count_words)]
+''')
+
+_W5["frequency_sort"] = ('Sort words by frequency (offline)', '''import re
+from collections import Counter
+from ronin_agent_patterns import Tool
+def frequency_sort(text: str) -> dict:
+    c = Counter(re.findall(r"[a-z0-9']+", text.lower()))
+    return {"ranked": [{"word": w, "count": n} for w, n in c.most_common()]}
+def register_tools():
+    return [Tool(name="frequency_sort", description="Rank all words by how often they appear. Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=frequency_sort)]
+''')
+
+_W5["caesar_rot13"] = ('ROT13 quick (offline)', '''import codecs
+from ronin_agent_patterns import Tool
+def caesar_rot13(text: str) -> dict:
+    return {"result": codecs.encode(text, "rot_13")}
+def register_tools():
+    return [Tool(name="caesar_rot13", description="ROT13 a string (self-inverse). Offline.",
+                 input_schema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}, handler=caesar_rot13)]
+''')
+
+_W5["cat_image"] = ('A random cat photo', '''import httpx
+from ronin_agent_patterns import Tool
+def cat_image() -> dict:
+    d = httpx.get("https://cataas.com/cat?json=true", timeout=15, follow_redirects=True).json()
+    u = d.get("url") or (("https://cataas.com/cat/" + d["id"]) if d.get("id") else None)
+    return {"image_url": u}
+def register_tools():
+    return [Tool(name="cat_image", description="A random cat photo URL. No key.",
+                 input_schema={"type":"object","properties":{}}, handler=cat_image)]
+''')
+
+_W5["dog_breeds"] = ('List dog breeds', '''import httpx
+from ronin_agent_patterns import Tool
+def dog_breeds() -> dict:
+    d = httpx.get("https://dog.ceo/api/breeds/list/all", timeout=15, follow_redirects=True).json()
+    return {"breeds": sorted((d.get("message") or {}).keys())}
+def register_tools():
+    return [Tool(name="dog_breeds", description="List all known dog breeds. No key.",
+                 input_schema={"type":"object","properties":{}}, handler=dog_breeds)]
+''')
+
+_W5["random_joke"] = ('A random joke (setup/punchline)', '''import httpx
+from ronin_agent_patterns import Tool
+def random_joke() -> dict:
+    d = httpx.get("https://official-joke-api.appspot.com/random_joke", timeout=15, follow_redirects=True).json()
+    return {"setup": d.get("setup"), "punchline": d.get("punchline")}
+def register_tools():
+    return [Tool(name="random_joke", description="A random two-part joke. No key.",
+                 input_schema={"type":"object","properties":{}}, handler=random_joke)]
+''')
+
+_W5["trivia_categories"] = ('List trivia categories', '''import httpx
+from ronin_agent_patterns import Tool
+def trivia_categories() -> dict:
+    d = httpx.get("https://opentdb.com/api_category.php", timeout=15, follow_redirects=True).json()
+    return {"categories": [c["name"] for c in d.get("trivia_categories", [])]}
+def register_tools():
+    return [Tool(name="trivia_categories", description="List available trivia categories. No key.",
+                 input_schema={"type":"object","properties":{}}, handler=trivia_categories)]
+''')
+
+
 @dataclass(frozen=True)
 class LibraryPlugin:
     name: str
@@ -2749,6 +3818,11 @@ LIBRARY: dict[str, LibraryPlugin] = {
     "urban_dictionary": LibraryPlugin("urban_dictionary", "Slang definitions", _URBAN),
     "random_meal": LibraryPlugin("random_meal", "A random recipe idea", _RANDMEAL),
 }
+
+# Compact waves (name -> (blurb, source)) folded into the library.
+for _wave in (_W1, _W2, _W3, _W4, _W5):
+    for _n, (_b, _s) in _wave.items():
+        LIBRARY[_n] = LibraryPlugin(_n, _b, _s)
 
 _ALIASES = {
     "hn": "hackernews", "notes": "scratchpad", "trending": "github_trending",
