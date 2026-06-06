@@ -2371,6 +2371,38 @@ def api(
         console.print(Markdown(md))
 
 
+# ---------- mock (fixture data from a schema) ----------
+
+@app.command()
+def mock(
+    source: str = typer.Argument(..., help="A JSON Schema, or a JSON sample (a schema is inferred from it), or @file."),
+    count: int = typer.Option(1, "--count", "-n", help="How many records to generate."),
+) -> None:
+    """🎭 Generate realistic mock/fixture data from a JSON Schema (or a sample).
+    Field names drive the values — email→an email, city→a city, created_at→a date.
+    """
+    import json
+
+    from .mock_data import generate_records
+    from .schema_infer import infer_schema
+    raw = source
+    if source.startswith("@"):
+        try:
+            raw = Path(source[1:]).read_text(encoding="utf-8")
+        except OSError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+    try:
+        obj = json.loads(raw)
+    except json.JSONDecodeError as e:
+        console.print(f"[red]invalid JSON:[/red] {e}")
+        raise typer.Exit(1)
+    # if it doesn't look like a schema (no top-level "type"), infer one from the sample
+    sch = obj if isinstance(obj, dict) and "type" in obj and "properties" in obj else infer_schema(obj)
+    records = generate_records(sch, count=count)
+    console.print_json(json.dumps(records if count > 1 else records[0]))
+
+
 # ---------- schema / endpoint (API toolkit) ----------
 
 @app.command()
