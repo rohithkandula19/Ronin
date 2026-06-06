@@ -2371,6 +2371,25 @@ def api(
         console.print(Markdown(md))
 
 
+# ---------- passphrase (memorable strong passwords) ----------
+
+@app.command()
+def passphrase(
+    words: int = typer.Argument(4, help="How many words (2-12)."),
+    separator: str = typer.Option("-", "--sep", help="Word separator."),
+    capitalize: bool = typer.Option(False, "--capitalize", help="Capitalize each word."),
+    number: bool = typer.Option(False, "--number", help="Append a random 2-digit number."),
+    count: int = typer.Option(1, "--count", "-n", help="How many to generate."),
+) -> None:
+    """🔑 Generate memorable, strong diceware-style passphrases. Offline."""
+    from .passphrase import passphrase as _gen
+
+    for _ in range(max(1, count)):
+        r = _gen(words, separator=separator, capitalize=capitalize, add_number=number)
+        console.print(f"[bold #9ece6a]{r['passphrase']}[/bold #9ece6a] "
+                      f"[dim]~{r['entropy_bits']} bits[/dim]")
+
+
 # ---------- toc (markdown table of contents) ----------
 
 @app.command()
