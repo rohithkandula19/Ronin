@@ -2371,6 +2371,31 @@ def api(
         console.print(Markdown(md))
 
 
+# ---------- time (world clock / timezone) ----------
+
+@app.command()
+def time(
+    zone: str = typer.Argument(None, help="A timezone, e.g. 'Asia/Tokyo'. Omit for a world clock."),
+) -> None:
+    """🕰️  World clock — current time across zones, or one zone. Offline."""
+    import datetime as _dt
+
+    from .time_zones import format_in, world_clock
+    now = _dt.datetime.now(_dt.timezone.utc)
+    if zone:
+        info = format_in(now, zone)
+        if info is None:
+            console.print(f"[yellow]unknown timezone '{zone}'[/yellow] [dim](e.g. Asia/Tokyo, Europe/London)[/dim]")
+            raise typer.Exit(1)
+        console.print(f"[#7aa2f7]🕰️  {info['zone']}[/#7aa2f7]  [bold]{info['time']}[/bold] "
+                      f"[dim]{info['day']} {info['date']} · UTC{info['offset']} {info['abbrev']}[/dim]")
+        return
+    console.print("[bold]🕰️  world clock[/bold]")
+    for info in world_clock(now):
+        console.print(f"  [cyan]{info['zone']:<22}[/cyan] [bold]{info['time']}[/bold] "
+                      f"[dim]{info['day'][:3]} · UTC{info['offset']}[/dim]")
+
+
 # ---------- http (explain a status code) ----------
 
 @app.command()
