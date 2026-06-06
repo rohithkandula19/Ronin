@@ -2371,6 +2371,24 @@ def api(
         console.print(Markdown(md))
 
 
+# ---------- cron (explain a cron expression) ----------
+
+@app.command()
+def cron(
+    expression: list[str] = typer.Argument(..., help="A cron expression, e.g. '*/15 9-17 * * 1-5' (quote it)."),
+) -> None:
+    """⏰ Explain a cron expression in plain English. Offline."""
+    from .cron_describe import describe_cron
+
+    expr = " ".join(expression)
+    desc = describe_cron(expr)
+    if desc.lower().startswith("invalid"):
+        console.print(f"[#f7768e]{desc}[/#f7768e]")
+        raise typer.Exit(1)
+    console.print(f"[#7aa2f7]⏰ {expr}[/#7aa2f7]")
+    console.print(f"   [bold]{desc}[/bold]")
+
+
 # ---------- mock (fixture data from a schema) ----------
 
 @app.command()
