@@ -2371,6 +2371,34 @@ def api(
         console.print(Markdown(md))
 
 
+# ---------- gitignore (generate from templates) ----------
+
+@app.command()
+def gitignore(
+    stacks: list[str] = typer.Argument(None, help="Stacks/OS/editors, e.g. python node macos vscode. Omit to list available."),
+    out: bool = typer.Option(False, "--write", help="Write to ./.gitignore (append if it exists)."),
+    root: Path = typer.Option(Path("."), "--root", help="Where to write."),
+) -> None:
+    """🙈 Generate a .gitignore from built-in templates (python, node, go, rust,
+    macos, vscode, jetbrains, env…). Offline.
+    """
+    from .gitignore_gen import available, gitignore_for
+
+    if not stacks:
+        console.print("[bold]available templates[/bold]")
+        console.print("  " + ", ".join(available()))
+        console.print("[dim]e.g. [bold]ronin gitignore python node macos[/bold][/dim]")
+        return
+    content = gitignore_for(list(stacks))
+    if out:
+        target = Path(root) / ".gitignore"
+        existing = target.read_text(encoding="utf-8") if target.is_file() else ""
+        target.write_text((existing + "\n" + content) if existing else content, encoding="utf-8")
+        console.print(f"[green]✓[/green] {'appended to' if existing else 'wrote'} [cyan]{target}[/cyan]")
+    else:
+        console.print(content)
+
+
 # ---------- cron (explain a cron expression) ----------
 
 @app.command()
