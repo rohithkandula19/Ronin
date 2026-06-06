@@ -2371,6 +2371,47 @@ def api(
         console.print(Markdown(md))
 
 
+# ---------- json (query JSON with a path) ----------
+
+@app.command()
+def json(
+    path: str = typer.Argument(..., help="A path like users.0.name or '.' for the whole thing."),
+    source: str = typer.Argument(..., help="JSON string, or @file.json, or '-' to read stdin."),
+    keys: bool = typer.Option(False, "--keys", help="List the keys/indices at the path instead of the value."),
+) -> None:
+    """🔧 Query JSON with a path (jq-lite): `ronin json users.0.name @data.json`."""
+    import json as _json
+    import sys
+
+    from .json_query import QueryError, keys_at, query_json
+    if source == "-":
+        raw = sys.stdin.read()
+    elif source.startswith("@"):
+        try:
+            raw = Path(source[1:]).read_text(encoding="utf-8")
+        except OSError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+    else:
+        raw = source
+    try:
+        data = _json.loads(raw)
+    except _json.JSONDecodeError as e:
+        console.print(f"[red]invalid JSON:[/red] {e}")
+        raise typer.Exit(1)
+    try:
+        result = query_json(data, path)
+    except QueryError as e:
+        console.print(f"[yellow]{e}[/yellow]")
+        raise typer.Exit(1)
+    if keys:
+        console.print("\n".join(keys_at(result)) or "[dim](scalar — no keys)[/dim]")
+    elif isinstance(result, (dict, list)):
+        console.print_json(_json.dumps(result))
+    else:
+        console.print(str(result))
+
+
 # ---------- license (generate a LICENSE) ----------
 
 @app.command()
