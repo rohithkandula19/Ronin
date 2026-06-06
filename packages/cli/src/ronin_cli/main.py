@@ -2371,6 +2371,33 @@ def api(
         console.print(Markdown(md))
 
 
+# ---------- env-example (.env -> .env.example) ----------
+
+@app.command(name="env-example")
+def env_example_cmd(
+    source: str = typer.Option(".env", "--from", help="The .env file to read."),
+    write: bool = typer.Option(False, "--write", help="Write to .env.example."),
+    root: Path = typer.Option(Path("."), "--root", help="Project root."),
+) -> None:
+    """🔑 Generate a safe .env.example from your .env — keeps keys + safe defaults,
+    blanks the secret values so you can commit a template. Offline.
+    """
+    from .env_example import mask_env
+
+    src = Path(root) / source
+    if not src.is_file():
+        console.print(f"[yellow]no {source} found[/yellow] at {src}")
+        raise typer.Exit(1)
+    result = mask_env(src.read_text(encoding="utf-8"))
+    if write:
+        out = Path(root) / ".env.example"
+        out.write_text(result["text"], encoding="utf-8")
+        console.print(f"[green]✓[/green] wrote [cyan]{out}[/cyan] [dim]({len(result['keys'])} keys)[/dim]")
+    else:
+        console.print(result["text"])
+        console.print(f"[dim]{len(result['keys'])} keys · secret values blanked[/dim]")
+
+
 # ---------- time (world clock / timezone) ----------
 
 @app.command()
