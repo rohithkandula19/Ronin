@@ -2371,6 +2371,73 @@ def api(
         console.print(Markdown(md))
 
 
+# ---------- schema / endpoint (API toolkit) ----------
+
+@app.command()
+def schema(
+    source: str = typer.Argument(..., help="A JSON string, or @file.json to read from a file."),
+) -> None:
+    """🧬 Infer a JSON Schema from a JSON sample (string or @file)."""
+    import json
+
+    from .schema_infer import infer_schema, leaf_paths
+    raw = source
+    if source.startswith("@"):
+        try:
+            raw = Path(source[1:]).read_text(encoding="utf-8")
+        except OSError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        console.print(f"[red]invalid JSON:[/red] {e}")
+        raise typer.Exit(1)
+    sch = infer_schema(data)
+    console.print_json(json.dumps(sch))
+    paths = leaf_paths(data)
+    if paths:
+        console.print(f"\n[dim]fields: {', '.join(paths[:15])}[/dim]")
+
+
+@app.command()
+def endpoint(
+    url: str = typer.Argument(..., help="An HTTP(S) endpoint to probe."),
+) -> None:
+    """🛰️  Probe an API endpoint — status, latency, content-type, inferred response
+    schema, and a ready-to-run `ronin plugin from-api` command to turn it into a tool.
+    """
+    import json
+    import time
+
+    import httpx
+
+    from .schema_infer import infer_schema, leaf_paths
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    console.print(f"[#7aa2f7]🛰️  probing[/#7aa2f7] [bold]{url}[/bold]")
+    t0 = time.time()
+    try:
+        r = httpx.get(url, timeout=20, follow_redirects=True)
+    except Exception as e:  # noqa: BLE001
+        console.print(f"[red]request failed:[/red] {e}")
+        raise typer.Exit(1)
+    ms = round((time.time() - t0) * 1000)
+    ok = "[green]" if r.is_success else "[#f7768e]"
+    console.print(f"  {ok}{r.status_code}[/] · {ms}ms · {r.headers.get('content-type', '?')[:40]} · {len(r.content)} bytes")
+    try:
+        data = r.json()
+    except ValueError:
+        console.print("  [dim]non-JSON response — no schema to infer.[/dim]")
+        return
+    console.print("\n[bold]inferred schema[/bold]")
+    console.print_json(json.dumps(infer_schema(data)))
+    paths = leaf_paths(data)
+    if paths:
+        flags = " ".join(f"-f {p}" for p in paths[:5])
+        console.print(f"\n[dim]make it a tool:[/dim]\n  [cyan]ronin plugin from-api mytool '{url}' {flags}[/cyan]")
+
+
 # ---------- tree (annotated project map) ----------
 
 @app.command()
