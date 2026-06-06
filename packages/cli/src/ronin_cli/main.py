@@ -2371,6 +2371,37 @@ def api(
         console.print(Markdown(md))
 
 
+# ---------- redact (strip secrets/PII from text) ----------
+
+@app.command()
+def redact(
+    source: str = typer.Argument(..., help="Text to redact: a string, @file, or '-' for stdin."),
+) -> None:
+    """🕶️  Redact secrets & PII (emails, IPs, API keys, tokens, JWTs) from text so
+    you can share logs/errors safely. Offline.
+    """
+    import sys
+
+    from .redact import redact_text
+    if source == "-":
+        raw = sys.stdin.read()
+    elif source.startswith("@"):
+        try:
+            raw = Path(source[1:]).read_text(encoding="utf-8")
+        except OSError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+    else:
+        raw = source
+    result = redact_text(raw)
+    print(result["text"])
+    if result["total"]:
+        summary = ", ".join(f"{k}: {v}" for k, v in result["redactions"].items())
+        console.print(f"\n[dim]🕶️  redacted {result['total']} item(s) — {summary}[/dim]")
+    else:
+        console.print("[dim]🕶️  nothing to redact.[/dim]")
+
+
 # ---------- diff-json (structural JSON diff) ----------
 
 @app.command(name="diff-json")
