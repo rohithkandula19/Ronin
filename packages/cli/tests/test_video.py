@@ -78,4 +78,7 @@ def test_cli_video_happy_path(tmp_path: Path) -> None:
          patch("ronin_cli.media.generate_video", return_value=fake):
         r = runner.invoke(app, ["video", "a panda", "--no-show", "--out", str(out)])
     assert r.exit_code == 0, r.stdout
-    assert "saved" in r.stdout and "8 frames" in r.stdout
+    # rich wraps text on narrow CI terminals — collapse whitespace so the
+    # substring check survives "8 \nframes" wrapping (gh actions = 80 cols).
+    flat = " ".join(r.stdout.split())
+    assert "saved" in flat and "8 frames" in flat
