@@ -54,10 +54,10 @@ jobs:
             apps/demo \
             -q
 
-      - name: Smoke test csk CLI
+      - name: Smoke test ronin CLI
         run: |
-          mkdir -p /tmp/csk-smoke && cd /tmp/csk-smoke
-          uv --project "$GITHUB_WORKSPACE" run csk init --demo -y
-          uv --project "$GITHUB_WORKSPACE" run csk tools
-          uv --project "$GITHUB_WORKSPACE" run csk doctor
-          uv --project "$GITHUB_WORKSPACE" run csk version
+          mkdir -p /tmp/ronin-smoke && cd /tmp/ronin-smoke
+          uv --project "$GITHUB_WORKSPACE" run ronin init --demo -y
+          uv --project "$GITHUB_WORKSPACE" run ronin tools
+          uv --project "$GITHUB_WORKSPACE" run ronin doctor
+          uv --project "$GITHUB_WORKSPACE" run ronin version
