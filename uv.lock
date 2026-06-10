@@ -2068,7 +2068,7 @@ source = { virtual = "." }
 
 [[package]]
 name = "ronin-agent-patterns"
-version = "0.0.1"
+version = "0.58.0"
 source = { editable = "packages/agent-patterns" }
 dependencies = [
     { name = "anthropic" },
@@ -2175,19 +2175,19 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anthropic", specifier = ">=0.40.0" },
-    { name = "prompt-toolkit", specifier = ">=3.0" },
+    { name = "anthropic", specifier = ">=0.100,<1.0" },
+    { name = "prompt-toolkit", specifier = ">=3.0,<4" },
     { name = "psycopg2-binary", marker = "extra == 'postgres'", specifier = ">=2.9" },
-    { name = "pydantic", specifier = ">=2.5" },
-    { name = "rich", specifier = ">=13.7" },
+    { name = "pydantic", specifier = ">=2.5,<3" },
+    { name = "rich", specifier = ">=13.7,<16" },
     { name = "ronin-agent-patterns", editable = "packages/agent-patterns" },
     { name = "ronin-eval-suite", editable = "packages/eval-suite" },
     { name = "ronin-hardening", editable = "packages/hardening" },
     { name = "ronin-mcp-servers", editable = "packages/mcp-servers" },
     { name = "ronin-memory", editable = "packages/memory" },
-    { name = "textual", specifier = ">=0.85" },
-    { name = "tomli-w", specifier = ">=1.0" },
-    { name = "typer", specifier = ">=0.12" },
+    { name = "textual", specifier = ">=8.0,<9" },
+    { name = "tomli-w", specifier = ">=1.0,<2" },
+    { name = "typer", specifier = ">=0.12,<1" },
 ]
 provides-extras = ["postgres"]
 
@@ -2231,7 +2231,7 @@ dev = [
 
 [[package]]
 name = "ronin-eval-suite"
-version = "0.0.1"
+version = "0.58.0"
 source = { editable = "packages/eval-suite" }
 dependencies = [
     { name = "anthropic" },
@@ -2254,7 +2254,7 @@ dev = [{ name = "pytest", specifier = ">=7.0" }]
 
 [[package]]
 name = "ronin-hardening"
-version = "0.0.1"
+version = "0.58.0"
 source = { editable = "packages/hardening" }
 dependencies = [
     { name = "anthropic" },
@@ -2277,7 +2277,7 @@ dev = [{ name = "pytest", specifier = ">=7.0" }]
 
 [[package]]
 name = "ronin-mcp-servers"
-version = "0.0.1"
+version = "0.58.0"
 source = { editable = "packages/mcp-servers" }
 dependencies = [
     { name = "httpx" },
@@ -2311,7 +2311,7 @@ dev = [{ name = "pytest", specifier = ">=7.0" }]
 
 [[package]]
 name = "ronin-memory"
-version = "0.0.1"
+version = "0.58.0"
 source = { editable = "packages/memory" }
 dependencies = [
     { name = "anthropic" },

@@ -62,7 +62,9 @@ csk_saas.db
 csk_saas.db-journal
 # ronin local config — holds plaintext API keys; NEVER commit it
 .ronin/
-.csk/   # legacy (pre-rename) — still ignored for older checkouts
+# legacy (pre-rename) — still ignored for older checkouts.
+# NB: git does not support trailing comments on pattern lines.
+.csk/
 # generated media (images / videos) dropped in the repo root
 ronin_image_*.png
 ronin_image_*.jpg
