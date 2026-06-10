@@ -113,8 +113,21 @@ def run_fitness(root: Path | str, *, target_tests: str | None = None,
                 timeout: int = 600) -> Fitness:
     """Run the test suite in ``root`` and return the Fitness verdict.
 
-    ``target_tests`` optionally narrows to a path/expression (faster gate). Uses
-    ``uv run pytest`` so it works inside an isolated worktree checkout too."""
+    ``target_tests`` optionally narrows to a path/expression (faster pytest gate).
+    With no narrowing, the repo's OWN verify command is detected (pytest, npm,
+    cargo, go, make, or a RONIN.md ``verify:`` line) so the autonomy stack works
+    on Node/Go/Rust repos, not just pytest."""
+    if target_tests is None:
+        from .verify_cmd import _has_python_tests, detect_verify_command, run_verify
+        detected = detect_verify_command(root)
+        # Only hand off to a non-pytest runner when this isn't a Python project.
+        # Belt-and-suspenders: a Python repo with a stray package.json must never
+        # have its real pytest gate silently swapped for `npm test`.
+        if (detected is not None and detected[1] != "pytest"
+                and not _has_python_tests(root)):
+            v = run_verify(root, timeout=timeout)
+            return Fitness(passed=v.passed, total=(1 if v.ran else 0),
+                           failed=(0 if v.passed else 1), summary=v.summary)
     cmd = ["uv", "run", "pytest", "-q"]
     if target_tests:
         cmd.append(target_tests)

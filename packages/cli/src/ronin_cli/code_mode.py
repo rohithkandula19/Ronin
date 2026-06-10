@@ -1066,6 +1066,7 @@ SLASH_COMMANDS: dict[str, str] = {
     "router": "show routing + what the self-tuning router has learned",
     "status": "mission control — every ronin system in one view",
     "permissions": "show standing approval rules (/permissions clear to wipe)",
+    "fix": "run the repo's tests; if red, repair to green",
     "quit": "exit the session",
 }
 

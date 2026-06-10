@@ -534,3 +534,19 @@ def test_permissions_empty(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
     action, out = _call("/permissions", root=tmp_path)
     assert action == "handled" and "no standing permission rules" in out
+
+
+def test_fix_no_test_command(tmp_path: Path) -> None:
+    # /fix with nothing to test → reports cleanly, doesn't crash
+    action, out = _call("/fix", root=tmp_path)
+    assert action == "handled"
+    assert "no test command detected" in out
+
+
+def test_fix_reports_green_without_key(tmp_path: Path) -> None:
+    # a passing Makefile + no provider key → just reports green, no repair attempt
+    (tmp_path / "Makefile").write_text("test:\n\t@echo ok\n", encoding="utf-8")
+    action, out = _call("/fix", root=tmp_path)
+    assert action == "handled"
+    if "make" in out:        # make present on this host
+        assert "green" in out
