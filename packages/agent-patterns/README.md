@@ -1,4 +1,4 @@
-# @ro-claude-kit/agent-patterns
+# @ronin/agent-patterns
 
 Production-grade agent patterns for Claude. Pure Python, Pydantic-typed state, opinionated defaults.
 
@@ -20,7 +20,7 @@ uv sync --all-packages --all-groups
 ## Example
 
 ```python
-from ro_claude_kit_agent_patterns import ReActAgent, Tool
+from ronin_agent_patterns import ReActAgent, Tool
 
 search = Tool(
     name="search",

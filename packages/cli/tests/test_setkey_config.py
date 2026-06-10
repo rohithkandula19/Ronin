@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from ro_claude_kit_cli.config import CSKConfig, load_config
-from ro_claude_kit_cli.main import _key_preview, app
+from ronin_cli.config import RoninConfig, load_config
+from ronin_cli.main import _key_preview, app
 
 runner = CliRunner()
 GOOD_KEY = "gsk_" + "a" * 52       # 56 chars
@@ -16,20 +16,20 @@ LONG_KEY = "gsk_" + "a" * 120      # double-pasted-ish
 # ---------- api_key alias ----------
 
 def test_api_key_alias_maps_to_openai_key() -> None:
-    cfg = CSKConfig(provider="groq", api_key=GOOD_KEY)
+    cfg = RoninConfig(provider="groq", api_key=GOOD_KEY)
     assert cfg.openai_api_key == GOOD_KEY
 
 
 def test_explicit_openai_key_wins_over_alias() -> None:
-    cfg = CSKConfig(openai_api_key="real", api_key="alias")
+    cfg = RoninConfig(openai_api_key="real", api_key="alias")
     assert cfg.openai_api_key == "real"
 
 
 def test_load_config_reads_api_key_alias(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    (tmp_path / ".csk").mkdir()
-    (tmp_path / ".csk" / "config.toml").write_text(
+    (tmp_path / ".ronin").mkdir()
+    (tmp_path / ".ronin" / "config.toml").write_text(
         'provider = "groq"\napi_key = "gsk_fromfile"\n', encoding="utf-8")
     cfg = load_config()
     assert cfg.provider == "groq" and cfg.openai_api_key == "gsk_fromfile"

@@ -7,9 +7,9 @@ from unittest.mock import patch
 import pytest
 from rich.console import Console
 
-from ro_claude_kit_agent_patterns import FakeProvider, LLMResponse, ToolCall
-from ro_claude_kit_cli import code_mode, media
-from ro_claude_kit_cli.config import CSKConfig
+from ronin_agent_patterns import FakeProvider, LLMResponse, ToolCall
+from ronin_cli import code_mode, media
+from ronin_cli.config import RoninConfig
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"img"
 
@@ -23,14 +23,14 @@ def test_unified_has_all_tool_types(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     """One agent gets code + media + data tools together."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
-    config = CSKConfig(provider="anthropic", demo_mode=True)  # demo → data tools exist
+    config = RoninConfig(provider="anthropic", demo_mode=True)  # demo → data tools exist
 
     buf = io.StringIO()
     console = Console(file=buf, force_terminal=False, width=100)
     _queue(console, ["hi", "/q"])
     provider = FakeProvider(responses=[LLMResponse(text="hello!", stop_reason="end_turn", usage={})])
 
-    with patch("ro_claude_kit_cli.code_mode.build_provider", return_value=provider):
+    with patch("ronin_cli.code_mode.build_provider", return_value=provider):
         code_mode.run_unified_session(config, root=tmp_path, console=console)
 
     names = set(provider.calls[0]["tool_names"])
@@ -44,7 +44,7 @@ def test_unified_has_all_tool_types(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 def test_unified_generates_image_from_chat(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
-    config = CSKConfig(provider="anthropic", demo_mode=True)
+    config = RoninConfig(provider="anthropic", demo_mode=True)
 
     buf = io.StringIO()
     console = Console(file=buf, force_terminal=False, width=100)
@@ -56,7 +56,7 @@ def test_unified_generates_image_from_chat(tmp_path: Path, monkeypatch: pytest.M
         LLMResponse(text="Here's your panda!", stop_reason="end_turn", usage={}),
     ])
 
-    with patch("ro_claude_kit_cli.code_mode.build_provider", return_value=provider), \
+    with patch("ronin_cli.code_mode.build_provider", return_value=provider), \
          patch.object(media, "_image_bytes", return_value=(PNG, "image/png")), \
          patch.object(media, "display_image") as disp:
         code_mode.run_unified_session(config, root=tmp_path, console=console)
@@ -68,7 +68,7 @@ def test_unified_generates_image_from_chat(tmp_path: Path, monkeypatch: pytest.M
 def test_unified_can_write_code(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
-    config = CSKConfig(provider="anthropic", demo_mode=True)
+    config = RoninConfig(provider="anthropic", demo_mode=True)
 
     buf = io.StringIO()
     console = Console(file=buf, force_terminal=False, width=100)
@@ -80,7 +80,7 @@ def test_unified_can_write_code(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         LLMResponse(text="Done.", stop_reason="end_turn", usage={}),
     ])
 
-    with patch("ro_claude_kit_cli.code_mode.build_provider", return_value=provider):
+    with patch("ronin_cli.code_mode.build_provider", return_value=provider):
         # yolo=False but no console gate interaction needed since write is approved via yolo
         code_mode.run_unified_session(config, root=tmp_path, console=console, yolo=True)
 
@@ -91,7 +91,7 @@ def test_verify_runs_a_second_self_check_pass(tmp_path: Path, monkeypatch: pytes
     """With /verify on, a turn that uses a tool triggers a second verification pass."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
-    config = CSKConfig(provider="anthropic", verify=True)
+    config = RoninConfig(provider="anthropic", verify=True)
 
     buf = io.StringIO()
     console = Console(file=buf, force_terminal=False, width=100)
@@ -103,7 +103,7 @@ def test_verify_runs_a_second_self_check_pass(tmp_path: Path, monkeypatch: pytes
         LLMResponse(text="created note.txt", stop_reason="end_turn", usage={}),
         LLMResponse(text="Verified.", stop_reason="end_turn", usage={}),  # the verify pass
     ])
-    with patch("ro_claude_kit_cli.code_mode.build_provider", return_value=provider):
+    with patch("ronin_cli.code_mode.build_provider", return_value=provider):
         code_mode.run_unified_session(config, root=tmp_path, console=console, yolo=True)
 
     assert len(provider.calls) >= 3            # main turn (2 calls) + verify pass

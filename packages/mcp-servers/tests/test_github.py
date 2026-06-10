@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from ro_claude_kit_mcp_servers import GitHubReadOnlyTools, github_tools
+from ronin_mcp_servers import GitHubReadOnlyTools, github_tools
 
 
 def _resp(payload, status: int = 200) -> MagicMock:

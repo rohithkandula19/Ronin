@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from ro_claude_kit_cli.briefing import compute_briefing_data
-from ro_claude_kit_cli.briefing_history import (
+from ronin_cli.briefing import compute_briefing_data
+from ronin_cli.briefing_history import (
     BriefingDelta,
     BriefingSnapshot,
     format_delta_line,
@@ -15,16 +15,16 @@ from ro_claude_kit_cli.briefing_history import (
     most_recent_prior,
     save_snapshot,
 )
-from ro_claude_kit_cli.config import CSKConfig
-from ro_claude_kit_cli.main import app
-from ro_claude_kit_cli.tools import build_tools
+from ronin_cli.config import RoninConfig
+from ronin_cli.main import app
+from ronin_cli.tools import build_tools
 
 
 runner = CliRunner()
 
 
 def test_snapshot_from_briefing_captures_counts() -> None:
-    tools = build_tools(CSKConfig(demo_mode=True))
+    tools = build_tools(RoninConfig(demo_mode=True))
     data = compute_briefing_data(tools)
     snap = BriefingSnapshot.from_briefing(data, date="2026-05-11")
 
@@ -102,7 +102,7 @@ def test_briefing_cli_auto_saves(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     r = runner.invoke(app, ["briefing", "--raw"])
     assert r.exit_code == 0
 
-    briefings = list((tmp_path / ".csk" / "briefings").glob("*.json"))
+    briefings = list((tmp_path / ".ronin" / "briefings").glob("*.json"))
     assert len(briefings) == 1
     payload = json.loads(briefings[0].read_text())
     assert payload["mrr_cents"] > 0
@@ -145,5 +145,5 @@ def test_no_save_flag_skips_persistence(tmp_path: Path, monkeypatch: pytest.Monk
 
     r = runner.invoke(app, ["briefing", "--raw", "--no-save"])
     assert r.exit_code == 0
-    briefings_dir = tmp_path / ".csk" / "briefings"
+    briefings_dir = tmp_path / ".ronin" / "briefings"
     assert not briefings_dir.exists() or not any(briefings_dir.iterdir())

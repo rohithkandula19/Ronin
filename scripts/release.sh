@@ -136,7 +136,7 @@ bump_in_file \
   "version = \"${VERSION}\""
 
 bump_in_file \
-  "packages/cli/src/ro_claude_kit_cli/__init__.py" \
+  "packages/cli/src/ronin_cli/__init__.py" \
   '^__version__ = "[^"]+"' \
   "__version__ = \"${VERSION}\""
 
@@ -180,7 +180,7 @@ if [[ "$DRY_RUN" == "yes" ]]; then
 fi
 
 git add packages/cli/pyproject.toml \
-        packages/cli/src/ro_claude_kit_cli/__init__.py \
+        packages/cli/src/ronin_cli/__init__.py \
         README.md \
         CHANGELOG.md
 
@@ -222,6 +222,6 @@ ok "release v${VERSION} published 🎉"
 
 echo
 echo "${C_BOLD}Next:${C_RESET}"
-echo "  • verify on PyPI: https://pypi.org/project/ro-claude-kit-cli/${VERSION}/"
-echo "  • test the install: ${C_CYAN}pipx install ro-claude-kit-cli==${VERSION}${C_RESET}"
+echo "  • verify on PyPI: https://pypi.org/project/ronin-cli/${VERSION}/"
+echo "  • test the install: ${C_CYAN}pipx install ronin-cli==${VERSION}${C_RESET}"
 echo "  • walk through scripts/launch_kit/DAY_BY_DAY_PLAN.md"

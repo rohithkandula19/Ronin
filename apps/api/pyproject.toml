@@ -1,5 +1,5 @@
 [project]
-name = "ro-claude-kit-api"
+name = "ronin-api"
 version = "0.0.1"
 description = "Hosted SaaS for csk briefings — FastAPI backend with encrypted per-user credential storage."
 readme = "README.md"
@@ -14,8 +14,8 @@ dependencies = [
     "pydantic-settings>=2.0",
     "cryptography>=42.0",
     "apscheduler>=3.10",
-    "ro-claude-kit-cli",
-    "ro-claude-kit-agent-patterns",
+    "ronin-cli",
+    "ronin-agent-patterns",
 ]
 
 [project.optional-dependencies]
@@ -28,8 +28,8 @@ dev = [
 ]
 
 [tool.uv.sources]
-ro-claude-kit-cli = { workspace = true }
-ro-claude-kit-agent-patterns = { workspace = true }
+ronin-cli = { workspace = true }
+ronin-agent-patterns = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

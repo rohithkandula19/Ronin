@@ -3,9 +3,9 @@
 > **A masterless, terminal-native Claude agent.** ronin is a **Claude-Code-style AI coding agent** — it reads, edits, and runs your code from the terminal — built on a **provider-agnostic agent framework** with first-class evals, memory, security hardening, and MCP tool integrations. Plug in Claude for top quality, or run it **free** on Gemini / Cerebras / Groq / Ollama.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-v0.52.0-blue)](CHANGELOG.md)
+[![Status](https://img.shields.io/badge/status-v0.58.0-blue)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-636%20passing-brightgreen.svg)](#-whats-under-the-hood)
+[![Tests](https://img.shields.io/badge/tests-1644%20passing-brightgreen.svg)](#-whats-under-the-hood)
 [![Providers](https://img.shields.io/badge/providers-Claude%20·%20Gemini%20·%20Cerebras%20·%20Groq%20·%20OpenRouter%20·%20Ollama%20·%20OpenAI-d4a373)](#-supported-providers)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
@@ -18,7 +18,7 @@ $ ronin code "fix the failing test"        # the coding agent
 $ ronin "explain @main.py and add tests"   # @-mention files inline
 ```
 
-> The binary is **`ronin`**. `ro` and `csk` also work as aliases.
+> The binary is **`ronin`**. `ro` also works as a short alias.
 
 ## 🎬 Demo
 
@@ -36,7 +36,7 @@ Regenerate the walkthrough anytime with [`vhs`](https://github.com/charmbracelet
 
 **One front door:** type **`ronin`** and you get a single agent that reads, writes, and runs code (every edit and shell command gated behind a diff preview and your approval — reads run freely), generates images/video/speech, and queries your connected data — all in one conversation, in plain language. It's **provider-agnostic**: the same agent runs on Claude or on free open models.
 
-It's also a **reference implementation for building agents the right way**. The CLI is a thin wrapper over seven independently-usable packages — agent patterns, evals, memory, hardening, and MCP integrations — backed by **636 tests** that run offline in CI. (`ronin code` is the focused coding agent; `ronin chat` is the talk/media surface — both available when you want a single-purpose mode.)
+It's also a **reference implementation for building agents the right way**. The CLI is a thin wrapper over seven independently-usable packages — agent patterns, evals, memory, hardening, and MCP integrations — backed by **1,644 tests** that run offline in CI. (`ronin code` is the focused coding agent; `ronin chat` is the talk/media surface — both available when you want a single-purpose mode.)
 
 ## 🛠 `ronin code` — the coding agent (Claude-Code shaped)
 
@@ -49,15 +49,16 @@ ronin code --continue                                        # resume your last 
 
 A coding agent that reads, edits, and runs your code — every write and shell command gated behind a diff preview and your approval (read operations run freely). It mirrors the Claude Code experience:
 
-- **Rounded input box + live dropdowns** — type inside a bordered prompt with ghost placeholder text. **`/`** opens a command menu (26 commands with descriptions), **`@`** opens a live file picker, **`!`** runs a shell command inline, and **`#`** files a note straight into project memory. ↑/↓ history, vi-mode (`/vim`).
+- **Rounded input box + live dropdowns** — type inside a bordered prompt with ghost placeholder text. **`/`** opens a command menu (30 commands with descriptions), **`@`** opens a live file picker, **`!`** runs a shell command inline, and **`#`** files a note straight into project memory. ↑/↓ history, vi-mode (`/vim`).
 - **Shift+Tab modes** — cycle **normal → auto-accept → plan** edit modes, shown live in the input chrome.
 - **Streaming Markdown + inline tool calls** — replies stream as rendered Markdown; tool activity renders Claude-Code-style as `⏺ Read(file)` with `⎿ result` underneath; edits are shown as syntax-highlighted diffs you approve.
-- **@-file mentions** — drop `@path` in your request to pull files into context. Start a message with a folder path to `cd` into it.
+- **@-file & @-URL mentions** — drop `@path` to pull a file into context, or `@https://…` to pull a web page's readable text into context. Start a message with a folder path to `cd` into it.
 - **Plan mode** (`--plan`) proposes the steps read-only, you approve, then it executes. **Resume** (`--continue`) picks up your last session.
 - **Live plan tracker** — multi-step tasks show a checklist (`✓ / ▶ / ☐`) the agent keeps current as it works.
-- **Tools**: read / write / `edit` / `multi_edit` / `glob` / search / run — plus **`web_search` / `fetch_url`**, **semantic code intelligence** (`diagnostics` / `definition` / `references` via LSP), a **`task`** subagent plus **`parallel_task`** (concurrent read-only fan-out) and **`isolated_task`** (parallel *mutating* sub-agents, each in its own git worktree so edits can't collide), and any **MCP** server's tools (`ronin mcp add …`).
+- **Tools**: read / write / `edit` / `multi_edit` / `glob` / search / run — plus **`web_search` / `fetch_url`**, **read-only git** (`git_status` / `git_diff` / `git_log`), **semantic code intelligence** (`diagnostics` / `definition` / `references` via LSP), a **`task`** subagent plus **`parallel_task`** (concurrent read-only fan-out) and **`isolated_task`** (parallel *mutating* sub-agents, each in its own git worktree so edits can't collide), and any **MCP** server's tools (`ronin mcp add …`).
+- **Integrations**: give the agent new tools three ways, each one command — **local MCP** servers (24-server catalog: `ronin mcp install github`), **remote/hosted MCP** servers (`ronin mcp add-remote …`), or **plugins** (200 built-ins like weather/currency/dns/uuid + scaffold your own with `ronin plugin new`). See **[docs/INTEGRATIONS.md](docs/INTEGRATIONS.md)**.
 - **Project memory** — auto-loads `RONIN.md` / `CLAUDE.md` / `AGENTS.md` from the repo so it follows your conventions.
-- **26 slash commands** — steer across turns: `/help`, `/login`, `/model`, `/models`, `/mcp`, `/agents`, `/compact`, `/context`, `/copy`, `/export`, `/resume`, `/diff`, `/undo`, `/commit`, `/pr`, `/doctor`, `/config`, and more. A per-turn status line shows provider · model · tokens · time.
+- **30 slash commands** — steer across turns: `/help`, `/login`, `/model`, `/models`, `/mcp`, `/agents`, `/compact`, `/context`, `/copy`, `/export`, `/resume`, `/diff`, `/undo`, `/commit`, `/pr`, `/doctor`, `/config`, and more. A per-turn status line shows provider · model · tokens · time.
 
 ## 🧠 Supported providers
 
@@ -91,24 +92,42 @@ Because ronin is **provider-agnostic**, it can do things a single-vendor agent s
 - **🔁 Cross-provider failover** — set `failover` in config and a turn that hits a rate-limit or outage on the primary **transparently continues on the next provider** instead of dying. (Tokens already streamed aren't silently re-answered.)
 - **🔒 Fully offline mode** — `ronin --offline` forces a **local brain** (Ollama / any localhost model) and **strips every network tool**, so ronin codes on a plane or in an air-gapped box with **zero egress** — nothing leaves the machine.
 - **📊 Eval-driven model bake-off** — `ronin bench -m anthropic,gemini,ollama:llama3.1` runs the **objective** eval battery (no LLM judge) across models and tells you the **cheapest model that clears your quality bar**. Pick a model with data, not vibes.
+- **🥷 Kaizen — the self-forging agent** — `ronin kaizen` finds a weakness in ronin's *own* source, drafts a fix in an **isolated git worktree**, and runs the **test suite as an objective fitness gate** — the diff only reaches your tree if the tests pass there. An agent that improves its own code, with eval-proof it worked, on a free model for $0.
+- **🥋 The Dojo — rival models fight over your code** — `ronin dojo "<task>" -m anthropic,gemini,cerebras` has each model attempt the *same* change in **parallel isolated worktrees**; a judge crowns the best diff. Claude vs Gemini vs DeepSeek, then you apply the winner.
+- **⚔️ Ronin Duel — cross-vendor review** — `ronin duel --against gemini` hands your diff to a **different** provider that adversarially hunts for what's wrong. The author model can't see its own blind spots; a rival vendor can. Advisory, CI-friendly.
+- **🔭 Scout → Strike — explore cheap, edit strong** — `ronin code --scout "<task>"` runs read-only recon on a free blade, then a strong blade executes only the edits. Frontier quality where it counts, $0 everywhere else.
+- **🗡 Bushido — your code of honor, everywhere** — a global `~/.ronin/bushido.md` of standing personal conventions the agent carries into **every** repo (a repo's own notes always override it).
+- **💪 Muscle Memory — gets better at *your* repo** — the agent crystallizes a solved workflow into a reusable `/skill` saved in your repo. Use it for a week and ronin has a custom playbook that compounds.
+
+### 🧪 Quality gates — objective checks, not vibes
+
+The same "outcome over LLM-judge" philosophy as `eval` and `kaizen`, aimed at the code you're about to ship. Each is CI-friendly (non-zero exit on failure) and the core algorithms are pure + unit-tested.
+
+- **🧬 Mutation testing — `ronin mutants <file>`** — coverage tells you a line *ran*; this tells you your tests would *notice if it were wrong*. ronin injects one-operator faults (`==`→`!=`, `and`→`or`, `>`→`>=`, …), runs your suite against each, and lists the mutants that **survived** — every survivor is a bug your tests would miss. The original file is always restored. Requires a green baseline.
+- **🌐 Blast radius — `ronin radius`** — from your uncommitted changes, ronin walks the Python import graph *backwards* to every module that (transitively) depends on what you touched, and surfaces the **test modules in that radius** so you can run only what matters. `--run` executes them. A risk map + a fast, targeted feedback loop.
+- **🎲 Flaky-test hunter — `ronin flake "<cmd>" -n 7`** — a single run can't tell flaky from stable. ronin runs your command N times, diffs the failure sets, and ranks the tests that flip green↔red — the non-deterministic ones — separating them from tests that are simply broken.
+- **🛡 Scope-creep guard — `ronin guard`** — before you commit, ronin scans the lines you *added* for debug/secret leftovers (stray `breakpoint()`, `console.log`, unresolved merge markers, AWS keys, `TODO/FIXME`) and, with `--intent "…"`, flags files that drift from the task you set out to do. Drop it in a pre-commit hook.
 
 Plus, on the coding agent itself:
 
+- **⌨️ Type-ahead in the inline REPL** — the default is the minimal, Claude-Code-style inline flow (scrollback + a bordered input box); you can **type and queue messages while it works**. `ronin --tui` opts into an optional full-screen pane layout (live trace + approval modal) for those who want it.
 - **⚡ Prompt caching** (Anthropic) — the static system + tools prefix is cached on every turn (up to ~90% cheaper/faster); the status line shows `⚡N cached`.
-- **🧠 Semantic code intelligence** — `diagnostics` / `definition` / `references` via real language servers (pyright, ts-language-server, gopls, rust-analyzer), with graceful "install X" fallback when a server is missing.
+- **🧠 Semantic code intelligence** — `diagnostics` / `definition` / `references` via real language servers (pyright, ts-language-server, gopls, rust-analyzer), with graceful "install X" fallback. Plus **`repo_map`** (BM25) and optional **`semantic_search`** (embeddings, local-Ollama or OpenAI) to find code by meaning, and **auto context engineering** that front-loads the most relevant files each turn.
 - **🌳 Parallel mutating sub-agents** — `isolated_task` runs several editing agents at once, each in its **own git worktree**, so concurrent edits never collide; each returns a reviewable diff.
+- **🖥️ Background processes** — `run_background` a dev server / test-watcher, tail its logs, and keep working ("watch-and-fix"); **⏪ checkpoint & rewind** snapshots the whole workspace and rolls it back; **👁️ vision-in-the-loop** screenshots a UI and analyzes it so the agent can self-correct.
+- **🛡️ Built for free models** — tool calls survive near-miss argument names (auto-remapped), oversized tool results are capped, context compacts earlier off-Anthropic, clarifying questions (`ask_user`) head off wrong guesses, and per-provider keys mean switching providers never clobbers a key.
 
 ## Install
 
 ```bash
 # one-liner: installs uv if missing, clones the repo, syncs the workspace,
-# drops a 'ronin' shim in ~/.local/bin (with ro / csk aliases)
+# drops a 'ronin' shim in ~/.local/bin (with a 'ro' short alias)
 curl -sSL https://raw.githubusercontent.com/rohithkandula19/Ronin/main/install.sh | bash
 ```
 
-Pin a tag: append `-s -- --ref v0.51.0`. PyPI publish is wired (`.github/workflows/release.yml`) and lands `pip install ro-claude-kit-cli` once `PYPI_TOKEN` is set as a repo secret.
+Pin a tag: append `-s -- --ref v0.58.0`. PyPI publish is wired (`.github/workflows/release.yml`) and lands `pip install ronin-cli` once `PYPI_TOKEN` is set as a repo secret.
 
-For Postgres support after install: `(cd ~/.local/share/ro-claude-kit && uv pip install psycopg2-binary)`.
+For Postgres support after install: `(cd ~/.local/share/ronin && uv pip install psycopg2-binary)`.
 
 ## More surfaces
 
@@ -142,7 +161,7 @@ Demo mode lets you play with the CLI before connecting any real services. Withou
 ronin init                                        # interactive — picks provider + service creds
 ```
 
-Or write `.csk/config.toml`:
+Or write `.ronin/config.toml`:
 
 ```toml
 provider = "anthropic"
@@ -156,14 +175,14 @@ notion_token = "secret_..."
 database_url = "postgres://readonly_user:...@host:5432/db"   # a read-only role
 ```
 
-`.csk/` is gitignored — the file holds plaintext credentials. Keys are user-supplied and never committed.
+`.ronin/` is gitignored — the file holds plaintext credentials. Keys are user-supplied and never committed.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
 | **`ronin`** | **The unified agent — talk, code, generate media, query data in one conversation.** |
-| **`ronin code [task]`** | **Coding agent — streaming, plan tracker, project memory, 26 slash commands.** |
+| **`ronin code [task]`** | **Coding agent — streaming, plan tracker, project memory, 30 slash commands.** |
 | `ronin chat` | Talk/media REPL with short-term memory. |
 | `ronin init [--demo]` | Create a config file (interactive or demo). |
 | **`ronin eval [--model X]`** | **Score agent quality on objective tasks — works on any provider (no LLM judge).** |
@@ -183,6 +202,10 @@ database_url = "postgres://readonly_user:...@host:5432/db"   # a read-only role
 | `ronin tools` / `ronin doctor [--check]` | List tools / health-check provider + auth + services (live ping). |
 | `ronin image` / `video` / `say` / `see` | Media: text-to-image, video, text-to-speech, vision. |
 | `ronin set-key [--provider X] [--model Y]` | Set the LLM API key (masked). In-session, use `/login`. |
+| `ronin mutants <file> [--test "<cmd>"]` | Mutation-test a file: list mutants the suite fails to catch. |
+| `ronin radius [--run]` | Blast radius of your diff + the affected test modules. |
+| `ronin flake "<cmd>" [-n N]` | Run a test command N times; rank non-deterministic tests. |
+| `ronin guard [--intent "<task>"]` | Scan the diff for debug/secret leftovers + scope creep. |
 | `ronin version` | Print the version. |
 
 ## 🔒 Safety & security
@@ -192,7 +215,7 @@ ronin can write files and run commands, so safety is built into the core, not bo
 - **Gated mutations.** Every file write and shell command in the coding agent is held behind a **diff preview + your approval** — read operations run freely. **Plan mode** (`--plan`) is fully read-only.
 - **Prompt-injection scanning.** User input passes through an injection scanner (`packages/hardening`) before it reaches a tool-calling planner.
 - **Read-only data integrations.** The Stripe / Linear / Slack / Notion / Postgres MCP templates are read-only by default; the recommended Postgres setup uses a read-only DB role.
-- **Secrets discipline.** API keys are user-supplied and stored only in local `.csk/` (gitignored) — never committed (the repo is public). PII (emails, SSNs, cards, keys) is redacted from traces before anything leaves your process.
+- **Secrets discipline.** API keys are user-supplied and stored only in local `.ronin/` (gitignored) — never committed (the repo is public). PII (emails, SSNs, cards, keys) is redacted from traces before anything leaves your process.
 - **Offline guarantee.** `ronin --offline` forces a local brain and removes every network-touching tool — a hard guarantee for air-gapped / privacy-sensitive work.
 
 ### Running ronin for others / at scale
@@ -202,7 +225,7 @@ ronin is MIT-licensed and meant to be picked up by other people. A few notes if 
 - **`--yolo` / auto-accept bypasses the approval gate** and lets the model run shell commands unattended. Only use it in a sandbox or CI you trust — interactive use keeps every mutation gated.
 - **Parallel sub-agents cost real tokens.** `parallel_task` / `isolated_task` / `consensus` / `bench` fan out *N* model runs at once; concurrency is capped (3–4 workers) but spend scales with the number of tasks/models — budget accordingly.
 - **`isolated_task` needs a git repo** (worktrees are a git feature) and returns diffs for review rather than auto-merging — parallel changes stay reviewable.
-- **Pin the installer** for reproducibility: `curl … | bash -s -- --ref v0.52.0`.
+- **Pin the installer** for reproducibility: `curl … | bash -s -- --ref v0.58.0`.
 
 ## 🧱 What's under the hood
 
@@ -210,22 +233,22 @@ ronin is MIT-licensed and meant to be picked up by other people. A few notes if 
 
 | Package | What it does | Tests |
 |---|---|---|
-| `agent-patterns` | ReAct, Planner-Executor, Multi-Agent Supervisor, Reflexion + a provider abstraction (streaming, 429 retry, MCP-style metadata) | 29 |
+| `agent-patterns` | ReAct, Planner-Executor, Multi-Agent Supervisor, Reflexion + a provider abstraction (streaming, 429 retry, MCP-style metadata) | 81 |
 | `eval-suite` | LLM-as-a-judge, golden datasets, drift detection, HTML reports | 11 |
 | `memory` | Short-term (rolling summary), long-term (pluggable vector store), user preferences | 11 |
 | `hardening` | Prompt-injection scanner, tool allowlist, approval gates, output validator, token budgets, tracing | 40 |
 | `mcp-servers` | Read-only Postgres, Stripe, Linear, Slack, Notion, Tavily, GitHub templates | 67 |
-| `cli` | The `ronin` binary — agent loop, MCP client, web tools, subagents, eval, media | 382 |
+| `cli` | The `ronin` binary — agent loop, MCP client, web tools, subagents, eval, media | 1396 |
 | `deployment-templates` | Docker Compose, Modal, Vercel, Railway | — |
 
-**636 tests** across all packages, green on every push (see CI). A `FakeProvider` makes them deterministic, offline, and free — no API calls in CI.
+**1,644 tests** across all packages (incl. the demo/API apps), green on every push (see CI). A `FakeProvider` makes them deterministic, offline, and free — no API calls in CI.
 
 ## Use the modules without the CLI
 
 Build an agent in 5 lines:
 
 ```python
-from ro_claude_kit_agent_patterns import ReActAgent, Tool
+from ronin_agent_patterns import ReActAgent, Tool
 
 agent = ReActAgent(
     system="You are a helpful research assistant.",
@@ -237,7 +260,7 @@ print(agent.run("What is the ReAct pattern?").output)
 Run it on Ollama instead of Claude:
 
 ```python
-from ro_claude_kit_agent_patterns import OllamaProvider, ReActAgent
+from ronin_agent_patterns import OllamaProvider, ReActAgent
 
 agent = ReActAgent(system="...", tools=[...], provider=OllamaProvider(model="llama3.1"))
 ```
@@ -245,7 +268,7 @@ agent = ReActAgent(system="...", tools=[...], provider=OllamaProvider(model="lla
 Add an eval suite:
 
 ```python
-from ro_claude_kit_eval_suite import EvalSuite, Rubric, GoldenDataset
+from ronin_eval_suite import EvalSuite, Rubric, GoldenDataset
 
 suite = EvalSuite(
     rubric=Rubric(criteria=["task_success", "faithfulness", "safety"]),

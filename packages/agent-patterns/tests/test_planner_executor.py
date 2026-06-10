@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ro_claude_kit_agent_patterns import FakeProvider, LLMResponse, PlannerExecutorAgent
+from ronin_agent_patterns import FakeProvider, LLMResponse, PlannerExecutorAgent
 
 
 def test_planner_executor_happy_path() -> None:

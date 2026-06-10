@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic import BaseModel
 
-from ro_claude_kit_hardening import OutputValidator, ValidationFailure
+from ronin_hardening import OutputValidator, ValidationFailure
 
 
 class Person(BaseModel):
@@ -26,7 +26,7 @@ def test_valid_first_attempt() -> None:
     fake_client = MagicMock()
     fake_client.messages.create.return_value = _resp('{"name": "Alice", "age": 30}')
 
-    with patch("ro_claude_kit_hardening.validation.anthropic.Anthropic", return_value=fake_client):
+    with patch("ronin_hardening.validation.anthropic.Anthropic", return_value=fake_client):
         validator = OutputValidator(output_schema=Person)
         result = validator.call(system="extract person", user_message="Alice is 30.")
 
@@ -41,7 +41,7 @@ def test_retry_on_invalid_then_succeed() -> None:
         _resp('{"name": "Bob"}'),  # missing age — Pydantic rejects
         _resp('{"name": "Bob", "age": 42}'),
     ]
-    with patch("ro_claude_kit_hardening.validation.anthropic.Anthropic", return_value=fake_client):
+    with patch("ronin_hardening.validation.anthropic.Anthropic", return_value=fake_client):
         validator = OutputValidator(output_schema=Person, max_attempts=3)
         result = validator.call(system="extract", user_message="Bob is 42.")
 
@@ -54,7 +54,7 @@ def test_extracts_json_from_code_fence() -> None:
     fake_client.messages.create.return_value = _resp(
         'Here you go:\n```json\n{"name": "Carol", "age": 25}\n```'
     )
-    with patch("ro_claude_kit_hardening.validation.anthropic.Anthropic", return_value=fake_client):
+    with patch("ronin_hardening.validation.anthropic.Anthropic", return_value=fake_client):
         validator = OutputValidator(output_schema=Person)
         result = validator.call(system="extract", user_message="Carol is 25.")
     assert result.name == "Carol"
@@ -63,7 +63,7 @@ def test_extracts_json_from_code_fence() -> None:
 def test_raises_after_max_attempts() -> None:
     fake_client = MagicMock()
     fake_client.messages.create.return_value = _resp("nonsense, no json here")
-    with patch("ro_claude_kit_hardening.validation.anthropic.Anthropic", return_value=fake_client):
+    with patch("ronin_hardening.validation.anthropic.Anthropic", return_value=fake_client):
         validator = OutputValidator(output_schema=Person, max_attempts=2)
         with pytest.raises(ValidationFailure) as exc_info:
             validator.call(system="extract", user_message="?")

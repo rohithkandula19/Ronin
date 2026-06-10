@@ -37,7 +37,7 @@ Notable bits if you're building agent stuff:
 
 - Read-only by design. Every MCP server here exposes only GETs; there's an explicit `ApprovalGate` you'd have to wire to add writes.
 - Prompt-injection scanner at the input boundary, PII redaction in traces, output validator with retry on Pydantic schema failures.
-- Each briefing auto-saves to `.csk/briefings/<date>.json`. Subsequent runs append a "vs last week" delta line at the bottom. `csk briefing --history` shows the trend table.
+- Each briefing auto-saves to `.ronin/briefings/<date>.json`. Subsequent runs append a "vs last week" delta line at the bottom. `csk briefing --history` shows the trend table.
 - `csk briefing --slack #founders` posts directly via `chat.postMessage`.
 - Demo mode (`csk init --demo`) ships fake-but-realistic Stripe + Linear data so you can play with the briefing in 30 seconds without setting up keys. An offline keyword router answers `csk ask` queries without an LLM, so even the no-key demo is real.
 

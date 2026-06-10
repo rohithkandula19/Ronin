@@ -3,13 +3,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ro_claude_kit_cli.hooks import build_after_tool, load_hooks
+from ronin_cli.hooks import build_after_tool, load_hooks
 
 
 def test_load_hooks(tmp_path: Path) -> None:
     assert load_hooks(tmp_path) == []
-    (tmp_path / ".csk").mkdir()
-    (tmp_path / ".csk" / "hooks.json").write_text(json.dumps(
+    (tmp_path / ".ronin").mkdir()
+    (tmp_path / ".ronin" / "hooks.json").write_text(json.dumps(
         {"hooks": [{"event": "post_edit", "command": "touch $FILE.formatted"}]}))
     hooks = load_hooks(tmp_path)
     assert hooks and hooks[0]["event"] == "post_edit"

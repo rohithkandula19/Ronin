@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ro_claude_kit_memory import InMemoryBackend, LongTermMemory
+from ronin_memory import InMemoryBackend, LongTermMemory
 
 
 def test_remember_and_recall_basic() -> None:

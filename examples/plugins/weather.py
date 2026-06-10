@@ -1,11 +1,11 @@
 """Example user plugin.
 
-Copy to ``.csk/plugins/weather.py`` in your project to make ``csk`` agents call
+Copy to ``.ronin/plugins/weather.py`` in your project to make ``csk`` agents call
 this tool. Replace the fake implementation with a real weather API.
 """
 from __future__ import annotations
 
-from ro_claude_kit_agent_patterns import Tool
+from ronin_agent_patterns import Tool
 
 
 _FAKE_WEATHER = {

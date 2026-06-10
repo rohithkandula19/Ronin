@@ -8,9 +8,9 @@ from unittest.mock import patch
 
 from rich.console import Console
 
-from ro_claude_kit_agent_patterns import FakeProvider, LLMResponse, ToolCall
-from ro_claude_kit_cli.config import CSKConfig
-from ro_claude_kit_cli.fix_mode import run_fix
+from ronin_agent_patterns import FakeProvider, LLMResponse, ToolCall
+from ronin_cli.config import RoninConfig
+from ronin_cli.fix_mode import run_fix
 
 
 def test_fix_loops_until_command_passes(tmp_path: Path) -> None:
@@ -27,8 +27,8 @@ def test_fix_loops_until_command_passes(tmp_path: Path) -> None:
                     stop_reason="tool_use", usage={}),
         LLMResponse(text="fixed the operator", stop_reason="end_turn", usage={}),
     ])
-    with patch("ro_claude_kit_cli.code_mode.build_provider", return_value=provider):
-        ok = run_fix(CSKConfig(provider="groq", openai_api_key="x"),
+    with patch("ronin_cli.code_mode.build_provider", return_value=provider):
+        ok = run_fix(RoninConfig(provider="groq", openai_api_key="x"),
                      command, root=tmp_path, console=console, yolo=True)
     assert ok is True
     assert "def add(a, b):\n    return a + b" in (tmp_path / "calc.py").read_text()
@@ -36,6 +36,6 @@ def test_fix_loops_until_command_passes(tmp_path: Path) -> None:
 
 def test_fix_returns_true_immediately_if_already_passing(tmp_path: Path) -> None:
     console = Console(file=io.StringIO(), force_terminal=False)
-    ok = run_fix(CSKConfig(provider="groq", openai_api_key="x"),
+    ok = run_fix(RoninConfig(provider="groq", openai_api_key="x"),
                  f'{shlex.quote(sys.executable)} -c "assert True"', root=tmp_path, console=console)
     assert ok is True

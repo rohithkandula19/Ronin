@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
-from ro_claude_kit_cli.main import app
+from ronin_cli.main import app
 
 
 runner = CliRunner()
@@ -22,9 +22,9 @@ def test_tui_without_auth_errors(tmp_path, monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_tui_imports_cleanly() -> None:
     """The textual app should at least import + construct without raising."""
-    from ro_claude_kit_cli.tui import RoninApp
-    from ro_claude_kit_cli.config import CSKConfig
-    app_obj = RoninApp(config=CSKConfig(demo_mode=True))
+    from ronin_cli.tui import RoninApp
+    from ronin_cli.config import RoninConfig
+    app_obj = RoninApp(config=RoninConfig(demo_mode=True))
     assert app_obj is not None
 
 
@@ -34,7 +34,7 @@ def test_tui_launches_run_tui(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
     runner.invoke(app, ["init", "--demo", "-y"])
 
-    with patch("ro_claude_kit_cli.tui.run_tui") as mock_run:
+    with patch("ronin_cli.tui.run_tui") as mock_run:
         r = runner.invoke(app, ["tui"])
     assert r.exit_code == 0
     mock_run.assert_called_once()
@@ -43,11 +43,11 @@ def test_tui_launches_run_tui(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None
 @pytest.mark.asyncio
 async def test_app_renders_core_widgets(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Pilot test: app boots, key widgets exist, prompt is focused."""
-    from ro_claude_kit_cli.config import CSKConfig
-    from ro_claude_kit_cli.tui import RoninApp
+    from ronin_cli.config import RoninConfig
+    from ronin_cli.tui import RoninApp
 
     monkeypatch.chdir(tmp_path)
-    csk_app = RoninApp(config=CSKConfig(demo_mode=True, provider="anthropic"))
+    csk_app = RoninApp(config=RoninConfig(demo_mode=True, provider="anthropic"))
 
     async with csk_app.run_test() as pilot:
         await pilot.pause()
@@ -63,11 +63,11 @@ async def test_app_renders_core_widgets(tmp_path, monkeypatch: pytest.MonkeyPatc
 @pytest.mark.asyncio
 async def test_empty_submit_is_ignored(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Submitting an empty/whitespace prompt should not invoke the agent."""
-    from ro_claude_kit_cli.config import CSKConfig
-    from ro_claude_kit_cli.tui import RoninApp
+    from ronin_cli.config import RoninConfig
+    from ronin_cli.tui import RoninApp
 
     monkeypatch.chdir(tmp_path)
-    csk_app = RoninApp(config=CSKConfig(demo_mode=True, provider="anthropic"))
+    csk_app = RoninApp(config=RoninConfig(demo_mode=True, provider="anthropic"))
 
     called: list[str] = []
 
@@ -87,11 +87,11 @@ async def test_empty_submit_is_ignored(tmp_path, monkeypatch: pytest.MonkeyPatch
 
 @pytest.mark.asyncio
 async def test_action_clear_resets_history(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from ro_claude_kit_cli.config import CSKConfig
-    from ro_claude_kit_cli.tui import RoninApp
+    from ronin_cli.config import RoninConfig
+    from ronin_cli.tui import RoninApp
 
     monkeypatch.chdir(tmp_path)
-    csk_app = RoninApp(config=CSKConfig(demo_mode=True, provider="anthropic"))
+    csk_app = RoninApp(config=RoninConfig(demo_mode=True, provider="anthropic"))
     csk_app.history.append(("user", "test"))
 
     async with csk_app.run_test() as pilot:

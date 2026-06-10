@@ -1,5 +1,5 @@
 {
-  "name": "@ro-claude-kit/agent-patterns",
+  "name": "@ronin/agent-patterns",
   "version": "0.0.1",
   "private": false,
   "description": "Production-grade agent patterns for Claude (TypeScript wrapper).",

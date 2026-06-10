@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from ro_claude_kit_agent_patterns import (
+from ronin_agent_patterns import (
     FakeProvider,
     LLMResponse,
     ReActAgent,

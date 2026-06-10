@@ -1,5 +1,5 @@
 [project]
-name = "ro-claude-kit"
+name = "ronin"
 version = "0.0.1"
 description = "ronin — a masterless, terminal-native Claude agent: a Claude-Code-style coding agent on a provider-agnostic agent framework with evals, memory, hardening, and MCP integrations."
 readme = "README.md"
@@ -22,6 +22,12 @@ members = [
 # Root pytest config so `pytest` / `uv run pytest` works from the monorepo root
 # (collecting every package). asyncio_mode=auto lets async tests — e.g. the
 # Textual TUI queue test — run without a per-test marker.
+#
+# faulthandler_timeout dumps a Python traceback for any test that runs longer
+# than the timeout — stdlib-only, no pytest-timeout dependency needed. Catches
+# CI hangs that don't reproduce locally (e.g. subprocess deadlock on the
+# headless GitHub Actions runner).
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["packages", "apps"]
+faulthandler_timeout = 90

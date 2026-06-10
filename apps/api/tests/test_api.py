@@ -8,11 +8,11 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
-    """Fresh sqlite DB per test, fresh app instance, demo-mode CSKConfig."""
+    """Fresh sqlite DB per test, fresh app instance, demo-mode RoninConfig."""
     db_url = f"sqlite:///{tmp_path / 'test.db'}"
     monkeypatch.setenv("DATABASE_URL", db_url)
     # Make briefings deterministic & offline — the CLI's demo_mode flag is on
-    # via the user's CSKConfig when the user uploads no real credentials.
+    # via the user's RoninConfig when the user uploads no real credentials.
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
     from csk_api.db import reset_db_for_tests

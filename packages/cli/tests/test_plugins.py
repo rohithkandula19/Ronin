@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from ro_claude_kit_cli.plugins import load_plugin_tools, load_plugins
+from ronin_cli.plugins import load_plugin_tools, load_plugins
 
 
 PLUGIN_OK = '''
-from ro_claude_kit_agent_patterns import Tool
+from ronin_agent_patterns import Tool
 
 def register_tools():
     return [Tool(

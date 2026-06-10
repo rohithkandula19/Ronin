@@ -5,13 +5,13 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from ro_claude_kit_cli.briefing_anomaly import (
+from ronin_cli.briefing_anomaly import (
     Anomaly,
     detect_anomalies,
     render_anomalies_section,
 )
-from ro_claude_kit_cli.briefing_history import BriefingSnapshot, save_snapshot
-from ro_claude_kit_cli.main import app
+from ronin_cli.briefing_history import BriefingSnapshot, save_snapshot
+from ronin_cli.main import app
 
 
 runner = CliRunner()

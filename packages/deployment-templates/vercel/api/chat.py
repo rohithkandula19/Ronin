@@ -9,8 +9,8 @@ import json
 import os
 from http.server import BaseHTTPRequestHandler
 
-from ro_claude_kit_agent_patterns import ReActAgent
-from ro_claude_kit_hardening import InjectionScanner
+from ronin_agent_patterns import ReActAgent
+from ronin_hardening import InjectionScanner
 
 
 class handler(BaseHTTPRequestHandler):

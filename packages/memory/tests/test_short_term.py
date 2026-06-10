@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from ro_claude_kit_memory import ShortTermMemory
+from ronin_memory import ShortTermMemory
 
 
 def _resp(text: str) -> SimpleNamespace:
@@ -44,7 +44,7 @@ def test_compress_summarizes_old_turns() -> None:
 
     fake_client = MagicMock()
     fake_client.messages.create.return_value = _resp("Discussed greetings and weather.")
-    with patch("ro_claude_kit_memory.short_term.anthropic.Anthropic", return_value=fake_client):
+    with patch("ronin_memory.short_term.anthropic.Anthropic", return_value=fake_client):
         compressed = mem.maybe_compress()
 
     assert compressed is True

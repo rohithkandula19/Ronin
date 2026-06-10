@@ -8,10 +8,10 @@ import pytest
 from rich.console import Console
 from typer.testing import CliRunner
 
-from ro_claude_kit_agent_patterns import FakeProvider, LLMResponse, ToolCall
-from ro_claude_kit_cli import code_mode, memory_store
-from ro_claude_kit_cli.config import CSKConfig
-from ro_claude_kit_cli.main import app
+from ronin_agent_patterns import FakeProvider, LLMResponse, ToolCall
+from ronin_cli import code_mode, memory_store
+from ronin_cli.config import RoninConfig
+from ronin_cli.main import app
 
 runner = CliRunner()
 
@@ -28,8 +28,8 @@ def test_add_and_load(home: Path) -> None:
     assert memory_store.add_memory("I use Groq") is True
     texts = [m["text"] for m in memory_store.load_memories()]
     assert texts == ["My name is Rohith", "I use Groq"]
-    # persisted to ~/.csk/memory.json
-    assert (home / ".csk" / "memory.json").is_file()
+    # persisted to ~/.ronin/memory.json
+    assert (home / ".ronin" / "memory.json").is_file()
 
 
 def test_dedupe_and_blank(home: Path) -> None:
@@ -78,7 +78,7 @@ def test_cli_memory_add_list_clear(home: Path) -> None:
 
 def test_unified_session_persists_memory(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
-    config = CSKConfig(provider="anthropic", demo_mode=True)
+    config = RoninConfig(provider="anthropic", demo_mode=True)
     buf = io.StringIO()
     console = Console(file=buf, force_terminal=False, width=100)
     it = iter(["my name is Rohith and I work in ~/ronin", "/q"])
@@ -90,7 +90,7 @@ def test_unified_session_persists_memory(home: Path, monkeypatch: pytest.MonkeyP
                     stop_reason="tool_use", usage={}),
         LLMResponse(text="I'll remember that.", stop_reason="end_turn", usage={}),
     ])
-    with patch("ro_claude_kit_cli.code_mode.build_provider", return_value=provider):
+    with patch("ronin_cli.code_mode.build_provider", return_value=provider):
         code_mode.run_unified_session(config, root=home, console=console)
 
     # the fact persists to disk for the NEXT session
@@ -107,11 +107,11 @@ def test_parse_json_list() -> None:
 
 
 def test_auto_extract_saves_facts(home: Path) -> None:
-    from ro_claude_kit_agent_patterns import FakeProvider, LLMResponse
+    from ronin_agent_patterns import FakeProvider, LLMResponse
     fake = FakeProvider(responses=[LLMResponse(
         text='["User\'s name is Rohith", "User uses Groq"]', stop_reason="end_turn", usage={})])
-    with patch("ro_claude_kit_cli.runner.build_provider", return_value=fake):
-        n = memory_store.auto_extract(CSKConfig(provider="anthropic"),
+    with patch("ronin_cli.runner.build_provider", return_value=fake):
+        n = memory_store.auto_extract(RoninConfig(provider="anthropic"),
                                       "USER: hi I'm Rohith and I use Groq\nASSISTANT: hello")
     assert n == 2
     texts = [m["text"] for m in memory_store.load_memories()]
@@ -122,15 +122,15 @@ def test_auto_extract_silent_on_error(home: Path) -> None:
     class Boom:
         model = "x"
         def complete(self, **kw): raise RuntimeError("rate limited")
-    with patch("ro_claude_kit_cli.runner.build_provider", return_value=Boom()):
-        n = memory_store.auto_extract(CSKConfig(provider="groq"), "USER: x\nASSISTANT: y")
+    with patch("ronin_cli.runner.build_provider", return_value=Boom()):
+        n = memory_store.auto_extract(RoninConfig(provider="groq"), "USER: x\nASSISTANT: y")
     assert n == 0  # never raises, just returns 0
     assert memory_store.load_memories() == []
 
 
 def test_auto_extract_empty_list(home: Path) -> None:
-    from ro_claude_kit_agent_patterns import FakeProvider, LLMResponse
+    from ronin_agent_patterns import FakeProvider, LLMResponse
     fake = FakeProvider(responses=[LLMResponse(text="[]", stop_reason="end_turn", usage={})])
-    with patch("ro_claude_kit_cli.runner.build_provider", return_value=fake):
-        n = memory_store.auto_extract(CSKConfig(provider="anthropic"), "USER: what time is it\nASSISTANT: ...")
+    with patch("ronin_cli.runner.build_provider", return_value=fake):
+        n = memory_store.auto_extract(RoninConfig(provider="anthropic"), "USER: what time is it\nASSISTANT: ...")
     assert n == 0

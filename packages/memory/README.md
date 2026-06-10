@@ -1,11 +1,11 @@
-# ro-claude-kit-memory
+# ronin-memory
 
 Three-layer memory module. Pick the layer(s) that fit your agent.
 
 ## Short-term (conversation history)
 
 ```python
-from ro_claude_kit_memory import ShortTermMemory
+from ronin_memory import ShortTermMemory
 
 mem = ShortTermMemory(keep_recent=6, compress_threshold_tokens=4000)
 mem.add_turn("user", "What's your name?")
@@ -26,7 +26,7 @@ mem.maybe_compress()
 ## Long-term (vector store)
 
 ```python
-from ro_claude_kit_memory import LongTermMemory
+from ronin_memory import LongTermMemory
 
 mem = LongTermMemory()  # in-memory backend by default
 mem.remember("user prefers dark mode", namespace="alice", source="onboarding")
@@ -40,12 +40,12 @@ in any class satisfying `LongTermBackend` (`upsert` / `query` / `delete`):
 mem = LongTermMemory(backend=ChromaDBBackend(client, collection="memories"))
 ```
 
-The `chromadb` extra is declared but optional: `uv pip install ro-claude-kit-memory[chromadb]`.
+The `chromadb` extra is declared but optional: `uv pip install ronin-memory[chromadb]`.
 
 ## User preferences (namespaced KV with extraction)
 
 ```python
-from ro_claude_kit_memory import UserPreferenceMemory
+from ronin_memory import UserPreferenceMemory
 
 prefs = UserPreferenceMemory()
 prefs.set("alice", "tone", "concise")

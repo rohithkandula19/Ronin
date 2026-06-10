@@ -29,6 +29,11 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
+      - name: Run tests (publish gate)
+        run: |
+          uv sync --all-packages --all-groups
+          uv run --frozen pytest packages -q
+
       - name: Build all packages
         run: |
           set -e
@@ -43,6 +48,9 @@ jobs:
             echo "::endgroup::"
           done
           ls -la dist/
+
+      - name: Validate artifacts (twine check)
+        run: uvx twine check dist/*
 
       - name: Publish to PyPI
         env:

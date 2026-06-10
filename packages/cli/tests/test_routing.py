@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from ro_claude_kit_cli.config import CSKConfig
-from ro_claude_kit_cli.routing import classify, pick_model
+from ronin_cli.config import RoninConfig
+from ronin_cli.routing import classify, pick_model
 
 
 def test_classify() -> None:
@@ -13,10 +13,10 @@ def test_classify() -> None:
 
 
 def test_pick_model_routes_by_complexity() -> None:
-    cfg = CSKConfig(provider="cerebras", route_fast="llama3.1-8b", route_strong="gpt-oss-120b")
+    cfg = RoninConfig(provider="cerebras", route_fast="llama3.1-8b", route_strong="gpt-oss-120b")
     assert pick_model(cfg, "hey") == "llama3.1-8b"
     assert pick_model(cfg, "refactor the parser") == "gpt-oss-120b"
 
 
 def test_pick_model_off_when_unset() -> None:
-    assert pick_model(CSKConfig(provider="cerebras"), "refactor") is None
+    assert pick_model(RoninConfig(provider="cerebras"), "refactor") is None

@@ -5,16 +5,16 @@ from unittest.mock import patch
 
 import pytest
 
-from ro_claude_kit_agent_patterns import FakeProvider, LLMResponse
-from ro_claude_kit_cli.code_mode import (
+from ronin_agent_patterns import FakeProvider, LLMResponse
+from ronin_cli.code_mode import (
     expand_file_mentions,
     load_session,
     run_code_agent,
     save_session,
 )
-from ro_claude_kit_cli.code_tools import build_code_tools
-from ro_claude_kit_cli.config import CSKConfig
-from ro_claude_kit_cli.main import _is_code_project
+from ronin_cli.code_tools import build_code_tools
+from ronin_cli.config import RoninConfig
+from ronin_cli.main import _is_code_project
 
 
 # ---------- @-file mentions ----------
@@ -33,6 +33,28 @@ def test_expand_mentions_ignores_unknown_and_traversal(tmp_path: Path) -> None:
 
 def test_expand_mentions_noop_without_at(tmp_path: Path) -> None:
     assert expand_file_mentions("just a normal task", tmp_path) == "just a normal task"
+
+
+def test_expand_url_mention_offline_skips_fetch(tmp_path: Path) -> None:
+    # offline=True must never touch the network; the @url is left as-is.
+    out = expand_file_mentions("read @https://example.com/docs", tmp_path, offline=True)
+    assert out == "read @https://example.com/docs"
+
+
+def test_expand_url_mention_fetches(tmp_path: Path, monkeypatch) -> None:
+    # online: the page's text is inlined under "Referenced web pages:".
+    import ronin_cli.web_tools as web_tools
+    monkeypatch.setattr(web_tools, "fetch_url", lambda url, max_chars=4000: "PAGE_BODY_MARKER")
+    out = expand_file_mentions("summarize @https://example.com/x", tmp_path)
+    assert "Referenced web pages:" in out and "PAGE_BODY_MARKER" in out
+    assert "summarize @https://example.com/x" in out
+
+
+def test_expand_url_mention_skips_failed_fetch(tmp_path: Path, monkeypatch) -> None:
+    import ronin_cli.web_tools as web_tools
+    monkeypatch.setattr(web_tools, "fetch_url", lambda url, max_chars=4000: "ERROR: fetch failed")
+    out = expand_file_mentions("read @https://bad.example", tmp_path)
+    assert out == "read @https://bad.example"  # error pages are not inlined
 
 
 # ---------- glob + multi_edit tools ----------
@@ -72,7 +94,7 @@ def test_multi_edit_all_or_nothing(tmp_path: Path) -> None:
 
 
 def test_multi_edit_in_sensitive_set() -> None:
-    from ro_claude_kit_cli.code_tools import SENSITIVE_TOOLS
+    from ronin_cli.code_tools import SENSITIVE_TOOLS
     assert "multi_edit" in SENSITIVE_TOOLS
 
 
@@ -102,9 +124,9 @@ def test_session_round_trip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_read_only_excludes_write_tools(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
-    config = CSKConfig(provider="anthropic")
+    config = RoninConfig(provider="anthropic")
     provider = FakeProvider(responses=[LLMResponse(text="plan: do x", stop_reason="end_turn", usage={})])
-    with patch("ro_claude_kit_cli.code_mode.build_provider", return_value=provider):
+    with patch("ronin_cli.code_mode.build_provider", return_value=provider):
         run_code_agent(config, "plan something", root=tmp_path, console=None, yolo=True, read_only=True)
     names = set(provider.calls[0]["tool_names"])
     assert "write_file" not in names and "edit_file" not in names
@@ -114,9 +136,9 @@ def test_read_only_excludes_write_tools(tmp_path: Path, monkeypatch: pytest.Monk
 
 def test_normal_mode_includes_write_tools(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
-    config = CSKConfig(provider="anthropic")
+    config = RoninConfig(provider="anthropic")
     provider = FakeProvider(responses=[LLMResponse(text="done", stop_reason="end_turn", usage={})])
-    with patch("ro_claude_kit_cli.code_mode.build_provider", return_value=provider):
+    with patch("ronin_cli.code_mode.build_provider", return_value=provider):
         run_code_agent(config, "do something", root=tmp_path, console=None, yolo=True, read_only=False)
     names = set(provider.calls[0]["tool_names"])
     assert {"write_file", "edit_file", "multi_edit", "run_command"} <= names

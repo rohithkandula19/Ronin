@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from ro_claude_kit_mcp_servers import SlackReadOnlyTools, slack_tools
+from ronin_mcp_servers import SlackReadOnlyTools, slack_tools
 
 
 def _ok(payload: dict) -> MagicMock:

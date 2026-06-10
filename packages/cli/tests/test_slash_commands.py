@@ -5,8 +5,8 @@ from pathlib import Path
 
 from rich.console import Console
 
-from ro_claude_kit_cli.code_mode import handle_slash_command
-from ro_claude_kit_cli.config import CSKConfig
+from ronin_cli.code_mode import handle_slash_command
+from ronin_cli.config import RoninConfig
 
 
 def _console() -> tuple[Console, io.StringIO]:
@@ -17,7 +17,7 @@ def _console() -> tuple[Console, io.StringIO]:
 def _call(user: str, *, root: Path, undo_stack=None, transcript=None):
     console, buf = _console()
     action = handle_slash_command(
-        user, console=console, root=root, config=CSKConfig(provider="anthropic"),
+        user, console=console, root=root, config=RoninConfig(provider="anthropic"),
         undo_stack=undo_stack if undo_stack is not None else [],
         transcript=transcript if transcript is not None else [],
     )
@@ -105,10 +105,10 @@ def test_leading_absolute_path_is_not_a_command(tmp_path: Path) -> None:
 
 def test_login_sets_provider_key_and_model(tmp_path: Path, monkeypatch) -> None:
     from unittest.mock import patch
-    from ro_claude_kit_cli.code_mode import handle_slash_command
+    from ronin_cli.code_mode import handle_slash_command
     monkeypatch.chdir(tmp_path)
     console, buf = _console()
-    config = CSKConfig(provider="groq")
+    config = RoninConfig(provider="groq")
     with patch("rich.prompt.Prompt.ask", return_value="sk-or-v1-abc123"):
         action = handle_slash_command(
             "/login openrouter qwen/qwen3-coder:free", console=console, root=tmp_path,
@@ -122,10 +122,10 @@ def test_login_sets_provider_key_and_model(tmp_path: Path, monkeypatch) -> None:
 
 def test_login_rejects_double_paste(tmp_path: Path, monkeypatch) -> None:
     from unittest.mock import patch
-    from ro_claude_kit_cli.code_mode import handle_slash_command
+    from ronin_cli.code_mode import handle_slash_command
     monkeypatch.chdir(tmp_path)
     console, buf = _console()
-    config = CSKConfig(provider="groq")
+    config = RoninConfig(provider="groq")
     dbl = "sk-or-v1-aaaa" + "sk-or-v1-bbbb"  # two keys concatenated
     with patch("rich.prompt.Prompt.ask", return_value=dbl):
         handle_slash_command("/login openrouter", console=console, root=tmp_path,
@@ -136,10 +136,10 @@ def test_login_rejects_double_paste(tmp_path: Path, monkeypatch) -> None:
 
 def test_model_switch_in_place(tmp_path: Path, monkeypatch) -> None:
     """/model <name> changes the model without prompting for a key."""
-    from ro_claude_kit_cli.code_mode import handle_slash_command
+    from ronin_cli.code_mode import handle_slash_command
     monkeypatch.chdir(tmp_path)
     console, buf = _console()
-    config = CSKConfig(provider="cerebras")
+    config = RoninConfig(provider="cerebras")
     action = handle_slash_command("/model qwen-3-235b-a22b-instruct-2507",
                                   console=console, root=tmp_path, config=config,
                                   undo_stack=[], transcript=[])
@@ -149,14 +149,14 @@ def test_model_switch_in_place(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_summarize_result_counts() -> None:
-    from ro_claude_kit_cli.streaming import _summarize_result
+    from ronin_cli.streaming import _summarize_result
     assert _summarize_result('["a.py", "b.py", "c.py"]').startswith("3 items · ")
     assert _summarize_result("line1\nline2\nline3").startswith("3 lines · ")
     assert _summarize_result("just a short string") == "just a short string"
 
 
 def test_slash_completer_completes_commands() -> None:
-    from ro_claude_kit_cli.prompt_box import _slash_completer
+    from ronin_cli.prompt_box import _slash_completer
     assert _slash_completer("/he", 0) == "/help "
     ms = {_slash_completer("/m", i) for i in range(4)} - {None}
     assert {"/memory ", "/model ", "/models "} <= ms
@@ -166,7 +166,7 @@ def test_slash_completer_completes_commands() -> None:
 def test_slash_dropdown_rows_carry_name_and_description() -> None:
     """The prompt_toolkit dropdown source: each matching command yields
     (insert_text, start_position, 'name + description')."""
-    from ro_claude_kit_cli.prompt_box import _slash_completions
+    from ronin_cli.prompt_box import _slash_completions
 
     rows = _slash_completions("/mo")
     inserts = {ins for ins, _, _ in rows}
@@ -179,7 +179,7 @@ def test_slash_dropdown_rows_carry_name_and_description() -> None:
 
 
 def test_slash_dropdown_only_fires_on_slash_token() -> None:
-    from ro_claude_kit_cli.prompt_box import _slash_completions
+    from ronin_cli.prompt_box import _slash_completions
     assert _slash_completions("hello") == []        # not a slash word
     assert _slash_completions("") == []              # empty
     assert _slash_completions("/model gpt") == []    # already past the command token
@@ -194,7 +194,7 @@ def test_new_commands_appear_in_help(tmp_path: Path) -> None:
 
 
 def test_mcp_lists_configured_servers(tmp_path: Path) -> None:
-    from ro_claude_kit_cli import mcp_client
+    from ronin_cli import mcp_client
     mcp_client._ACTIVE.clear()  # isolate from servers other tests may have started
     p = mcp_client.mcp_config_path(tmp_path)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -206,7 +206,7 @@ def test_mcp_lists_configured_servers(tmp_path: Path) -> None:
 
 
 def test_mcp_when_none_configured(tmp_path: Path) -> None:
-    from ro_claude_kit_cli import mcp_client
+    from ronin_cli import mcp_client
     mcp_client._ACTIVE.clear()  # isolate from servers other tests may have started
     action, out = _call("/mcp", root=tmp_path)
     assert action == "handled"
@@ -237,14 +237,24 @@ def test_export_writes_markdown_file(tmp_path: Path) -> None:
     assert "make a plan" in body and "here is the plan" in body
 
 
-def test_resume_reloads_saved_session(tmp_path: Path) -> None:
-    from ro_claude_kit_cli.code_mode import save_session
+def test_resume_lists_then_reloads(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    from ronin_cli import sessions
+    sessions._session_id = None  # fresh session id for isolation
+    from ronin_cli.code_mode import save_session
     save_session(tmp_path, ["USER: earlier q", "ASSISTANT: earlier a"])
+
+    # /resume (no arg) LISTS past sessions — it does not auto-load
     transcript: list[str] = []
     action, out = _call("/resume", root=tmp_path, transcript=transcript)
     assert action == "handled"
-    assert transcript == ["USER: earlier q", "ASSISTANT: earlier a"]
-    assert "resumed" in out and "1 turn" in out
+    assert "earlier q" in out          # the session is listed (by its title)
+    assert transcript == []            # nothing loaded yet
+
+    # /resume 1 reloads the chosen session into the transcript
+    action, out = _call("/resume 1", root=tmp_path, transcript=transcript)
+    assert action == "handled"
+    assert len(transcript) == 2 and "earlier q" in transcript[0]
 
 
 def test_copy_uses_clipboard_helper(tmp_path: Path, monkeypatch) -> None:
@@ -254,7 +264,7 @@ def test_copy_uses_clipboard_helper(tmp_path: Path, monkeypatch) -> None:
         captured["text"] = text
         return True
 
-    monkeypatch.setattr("ro_claude_kit_cli.code_mode._copy_to_clipboard", fake_copy)
+    monkeypatch.setattr("ronin_cli.code_mode._copy_to_clipboard", fake_copy)
     transcript = ["USER: q", "ASSISTANT: the answer to copy"]
     action, out = _call("/copy", root=tmp_path, transcript=transcript)
     assert action == "handled"
@@ -276,7 +286,7 @@ def test_compact_replaces_transcript_with_summary(tmp_path: Path, monkeypatch) -
         def complete(self, **kw):  # noqa: ANN003
             return _Resp()
 
-    monkeypatch.setattr("ro_claude_kit_cli.runner.build_provider", lambda cfg: _Provider())
+    monkeypatch.setattr("ronin_cli.runner.build_provider", lambda cfg: _Provider())
     transcript = [f"USER: msg {i}" for i in range(10)] + ["ASSISTANT: long reply " * 50]
     action, out = _call("/compact", root=tmp_path, transcript=transcript)
     assert action == "handled"
@@ -286,7 +296,7 @@ def test_compact_replaces_transcript_with_summary(tmp_path: Path, monkeypatch) -
 
 
 def test_vim_toggles_keybindings(tmp_path: Path) -> None:
-    from ro_claude_kit_cli.prompt_box import set_vi_mode
+    from ronin_cli.prompt_box import set_vi_mode
     set_vi_mode(False)  # known starting state
     action, out = _call("/vim", root=tmp_path)
     assert action == "handled" and "on" in out
@@ -303,7 +313,7 @@ def test_doctor_and_config_show_provider_and_model(tmp_path: Path) -> None:
 
 
 def test_at_picker_lists_and_filters_files(tmp_path: Path) -> None:
-    from ro_claude_kit_cli.prompt_box import _at_completions
+    from ronin_cli.prompt_box import _at_completions
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "app.py").write_text("x")
     (tmp_path / "readme.md").write_text("x")
@@ -325,7 +335,7 @@ def test_at_picker_lists_and_filters_files(tmp_path: Path) -> None:
 
 
 def test_at_picker_descends_one_segment(tmp_path: Path) -> None:
-    from ro_claude_kit_cli.prompt_box import _at_completions
+    from ronin_cli.prompt_box import _at_completions
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "app.py").write_text("x")
     rows = _at_completions("@src/", root=tmp_path)
@@ -333,14 +343,14 @@ def test_at_picker_descends_one_segment(tmp_path: Path) -> None:
 
 
 def test_at_picker_stays_in_root_and_ignores_non_mentions(tmp_path: Path) -> None:
-    from ro_claude_kit_cli.prompt_box import _at_completions
+    from ronin_cli.prompt_box import _at_completions
     assert _at_completions("@../../", root=tmp_path) == []   # no escaping root
     assert _at_completions("plain text", root=tmp_path) == []
     assert _at_completions("", root=tmp_path) == []
 
 
 def test_bang_bash_mode_runs_and_records(tmp_path: Path) -> None:
-    from ro_claude_kit_cli.code_mode import _run_bash_inline
+    from ronin_cli.code_mode import _run_bash_inline
     console, buf = _console()
     transcript: list[str] = []
     _run_bash_inline("echo hello-from-bash", console=console, root=tmp_path,
@@ -352,7 +362,7 @@ def test_bang_bash_mode_runs_and_records(tmp_path: Path) -> None:
 
 
 def test_bang_bash_mode_reports_nonzero_exit(tmp_path: Path) -> None:
-    from ro_claude_kit_cli.code_mode import _run_bash_inline
+    from ronin_cli.code_mode import _run_bash_inline
     console, buf = _console()
     transcript: list[str] = []
     _run_bash_inline("exit 3", console=console, root=tmp_path, transcript=transcript)
@@ -361,7 +371,7 @@ def test_bang_bash_mode_reports_nonzero_exit(tmp_path: Path) -> None:
 
 
 def test_hash_quick_memory_appends_to_ronin_md(tmp_path: Path) -> None:
-    from ro_claude_kit_cli.project_memory import append_project_note
+    from ronin_cli.project_memory import append_project_note
     path, name = append_project_note(tmp_path, "always run ruff before commit")
     assert name == "RONIN.md" and path.is_file()
     text = path.read_text(encoding="utf-8")
@@ -375,7 +385,7 @@ def test_hash_quick_memory_appends_to_ronin_md(tmp_path: Path) -> None:
 
 
 def test_hash_quick_memory_prefers_existing_claude_md(tmp_path: Path) -> None:
-    from ro_claude_kit_cli.project_memory import append_project_note
+    from ronin_cli.project_memory import append_project_note
     (tmp_path / "CLAUDE.md").write_text("# existing\n", encoding="utf-8")
     _path, name = append_project_note(tmp_path, "note here")
     assert name == "CLAUDE.md"  # don't create a rival RONIN.md when CLAUDE.md exists
@@ -383,7 +393,7 @@ def test_hash_quick_memory_prefers_existing_claude_md(tmp_path: Path) -> None:
 
 
 def test_shift_tab_cycles_edit_mode() -> None:
-    from ro_claude_kit_cli.prompt_box import current_mode, cycle_mode, set_mode
+    from ronin_cli.prompt_box import current_mode, cycle_mode, set_mode
     set_mode("normal")
     assert current_mode() == "normal"
     assert cycle_mode() == "auto-accept"
@@ -402,7 +412,7 @@ def test_shift_tab_binding_cycles_mode_in_real_prompt() -> None:
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.output import DummyOutput
 
-    from ro_claude_kit_cli.prompt_box import current_mode, cycle_mode, set_mode
+    from ronin_cli.prompt_box import current_mode, cycle_mode, set_mode
 
     set_mode("normal")
     kb = KeyBindings()
@@ -428,7 +438,7 @@ def test_prompt_toolkit_prompt_runs_with_dropdown_completer() -> None:
     from prompt_toolkit.input.defaults import create_pipe_input
     from prompt_toolkit.output import DummyOutput
 
-    from ro_claude_kit_cli.prompt_box import _slash_completions
+    from ronin_cli.prompt_box import _slash_completions
 
     class _C(Completer):
         def get_completions(self, document, complete_event):
@@ -441,3 +451,23 @@ def test_prompt_toolkit_prompt_runs_with_dropdown_completer() -> None:
         got = session.prompt([("class:arrow", " > ")], completer=_C(),
                              complete_while_typing=True)
     assert got == "/he"
+
+
+def test_integrations_lists_servers_and_plugins(tmp_path: Path) -> None:
+    # set up one MCP server + one installed plugin, then /integrations shows both
+    from ronin_cli.mcp_client import add_mcp_server
+    from ronin_cli.plugin_library import LIBRARY
+    add_mcp_server("github", "npx", ["-y", "x"], tmp_path)
+    pdir = tmp_path / ".ronin" / "plugins"
+    pdir.mkdir(parents=True, exist_ok=True)
+    (pdir / "weather.py").write_text(LIBRARY["weather"].source, encoding="utf-8")
+    action, out = _call("/integrations", root=tmp_path)
+    assert action == "handled"
+    assert "github" in out and "weather" in out
+    assert "integrations" in out.lower()
+
+
+def test_integrations_empty_suggests_how_to_add(tmp_path: Path) -> None:
+    action, out = _call("/int", root=tmp_path)        # alias works
+    assert action == "handled"
+    assert "ronin mcp install" in out and "ronin plugin add" in out

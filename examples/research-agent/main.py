@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sys
 
-from ro_claude_kit_agent_patterns import ReActAgent, Tool
+from ronin_agent_patterns import ReActAgent, Tool
 
 KB = {
     "claude": "Claude is a family of LLMs by Anthropic.",

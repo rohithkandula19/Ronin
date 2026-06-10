@@ -1,89 +1,100 @@
-# csk — the agent CLI for startup ops
+# ronin — a masterless, terminal-native Claude agent
 
 ```bash
-$ pipx install ro-claude-kit-cli
-$ csk init --demo
-$ csk ask "how many active subscriptions do we have?"
-
-🤔 thinking…
-✅ You have 2 active subscriptions: Alice (Pro, $49/mo) and Bob (Starter, $29/mo).
-   Total MRR from active subs: $78/mo.
+pipx install ronin-cli
+ronin init --demo
+ronin chat
 ```
 
-`csk` is the Claude-powered CLI you point at your startup's data. Configure once, then ask questions in plain English. Under the hood: the `Ronin` agent loop, hardening, and read-only MCP servers for Stripe / Linear / Slack / Notion / Postgres.
+`ronin` is a **Claude-Code-style AI coding agent** — it reads, edits, and runs
+your code from the terminal — built on a **provider-agnostic agent framework**
+with first-class evals, memory, security hardening, and MCP tool integrations.
 
-## Why this exists
-
-Founders spend hours each week clicking through Stripe dashboards, Linear boards, Slack channels, and Postgres queries to answer questions they could just *ask*:
-
-- "Which customers churned this month and what was their last support thread?"
-- "Show me all open ENG issues over priority 2 that mention auth."
-- "How many active Pro subscriptions, total MRR, and YoY growth?"
-
-`csk` is the answer. One CLI, one config, ask anything.
+Plug in Claude for top quality, or run it **free** on Gemini, Cerebras, Groq,
+or Ollama.
 
 ## Install
 
 ```bash
-pipx install ro-claude-kit-cli                    # recommended (isolated venv)
+pipx install ronin-cli            # recommended (isolated venv)
 # or
-pip install ro-claude-kit-cli
+pip install ronin-cli
 ```
 
-For Postgres support: `pipx install 'ro-claude-kit-cli[postgres]'`.
+`pipx install 'ronin-cli[postgres]'` adds the read-only Postgres MCP server.
 
-## Quickstart (no real credentials needed)
+## What you get
+
+- **Claude-Code-style coding agent** — `ronin code` opens a REPL where Claude
+  reads, edits, and runs your code under a sandbox. Parallel tool calls,
+  prompt caching, `/context` fullness bar, in-session `/cost` and `/router`,
+  per-file syntax-highlighted diffs, checkpoint & rewind, vision-in-the-loop.
+- **Provider-agnostic** — Claude, Gemini, Cerebras, Groq, Ollama, OpenRouter,
+  OpenAI. Switch with `/model`, or let the **Self-tuning Router** pick the
+  cheapest blade that reliably wins on your repo.
+- **200+ built-in plugins** — currency, crypto, weather, GitHub, recipes,
+  NASA, Luhn, WCAG contrast, … plus a `ronin plugin from-api` generator that
+  turns ANY REST endpoint into an agent tool.
+- **MCP catalog** — 24 first-party servers (Stripe, Linear, Slack, Notion,
+  Postgres, GitHub, Playwright, …) — `ronin mcp catalog` then `install`.
+  Supports both stdio and remote (HTTP/SSE) transports.
+- **Nightshift autonomous mode** — works your backlog into reviewable patches
+  overnight (worktree-isolated, idempotent, cron-schedulable, opens real PRs).
+- **20+ offline dev/API commands** — `hash`, `jwt`, `uuid`, `subnet`, `cron`,
+  `chmod`, `json` (jq-lite), `passphrase`, `curl2code`, `redact`, `mock`,
+  `tree`, `deadcode`, `complexity`, `smell`, `api`, `changelog`, … all stdlib,
+  no network.
+- **Trust gates** — Sentinel mode (abstain over bluff), secret-scan write
+  guard, `.roninignore`, `--budget` spend cap.
+
+## Quickstart (no credentials needed)
 
 ```bash
-csk init --demo
-csk ask "how many active subscriptions do we have?"
-csk ask "what ENG issues are in progress and their priorities?"
-csk chat
+ronin init --demo
+ronin ask "how many active subscriptions do we have?"
+ronin chat
+ronin code      # the Claude-Code-style coding agent
 ```
 
-Demo mode ships with a small set of fake customers, subscriptions, charges, and Linear issues so you can play with the CLI before connecting real services.
+Demo mode answers from in-process fixtures — calls don't leave your machine.
 
-## Real config
+## Bring your own keys
 
 ```bash
-csk init   # interactive — prompts for each service's credentials
+ronin init           # interactive — prompts for each provider's credentials
+ronin login          # set/refresh provider keys later
 ```
 
-Or write `.csk/config.toml` directly:
+Or write `~/.ronin/config.toml` directly:
 
 ```toml
 anthropic_api_key = "sk-ant-..."
-stripe_api_key = "rk_live_..."          # use a Restricted Key
-linear_api_key = "lin_api_..."
-slack_bot_token = "xoxb-..."
-notion_token = "secret_..."
-database_url = "postgres://readonly_user:...@host:5432/db"
 model = "claude-sonnet-4-6"
 ```
 
-`.gitignore` `.csk/` — the file is plaintext.
+`~/.ronin/` is plaintext — keep it out of version control.
 
-## Commands
+## Highlights
 
-| Command | What it does |
-|---|---|
-| `csk init [--demo]` | Create a config (interactive or demo) |
-| `csk ask "<question>"` | One-shot — Claude runs against your tools, prints answer + trace |
-| `csk chat` | Multi-turn REPL with short-term memory |
-| `csk tools` | List the tools registered for the current config |
-| `csk doctor` | Health check: config, auth, services |
-| `csk version` | Print the version |
+```bash
+ronin code                       # Claude-Code-style coding REPL
+ronin commit                     # Conventional Commit message from your diff
+ronin pr                         # open a PR with a title + body from your diff
+ronin nightshift                 # autonomous teammate works your backlog
+ronin mcp catalog                # browse 24 popular MCP integrations
+ronin plugin library             # 200+ ready-to-add plugins
+ronin plugin from-api <url>      # turn any REST endpoint into an agent tool
+ronin scan                       # block secrets at commit time
+```
 
 ## Safety
 
-Every input is run through the prompt-injection scanner from `ro-claude-kit-hardening` before reaching the agent. Every tool is read-only by design — there is no way to make `csk` mutate your data, even if Claude tries.
+`ronin code` writes only inside the project. The MCP servers shipped with
+ronin are read-only by default; write paths require explicit opt-in.
+Prompt-injection scanning is on by default for tool outputs.
 
-To add write paths: don't. If you must, fork and wrap them in `ApprovalGate` from the hardening package.
+## Project
 
-## Tests
-
-```bash
-uv run pytest packages/cli -q
-```
-
-No real credentials needed — Anthropic and HTTP clients are mocked.
+- Source, issues, and full docs: <https://github.com/rohithkandula19/Ronin>
+- Changelog: <https://github.com/rohithkandula19/Ronin/blob/main/CHANGELOG.md>
+- License: MIT

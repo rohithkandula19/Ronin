@@ -8,11 +8,11 @@ import pytest
 from rich.console import Console
 from typer.testing import CliRunner
 
-from ro_claude_kit_agent_patterns import FakeProvider, LLMResponse
-from ro_claude_kit_cli.code_mode import run_code_agent
-from ro_claude_kit_cli.config import CSKConfig
-from ro_claude_kit_cli.main import app
-from ro_claude_kit_cli.project_memory import (
+from ronin_agent_patterns import FakeProvider, LLMResponse
+from ronin_cli.code_mode import run_code_agent
+from ronin_cli.config import RoninConfig
+from ronin_cli.main import app
+from ronin_cli.project_memory import (
     load_project_memory,
     memory_system_block,
     write_memory_template,
@@ -71,12 +71,12 @@ def _simple_provider() -> FakeProvider:
 def test_code_agent_injects_memory_into_system(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
     (tmp_path / "RONIN.md").write_text("NEVER use print(); use logging.", encoding="utf-8")
-    config = CSKConfig(provider="anthropic")
+    config = RoninConfig(provider="anthropic")
     buf = io.StringIO()
     console = Console(file=buf, force_terminal=False, width=100)
     provider = _simple_provider()
 
-    with patch("ro_claude_kit_cli.code_mode.build_provider", return_value=provider):
+    with patch("ronin_cli.code_mode.build_provider", return_value=provider):
         result = run_code_agent(config, "say ok", root=tmp_path, console=console, yolo=True)
 
     assert result.success

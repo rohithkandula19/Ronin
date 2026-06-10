@@ -1,11 +1,11 @@
-# ro-claude-kit-eval-suite
+# ronin-eval-suite
 
 LLM-as-a-judge eval suite for Claude agents. Golden datasets, configurable rubrics, drift detection, self-contained HTML reports, CLI runner.
 
 ## Quickstart
 
 ```python
-from ro_claude_kit_eval_suite import EvalSuite, Rubric, GoldenDataset, render_html_report
+from ronin_eval_suite import EvalSuite, Rubric, GoldenDataset, render_html_report
 
 dataset = GoldenDataset.from_jsonl("./golden.jsonl")
 

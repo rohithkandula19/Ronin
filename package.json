@@ -1,5 +1,5 @@
 {
-  "name": "ro-claude-kit",
+  "name": "ronin",
   "version": "0.0.1",
   "private": true,
   "description": "Opinionated reference implementation for shipping production Claude agents in a weekend.",

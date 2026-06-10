@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from ro_claude_kit_cli.mcp_client import MCPClient, add_mcp_server, build_mcp_tools
+from ronin_cli.mcp_client import MCPClient, add_mcp_server, build_mcp_tools
 
 # A minimal MCP server (JSON-RPC over stdio) used as a test fixture.
 ECHO_SERVER = r'''
@@ -59,7 +59,7 @@ def test_build_mcp_tools_from_config(tmp_path: Path) -> None:
 
 
 def test_add_then_remove_server(tmp_path: Path) -> None:
-    from ro_claude_kit_cli.mcp_client import add_mcp_server, load_mcp_servers, remove_mcp_server
+    from ronin_cli.mcp_client import add_mcp_server, load_mcp_servers, remove_mcp_server
     add_mcp_server("fs", "npx", ["-y", "x", "."], root=tmp_path)
     assert "fs" in load_mcp_servers(tmp_path)
     assert remove_mcp_server("fs", tmp_path) is True

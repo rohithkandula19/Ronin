@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from ro_claude_kit_memory import UserPreferenceMemory
+from ronin_memory import UserPreferenceMemory
 
 
 def _resp(text: str) -> SimpleNamespace:
@@ -31,7 +31,7 @@ def test_extract_from_message_stores_facts() -> None:
         '{"key": "timezone", "value": "America/Los_Angeles"}]</facts>'
     )
     mem = UserPreferenceMemory()
-    with patch("ro_claude_kit_memory.preferences.anthropic.Anthropic", return_value=fake_client):
+    with patch("ronin_memory.preferences.anthropic.Anthropic", return_value=fake_client):
         stored = mem.extract_from_message(
             "alice",
             "I prefer concise responses and I'm in LA.",
@@ -44,7 +44,7 @@ def test_extract_handles_garbage() -> None:
     fake_client = MagicMock()
     fake_client.messages.create.return_value = _resp("not json at all")
     mem = UserPreferenceMemory()
-    with patch("ro_claude_kit_memory.preferences.anthropic.Anthropic", return_value=fake_client):
+    with patch("ronin_memory.preferences.anthropic.Anthropic", return_value=fake_client):
         stored = mem.extract_from_message("alice", "hello")
     assert stored == []
     assert mem.all("alice") == {}
@@ -57,6 +57,6 @@ def test_extract_filters_invalid_items() -> None:
         '{"value": "missing-key"}, "string-not-object"]</facts>'
     )
     mem = UserPreferenceMemory()
-    with patch("ro_claude_kit_memory.preferences.anthropic.Anthropic", return_value=fake_client):
+    with patch("ronin_memory.preferences.anthropic.Anthropic", return_value=fake_client):
         stored = mem.extract_from_message("alice", "irrelevant")
     assert stored == [("language", "Python")]

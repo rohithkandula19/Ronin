@@ -7,10 +7,10 @@ from unittest.mock import patch
 import pytest
 from rich.console import Console
 
-from ro_claude_kit_agent_patterns import FakeProvider, LLMResponse, ToolCall
-from ro_claude_kit_cli.code_mode import run_code_agent
-from ro_claude_kit_cli.config import CSKConfig
-from ro_claude_kit_cli.todo import TodoStore, build_todo_tool, render_todos
+from ronin_agent_patterns import FakeProvider, LLMResponse, ToolCall
+from ronin_cli.code_mode import run_code_agent
+from ronin_cli.config import RoninConfig
+from ronin_cli.todo import TodoStore, build_todo_tool, render_todos
 
 
 def test_store_replace_cleans_and_validates() -> None:
@@ -66,11 +66,11 @@ def _planning_provider() -> FakeProvider:
 
 def test_code_agent_renders_plan_checklist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
-    config = CSKConfig(provider="anthropic")
+    config = RoninConfig(provider="anthropic")
     buf = io.StringIO()
     console = Console(file=buf, force_terminal=False, width=100)
 
-    with patch("ro_claude_kit_cli.code_mode.build_provider", return_value=_planning_provider()):
+    with patch("ronin_cli.code_mode.build_provider", return_value=_planning_provider()):
         result = run_code_agent(config, "fix the bug", root=tmp_path, console=console, yolo=True)
 
     assert result.success

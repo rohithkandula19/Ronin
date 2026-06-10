@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from ro_claude_kit_cli.config import CSKConfig
-from ro_claude_kit_cli.demo_brain import demo_answer
-from ro_claude_kit_cli.tools import build_tools
+from ronin_cli.config import RoninConfig
+from ronin_cli.demo_brain import demo_answer
+from ronin_cli.tools import build_tools
 
 
 def _demo_tools():
-    return build_tools(CSKConfig(demo_mode=True))
+    return build_tools(RoninConfig(demo_mode=True))
 
 
 def test_subscriptions_question() -> None:
@@ -57,10 +57,10 @@ def test_fallback_for_unknown_question() -> None:
 
 def test_no_real_key_routes_to_demo_brain(monkeypatch) -> None:
     """End-to-end check via run_ask: demo mode + no key → demo_brain answer, no anthropic call."""
-    from ro_claude_kit_cli.runner import run_ask
+    from ronin_cli.runner import run_ask
 
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    config = CSKConfig(demo_mode=True)
+    config = RoninConfig(demo_mode=True)
     result = run_ask(config, "how many active subscriptions?", console=None)
 
     assert result.success

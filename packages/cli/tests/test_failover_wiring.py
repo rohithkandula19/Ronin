@@ -1,25 +1,25 @@
-"""Tests that CSKConfig.failover composes into a FailoverProvider via build_provider,
+"""Tests that RoninConfig.failover composes into a FailoverProvider via build_provider,
 and that per-spec configs resolve the right provider/model/key."""
 from __future__ import annotations
 
-from ro_claude_kit_agent_patterns import (
+from ronin_agent_patterns import (
     AnthropicProvider,
     FailoverProvider,
     OpenAICompatProvider,
 )
 
-from ro_claude_kit_cli.config import CSKConfig
-from ro_claude_kit_cli.runner import build_provider, config_for_spec
+from ronin_cli.config import RoninConfig
+from ronin_cli.runner import build_provider, config_for_spec
 
 
 def test_no_failover_returns_plain_provider() -> None:
-    cfg = CSKConfig(provider="anthropic", anthropic_api_key="sk-x")
+    cfg = RoninConfig(provider="anthropic", anthropic_api_key="sk-x")
     prov = build_provider(cfg)
     assert isinstance(prov, AnthropicProvider)
 
 
 def test_failover_composes_chain_in_order() -> None:
-    cfg = CSKConfig(
+    cfg = RoninConfig(
         provider="anthropic", anthropic_api_key="sk-x",
         failover=[
             {"provider": "gemini", "api_key": "g-key"},
@@ -39,7 +39,7 @@ def test_failover_composes_chain_in_order() -> None:
 
 
 def test_config_for_spec_routes_key_to_right_slot() -> None:
-    base = CSKConfig(provider="anthropic", anthropic_api_key="primary-key")
+    base = RoninConfig(provider="anthropic", anthropic_api_key="primary-key")
 
     anthropic_spec = config_for_spec(base, {"provider": "anthropic", "api_key": "k1"})
     assert anthropic_spec.anthropic_api_key == "k1"
@@ -53,6 +53,30 @@ def test_config_for_spec_routes_key_to_right_slot() -> None:
 
 
 def test_config_for_spec_never_recurses_failover() -> None:
-    base = CSKConfig(provider="anthropic", failover=[{"provider": "ollama"}])
+    base = RoninConfig(provider="anthropic", failover=[{"provider": "ollama"}])
     sub = config_for_spec(base, {"provider": "ollama"})
     assert sub.failover == []
+
+
+def test_attach_retry_notifier_sets_callback() -> None:
+    import os
+
+    from rich.console import Console
+
+    from ronin_agent_patterns import FailoverProvider, OpenAICompatProvider
+
+    from ronin_cli.runner import attach_retry_notifier
+
+    console = Console(file=open(os.devnull, "w"))
+
+    plain = OpenAICompatProvider(model="m", api_key="k")
+    attach_retry_notifier(plain, console)
+    assert plain.on_retry is not None
+
+    # failover: each inner provider that retries gets the notifier
+    fo = FailoverProvider(providers=[
+        OpenAICompatProvider(model="a", api_key="k"),
+        OpenAICompatProvider(model="b", api_key="k"),
+    ])
+    attach_retry_notifier(fo, console)
+    assert all(p.on_retry is not None for p in fo.providers)

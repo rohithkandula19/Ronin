@@ -5,7 +5,7 @@ import importlib.util
 import sys
 from pathlib import Path
 
-from ro_claude_kit_agent_patterns import FakeProvider, LLMResponse, ToolCall
+from ronin_agent_patterns import FakeProvider, LLMResponse, ToolCall
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -97,7 +97,7 @@ def test_customer_support_blocks_injection(monkeypatch) -> None:
 
 def test_golden_dataset_is_valid_jsonl() -> None:
     """Verify every line of golden.jsonl parses as a valid EvalCase."""
-    from ro_claude_kit_eval_suite import GoldenDataset
+    from ronin_eval_suite import GoldenDataset
     path = REPO_ROOT / "examples" / "customer-support" / "golden.jsonl"
     dataset = GoldenDataset.from_jsonl(path)
     assert len(dataset) >= 20

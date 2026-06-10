@@ -5,22 +5,22 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from ro_claude_kit_cli.briefing import compute_briefing_data
-from ro_claude_kit_cli.briefing_template import (
+from ronin_cli.briefing import compute_briefing_data
+from ronin_cli.briefing_template import (
     BriefingTemplate,
     SECTIONS,
     render_with_template,
 )
-from ro_claude_kit_cli.config import CSKConfig
-from ro_claude_kit_cli.main import app
-from ro_claude_kit_cli.tools import build_tools
+from ronin_cli.config import RoninConfig
+from ronin_cli.main import app
+from ronin_cli.tools import build_tools
 
 
 runner = CliRunner()
 
 
 def _demo_data():
-    return compute_briefing_data(build_tools(CSKConfig(demo_mode=True)))
+    return compute_briefing_data(build_tools(RoninConfig(demo_mode=True)))
 
 
 def test_default_template_has_all_four_sections() -> None:
@@ -104,12 +104,12 @@ def test_cli_uses_custom_template(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 
 
 def test_cli_auto_loads_project_template(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """If .csk/briefing-template.toml exists, the CLI uses it without --template."""
+    """If .ronin/briefing-template.toml exists, the CLI uses it without --template."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     runner.invoke(app, ["init", "--demo", "-y"])
 
-    (tmp_path / ".csk" / "briefing-template.toml").write_text(
+    (tmp_path / ".ronin" / "briefing-template.toml").write_text(
         'title = "Auto-loaded — {{date}}"\nsections = ["revenue"]\n',
         encoding="utf-8",
     )

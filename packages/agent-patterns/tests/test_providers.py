@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 
-from ro_claude_kit_agent_patterns import (
+from ronin_agent_patterns import (
     AnthropicProvider,
     Message,
     OllamaProvider,
@@ -45,7 +45,7 @@ def test_anthropic_provider_text_response() -> None:
     fake_client = MagicMock()
     fake_client.messages.create.return_value = _anthropic_response("hello")
     provider = AnthropicProvider(api_key="sk-test")
-    with patch("ro_claude_kit_agent_patterns.providers.anthropic_provider.anthropic.Anthropic", return_value=fake_client):
+    with patch("ronin_agent_patterns.providers.anthropic_provider.anthropic.Anthropic", return_value=fake_client):
         response = provider.complete(
             system="be nice",
             messages=[Message(role="user", content="hi")],
@@ -64,7 +64,7 @@ def test_anthropic_provider_tool_call() -> None:
         tool_use={"id": "t1", "name": "calc", "input": {"x": 1}},
     )
     provider = AnthropicProvider(api_key="sk-test")
-    with patch("ro_claude_kit_agent_patterns.providers.anthropic_provider.anthropic.Anthropic", return_value=fake_client):
+    with patch("ronin_agent_patterns.providers.anthropic_provider.anthropic.Anthropic", return_value=fake_client):
         response = provider.complete(system="x", messages=[Message(role="user", content="?")], tools=[])
 
     assert response.tool_calls[0].name == "calc"
@@ -86,7 +86,7 @@ def test_anthropic_provider_batches_consecutive_tool_messages() -> None:
         Message(role="tool", tool_call_id="t1", content="r1"),
         Message(role="tool", tool_call_id="t2", content="r2"),
     ]
-    with patch("ro_claude_kit_agent_patterns.providers.anthropic_provider.anthropic.Anthropic", return_value=fake_client):
+    with patch("ronin_agent_patterns.providers.anthropic_provider.anthropic.Anthropic", return_value=fake_client):
         provider.complete(system="x", messages=messages, tools=[])
 
     sent = fake_client.messages.create.call_args.kwargs["messages"]
@@ -105,7 +105,7 @@ def test_anthropic_provider_sets_cache_breakpoints() -> None:
     fake_client = MagicMock()
     fake_client.messages.create.return_value = _anthropic_response("ok")
     provider = AnthropicProvider(api_key="sk-test")
-    with patch("ro_claude_kit_agent_patterns.providers.anthropic_provider.anthropic.Anthropic", return_value=fake_client):
+    with patch("ronin_agent_patterns.providers.anthropic_provider.anthropic.Anthropic", return_value=fake_client):
         provider.complete(system="be nice", messages=[Message(role="user", content="hi")], tools=[_cache_tool()])
 
     kwargs = fake_client.messages.create.call_args.kwargs
@@ -122,7 +122,7 @@ def test_anthropic_provider_caching_can_be_disabled() -> None:
     fake_client = MagicMock()
     fake_client.messages.create.return_value = _anthropic_response("ok")
     provider = AnthropicProvider(api_key="sk-test", cache_prompt=False)
-    with patch("ro_claude_kit_agent_patterns.providers.anthropic_provider.anthropic.Anthropic", return_value=fake_client):
+    with patch("ronin_agent_patterns.providers.anthropic_provider.anthropic.Anthropic", return_value=fake_client):
         provider.complete(system="be nice", messages=[Message(role="user", content="hi")], tools=[_cache_tool()])
 
     kwargs = fake_client.messages.create.call_args.kwargs
@@ -141,7 +141,7 @@ def test_anthropic_provider_surfaces_cache_usage() -> None:
         ),
     )
     provider = AnthropicProvider(api_key="sk-test")
-    with patch("ro_claude_kit_agent_patterns.providers.anthropic_provider.anthropic.Anthropic", return_value=fake_client):
+    with patch("ronin_agent_patterns.providers.anthropic_provider.anthropic.Anthropic", return_value=fake_client):
         resp = provider.complete(system="s", messages=[Message(role="user", content="hi")], tools=[])
 
     assert resp.usage["cache_read_input_tokens"] == 1200
@@ -177,7 +177,7 @@ def test_openai_compat_text() -> None:
     fake_client.__exit__.return_value = False
     fake_client.post.return_value = response
 
-    with patch("ro_claude_kit_agent_patterns.providers.openai_compat.httpx.Client", return_value=fake_client):
+    with patch("ronin_agent_patterns.providers.openai_compat.httpx.Client", return_value=fake_client):
         provider = OpenAICompatProvider(model="gpt-4o-mini", api_key="sk-x")
         result = provider.complete(system="s", messages=[Message(role="user", content="hi")], tools=[])
 
@@ -204,7 +204,7 @@ def test_openai_compat_tool_call_parses_json_arguments() -> None:
     fake_client.__exit__.return_value = False
     fake_client.post.return_value = response
 
-    with patch("ro_claude_kit_agent_patterns.providers.openai_compat.httpx.Client", return_value=fake_client):
+    with patch("ronin_agent_patterns.providers.openai_compat.httpx.Client", return_value=fake_client):
         provider = OpenAICompatProvider(model="gpt-4o-mini", api_key="sk-x")
         result = provider.complete(system="s", messages=[Message(role="user", content="?")], tools=[])
 
@@ -226,7 +226,7 @@ def test_openai_compat_tools_serialized_correctly() -> None:
         input_schema={"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
         handler=lambda query: query,
     )
-    with patch("ro_claude_kit_agent_patterns.providers.openai_compat.httpx.Client", return_value=fake_client):
+    with patch("ronin_agent_patterns.providers.openai_compat.httpx.Client", return_value=fake_client):
         provider = OpenAICompatProvider(model="gpt-4o-mini", api_key="sk-x")
         provider.complete(system="s", messages=[Message(role="user", content="?")], tools=[tool])
 
@@ -253,7 +253,7 @@ def test_openai_compat_translates_tool_messages() -> None:
         Message(role="assistant", content="thinking", tool_calls=[ToolCall(id="t1", name="search", arguments={"q": "x"})]),
         Message(role="tool", tool_call_id="t1", content="result", name="search"),
     ]
-    with patch("ro_claude_kit_agent_patterns.providers.openai_compat.httpx.Client", return_value=fake_client):
+    with patch("ronin_agent_patterns.providers.openai_compat.httpx.Client", return_value=fake_client):
         provider = OpenAICompatProvider(model="gpt-4o-mini", api_key="sk-x")
         provider.complete(system="s", messages=messages, tools=[])
 
@@ -266,7 +266,7 @@ def test_openai_compat_translates_tool_messages() -> None:
 
 def test_openai_compat_retries_on_429(monkeypatch) -> None:
     """A transient 429 is retried (with backoff) instead of failing the turn."""
-    import ro_claude_kit_agent_patterns.providers.openai_compat as oc
+    import ronin_agent_patterns.providers.openai_compat as oc
     monkeypatch.setattr(oc.time, "sleep", lambda *_a, **_k: None)  # no real waiting
 
     r429 = MagicMock(spec=httpx.Response)
@@ -279,7 +279,7 @@ def test_openai_compat_retries_on_429(monkeypatch) -> None:
     fake_client.__exit__.return_value = False
     fake_client.post.side_effect = [r429, r429, ok]  # two limits, then success
 
-    with patch("ro_claude_kit_agent_patterns.providers.openai_compat.httpx.Client", return_value=fake_client):
+    with patch("ronin_agent_patterns.providers.openai_compat.httpx.Client", return_value=fake_client):
         provider = OpenAICompatProvider(model="m", api_key="sk-x")
         result = provider.complete(system="s", messages=[Message(role="user", content="hi")], tools=[])
 
@@ -287,10 +287,41 @@ def test_openai_compat_retries_on_429(monkeypatch) -> None:
     assert fake_client.post.call_count == 3
 
 
+def test_openai_compat_on_retry_callback_fires(monkeypatch) -> None:
+    """A 429 fires the on_retry callback (so the CLI can show 'retrying in Ns')
+    then the call succeeds on the next attempt."""
+    import ronin_agent_patterns.providers.openai_compat as oc
+    monkeypatch.setattr(oc.time, "sleep", lambda *_a, **_k: None)
+
+    r429 = MagicMock(spec=httpx.Response)
+    r429.status_code = 429
+    r429.headers = {"retry-after": "7"}
+    ok = _openai_response(content="recovered")
+
+    fake_client = MagicMock()
+    fake_client.__enter__.return_value = fake_client
+    fake_client.__exit__.return_value = False
+    fake_client.post.side_effect = [r429, ok]
+
+    calls: list = []
+    with patch("ronin_agent_patterns.providers.openai_compat.httpx.Client", return_value=fake_client):
+        provider = OpenAICompatProvider(
+            model="m", api_key="sk-x",
+            on_retry=lambda attempt, wait, status: calls.append((attempt, wait, status)),
+        )
+        result = provider.complete(system="s", messages=[Message(role="user", content="hi")], tools=[])
+
+    assert result.text == "recovered"
+    assert len(calls) == 1
+    assert calls[0][0] == 1            # attempt number
+    assert calls[0][1] == 7.0          # honoured Retry-After
+    assert calls[0][2] == 429          # status
+
+
 def test_openai_compat_roundtrips_tool_call_provider_meta() -> None:
     """Gemini-style extra_content (thought_signature) is captured on parse and
     replayed when the assistant tool-call is serialized back."""
-    from ro_claude_kit_agent_patterns.providers.openai_compat import _to_openai_messages
+    from ronin_agent_patterns.providers.openai_compat import _to_openai_messages
 
     sig = {"google": {"thought_signature": "SIG"}}
     resp = _openai_response(content="", tool_calls=[{
@@ -302,7 +333,7 @@ def test_openai_compat_roundtrips_tool_call_provider_meta() -> None:
     fake_client.__enter__.return_value = fake_client
     fake_client.__exit__.return_value = False
     fake_client.post.return_value = resp
-    with patch("ro_claude_kit_agent_patterns.providers.openai_compat.httpx.Client", return_value=fake_client):
+    with patch("ronin_agent_patterns.providers.openai_compat.httpx.Client", return_value=fake_client):
         prov = OpenAICompatProvider(model="m", api_key="k")
         r = prov.complete(system="s", messages=[Message(role="user", content="hi")], tools=[])
 

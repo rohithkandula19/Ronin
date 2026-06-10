@@ -7,8 +7,8 @@ from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
-from ro_claude_kit_cli import media
-from ro_claude_kit_cli.main import app
+from ronin_cli import media
+from ronin_cli.main import app
 
 runner = CliRunner()
 
@@ -64,7 +64,7 @@ def test_generate_video_ffmpeg_failure_surfaces(tmp_path: Path) -> None:
 
 
 def test_cli_video_without_ffmpeg_exits_2() -> None:
-    with patch("ro_claude_kit_cli.media.ffmpeg_available", return_value=False):
+    with patch("ronin_cli.media.ffmpeg_available", return_value=False):
         r = runner.invoke(app, ["video", "a panda", "--no-show"])
     assert r.exit_code == 2
     assert "ffmpeg" in r.stdout
@@ -74,8 +74,11 @@ def test_cli_video_happy_path(tmp_path: Path) -> None:
     out = tmp_path / "v.mp4"
     fake = media.VideoResult(path=out, poster=None, frames=8, fps=8)
     out.write_bytes(b"mp4")
-    with patch("ro_claude_kit_cli.media.ffmpeg_available", return_value=True), \
-         patch("ro_claude_kit_cli.media.generate_video", return_value=fake):
+    with patch("ronin_cli.media.ffmpeg_available", return_value=True), \
+         patch("ronin_cli.media.generate_video", return_value=fake):
         r = runner.invoke(app, ["video", "a panda", "--no-show", "--out", str(out)])
     assert r.exit_code == 0, r.stdout
-    assert "saved" in r.stdout and "8 frames" in r.stdout
+    # rich wraps text on narrow CI terminals — collapse whitespace so the
+    # substring check survives "8 \nframes" wrapping (gh actions = 80 cols).
+    flat = " ".join(r.stdout.split())
+    assert "saved" in flat and "8 frames" in flat

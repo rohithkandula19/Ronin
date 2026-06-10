@@ -13,8 +13,8 @@ from io import StringIO
 
 from rich.console import Console
 
-from ro_claude_kit_cli import panda_art
-from ro_claude_kit_cli.panda_art import (
+from ronin_cli import panda_art
+from ronin_cli.panda_art import (
     PANDA,
     PANDA_ACTIVITIES,
     PANDA_FRAMES,

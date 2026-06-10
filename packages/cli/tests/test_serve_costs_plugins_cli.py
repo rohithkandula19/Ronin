@@ -6,7 +6,7 @@ from textwrap import dedent
 import pytest
 from typer.testing import CliRunner
 
-from ro_claude_kit_cli.main import app
+from ronin_cli.main import app
 
 
 runner = CliRunner()
@@ -21,10 +21,10 @@ def test_plugins_no_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
 
 def test_plugins_lists_loaded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
-    plugin_dir = tmp_path / ".csk" / "plugins"
+    plugin_dir = tmp_path / ".ronin" / "plugins"
     plugin_dir.mkdir(parents=True)
     (plugin_dir / "echo.py").write_text(dedent("""
-        from ro_claude_kit_agent_patterns import Tool
+        from ronin_agent_patterns import Tool
         def handler(text: str) -> str: return text
         def register_tools():
             return [Tool(name="echo", description="echo back",
@@ -46,7 +46,7 @@ def test_costs_no_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_costs_shows_summary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
-    from ro_claude_kit_cli.usage import record_usage
+    from ronin_cli.usage import record_usage
 
     record_usage("ask", "anthropic", "claude-sonnet-4-6", 1000, 500)
     record_usage("ask", "anthropic", "claude-haiku-4-5", 5000, 2000)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ro_claude_kit_eval_suite import RunReport, Rubric, detect_drift
+from ronin_eval_suite import RunReport, Rubric, detect_drift
 
 
 def _report(label: str, summary: dict[str, float]) -> RunReport:

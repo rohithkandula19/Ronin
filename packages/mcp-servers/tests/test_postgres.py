@@ -4,7 +4,7 @@ import sqlite3
 
 import pytest
 
-from ro_claude_kit_mcp_servers import (
+from ronin_mcp_servers import (
     DangerousSQLError,
     PostgresQueryTool,
     is_readonly_sql,

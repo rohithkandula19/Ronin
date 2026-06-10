@@ -18,7 +18,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from ro_claude_kit_agent_patterns import (
+from ronin_agent_patterns import (
     PlannerExecutorAgent,
     ReActAgent,
     ReflexionAgent,
@@ -26,7 +26,7 @@ from ro_claude_kit_agent_patterns import (
     SupervisorAgent,
     Tool,
 )
-from ro_claude_kit_hardening import InjectionScanner
+from ronin_hardening import InjectionScanner
 
 app = FastAPI(title="AgentLab")
 
@@ -66,7 +66,7 @@ def _kb_search_tool() -> Tool:
         "claude": "Claude is a family of LLMs by Anthropic.",
         "react": "ReAct combines reasoning and acting via tool use in a loop.",
         "reflexion": "Reflexion adds a critic that triggers retries with feedback.",
-        "ro-claude-kit": "Ronin is an opinionated reference implementation for Claude agents.",
+        "ronin": "Ronin is an opinionated reference implementation for Claude agents.",
     }
 
     def search(query: str) -> str:

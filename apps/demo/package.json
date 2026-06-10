@@ -1,5 +1,5 @@
 {
-  "name": "@ro-claude-kit/demo",
+  "name": "@ronin/demo",
   "version": "0.0.1",
   "private": true,
   "description": "AgentLab — interactive playground showing the kit in action.",

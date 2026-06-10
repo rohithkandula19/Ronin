@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from ro_claude_kit_eval_suite import EvalCase, GoldenDataset
+from ronin_eval_suite import EvalCase, GoldenDataset
 
 
 def test_roundtrip(tmp_path: Path) -> None:

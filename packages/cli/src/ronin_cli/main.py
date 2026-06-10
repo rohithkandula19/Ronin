@@ -1,0 +1,4869 @@
+"""ronin — Claude-powered CLI for startup ops.
+
+Subcommands:
+    ronin init              — create a config file (interactive or --demo).
+    ronin ask "<question>"  — one-shot agent run against your configured tools.
+    ronin chat              — interactive REPL (multi-turn with short-term memory).
+    ronin tools             — list the tools registered for the current config.
+    ronin doctor            — health check.
+    ronin save NAME "Q"     — save a question for later recall.
+    ronin run NAME          — run a saved question.
+    ronin queries           — list saved questions.
+    ronin eval ...          — eval suite (golden datasets, drift detection).
+    ronin version           — print version.
+"""
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+from typing import Optional
+
+import typer
+from rich import box
+from rich.console import Console
+from rich.panel import Panel
+from rich.prompt import Confirm, Prompt
+from rich.table import Table
+
+from . import __version__
+from .config import PROVIDER_PRESETS, RoninConfig, find_config_path, load_config, save_config
+from .runner import AgentResultRich, run_ask, start_chat
+from .saved_queries import QueryStore, default_path as queries_path
+from .tools import build_tools
+
+app = typer.Typer(
+    name="ronin",
+    help="ronin — a masterless Claude agent CLI. Ops briefings, autonomous data questions, and a coding agent.",
+    no_args_is_help=False,
+    add_completion=False,
+)
+console = Console()
+
+
+# The panda mascot (dancing / running / playing / playing football / sleeping)
+# lives in panda_art.py — single source of truth for both the launch banner
+# and the `ronin panda` command. We re-export the activities dict so existing
+# imports keep working.
+from .panda_art import PANDA_ACTIVITIES as _PANDA_ACTIVITIES, render_panda as _render_panda
+
+
+@app.callback(invoke_without_command=True)
+def _root(
+    ctx: typer.Context,
+    tui: bool = typer.Option(
+        False, "--tui",
+        help="Open the full-screen TUI (panes + trace) instead of the inline REPL.",
+    ),
+    no_tui: bool = typer.Option(
+        False, "--no-tui", "--repl", hidden=True,
+        help="(default) the inline REPL — kept for backward-compatibility.",
+    ),
+    offline: bool = typer.Option(
+        False, "--offline",
+        help="Zero network egress: forces a local brain (Ollama) and strips all "
+             "network tools. Nothing leaves the machine.",
+    ),
+    full_access: bool = typer.Option(
+        False, "--full-access", "--god-mode",
+        help="Lift all guards: filesystem-wide access (beyond the project root), "
+             "auto-approve every edit/command (no y/n), longer timeouts. Powerful "
+             "and unsandboxed — only in a directory you trust.",
+    ),
+    sentinel: bool = typer.Option(
+        False, "--sentinel",
+        help="Abstain over bluff: the agent declares CONFIDENCE: high/medium/low and "
+             "says what it's unsure about. Low confidence on a cheap blade escalates "
+             "to the strong one (with routing).",
+    ),
+    budget: float = typer.Option(
+        None, "--budget",
+        help="Spend cap (USD) for this session — ronin warns once estimated cost "
+             "crosses it. The footer shows 💸 spent $X of $cap.",
+    ),
+    fast: bool = typer.Option(
+        False, "--fast",
+        help="Snappier turns: ship only the core coding tools (smaller per-call "
+             "payload → less latency + fewer rate-limit hits). Trades breadth for speed.",
+    ),
+) -> None:
+    if ctx.invoked_subcommand is not None:
+        return
+
+    # When _root is called directly (not via typer's CLI parsing — e.g. from
+    # tests), typer leaves parameter defaults as OptionInfo objects, not real
+    # bools. Normalise so direct callers see False by default.
+    if not isinstance(tui, bool):
+        tui = False
+    if not isinstance(no_tui, bool):
+        no_tui = False
+    if not isinstance(offline, bool):
+        offline = False
+    if not isinstance(full_access, bool):
+        full_access = False
+
+    import sys
+    # Non-interactive (pipe/test) → just show help and exit, cleanly (no banner).
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        console.print(ctx.get_help())
+        return
+
+    config = load_config()
+    if offline:
+        from .offline import apply_offline
+        config = apply_offline(config.model_copy(update={"offline": True}))
+        console.print(f"[dim]🔒 offline mode — local brain ([bold]{config.provider}[/bold]), "
+                      "no network tools, nothing leaves this machine[/dim]")
+    if not offline and not config.has_provider_auth():
+        import sys
+        # Interactive TTY → a friendly guided picker; otherwise the help fallback.
+        if sys.stdin.isatty() and sys.stdout.isatty():
+            from .onboard import onboard
+            picked = onboard(console, config)
+            if picked is not None:
+                config = picked
+            else:
+                from .theme import ACCENT
+                console.print(f"\n[bold {ACCENT}]ʕ•ᴥ•ʔ  ronin[/bold {ACCENT}]\n")
+                console.print("[dim]Set up any time with [bold]ronin init[/bold], or "
+                              "[bold]/login[/bold] inside a session.[/dim]")
+                return
+        else:
+            from .theme import ACCENT
+            console.print(f"\n[bold {ACCENT}]ʕ•ᴥ•ʔ  ronin[/bold {ACCENT}]\n")
+            console.print(
+                "[dim]No provider configured yet. Run [bold]ronin init[/bold] to get "
+                "started, or [bold]ronin --help[/bold] for all commands.[/dim]"
+            )
+            console.print(ctx.get_help())
+            return
+
+    if full_access:
+        config = config.model_copy(update={"full_access": True})
+        console.print("[bold #e0af68]⚠ FULL-ACCESS MODE[/bold #e0af68] [dim]— filesystem-wide, "
+                      "auto-approving every edit & command, no sandbox. Use only in a directory "
+                      "you trust.[/dim]")
+    if not isinstance(sentinel, bool):
+        sentinel = False
+    if sentinel:
+        config = config.model_copy(update={"sentinel": True})
+        console.print("[#6b7089]🛡 sentinel mode — the agent abstains over bluffing[/#6b7089]")
+    if isinstance(budget, (int, float)) and budget > 0:
+        config = config.model_copy(update={"budget": float(budget)})
+        console.print(f"[#6b7089]💸 budget cap — ${budget:.2f} for this session[/#6b7089]")
+    if not isinstance(fast, bool):
+        fast = False
+    if fast:
+        config = config.model_copy(update={"fast": True})
+        console.print("[#6b7089]⚡ fast mode — core tools only, snappier turns[/#6b7089]")
+
+    root = Path(".")
+
+    # Default: the minimal, Claude-Code-style INLINE REPL — output flows in the
+    # terminal's normal scrollback under a tiny logo and a bordered input box (no
+    # full-screen takeover, no side panes). `ronin --tui` opts into the
+    # full-screen Textual app (panes + live trace + approval modal) for those who
+    # want it.
+    if tui and not no_tui:
+        from .tui import run_tui
+        run_tui(config=config, root=str(root))
+        return
+
+    from .code_mode import run_code_session, run_unified_session
+
+    if _is_code_project(root):
+        if not full_access:
+            console.print("[dim]code project · reads run free, edits & commands need approval[/dim]")
+        run_code_session(config, root=root, console=console, yolo=full_access)
+        return
+
+    # Outside a code repo = one assistant that does everything: talk, generate
+    # media, query data, write/run code when asked.
+    run_unified_session(config, root=root, console=console, yolo=full_access)
+
+
+def _is_code_project(path: Path) -> bool:
+    """Heuristic: does ``path`` look like a code repository? Used to greet you
+    with a code-aware hint when you launch bare ``ronin`` inside a repo."""
+    markers = (
+        ".git", "pyproject.toml", "package.json", "go.mod", "Cargo.toml",
+        "pom.xml", "build.gradle", "Gemfile", "RONIN.md", "CLAUDE.md", "AGENTS.md",
+    )
+    return any((path / m).exists() for m in markers)
+
+
+# ---------- init ----------
+
+@app.command()
+def init(
+    demo: bool = typer.Option(False, "--demo", help="Skip credential prompts; use built-in demo data."),
+    scope: str = typer.Option("project", "--scope", help="'project' (./.ronin/) or 'user' (~/.config/csk/)."),
+    yes: bool = typer.Option(False, "-y", "--yes", help="Overwrite existing config without confirmation."),
+) -> None:
+    """Create a ronin config file."""
+    existing = find_config_path()
+    if existing and not yes:
+        if not Confirm.ask(f"[yellow]A config already exists at[/yellow] {existing}. Overwrite?", default=False):
+            console.print("[dim]aborted[/dim]")
+            raise typer.Exit(1)
+
+    if demo:
+        cfg = RoninConfig(demo_mode=True)
+        path = save_config(cfg, scope=scope)
+        console.print(Panel.fit(
+            f"[green]✓[/green] Demo config written to [cyan]{path}[/cyan]\n\n"
+            "Try it now:\n"
+            "  [bold]ronin ask[/bold] [cyan]\"how many active subscriptions do we have?\"[/cyan]\n"
+            "  [bold]ronin tools[/bold]",
+            title="Ready", border_style="green",
+        ))
+        return
+
+    console.print(Panel.fit(
+        "[bold]ronin init[/bold] — pick an LLM provider, then add credentials for the services "
+        "you want it to query.\n[dim]Values are stored in plaintext at .ronin/config.toml — .gitignore "
+        "that path.[/dim]",
+        border_style="cyan",
+    ))
+
+    provider_choice = Prompt.ask(
+        "LLM provider",
+        choices=["anthropic", "ollama", "openai", "together", "groq", "fireworks", "custom"],
+        default="anthropic",
+    )
+    preset = PROVIDER_PRESETS.get(provider_choice, {})
+    default_model = preset.get("model") or ""
+    model = Prompt.ask("Model", default=default_model)
+    # Guard: people sometimes answer the Model prompt with "yes"/"y" (as if it
+    # were a confirmation), which silently saves an invalid model and 404s at
+    # runtime. Reject those and fall back to the provider's default.
+    if model.strip().lower() in {"y", "n", "yes", "no", "true", "false", "ok"} and default_model:
+        console.print(
+            f"[yellow]'{model}' isn't a model name[/yellow] — using the default "
+            f"[bold]{default_model}[/bold] instead. (Pass --model or edit .ronin/config.toml to change it.)"
+        )
+        model = default_model
+    base_url: str | None = None
+    if provider_choice == "custom":
+        base_url = Prompt.ask("OpenAI-compatible base URL")
+    elif provider_choice not in ("anthropic", "ollama"):
+        base_url = preset.get("base_url") or ""
+
+    anthropic_key: str | None = None
+    openai_key: str | None = None
+    if provider_choice == "anthropic":
+        anthropic_key = Prompt.ask(
+            "ANTHROPIC_API_KEY",
+            default=os.environ.get("ANTHROPIC_API_KEY") or "",
+            password=True,
+        ) or None
+    elif provider_choice != "ollama":
+        openai_key = Prompt.ask(
+            f"API key for {provider_choice} (your {provider_choice} key; input is hidden — paste ONCE)",
+            default=os.environ.get("OPENAI_API_KEY") or "",
+            password=True,
+        ) or None
+
+    # The key prompt hides input, so confirm what landed (length + masked preview)
+    # — this is what stops the "did my paste work?" double-paste problem.
+    chosen_key = anthropic_key or openai_key
+    if chosen_key:
+        console.print(f"[dim]key received:[/dim] {_key_preview(chosen_key)}")
+
+    console.print()
+    stripe = Prompt.ask("Stripe API key (rk_live_... recommended)", default="", password=True)
+    linear = Prompt.ask("Linear API key", default="", password=True)
+    slack_bot = Prompt.ask("Slack bot token (xoxb-...)", default="", password=True)
+    notion = Prompt.ask("Notion integration token", default="", password=True)
+    database_url = Prompt.ask("Postgres DATABASE_URL", default="")
+
+    cfg = RoninConfig(
+        provider=provider_choice,
+        model=model or None,
+        base_url=base_url or None,
+        anthropic_api_key=anthropic_key,
+        openai_api_key=openai_key,
+        stripe_api_key=stripe or None,
+        linear_api_key=linear or None,
+        slack_bot_token=slack_bot or None,
+        notion_token=notion or None,
+        database_url=database_url or None,
+    )
+    path = save_config(cfg, scope=scope)
+    console.print(f"\n[green]✓[/green] Wrote config to [cyan]{path}[/cyan]")
+    services = cfg.configured_services()
+    console.print(f"[dim]provider:[/dim] {provider_choice} ({cfg.resolved_model()})")
+    console.print(f"[dim]configured services:[/dim] {', '.join(services) if services else '[red]none[/red]'}")
+    console.print("[dim]verify with [bold]ronin doctor --check[/bold][/dim]")
+
+
+def _key_preview(key: str) -> str:
+    """A safe, non-revealing confirmation of a pasted key: length + masked ends."""
+    n = len(key)
+    if n == 0:
+        return "[dim](empty)[/dim]"
+    masked = f"{key[:4]}…{key[-4:]}" if n > 10 else "…"
+    if 30 < n < 80:
+        flag = "[green]looks right ✅[/green]"
+    elif n >= 80:
+        flag = "[red]too long — looks double-pasted ❌[/red]"
+    else:
+        flag = "[yellow]short — double-check ⚠️[/yellow]"
+    return f"{n} chars · {masked} · {flag}"
+
+
+@app.command("set-key")
+def set_key(
+    provider: str = typer.Option(None, "--provider", help="Set/override the provider (e.g. groq, openrouter, anthropic)."),
+    model: str = typer.Option(None, "--model", help="Set/override the model (e.g. qwen/qwen3-coder:free)."),
+    scope: str = typer.Option("project", "--scope", help="'project' (./.ronin/) or 'user' (~/.config/csk/)."),
+) -> None:
+    """Set just the LLM API key — masked input with a length/preview confirmation
+    so you can tell the paste actually worked (no more blind double-pasting)."""
+    config = load_config()
+    if provider:
+        config.provider = provider
+    if model:
+        config.model = model
+    prov = config.provider
+    if prov == "ollama":
+        console.print("[yellow]ollama runs locally and needs no key.[/yellow]")
+        raise typer.Exit(0)
+
+    key = (Prompt.ask(f"API key for {prov} (input hidden — paste ONCE, then Enter)", password=True) or "").strip()
+    if not key:
+        console.print("[yellow]no key entered — nothing changed[/yellow]")
+        raise typer.Exit(1)
+    console.print(f"[dim]received:[/dim] {_key_preview(key)}")
+    if len(key) >= 80:
+        console.print("[red]✗ that looks like the key pasted multiple times — run [bold]ronin set-key[/bold] again and paste ONCE.[/red]")
+        raise typer.Exit(1)
+
+    config.demo_mode = False
+    config.set_key_for(prov, key)  # per-provider — never clobbers another provider's key
+    path = save_config(config, scope=scope)
+    console.print(f"[green]✓[/green] key saved for [bold]{prov}[/bold] "
+                  f"[dim]({config.resolved_model()})[/dim] → [cyan]{path}[/cyan]")
+    console.print("[dim]verify it works: [bold]ronin doctor --check[/bold][/dim]")
+
+
+# ---------- ask ----------
+
+@app.command()
+def ask(
+    question: list[str] = typer.Argument(None, help="The question to ask. Wrap multi-word questions in quotes."),
+    raw: bool = typer.Option(False, "--raw", help="Print plain output instead of rich panels."),
+) -> None:
+    """One-shot Q&A — also reads piped stdin, so ronin composes in shell pipelines.
+
+    Examples:
+      ronin ask "which customers churned?"
+      cat error.log | ronin ask "what's the root cause?"
+      git diff | ronin ask "write release notes for these changes"
+    """
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(
+            f"[red]✗[/red] No credentials for provider [bold]{config.provider}[/bold]. "
+            "Run [bold]ronin init[/bold] (or [bold]ronin init --demo[/bold]) first."
+        )
+        raise typer.Exit(2)
+
+    text = " ".join(question) if question else ""
+    # Pipe support: fold piped stdin in as context (cat file | ronin ask "…").
+    if not sys.stdin.isatty():
+        try:
+            piped = sys.stdin.read().strip()
+        except Exception:  # noqa: BLE001
+            piped = ""
+        if piped:
+            text = f"{text}\n\n--- piped input ---\n{piped}" if text else piped
+    if not text.strip():
+        console.print("[red]✗[/red] nothing to ask — give a question or pipe input "
+                      "([dim]cat file | ronin ask \"...\"[/dim]).")
+        raise typer.Exit(2)
+
+    result = run_ask(config, text, console=console)
+    _print_result(result, raw=raw)
+
+
+# ---------- chat ----------
+
+@app.command()
+def chat(
+    raw: bool = typer.Option(False, "--raw", help="Plain output."),
+) -> None:
+    """Multi-turn REPL with short-term memory. Type :q or Ctrl-D to exit."""
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for provider [bold]{config.provider}[/bold]. Run [bold]ronin init[/bold] first.")
+        raise typer.Exit(2)
+
+    console.print(Panel.fit(
+        "[bold cyan]ronin chat[/bold cyan] — multi-turn. Type [bold]:q[/bold] or Ctrl-D to exit.",
+        border_style="cyan",
+    ))
+    start_chat(config, console=console, raw=raw)
+
+
+# ---------- consensus (multi-model) ----------
+
+@app.command()
+def consensus(
+    task: str = typer.Argument(..., help="The question / task to put to the panel of models."),
+    models: str = typer.Option(
+        ..., "--models", "-m",
+        help="Comma-separated provider[:model] specs, e.g. "
+             "'anthropic,gemini,cerebras' or 'openrouter:deepseek/deepseek-v4-flash:free,openrouter:qwen/qwen3-coder:free'.",
+    ),
+    judge: Optional[str] = typer.Option(
+        None, "--judge", help="provider[:model] to synthesize the answers (defaults to your current provider)."),
+) -> None:
+    """Ask SEVERAL models the same thing in parallel, then synthesize one
+    cross-checked answer. Read-only — for design/review/decision questions.
+
+    Something a single-vendor agent structurally can't do: run Claude AND Gemini
+    AND a local model at once and reconcile them.
+    """
+    from .consensus import parse_model_spec, render_consensus, run_consensus
+
+    config = load_config()
+    specs = [parse_model_spec(s) for s in models.split(",") if s.strip()]
+    if len(specs) < 2:
+        console.print("[yellow]consensus needs at least 2 models[/yellow] — e.g. "
+                      "[cyan]--models anthropic,gemini[/cyan]")
+        raise typer.Exit(2)
+    judge_spec = parse_model_spec(judge) if judge else None
+
+    labels = ", ".join(f"{s['provider']}{':' + s['model'] if s.get('model') else ''}" for s in specs)
+    console.print(f"[dim]polling {len(specs)} models in parallel — {labels}…[/dim]")
+    with console.status("[dim] gathering answers + synthesizing…[/dim]", spinner="dots"):
+        result = run_consensus(config, task, specs, judge_spec=judge_spec)
+    render_consensus(console, result)
+
+
+@app.command()
+def ghost(
+    root: Path = typer.Option(Path("."), "--root", help="Directory to watch."),
+    test: bool = typer.Option(False, "--test", help="Run the test suite after each save and react."),
+    watchful: bool = typer.Option(False, "--watchful", help="On a test failure, ask a model what likely broke."),
+    duel: str = typer.Option(None, "--duel", help="On a test failure, have a RIVAL provider[:model] red-team the diff."),
+    interval: float = typer.Option(1.5, "--interval", help="Poll interval (seconds)."),
+) -> None:
+    """👻 Ambient pair — the panda watches your saves and reacts. With --test it
+    runs your suite on each save (🐼✨ green / 🐼💥 broken); --watchful has a model
+    guess what broke; --duel gemini has a rival model red-team the breaking diff.
+    Dependency-free; Ctrl+C to dismiss.
+    """
+    from .ghost import run_ghost
+
+    config = load_config()
+    duel_spec = None
+    if duel:
+        from .consensus import parse_model_spec
+        duel_spec = parse_model_spec(duel)
+    run_ghost(config, root, console, interval=interval, run_tests=test,
+              watchful=watchful, duel_against=duel_spec)
+
+
+@app.command()
+def dojo(
+    task: str = typer.Argument(..., help="The coding task all the models will fight over."),
+    models: str = typer.Option(
+        ..., "--models", "-m", help="Comma-separated provider[:model] fighters, e.g. 'anthropic,gemini,cerebras'."),
+    judge: Optional[str] = typer.Option(None, "--judge", help="provider[:model] that scores the diffs."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Auto-apply the winning diff."),
+) -> None:
+    """🥋 Rival models each attempt the SAME change in parallel isolated worktrees;
+    a judge crowns the best diff, which you can apply. Claude vs Gemini vs ….
+
+    Needs git (parallel worktree isolation). Only a provider-agnostic agent can
+    pit multiple vendors against each other on the same code.
+    """
+    from .consensus import parse_model_spec
+    from .dojo import run_dojo
+    from .kaizen import _apply_diff, _print_diff
+
+    config = load_config()
+    specs = [parse_model_spec(s) for s in models.split(",") if s.strip()]
+    if len(specs) < 2:
+        console.print("[yellow]the dojo needs at least 2 fighters[/yellow] — e.g. [cyan]-m anthropic,gemini[/cyan]")
+        raise typer.Exit(2)
+    judge_spec = parse_model_spec(judge) if judge else None
+    labels = ", ".join(f"{s['provider']}{':' + s['model'] if s.get('model') else ''}" for s in specs)
+    console.print(f"[dim]🥋 {len(specs)} fighters entering the dojo — {labels}…[/dim]")
+    with console.status("[dim] fighting in parallel worktrees + judging…[/dim]", spinner="dots"):
+        try:
+            result = run_dojo(config, task, specs, judge_spec=judge_spec)
+        except ValueError as e:
+            console.print(f"[yellow]{e}[/yellow]")
+            raise typer.Exit(2)
+
+    # tally this dojo into the persistent leaderboard
+    from .leaderboard import load_leaderboard, save_leaderboard
+    _lb = load_leaderboard(Path("."))
+    _lb.record(result.winner.label if result.winner else None,
+               [f.label for f in result.contenders])
+    save_leaderboard(Path("."), _lb)
+
+    for f in result.fighters:
+        if f.changed:
+            mark = "[green]★ winner[/green]" if result.winner is f else "[dim]·[/dim]"
+            console.print(f"{mark} [bold]{f.label}[/bold] [dim]({len(f.diff.splitlines())} diff lines)[/dim]")
+        else:
+            why = f.error or "no changes"
+            console.print(f"[dim]✗ {f.label} — {why[:80]}[/dim]")
+    if result.winner is None:
+        console.print("[yellow]no winning diff[/yellow]")
+        raise typer.Exit(1)
+    console.print(f"\n[bold]winning diff[/bold] [dim]({result.winner.label})[/dim]:")
+    _print_diff(console, result.winner.diff)
+    if not yes:
+        if not Confirm.ask("[bold]apply the winning diff?[/bold]", default=False):
+            console.print("[dim]aborted — your tree is untouched[/dim]")
+            return
+    ok = _apply_diff(Path(".").resolve(), result.winner.diff)
+    console.print("[green]✓ applied[/green]" if ok else "[red]could not apply cleanly[/red]")
+
+
+@app.command()
+def duel(
+    against: str = typer.Option(
+        ..., "--against", "-a",
+        help="provider[:model] of the RIVAL reviewer, e.g. 'gemini' or 'cerebras:gpt-oss-120b'."),
+    staged: bool = typer.Option(False, "--staged", help="Review the staged diff instead of the working tree."),
+) -> None:
+    """⚔ Have a RIVAL model adversarially red-team your current git diff.
+
+    The author model is a poor judge of its own code; a different provider hunts
+    for bugs, edge cases, and regressions it can't see. Read-only, advisory.
+    Something a single-vendor agent can't do: a real cross-vendor second opinion.
+    """
+    from .consensus import parse_model_spec
+    from .duel import render_verdict, review_diff
+    from .git_helper import _git
+
+    config = load_config()
+    if _git(".", "rev-parse", "--is-inside-work-tree").returncode != 0:
+        console.print("[yellow]not a git repository[/yellow]")
+        raise typer.Exit(2)
+    args = ["diff", "--cached"] if staged else ["diff"]
+    diff = _git(".", *args).stdout
+    if not diff.strip():
+        where = "staged" if staged else "working-tree"
+        console.print(f"[dim]no {where} changes to duel over[/dim]")
+        return
+    spec = parse_model_spec(against)
+    console.print(f"[dim]⚔ {spec['provider']} is reviewing your diff…[/dim]")
+    with console.status("[dim] cross-examining…[/dim]", spinner="dots"):
+        verdict = review_diff(config, diff, spec)
+    render_verdict(console, verdict)
+    if not verdict.passed:
+        raise typer.Exit(1)
+
+
+@app.command()
+def kaizen(
+    goal: Optional[str] = typer.Argument(
+        None, help="What to improve. Omit to auto-pick the top FIXME/TODO in ronin's own source."),
+    tests: Optional[str] = typer.Option(
+        None, "--tests", help="Narrow the fitness gate to a path/expression (faster)."),
+    yes: bool = typer.Option(
+        False, "--yes", "-y", help="Auto-apply if the fitness gate passes (no prompt)."),
+    duel: Optional[str] = typer.Option(
+        None, "--duel", help="Have a RIVAL provider[:model] red-team the proven diff before you approve it."),
+) -> None:
+    """改善 — ronin sharpens its own blade. Finds a weakness, drafts a fix in an
+    isolated git worktree, and PROVES it against the test suite before showing
+    you anything. The diff only reaches your working tree if the tests pass.
+
+    Point it at a free provider (`/login cerebras`) and it improves code for $0.
+    Something a single-vendor agent structurally won't let you do: an agent that
+    edits its own source, with objective eval-proof it worked.
+    """
+    from .kaizen import run_kaizen
+
+    config = load_config()
+    duel_spec = None
+    if duel:
+        from .consensus import parse_model_spec
+        duel_spec = parse_model_spec(duel)
+    result = run_kaizen(config, Path("."), console, goal=goal, target_tests=tests,
+                        auto_apply=yes, duel_against=duel_spec)
+    style = "green" if result.applied else "yellow"
+    console.print(f"[{style}]改 {result.note}[/{style}]")
+    if result.fitness is not None and not result.applied and result.diff:
+        console.print(f"[dim]  fitness: {result.fitness.summary}[/dim]")
+
+
+# ---------- bench (model bake-off) ----------
+
+@app.command()
+def bench(
+    models: str = typer.Option(
+        ..., "--models", "-m",
+        help="Comma-separated provider[:model] specs to benchmark, e.g. "
+             "'anthropic,gemini,cerebras,ollama:llama3.1'.",
+    ),
+    threshold: float = typer.Option(
+        0.8, "--threshold", help="Pass-rate bar (0..1) a model must clear to be recommended."),
+) -> None:
+    """Run the objective eval battery across several models and recommend the
+    CHEAPEST one that clears the quality bar.
+
+    Eval-driven model selection — pick the model with data, not vibes. Something
+    a single-vendor agent has no way to do.
+    """
+    from .bench import parse_specs_or_exit, render_bench, run_bench
+
+    config = load_config()
+    specs = parse_specs_or_exit(models, console)
+    labels = ", ".join(f"{s['provider']}{':' + s['model'] if s.get('model') else ''}" for s in specs)
+    console.print(f"[dim]benchmarking {len(specs)} models on the objective battery — {labels}\n"
+                  "several real model calls each, ~1–3 min on free tiers…[/dim]")
+    with console.status("[dim] running evals…[/dim]", spinner="dots"):
+        result = run_bench(config, specs, threshold=threshold)
+    render_bench(console, result)
+
+
+# ---------- tools ----------
+
+@app.command()
+def tools() -> None:
+    """List the tools that are wired up for the current config."""
+    config = load_config()
+    services = config.configured_services()
+    tool_list = build_tools(config)
+
+    table = Table(title="Configured tools", box=box.ROUNDED, show_lines=False)
+    table.add_column("Service", style="cyan")
+    table.add_column("Tool", style="bold")
+    table.add_column("Description", style="dim", overflow="fold")
+
+    for tool in tool_list:
+        service = tool.name.split("_", 1)[0]
+        table.add_row(service, tool.name, tool.description)
+    if not tool_list:
+        table.add_row("[red]none[/red]", "", "Run [bold]ronin init[/bold] or [bold]ronin init --demo[/bold].")
+
+    console.print(table)
+    if config.demo_mode:
+        console.print("[yellow]demo mode is on[/yellow] — calls go to in-process fixtures, not real APIs.")
+    elif services:
+        console.print(f"[dim]configured services:[/dim] {', '.join(services)}")
+
+
+# ---------- doctor ----------
+
+def _provider_live_check(config: RoninConfig) -> str:
+    """Ping the provider's models endpoint to verify the key actually works and
+    the configured model exists. Returns a Rich-markup status string."""
+    import urllib.error
+    import urllib.request
+
+    provider = config.provider
+    model = config.resolved_model()
+    if provider == "anthropic":
+        url = "https://api.anthropic.com/v1/models"
+        key = config.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY")
+        if not key:
+            return "[red]no key set[/red]"
+        headers = {"x-api-key": key, "anthropic-version": "2023-06-01"}
+    elif provider == "ollama":
+        base = config.resolved_base_url() or "http://localhost:11434/v1"
+        url = f"{base.rstrip('/')}/models"
+        headers = {}
+        key = None
+    else:
+        base = config.resolved_base_url() or "https://api.openai.com/v1"
+        url = f"{base.rstrip('/')}/models"
+        key = config.openai_api_key or os.environ.get("OPENAI_API_KEY")
+        if not key:
+            return "[red]no key set[/red]"
+        headers = {"Authorization": f"Bearer {key}"}
+
+    # A non-Python User-Agent: Groq (and other WAF-fronted APIs) 403 the default
+    # "Python-urllib" agent, which would make this check lie about a valid key.
+    headers["User-Agent"] = "ronin (+https://github.com/rohithkandula19/Ronin)"
+
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
+            import json as _json
+            data = _json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            return f"[red]invalid key ({e.code})[/red]"
+        return f"[red]HTTP {e.code}[/red]"
+    except Exception as e:  # noqa: BLE001
+        return f"[red]unreachable[/red] [dim]({e.__class__.__name__})[/dim]"
+
+    ids = [m.get("id") for m in (data.get("data") or []) if isinstance(m, dict)]
+    if ids and model not in ids:
+        return f"[green]key ok[/green] · [red]model '{model}' not found[/red] [dim](try: {', '.join(ids[:3])}…)[/dim]"
+    return "[green]ok — key + model valid[/green]"
+
+
+@app.command()
+def doctor(
+    check: bool = typer.Option(False, "--check", help="Ping the provider to verify the key + model actually work (network)."),
+) -> None:
+    """Health check: config location, provider auth, configured services.
+
+    Add --check to make a live call that confirms the key is valid and the
+    configured model exists (instead of just checking a key is present)."""
+    config = load_config()
+    path = find_config_path()
+
+    table = Table(box=box.ROUNDED, show_header=False)
+    table.add_column(style="cyan", no_wrap=True)
+    table.add_column()
+
+    table.add_row("config file", str(path) if path else "[red]none[/red] — run ronin init")
+    table.add_row("demo mode", "[green]yes[/green]" if config.demo_mode else "[dim]no[/dim]")
+    table.add_row("provider", config.provider)
+    table.add_row("model", config.resolved_model())
+    if config.resolved_base_url():
+        table.add_row("base_url", config.resolved_base_url() or "")
+    # Static check only confirms a key is *present* — say so honestly.
+    table.add_row(
+        f"{config.provider} key",
+        "[green]present[/green]" if config.has_provider_auth() else "[red]missing[/red]",
+    )
+    if check:
+        table.add_row("live check", _provider_live_check(config))
+    services = config.configured_services()
+    table.add_row("services", ", ".join(services) if services else "[red]none[/red]")
+    table.add_row("ronin version", __version__)
+
+    console.print(table)
+    if not check:
+        console.print("[dim]tip: run [bold]ronin doctor --check[/bold] to verify the key + model actually work.[/dim]")
+
+
+# ---------- saved queries ----------
+
+@app.command()
+def save(
+    name: str = typer.Argument(..., help="Short slug-style name. Letters / digits / '-' / '_' only."),
+    query: list[str] = typer.Argument(..., help="The question to save. Quote multi-word questions."),
+    description: str = typer.Option("", "--description", "-d", help="Optional one-line description."),
+) -> None:
+    """Save a question under NAME for later recall via `ronin run NAME`."""
+    path = queries_path()
+    store = QueryStore.load(path)
+    text = " ".join(query)
+    try:
+        store.add(name, text, description=description)
+    except ValueError as exc:
+        console.print(f"[red]✗[/red] {exc}")
+        raise typer.Exit(2)
+    store.save(path)
+    console.print(f"[green]✓[/green] saved [bold]{name}[/bold]: {text}")
+    console.print(f"[dim]run it with:[/dim] [bold]ronin run {name}[/bold]")
+
+
+@app.command()
+def run(
+    name: str = typer.Argument(..., help="Name of a saved query."),
+    raw: bool = typer.Option(False, "--raw", help="Plain output."),
+) -> None:
+    """Run a saved query as if you typed `ronin ask "<saved text>"`."""
+    store = QueryStore.load(queries_path())
+    try:
+        saved = store.get(name)
+    except KeyError:
+        console.print(f"[red]✗[/red] no saved query named [bold]{name}[/bold]. See [bold]ronin queries[/bold].")
+        raise typer.Exit(2)
+
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(
+            f"[red]✗[/red] No credentials for provider [bold]{config.provider}[/bold]. Run [bold]ronin init[/bold] first."
+        )
+        raise typer.Exit(2)
+
+    console.print(f"[dim]running saved query[/dim] [bold]{name}[/bold]: {saved.query}")
+    result = run_ask(config, saved.query, console=console)
+    _print_result(result, raw=raw)
+
+
+@app.command()
+def queries() -> None:
+    """List all saved queries."""
+    store = QueryStore.load(queries_path())
+    items = store.list_all()
+    if not items:
+        console.print("[dim]no saved queries yet. Try:[/dim] [bold]ronin save mrr \"what is our MRR right now\"[/bold]")
+        return
+    table = Table(title="Saved queries", box=box.ROUNDED)
+    table.add_column("name", style="cyan", no_wrap=True)
+    table.add_column("query", overflow="fold")
+    table.add_column("description", style="dim", overflow="fold")
+    for q in items:
+        table.add_row(q.name, q.query, q.description or "")
+    console.print(table)
+
+
+@app.command(name="unsave")
+def unsave(name: str = typer.Argument(..., help="Name of the saved query to remove.")) -> None:
+    """Remove a saved query."""
+    path = queries_path()
+    store = QueryStore.load(path)
+    if not store.remove(name):
+        console.print(f"[red]✗[/red] no saved query named [bold]{name}[/bold]")
+        raise typer.Exit(2)
+    store.save(path)
+    console.print(f"[green]✓[/green] removed [bold]{name}[/bold]")
+
+
+# ---------- eval (delegates to the eval-suite CLI) ----------
+
+eval_app = typer.Typer(help="Measure agent quality (bare 'ronin eval'); golden-dataset judge runs and drift as subcommands.",
+                       invoke_without_command=True)
+app.add_typer(eval_app, name="eval")
+
+
+@eval_app.callback(invoke_without_command=True)
+def eval_default(
+    ctx: typer.Context,
+    model: str = typer.Option(None, "--model", help="Evaluate a specific model on the current provider."),
+) -> None:
+    """Bare ``ronin eval`` → score the agent on objective tasks (no LLM judge)."""
+    if ctx.invoked_subcommand is not None:
+        return  # a subcommand (run / drift) was given
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold]. "
+                      "Run [bold]ronin login[/bold] or [bold]ronin init[/bold] first.")
+        raise typer.Exit(2)
+    from .agent_eval import render_report, run_eval
+    shown = model or config.resolved_model()
+    console.print(f"[dim]running agent eval on [bold]{config.provider} · {shown}[/bold] — "
+                  "several real model calls, ~1–2 min on free tiers…[/dim]")
+    with console.status("[dim] evaluating…[/dim]", spinner="dots"):
+        outcomes = run_eval(config, model=model)
+    render_report(console, config, outcomes, model=model)
+
+
+@eval_app.command("run", help="Run a golden dataset against a target model.")
+def eval_run(
+    dataset: Path = typer.Argument(..., help="Path to JSONL dataset."),
+    target: str = typer.Option("claude-sonnet-4-6", "--target"),
+    judge: str = typer.Option("claude-opus-4-7", "--judge"),
+    criteria: str = typer.Option(
+        "task_success,faithfulness,helpfulness,safety", "--criteria",
+        help="Comma-separated rubric criteria.",
+    ),
+    label: Optional[str] = typer.Option(None, "--label"),
+    json_out: str = typer.Option("eval-report.json", "--json-out"),
+    out: Optional[str] = typer.Option(None, "--out", help="Optional HTML report path."),
+) -> None:
+    from ronin_eval_suite.cli import main as eval_main
+
+    argv = ["run", str(dataset), "--target", target, "--judge", judge, "--criteria", criteria, "--json-out", json_out]
+    if label:
+        argv += ["--label", label]
+    if out:
+        argv += ["--out", out]
+    raise typer.Exit(eval_main(argv))
+
+
+@eval_app.command("drift", help="Compare two run reports; exit non-zero on regression.")
+def eval_drift(
+    baseline: Path = typer.Argument(...),
+    candidate: Path = typer.Argument(...),
+    threshold: float = typer.Option(0.5, "--threshold"),
+) -> None:
+    from ronin_eval_suite.cli import main as eval_main
+
+    argv = ["drift", str(baseline), str(candidate), "--threshold", str(threshold)]
+    raise typer.Exit(eval_main(argv))
+
+
+# ---------- plugin (scaffold custom tools) ----------
+
+plugin_app = typer.Typer(help="Scaffold & manage custom Python tool plugins (.ronin/plugins/).")
+app.add_typer(plugin_app, name="plugin")
+
+
+@plugin_app.command("new", help="Scaffold a working plugin: ronin plugin new weather")
+def plugin_new(
+    name: str = typer.Argument(..., help="Tool name (lowercase, e.g. 'weather', 'github_trending')."),
+    desc: str = typer.Option("", "--desc", "-d", help="One-line description of what the tool does."),
+    force: bool = typer.Option(False, "--force", help="Overwrite if the plugin already exists."),
+    root: Path = typer.Option(Path("."), "--root", help="Project root (writes to <root>/.ronin/plugins/)."),
+) -> None:
+    from .plugin_scaffold import write_plugin
+    try:
+        path = write_plugin(name, root, description=desc, overwrite=force)
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(2)
+    except FileExistsError as e:
+        console.print(f"[yellow]already exists:[/yellow] {e} [dim](use --force to overwrite)[/dim]")
+        raise typer.Exit(1)
+    console.print(f"[green]✓[/green] scaffolded plugin [bold]{name}[/bold] → [cyan]{path}[/cyan]")
+    console.print(f"  [dim]edit the [bold]{name}()[/bold] function to call your API/logic, then run "
+                  "[bold]ronin[/bold] — the agent picks it up automatically.[/dim]")
+    console.print("  [dim]list plugins with [bold]ronin plugins[/bold].[/dim]")
+
+
+@plugin_app.command("list", help="List loaded plugins (alias of 'ronin plugins').")
+def plugin_list() -> None:
+    plugins()
+
+
+@plugin_app.command("library", help="Browse ready-to-use plugins you can add in one command.")
+def plugin_library_cmd() -> None:
+    from .plugin_library import installed_names, library_rows
+    have = installed_names(".")
+    grid = Table(box=box.ROUNDED, show_header=True, header_style="bold #7aa2f7")
+    grid.add_column("", no_wrap=True)
+    grid.add_column("add", style="cyan", no_wrap=True)
+    grid.add_column("needs", style="#e0af68", no_wrap=True)
+    grid.add_column("what it does")
+    for name, needs, blurb in library_rows():
+        mark = "[green]✓[/green]" if name in have else " "
+        grid.add_row(mark, name, needs, blurb)
+    console.print(grid)
+    console.print(f"[dim]✓ = installed ({len(have & {r[0] for r in library_rows()})}/{len(library_rows())}) · "
+                  "add with [bold]ronin plugin add <name>[/bold] · "
+                  "make your own with [bold]ronin plugin new <name>[/bold][/dim]")
+
+
+@plugin_app.command("update", help="Refresh installed library plugins to their latest version.")
+def plugin_update(
+    name: str = typer.Argument(None, help="A specific plugin to update (default: all outdated)."),
+    root: Path = typer.Option(Path("."), "--root", help="Project root."),
+) -> None:
+    from .plugin_library import LIBRARY, outdated
+    pdir = Path(root) / ".ronin" / "plugins"
+    targets = [name] if name else outdated(root)
+    if name and name not in LIBRARY:
+        console.print(f"[yellow]'{name}' isn't a library plugin[/yellow] — nothing to update.")
+        raise typer.Exit(1)
+    if not targets:
+        console.print("[green]✓ all installed library plugins are up to date.[/green]")
+        return
+    for n in targets:
+        (pdir / f"{n}.py").write_text(LIBRARY[n].source, encoding="utf-8")
+        console.print(f"[green]✓[/green] updated [bold]{n}[/bold]")
+    console.print(f"[dim]refreshed {len(targets)} plugin(s) — live next time you run ronin.[/dim]")
+
+
+@plugin_app.command("from-api", help="Turn any REST endpoint into a tool: ronin plugin from-api dogpic https://dog.ceo/api/breeds/image/random --field message")
+def plugin_from_api(
+    name: str = typer.Argument(..., help="Tool name (lowercase), e.g. 'weather'."),
+    url: str = typer.Argument(..., help="Endpoint URL; use {placeholders} for parameters, e.g. .../{city}."),
+    field: Optional[list[str]] = typer.Option(None, "--field", "-f", help="JSON field to extract, dotted path (e.g. data.0.title). Repeatable; omit to return the whole response."),
+    desc: str = typer.Option("", "--desc", help="One-line description for the agent."),
+    method: str = typer.Option("GET", "--method", help="HTTP method."),
+    force: bool = typer.Option(False, "--force", help="Overwrite if it exists."),
+    root: Path = typer.Option(Path("."), "--root", help="Project root."),
+) -> None:
+    from .plugin_from_api import generate_api_plugin
+    try:
+        src = generate_api_plugin(name, url, fields=list(field or []), blurb=desc, method=method)
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(2)
+    pdir = Path(root) / ".ronin" / "plugins"
+    pdir.mkdir(parents=True, exist_ok=True)
+    path = pdir / f"{name}.py"
+    if path.exists() and not force:
+        console.print(f"[yellow]already exists:[/yellow] {path} [dim](use --force)[/dim]")
+        raise typer.Exit(1)
+    path.write_text(src, encoding="utf-8")
+    from .plugin_from_api import url_params
+    params = url_params(url)
+    console.print(f"[green]✓[/green] generated tool [bold]{name}[/bold] → [cyan]{path}[/cyan]")
+    if params:
+        console.print(f"  [dim]parameters:[/dim] {', '.join(params)}")
+    if field:
+        console.print(f"  [dim]extracts:[/dim] {', '.join(field)}")
+    console.print("  [dim]live in the agent next run · edit the file to refine.[/dim]")
+
+
+@plugin_app.command("search", help="Search the plugin library: ronin plugin search finance")
+def plugin_search(
+    query: str = typer.Argument(..., help="A keyword, e.g. 'crypto', 'word', 'github'."),
+) -> None:
+    from .plugin_library import search
+    hits = search(query)
+    if not hits:
+        console.print(f"[yellow]no library plugins match[/yellow] '{query}' "
+                      "[dim](try [bold]ronin plugin library[/bold] for the full list)[/dim]")
+        raise typer.Exit(1)
+    console.print(f"[#7aa2f7]🔎 {len(hits)} match(es) for[/#7aa2f7] [bold]{query}[/bold]")
+    for p in hits:
+        console.print(f"  [cyan]{p.name:<16}[/cyan] [dim]{p.blurb}[/dim]")
+    console.print("[dim]install with [bold]ronin plugin add <name>[/bold].[/dim]")
+
+
+@plugin_app.command("add", help="Install a ready-made plugin from the library: ronin plugin add weather")
+def plugin_add(
+    name: str = typer.Argument(..., help="A library name, e.g. 'weather', 'hackernews'. See 'ronin plugin library'."),
+    force: bool = typer.Option(False, "--force", help="Overwrite if it already exists."),
+    root: Path = typer.Option(Path("."), "--root", help="Project root (writes to <root>/.ronin/plugins/)."),
+) -> None:
+    from .plugin_library import resolve
+    entry = resolve(name)
+    if entry is None:
+        console.print(f"[yellow]'{name}' isn't in the library[/yellow] — see "
+                      "[bold]ronin plugin library[/bold], or scaffold one with [bold]ronin plugin new[/bold].")
+        raise typer.Exit(1)
+    pdir = Path(root) / ".ronin" / "plugins"
+    pdir.mkdir(parents=True, exist_ok=True)
+    path = pdir / f"{entry.name}.py"
+    if path.exists() and not force:
+        console.print(f"[yellow]already exists:[/yellow] {path} [dim](use --force)[/dim]")
+        raise typer.Exit(1)
+    path.write_text(entry.source, encoding="utf-8")
+    console.print(f"[green]✓[/green] installed plugin [bold]{entry.name}[/bold] "
+                  f"[dim]{entry.blurb}[/dim] → [cyan]{path}[/cyan]")
+    console.print("  [dim]live in the agent next time you run [bold]ronin[/bold].[/dim]")
+
+
+@plugin_app.command("remove", help="Delete a plugin file: ronin plugin remove weather")
+def plugin_remove(
+    name: str = typer.Argument(..., help="The plugin name (file stem) to remove."),
+    root: Path = typer.Option(Path("."), "--root", help="Project root."),
+) -> None:
+    path = Path(root) / ".ronin" / "plugins" / f"{name}.py"
+    if not path.is_file():
+        console.print(f"[yellow]no plugin '{name}'[/yellow] at [dim]{path}[/dim] "
+                      "[dim](see [bold]ronin plugins[/bold])[/dim]")
+        raise typer.Exit(1)
+    path.unlink()
+    console.print(f"[green]✓[/green] removed plugin [bold]{name}[/bold] [dim]({path})[/dim]")
+
+
+# ---------- mcp ----------
+
+mcp_app = typer.Typer(help="Connect MCP servers (Anthropic's tool protocol) — their tools join the agent.")
+app.add_typer(mcp_app, name="mcp")
+
+
+@mcp_app.command("list", help="List configured MCP servers and their tools.")
+def mcp_list() -> None:
+    from .mcp_client import build_mcp_tools, load_mcp_servers
+    servers = load_mcp_servers(".")
+    if not servers:
+        console.print("[dim]no MCP servers configured. Add one:[/dim]\n"
+                      "  [cyan]ronin mcp add fs npx -y @modelcontextprotocol/server-filesystem .[/cyan]")
+        return
+    for name, spec in servers.items():
+        console.print(f"[bold]{name}[/bold]  [dim]{spec.get('command', '')} "
+                      f"{' '.join(spec.get('args', []))}[/dim]")
+    console.print("\n[dim]connecting to verify…[/dim]")
+    tools = build_mcp_tools(".", console=console)
+    console.print(f"[green]✓[/green] {len(tools)} tool(s) available to the agent.")
+
+
+@mcp_app.command("remove", help="Remove a configured MCP server by name.")
+def mcp_remove(name: str = typer.Argument(..., help="The server name to remove.")) -> None:
+    from .mcp_client import remove_mcp_server
+    if remove_mcp_server(name, "."):
+        console.print(f"[green]✓[/green] removed MCP server [bold]{name}[/bold].")
+    else:
+        console.print(f"[yellow]no MCP server named[/yellow] [bold]{name}[/bold] [yellow]configured.[/yellow]")
+
+
+@mcp_app.command("add", help="Add an MCP server: ronin mcp add NAME COMMAND [ARGS...]",
+                 context_settings={"ignore_unknown_options": True})
+def mcp_add(
+    name: str = typer.Argument(..., help="A short name, e.g. 'fs'."),
+    command: str = typer.Argument(..., help="The server command, e.g. 'npx'."),
+    args: Optional[list[str]] = typer.Argument(None, help="Args for the server command (flags like -y are passed through)."),
+    env: Optional[list[str]] = typer.Option(None, "--env", "-e", help="Env var for the server, KEY=VALUE (repeatable). Bare KEY inherits from your shell — good for secrets like tokens."),
+) -> None:
+    from .mcp_client import add_mcp_server, parse_env_pairs
+    env_map = parse_env_pairs(list(env or []))
+    path = add_mcp_server(name, command, list(args or []), ".", env=env_map or None)
+    console.print(f"[green]✓[/green] added MCP server [bold]{name}[/bold] → [cyan]{path}[/cyan]")
+    if env_map:
+        shown = ", ".join(f"{k}={'•••' if v else '(from shell)'}" for k, v in env_map.items())
+        console.print(f"[dim]env: {shown}[/dim]")
+    console.print("[dim]its tools load automatically next time you run [bold]ronin[/bold]. "
+                  "Verify now with [bold]ronin mcp list[/bold].[/dim]")
+
+
+@mcp_app.command("catalog", help="Browse popular MCP servers you can install in one command.")
+def mcp_catalog() -> None:
+    from rich.table import Table as _Table
+
+    from .mcp_catalog import catalog_rows
+    grid = _Table(box=box.ROUNDED, show_header=True, header_style="bold #7aa2f7")
+    grid.add_column("install", style="cyan", no_wrap=True)
+    grid.add_column("needs", style="#e0af68", no_wrap=True)
+    grid.add_column("what it adds")
+    for key, env, blurb in catalog_rows():
+        grid.add_row(key, env, blurb)
+    console.print(grid)
+    console.print("[dim]add one with [bold]ronin mcp install <name>[/bold] · "
+                  "any other server with [bold]ronin mcp add NAME COMMAND …[/bold][/dim]")
+
+
+@mcp_app.command("install", help="Install a popular MCP server by name: ronin mcp install github")
+def mcp_install(
+    name: str = typer.Argument(..., help="A catalog name, e.g. 'github', 'gmail', 'slack'. See 'ronin mcp catalog'."),
+) -> None:
+    import os
+
+    from .mcp_catalog import resolve
+    from .mcp_client import add_mcp_server
+    server = resolve(name)
+    if server is None:
+        console.print(f"[yellow]'{name}' isn't in the catalog[/yellow] — see "
+                      "[bold]ronin mcp catalog[/bold], or use [bold]ronin mcp add[/bold] for any server.")
+        raise typer.Exit(1)
+    # Capture each required env var from the shell IF set. We deliberately omit
+    # unset ones rather than writing "" — an empty value in the spec would
+    # override (shadow) the real value the user exports later, since the server
+    # is launched with {**os.environ, **spec_env}.
+    present = {k: os.environ[k] for k in server.env if os.environ.get(k)}
+    missing = [k for k in server.env if not os.environ.get(k)]
+    path = add_mcp_server(server.key, server.command, list(server.args), ".",
+                          env=present or None)
+    console.print(f"[green]✓[/green] installed [bold]{server.key}[/bold] [dim]{server.blurb}[/dim] "
+                  f"→ [cyan]{path}[/cyan]")
+    if server.note:
+        console.print(f"  [#e0af68]note:[/#e0af68] {server.note}")
+    if missing:
+        console.print(f"  [#f7768e]set these before running ronin:[/#f7768e] {', '.join(missing)}")
+        console.print(f"  [dim]e.g.  export {missing[0]}=…   (then they're picked up automatically)[/dim]")
+    console.print("[dim]its tools load next time you run [bold]ronin[/bold] · verify with "
+                  "[bold]ronin mcp list[/bold].[/dim]")
+
+
+@mcp_app.command("add-remote", help="Add a hosted MCP server by URL: ronin mcp add-remote NAME https://…/mcp")
+def mcp_add_remote(
+    name: str = typer.Argument(..., help="A short name, e.g. 'linear'."),
+    url: str = typer.Argument(..., help="The server's HTTP endpoint, e.g. https://mcp.example.com/mcp"),
+    header: Optional[list[str]] = typer.Option(None, "--header", "-H", help="Auth header, 'Name: value' (repeatable). Bare 'Authorization' inherits a Bearer token from $MCP_TOKEN."),
+) -> None:
+    import os
+
+    from .mcp_client import add_remote_mcp_server
+    headers: dict[str, str] = {}
+    for item in header or []:
+        if ":" in item:
+            k, v = item.split(":", 1)
+            headers[k.strip()] = v.strip()
+        elif item.strip().lower() == "authorization" and os.environ.get("MCP_TOKEN"):
+            headers["Authorization"] = f"Bearer {os.environ['MCP_TOKEN']}"
+    path = add_remote_mcp_server(name, url, ".", headers=headers or None)
+    console.print(f"[green]✓[/green] added remote MCP server [bold]{name}[/bold] "
+                  f"[dim]{url}[/dim] → [cyan]{path}[/cyan]")
+    if headers:
+        console.print(f"[dim]headers: {', '.join(headers)}[/dim]")
+    console.print("[dim]connects over HTTP next time you run [bold]ronin[/bold] · verify with "
+                  "[bold]ronin mcp list[/bold].[/dim]")
+
+
+# ---------- plugins ----------
+
+@app.command()
+def plugins() -> None:
+    """Discover and list user plugins from .ronin/plugins/."""
+    from .plugins import find_plugin_dir, load_plugins
+
+    plugin_dir = find_plugin_dir()
+    results = load_plugins(plugin_dir)
+
+    if not plugin_dir.exists():
+        console.print(
+            f"[dim]no plugin dir at[/dim] [cyan]{plugin_dir}[/cyan][dim] yet. "
+            "Drop a .py file with a register_tools() function there to add custom tools.[/dim]"
+        )
+        return
+    if not results:
+        console.print(f"[dim]no plugins found in[/dim] [cyan]{plugin_dir}[/cyan]")
+        return
+
+    table = Table(title=f"Plugins from {plugin_dir}", box=box.ROUNDED)
+    table.add_column("plugin", style="cyan", no_wrap=True)
+    table.add_column("status", no_wrap=True)
+    table.add_column("tools / error", overflow="fold")
+    for r in results:
+        if r.error:
+            table.add_row(r.name, "[red]error[/red]", r.error)
+        else:
+            tool_names = ", ".join(t.name for t in r.tools) or "[dim](none)[/dim]"
+            table.add_row(r.name, "[green]ok[/green]", tool_names)
+    console.print(table)
+
+
+# ---------- serve ----------
+
+@app.command()
+def serve(
+    host: str = typer.Option("127.0.0.1", "--host"),
+    port: int = typer.Option(8000, "--port"),
+) -> None:
+    """Run ronin as an HTTP API. POST /ask, GET /health."""
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for provider [bold]{config.provider}[/bold]. Run [bold]ronin init[/bold] first.")
+        raise typer.Exit(2)
+
+    try:
+        import uvicorn
+    except ImportError:
+        console.print("[red]✗[/red] uvicorn not installed. Run: [bold]uv pip install uvicorn[/bold]")
+        raise typer.Exit(2)
+
+    from .server import make_app
+
+    app_obj = make_app(config)
+    console.print(Panel.fit(
+        f"[bold cyan]ronin serve[/bold cyan]\n"
+        f"http://{host}:{port}/health   →   health check\n"
+        f"POST http://{host}:{port}/ask  →   {{\"question\": \"...\"}}\n\n"
+        f"provider: {config.provider} · model: {config.resolved_model()} · "
+        f"services: {', '.join(config.configured_services()) or 'none'}",
+        title="ready", border_style="green",
+    ))
+    uvicorn.run(app_obj, host=host, port=port, log_level="info")
+
+
+# ---------- export (session → markdown) ----------
+
+@app.command()
+def export(
+    session_id: str = typer.Argument(None, help="Session id to export. Omit for the latest."),
+    out: str = typer.Option(None, "--out", help="Write to this file (default: print to stdout)."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo whose session to export."),
+) -> None:
+    """📤 Export a session as shareable markdown (to a file with --out, else stdout)."""
+    from .replay import session_to_markdown, transcript_to_turns
+    from .sessions import latest_session, list_sessions, load_session
+
+    sid = session_id or latest_session(root)
+    if not sid:
+        console.print("[dim]no sessions to export.[/dim]")
+        raise typer.Exit(1)
+    turns = transcript_to_turns(load_session(sid))
+    title = next((s.get("title") for s in list_sessions() if str(s.get("id")) == str(sid)), "ronin session")
+    md = session_to_markdown(turns, title=title or "ronin session")
+    if out:
+        try:
+            Path(out).write_text(md, encoding="utf-8")
+            console.print(f"[green]✓ exported →[/green] [cyan]{out}[/cyan] ({len(turns)} entries)")
+        except OSError as e:
+            console.print(f"[red]couldn't write {out}: {e}[/red]")
+            raise typer.Exit(1)
+    else:
+        import sys
+        sys.stdout.write(md)
+
+
+# ---------- recall (search past sessions) ----------
+
+@app.command()
+def recall(
+    query: str = typer.Argument(..., help="What to search your past sessions for."),
+    here: bool = typer.Option(False, "--here", help="Only this repo's sessions (default: all)."),
+    limit: int = typer.Option(8, "--limit", help="Max results."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo (with --here)."),
+) -> None:
+    """🔎 Search your past sessions and show the best-matching turn from each.
+
+    `ronin recall "auth bug"` searches every stored session (use --here to scope
+    to this repo), then `ronin replay <id>` plays a hit back in full.
+    """
+    from .recall import rank
+    from .sessions import list_sessions, load_session
+
+    metas = list_sessions(root if here else None)
+    items = [(m, load_session(str(m.get("id")))) for m in metas]
+    hits = rank(items, query, limit=limit)
+    if not hits:
+        scope = "this repo's" if here else "any"
+        console.print(f"[dim]no {scope} sessions matched [bold]{query}[/bold].[/dim]")
+        return
+    console.print(f"[#6b7089]{len(hits)} match(es) for [bold]{query}[/bold]:[/#6b7089]")
+    for h in hits:
+        console.print(f"\n[cyan]{h.session_id[:14]}[/cyan] [dim]· score {h.score} ·[/dim] "
+                      f"[bold]{h.title[:60]}[/bold]")
+        if h.snippet:
+            console.print(f"  [#c0caf5]{h.snippet}[/#c0caf5]")
+    console.print(f"\n[dim]replay one with [bold]ronin replay <id>[/bold].[/dim]")
+
+
+# ---------- replay (session history) ----------
+
+@app.command()
+def replay(
+    session_id: str = typer.Argument(None, help="Session id to replay. Omit for the latest."),
+    list_sessions_flag: bool = typer.Option(False, "--list", help="List this repo's sessions and exit."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo whose sessions to read."),
+) -> None:
+    """⏪ Replay a past session as a readable story (who said what, trimmed).
+
+    `ronin replay` plays the latest; `ronin replay --list` shows all sessions to
+    pick an id from.
+    """
+    from .replay import render_story, transcript_to_turns
+    from .sessions import latest_session, list_sessions, load_session
+
+    if list_sessions_flag:
+        sessions = list_sessions(root)
+        if not sessions:
+            console.print("[dim]no saved sessions for this repo yet.[/dim]")
+            return
+        table = Table(title="sessions", box=box.ROUNDED)
+        table.add_column("id", style="cyan", no_wrap=True)
+        table.add_column("turns", justify="right")
+        table.add_column("title")
+        for s in sessions[:40]:
+            table.add_row(str(s.get("id", "?"))[:12], str(s.get("turns", 0)), s.get("title", "")[:70])
+        console.print(table)
+        return
+
+    sid = session_id or latest_session(root)
+    if not sid:
+        console.print("[dim]no sessions to replay. Run [bold]ronin code[/bold] first.[/dim]")
+        raise typer.Exit(1)
+    turns = transcript_to_turns(load_session(sid))
+    console.print(f"[#6b7089]replaying session [bold]{str(sid)[:12]}[/bold] · {len(turns)} entries[/#6b7089]")
+    render_story(console, turns)
+
+
+# ---------- map (codebase onboarding) ----------
+
+@app.command(name="map")
+def map_cmd(
+    write: bool = typer.Option(False, "--write", help="Save the overview as RONIN.md (project memory)."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo to map."),
+) -> None:
+    """🗺 Onboard to a codebase fast — ronin reads the repo and produces a concise
+    architecture overview (what it is, key dirs, entry points, how to build/test).
+    With --write it saves the result as RONIN.md so every future run is grounded.
+    """
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold].")
+        raise typer.Exit(2)
+    from .code_mode import run_code_agent
+    console.print("[#6b7089]mapping the codebase…[/#6b7089]")
+    prompt = (
+        "Produce a concise architecture overview of THIS repository for a new "
+        "contributor. Use your read-only tools (list_files / glob / search / read) "
+        "to ground every claim — do not guess. Cover, as markdown:\n"
+        "## What this project is (1–2 sentences)\n## Key directories\n"
+        "## Entry points\n## Build / test / run commands\n## Conventions worth knowing\n"
+        "Keep it tight and high-signal."
+    )
+    result = run_code_agent(config, prompt, root=root, console=console, read_only=True,
+                            include_image_tool=False, max_iterations=12)
+    if write and result.output:
+        path = Path(root) / "RONIN.md"
+        header = "# RONIN.md\n\n*Architecture overview generated by `ronin map`. Edit freely.*\n\n"
+        try:
+            path.write_text(header + result.output.strip() + "\n", encoding="utf-8")
+            console.print(f"[green]✓ saved project memory →[/green] [cyan]{path}[/cyan]")
+        except OSError as e:
+            console.print(f"[yellow]couldn't write RONIN.md: {e}[/yellow]")
+
+
+# ---------- pr (open a PR with AI-drafted title/body) ----------
+
+@app.command()
+def pr(
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """🔀 Push the current branch and open a GitHub PR with an AI-drafted title +
+    body (from your commits). Gated — shows what it'll do and waits for y/N.
+    """
+    config = load_config()
+    from .git_helper import open_pr
+    open_pr(console, root, config)
+
+
+# ---------- style (fine-tuning dataset from your sessions) ----------
+
+@app.command()
+def style(
+    out: str = typer.Option("ronin-style.jsonl", "--out", help="Output JSONL path."),
+    with_bushido: bool = typer.Option(True, "--bushido/--no-bushido", help="Prepend your code-of-honor as the system message."),
+    here: bool = typer.Option(False, "--here", help="Only this repo's sessions (default: all)."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo (with --here)."),
+) -> None:
+    """🧬 Export your past sessions as a fine-tuning dataset (chat JSONL) — the first
+    step toward a local model that codes in *your* style, free.
+
+    Pairs each request with ronin's response; --bushido prepends your standing
+    conventions as the system message. Train a local/hosted model on the result.
+    """
+    from .sessions import list_sessions, load_session
+    from .style import build_dataset, to_jsonl
+
+    metas = list_sessions(root if here else None)
+    transcripts = [load_session(str(m.get("id"))) for m in metas]
+    system = None
+    if with_bushido:
+        from .bushido import load_bushido
+        system = load_bushido()
+    rows = build_dataset(transcripts, system=system)
+    if not rows:
+        console.print("[dim]no usable session data yet — code with ronin a while, then re-run.[/dim]")
+        return
+    try:
+        Path(out).write_text(to_jsonl(rows), encoding="utf-8")
+    except OSError as e:
+        console.print(f"[red]couldn't write {out}: {e}[/red]")
+        raise typer.Exit(1)
+    sysline = " (with Bushido system prompt)" if system else ""
+    console.print(f"[green]✓ {len(rows)} training example(s){sysline} →[/green] [cyan]{out}[/cyan]\n"
+                  "[dim]fine-tune a local model on this to make ronin code in your style, free.[/dim]")
+
+
+# ---------- patches (review/apply nightshift output) ----------
+
+@app.command()
+def patches(
+    apply: bool = typer.Option(False, "--apply", help="Apply the patches to your working tree."),
+    pr: bool = typer.Option(False, "--pr", help="Open a GitHub PR per patch (branch + push + gh)."),
+    clean: bool = typer.Option(False, "--clean", help="Only patches with no Duel blockers."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """📦 Review, apply, or PR the patches from your last `ronin nightshift --execute`.
+
+    Lists each task + status + blockers. `--apply` applies the ready patches to
+    your working tree; `--pr` opens a GitHub PR per patch (each on its own branch,
+    built in an isolated worktree so your checkout is untouched). `--clean` skips
+    any a Duel flagged.
+    """
+    from .nightshift import apply_patch, applicable, load_report
+
+    report = load_report(root)
+    if not report:
+        console.print("[dim]no nightshift report yet — run [bold]ronin nightshift --execute[/bold].[/dim]")
+        return
+
+    table = Table(title="🌙 last nightshift", box=box.ROUNDED)
+    table.add_column("status")
+    table.add_column("task", style="bold")
+    table.add_column("notes", style="#6b7089")
+    _style = {"patched": "[green]patched[/green]", "failed-tests": "[red]failed[/red]",
+              "no-change": "[dim]no-change[/dim]", "error": "[red]error[/red]",
+              "skipped-budget": "[yellow]skipped[/yellow]"}
+    for r in report:
+        note = r.get("note", "")
+        if r.get("blockers"):
+            note = f"⚠ {len(r['blockers'])} blocker(s) · {note}"
+        table.add_row(_style.get(r.get("status"), r.get("status", "?")), r.get("title", "")[:50], note[:40])
+    console.print(table)
+
+    if not apply and not pr:
+        ready = applicable(report)
+        if ready:
+            console.print(f"[dim]{len(ready)} patch(es) ready — [bold]ronin patches --apply[/bold] "
+                          "or [bold]--pr[/bold] (add --clean to skip flagged ones).[/dim]")
+        return
+
+    if pr:
+        from .nightshift_pr import branch_commit_in_worktree, branch_name, open_pr, push_branch
+        ready = applicable(report, clean_only=clean)
+        if not ready:
+            console.print("[dim]nothing to open.[/dim]")
+            return
+        opened = 0
+        for i, r in enumerate(ready, 1):
+            br = branch_name(r["title"], i)
+            ok, note = branch_commit_in_worktree(root, r["patch_path"], br,
+                                                 f"nightshift: {r['title']}")
+            if not ok:
+                console.print(f"  [red]✗[/red] {r['title'][:45]} [dim]({note})[/dim]")
+                continue
+            if not push_branch(root, br):
+                console.print(f"  [yellow]⊘[/yellow] {r['title'][:45]} [dim](committed {br}, push failed)[/dim]")
+                continue
+            url = open_pr(root, br, f"nightshift: {r['title']}",
+                          f"Autonomous patch from `ronin nightshift`.\n\n{r.get('note','')}")
+            opened += 1 if url else 0
+            console.print(f"  [green]✓[/green] {r['title'][:45]} [dim]→ {url or br}[/dim]")
+        console.print(f"[green]opened {opened} PR(s)[/green]")
+        return
+
+    to_apply = applicable(report, clean_only=clean)
+    if not to_apply:
+        console.print("[dim]nothing to apply.[/dim]")
+        return
+    ok = 0
+    for r in to_apply:
+        applied = apply_patch(root, r["patch_path"])
+        ok += 1 if applied else 0
+        mark = "[green]✓[/green]" if applied else "[red]✗ (conflict)[/red]"
+        console.print(f"  {mark} {r['title'][:50]}")
+    console.print(f"[green]applied {ok}/{len(to_apply)} patch(es)[/green] "
+                  "[dim]— review the changes, then commit.[/dim]")
+
+
+# ---------- swarm (multi-provider agent team) ----------
+
+@app.command()
+def swarm(
+    task: str = typer.Argument(..., help="The task for the team to work."),
+    roster: str = typer.Option(
+        None, "--roster", "-r",
+        help="Role→provider, e.g. 'architect=anthropic,implementer=cerebras:gpt-oss-120b,reviewer=gemini'."),
+    yolo: bool = typer.Option(False, "--yolo", help="Auto-approve edits (trusted sandboxes)."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """🐝 A TEAM of role-specialized agents works one task — an architect plans, an
+    implementer codes, a reviewer critiques, the implementer revises. Each role can
+    run on a DIFFERENT vendor's model (a dream team only a provider-agnostic agent
+    can assemble).
+
+    Example:  ronin swarm "add retry to the http client" \\
+              -r architect=anthropic,implementer=cerebras,reviewer=gemini
+    """
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold].")
+        raise typer.Exit(2)
+    from .swarm import parse_roster, role_label, run_swarm
+
+    ra = parse_roster(roster)
+    line = " · ".join(f"{r}: [bold]{role_label(config, ra, r)}[/bold]" for r in ("architect", "implementer", "reviewer"))
+    console.print(f"[#7aa2f7]🐝 swarm[/#7aa2f7] {line}\n")
+    result = run_swarm(config, task, root=root, console=console, roster=ra, yolo=yolo)
+    console.print()
+    if result.blocked:
+        console.print(f"[red]✗[/red] {result.output}")
+        raise typer.Exit(2)
+    console.print("[bold green]✅ swarm done[/bold green]")
+
+
+# ---------- nightshift (autonomous backlog) ----------
+
+@app.command()
+def nightshift(
+    goal: str = typer.Argument(None, help="An explicit task to work. Omit to use TODOs/issues."),
+    todos: bool = typer.Option(True, "--todos/--no-todos", help="Include FIXME/TODO markers."),
+    issues: bool = typer.Option(False, "--issues", help="Include open GitHub issues (needs gh)."),
+    execute: bool = typer.Option(False, "--execute", help="Actually work the queue (default: dry-run plan)."),
+    duel: str = typer.Option(None, "--duel", help="Red-team each patch with a rival provider[:model]."),
+    swarm_roster: str = typer.Option(None, "--swarm", help="Work each task with a swarm (role=provider roster)."),
+    budget: float = typer.Option(None, "--budget", help="USD spend cap for the run."),
+    limit: int = typer.Option(10, "--limit", help="Max tasks."),
+    parallel: int = typer.Option(1, "--parallel", help="Work N tasks concurrently (forced to 1 with --budget)."),
+    redo: bool = typer.Option(False, "--redo", help="Re-attempt tasks already shipped in past runs."),
+    notify: str = typer.Option(None, "--notify", help="Webhook URL to ping with the morning report (Slack/Discord/…)."),
+    schedule: str = typer.Option(None, "--schedule", help="Install a cron entry, e.g. '0 2 * * *' (runs nightly)."),
+    unschedule: bool = typer.Option(False, "--unschedule", help="Remove ronin's scheduled nightshift."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo to work in."),
+) -> None:
+    """🌙 Autonomous teammate — works your backlog unattended in isolated worktrees
+    and leaves reviewable, test-passing patches under .ronin/nightshift/.
+
+    Dry-run by default (shows the queue, no edits). `--execute` does the real loop:
+    each task is implemented in a throwaway worktree, proven against the test suite
+    (discarded if red), optionally Duel-reviewed, and saved as a patch. Never pushes,
+    never touches your working tree. `ronin nightshift report` shows the results.
+    """
+    config = load_config()
+    from .nightshift import gather_tasks, patch_path, run_nightshift, summarize
+
+    # Scheduling: install/remove a cron entry that re-runs this nightshift nightly.
+    if unschedule:
+        from .cron_install import uninstall
+        console.print("[green]✓ scheduled nightshift removed[/green]" if uninstall()
+                      else "[dim]no scheduled nightshift to remove.[/dim]")
+        return
+    if schedule:
+        from .cron_install import install
+        import shlex
+        cmd_parts = [f"cd {shlex.quote(str(root.resolve()))} &&", "ronin", "nightshift", "--execute"]
+        if goal:
+            cmd_parts.insert(3, shlex.quote(goal))
+        if issues:
+            cmd_parts.append("--issues")
+        if not todos:
+            cmd_parts.append("--no-todos")
+        if duel:
+            cmd_parts += ["--duel", shlex.quote(duel)]
+        if budget:
+            cmd_parts += ["--budget", str(budget)]
+        if swarm_roster:
+            cmd_parts += ["--swarm", shlex.quote(swarm_roster)]
+        if notify:
+            cmd_parts += ["--notify", shlex.quote(notify)]
+        command = " ".join(cmd_parts)
+        if install(schedule, command):
+            console.print(f"[green]✓ scheduled[/green] [dim]({schedule})[/dim] → ronin will work this "
+                          "backlog on that cron. [dim]Remove with --unschedule.[/dim]")
+        else:
+            console.print("[yellow]couldn't write the crontab[/yellow] [dim](is `crontab` available?)[/dim]")
+        return
+
+    tasks = gather_tasks(root, include_todos=todos, include_issues=issues, goal=goal,
+                         limit=limit, skip_done=not redo)
+    if not tasks:
+        console.print("[dim]empty backlog — no goal, no TODO/FIXME markers"
+                      f"{', no open issues' if issues else ''} (or all already shipped; --redo to re-attempt).[/dim]")
+        return
+
+    console.print(f"[#7aa2f7]🌙 nightshift queue — {len(tasks)} task(s)[/#7aa2f7]"
+                  f"{' [dim](dry-run)[/dim]' if not execute else ''}")
+    for i, t in enumerate(tasks, 1):
+        ref = f" [dim]{t.ref}[/dim]" if t.ref else ""
+        console.print(f"  [cyan]{i:>2}[/cyan] [{t.source}] [bold]{t.title}[/bold]{ref}")
+
+    if not execute:
+        console.print("\n[dim]dry-run — nothing changed. Add [bold]--execute[/bold] to work the queue.[/dim]")
+        return
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold].")
+        raise typer.Exit(2)
+
+    duel_spec = None
+    if duel:
+        from .consensus import parse_model_spec
+        duel_spec = parse_model_spec(duel)
+    _roster = None
+    if swarm_roster is not None:
+        from .swarm import parse_roster
+        _roster = parse_roster(swarm_roster)
+        console.print("[dim]each task worked by a swarm (architect → implementer → reviewer).[/dim]")
+    console.print("[dim]working the queue (isolated worktrees, test-gated)…[/dim]\n")
+    results = run_nightshift(config, root, console, tasks, execute=True,
+                             duel_against=duel_spec, budget=budget, roster=_roster,
+                             parallel=parallel)
+    counts = summarize(results)
+    console.print(f"\n[bold]🌙 morning report[/bold] — [green]{counts['patched']} patch(es)[/green], "
+                  f"{counts['failed-tests']} failed tests, {counts['no-change']} no-change, "
+                  f"{counts['error']} error(s)")
+    patched = [r for r in results if r.status == "patched"]
+    if patched:
+        console.print("[dim]review + apply:[/dim]")
+        for r in patched:
+            warn = f" [yellow]⚠ {len(r.blockers)} blocker(s)[/yellow]" if r.blockers else ""
+            console.print(f"  [green]✓[/green] {r.task.title}{warn}\n"
+                          f"     [dim]git apply {r.patch_path}[/dim]")
+
+    if notify:
+        from .notify import format_report, post_webhook
+        text = format_report(counts, [r.task.title for r in patched])
+        ok = post_webhook(notify, text)
+        console.print("[dim]📣 morning report sent[/dim]" if ok
+                      else "[yellow]📣 couldn't reach the webhook[/yellow]")
+
+
+# ---------- failover (cross-provider resilience) ----------
+
+@app.command()
+def failover(
+    providers: str = typer.Argument(None, help="Ordered fallbacks, e.g. 'groq,gemini'. Omit to show current."),
+    off: bool = typer.Option(False, "--off", help="Turn failover off."),
+    scope: str = typer.Option("user", "--scope", help="Where to save: 'user' or 'project'."),
+) -> None:
+    """🔁 Cross-provider failover — when your provider rate-limits or errors, ronin
+    instantly continues on the next instead of waiting out a ~60s backoff.
+
+    Example:  ronin failover groq,gemini   (Cerebras → Groq → Gemini)
+    Non-last providers fail FAST (one quick retry) so a 429 hops onward.
+    """
+    from .config import save_config
+    cfg = load_config()
+    if off:
+        cfg = cfg.model_copy(update={"failover": []})
+        save_config(cfg, scope=scope)
+        console.print("[green]✓ failover off[/green]")
+        return
+    if not providers:
+        if cfg.failover:
+            chain = " → ".join([cfg.provider] + [f.get("provider", "?") for f in cfg.failover])
+            console.print(f"[#6b7089]failover:[/#6b7089] [bold]{chain}[/bold]")
+        else:
+            console.print("[dim]failover off — set it with [bold]ronin failover groq,gemini[/bold].[/dim]")
+        return
+    from .config_cmd import failover_specs
+    specs = failover_specs(providers)
+    cfg = cfg.model_copy(update={"failover": specs})
+    path = save_config(cfg, scope=scope)
+    chain = " → ".join([cfg.provider] + [s["provider"] for s in specs])
+    console.print(f"[green]✓ failover on[/green] — [bold]{chain}[/bold] → [cyan]{path}[/cyan]\n"
+                  "[dim]a rate-limit on one now hops to the next in ~1s instead of waiting.[/dim]")
+
+
+# ---------- config (view / set settings) ----------
+
+@app.command()
+def config(
+    set_: str = typer.Option(None, "--set", help="Set a setting: --set field=value (e.g. budget=0.50)."),
+    scope: str = typer.Option("project", "--scope", help="Where to save: 'project' or 'user'."),
+) -> None:
+    """⚙ View core settings, or set one with --set field=value.
+
+    Settable: provider · model · route_fast · route_strong · budget · sentinel.
+    Example:  ronin config --set route_fast=cerebras:gpt-oss-120b
+    """
+    cfg = load_config()
+    if set_:
+        from .config import save_config
+        from .config_cmd import BadSetting, coerce_value, parse_set
+        try:
+            field, raw = parse_set(set_)
+            value = coerce_value(field, raw)
+        except BadSetting as e:
+            console.print(f"[red]✗ {e}[/red]")
+            raise typer.Exit(2)
+        cfg = cfg.model_copy(update={field: value})
+        path = save_config(cfg, scope=scope)
+        console.print(f"[green]✓ {field} = {value}[/green] → [cyan]{path}[/cyan]")
+        return
+
+    from .config_cmd import SETTABLE
+    table = Table(title="ronin config", box=box.ROUNDED)
+    table.add_column("setting", style="cyan")
+    table.add_column("value", style="bold")
+    table.add_column("", style="#6b7089")
+    rows = {
+        "provider": cfg.provider,
+        "model": cfg.resolved_model(),
+        "route_fast": cfg.route_fast or "—",
+        "route_strong": cfg.route_strong or "—",
+        "budget": f"${cfg.budget:.2f}" if cfg.budget else "—",
+        "sentinel": "on" if cfg.sentinel else "off",
+    }
+    for k, v in rows.items():
+        table.add_row(k, str(v), SETTABLE.get(k, ("", ""))[1])
+    console.print(table)
+    routing = "on" if (cfg.route_fast and cfg.route_strong) else "off"
+    console.print(f"[dim]Cost Router: [bold]{routing}[/bold] · set it up fast with "
+                  "[bold]ronin setup[/bold].[/dim]")
+
+
+# ---------- changelog (from commits) ----------
+
+@app.command()
+def changelog(
+    since: str = typer.Option(None, "--since", help="Ref to start from (default: last tag, else all)."),
+    version: str = typer.Option("Unreleased", "--version", help="Version heading."),
+    write: bool = typer.Option(False, "--write", help="Prepend the section to CHANGELOG.md."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """🧾 Generate a changelog section from your commits (Conventional-Commits
+    aware: feat/fix/refactor/… grouped). Prints it, or --write prepends to CHANGELOG.md.
+    """
+    from .changelog import render_changelog
+    from .git_helper import _git
+
+    if _git(root, "rev-parse", "--is-inside-work-tree").returncode != 0:
+        console.print("[yellow]not a git repository[/yellow]")
+        raise typer.Exit(2)
+    if since is None:
+        tag = _git(root, "describe", "--tags", "--abbrev=0").stdout.strip()
+        since = tag or None
+    rng = f"{since}..HEAD" if since else "HEAD"
+    log = _git(root, "log", rng, "--pretty=%s", "--no-merges").stdout
+    subjects = [ln for ln in log.splitlines() if ln.strip()]
+    if not subjects:
+        console.print(f"[dim]no commits {('since ' + since) if since else 'found'}.[/dim]")
+        return
+    section = render_changelog(subjects, version=version)
+    if write:
+        cl = Path(root) / "CHANGELOG.md"
+        existing = cl.read_text(encoding="utf-8") if cl.is_file() else "# Changelog\n"
+        # insert after the first heading line
+        head, _, rest = existing.partition("\n")
+        cl.write_text(f"{head}\n\n{section}\n{rest.lstrip()}", encoding="utf-8")
+        console.print(f"[green]✓ prepended {len(subjects)} commit(s) →[/green] [cyan]{cl}[/cyan]")
+    else:
+        import sys
+        sys.stdout.write(section)
+
+
+# ---------- scan (secret scanning) ----------
+
+@app.command()
+def scan(
+    staged: bool = typer.Option(False, "--staged", help="Scan only files staged for commit."),
+    quiet: bool = typer.Option(False, "--quiet", help="No output; just the exit code (for hooks)."),
+    root: Path = typer.Option(Path("."), "--root", help="Directory to scan."),
+) -> None:
+    """🔍 Scan for committed secrets. Exits non-zero if any are found — wire it
+    into a pre-commit hook with [bold]ronin hook install[/bold].
+    """
+    from .scan import scan_staged, scan_tree
+
+    findings = scan_staged(root) if staged else scan_tree(root)
+    if not findings:
+        if not quiet:
+            console.print("[green]✓ no secrets found[/green]")
+        return
+    if not quiet:
+        console.print(f"[bold #f7768e]✗ {len(findings)} file(s) with possible secrets:[/bold #f7768e]")
+        for f in findings:
+            console.print(f"  [red]{f.path}[/red] [dim]({', '.join(f.labels)})[/dim]")
+    raise typer.Exit(1)
+
+
+hook_app = typer.Typer(help="Manage ronin's git pre-commit secret-scan hook.")
+app.add_typer(hook_app, name="hook")
+
+
+@hook_app.command("install")
+def hook_install(root: Path = typer.Option(Path("."), "--root", help="Repo root.")) -> None:
+    """Install the pre-commit hook that blocks commits containing secrets."""
+    from .git_hook import install_hook
+    try:
+        path, fresh = install_hook(root)
+    except FileNotFoundError as e:
+        console.print(f"[yellow]{e}[/yellow]")
+        raise typer.Exit(2)
+    console.print(f"[green]✓ hook installed[/green] → [cyan]{path}[/cyan]" if fresh
+                  else "[dim]hook already installed.[/dim]")
+
+
+@hook_app.command("uninstall")
+def hook_uninstall(root: Path = typer.Option(Path("."), "--root", help="Repo root.")) -> None:
+    """Remove ronin's pre-commit hook snippet (preserves any other hook content)."""
+    from .git_hook import uninstall_hook
+    console.print("[green]✓ hook removed[/green]" if uninstall_hook(root)
+                  else "[dim]no ronin hook to remove.[/dim]")
+
+
+# ---------- setup (first-run wizard) ----------
+
+@app.command()
+def setup() -> None:
+    """🧰 Get routing set up in one go — suggests a free/cheap blade for simple
+    turns and a strong blade for hard ones (the Cost Router + Scout→Strike), based
+    on the providers you already have keys for, and saves it.
+    """
+    config = load_config()
+    console.print(f"[#6b7089]current provider:[/#6b7089] [bold]{config.provider}[/bold] · "
+                  f"[#6b7089]model:[/#6b7089] {config.resolved_model()}")
+    if config.route_fast and config.route_strong:
+        console.print(f"[green]routing already on[/green] — simple→[bold]{config.route_fast}[/bold] · "
+                      f"complex→[bold]{config.route_strong}[/bold]")
+        if not Confirm.ask("Re-configure it?", default=False):
+            return
+
+    from .setup_wizard import suggest_routing
+    suggestion = suggest_routing(config)
+    if suggestion is None:
+        console.print("[yellow]Couldn't suggest a free+strong split[/yellow] — you only have one "
+                      "provider configured. Add a free one (e.g. [bold]ronin login cerebras[/bold]) "
+                      "then re-run [bold]ronin setup[/bold].")
+        return
+    fast, strong = suggestion
+    console.print("\n[bold]Suggested routing[/bold] (Cost Router):")
+    console.print(f"  simple turns  → [cyan]{fast}[/cyan]  [dim](free/cheap)[/dim]")
+    console.print(f"  complex turns → [cyan]{strong}[/cyan]  [dim](strong)[/dim]")
+    if not Confirm.ask("\nEnable this routing?", default=True):
+        console.print("[dim]left routing off.[/dim]")
+        return
+    from .config import save_config
+    config = config.model_copy(update={"route_fast": fast, "route_strong": strong})
+    path = save_config(config, scope="project")
+    console.print(f"[green]✓ routing enabled[/green] → saved to [cyan]{path}[/cyan]\n"
+                  "[dim]every session now shows 💰 cost · saved $… and self-tunes over time.[/dim]")
+
+
+# ---------- types (add missing type hints) ----------
+
+@app.command()
+def types(
+    execute: bool = typer.Option(False, "--execute", help="Add type hints (default: list gaps)."),
+    limit: int = typer.Option(60, "--limit", help="Max functions."),
+    budget: float = typer.Option(None, "--budget", help="USD spend cap."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """🏷  Find public functions missing parameter/return type hints, then (with
+    --execute) add precise hints — test-gated, as reviewable patches.
+    """
+    from .types_gap import find_type_gaps, to_tasks
+
+    gaps = find_type_gaps(root, limit=limit)
+    if not gaps:
+        console.print("[green]✓ every public function is annotated.[/green]")
+        return
+    by_file: dict[str, int] = {}
+    for g in gaps:
+        by_file[g.file] = by_file.get(g.file, 0) + 1
+    console.print(f"[#7aa2f7]🏷 {len(gaps)} under-annotated function(s)[/#7aa2f7] in {len(by_file)} file(s):")
+    for f, n in list(by_file.items())[:20]:
+        console.print(f"  [cyan]{f}[/cyan] [dim]{n} function(s)[/dim]")
+    if not execute:
+        console.print("\n[dim]add [bold]--execute[/bold] to add type hints (reviewable patches).[/dim]")
+        return
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold].")
+        raise typer.Exit(2)
+    from .nightshift import run_nightshift, summarize
+    console.print("[dim]adding type hints (isolated worktrees, test-gated)…[/dim]\n")
+    results = run_nightshift(config, root, console, to_tasks(gaps), execute=True, budget=budget)
+    counts = summarize(results)
+    console.print(f"\n[bold]🏷 types[/bold] — [green]{counts['patched']} file(s) annotated[/green]")
+    console.print("[dim]review with [bold]ronin patches[/bold].[/dim]")
+
+
+# ---------- deps (dependency audit) ----------
+
+@app.command()
+def deps(root: Path = typer.Option(Path("."), "--root", help="Repo root.")) -> None:
+    """📦 Audit dependencies — cross-checks what your code imports against what the
+    project declares: flags declared-but-unused deps and used-but-undeclared imports.
+    """
+    from .deps import audit
+
+    a = audit(root)
+    console.print(f"[#7aa2f7]📦 {len(a['used'])} third-party package(s) imported[/#7aa2f7]")
+    if a["undeclared"]:
+        console.print(f"\n[bold #f7768e]⚠ used but NOT declared[/bold #f7768e] "
+                      "[dim](add to pyproject/requirements?)[/dim]")
+        for d in a["undeclared"]:
+            console.print(f"  [#f7768e]{d}[/#f7768e]")
+    if a["unused"]:
+        console.print(f"\n[bold #e0af68]· declared but not imported[/bold #e0af68] "
+                      "[dim](unused, or used indirectly?)[/dim]")
+        for d in a["unused"]:
+            console.print(f"  [#e0af68]{d}[/#e0af68]")
+    if not a["undeclared"] and not a["unused"]:
+        console.print("[green]✓ declared deps and imports line up.[/green]")
+
+
+# ---------- onboard (understand a new repo fast) ----------
+
+@app.command()
+def onboard(
+    repo: str = typer.Argument(".", help="A git URL to clone, or a local path."),
+    keep: bool = typer.Option(False, "--keep", help="Keep the cloned repo (don't delete the temp dir)."),
+) -> None:
+    """🧭 Drop into any repo and get oriented — clones a URL (or reads a local path),
+    gathers the stack, layout, entry points and architecture, then writes you an
+    onboarding guide: what it is, where to start, how to build/run/test.
+    """
+    import shutil
+    import subprocess
+    import tempfile
+
+    from .onboard_repo import gather_facts, onboard_prompt
+
+    tmp: str | None = None
+    from .onboard_repo import is_git_url
+    if is_git_url(repo):
+        tmp = tempfile.mkdtemp(prefix="ronin-onboard-")
+        console.print(f"[#7aa2f7]🧭 cloning[/#7aa2f7] [bold]{repo}[/bold] [dim]→ shallow[/dim]")
+        try:
+            r = subprocess.run(["git", "clone", "--depth", "1", repo, tmp],
+                               capture_output=True, text=True, timeout=180)
+        except (OSError, subprocess.SubprocessError) as e:
+            console.print(f"[red]clone failed: {e}[/red]")
+            raise typer.Exit(1)
+        if r.returncode != 0:
+            console.print(f"[red]clone failed:[/red] {r.stderr.strip()[:300]}")
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise typer.Exit(1)
+        root = Path(tmp)
+    else:
+        root = Path(repo)
+        if not root.is_dir():
+            console.print(f"[red]not a directory:[/red] {repo}")
+            raise typer.Exit(1)
+
+    try:
+        console.print("[#6b7089]gathering facts…[/#6b7089]")
+        facts = gather_facts(root)
+        stack = ", ".join(facts.get("stack", [])) or "unknown"
+        console.print(f"  stack [bold]{stack}[/bold]"
+                      + (f"  ·  [bold]{facts['modules']}[/bold] modules in [cyan]{facts['package']}[/cyan]"
+                         if facts.get("package") else ""))
+        if facts.get("entry_points"):
+            console.print(f"  entry points  [cyan]{', '.join(facts['entry_points'])}[/cyan]")
+
+        config = load_config()
+        if not config.has_provider_auth():
+            console.print("[dim]set a provider to generate the full onboarding guide.[/dim]")
+            return
+        from .code_mode import run_code_agent
+        console.print("\n[#6b7089]writing your onboarding guide…[/#6b7089]\n")
+        run_code_agent(config, onboard_prompt(facts), root=root, console=console,
+                       read_only=True, include_image_tool=False, max_iterations=14)
+    finally:
+        if tmp and not keep:
+            shutil.rmtree(tmp, ignore_errors=True)
+        elif tmp and keep:
+            console.print(f"\n[dim]cloned repo kept at[/dim] {tmp}")
+
+
+# ---------- usages (deep-dive one symbol + its call sites) ----------
+
+@app.command()
+def usages(
+    symbol: str = typer.Argument(..., help="A function/class/method name to deep-dive."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+    no_ai: bool = typer.Option(False, "--no-ai", help="Just show where it's defined + used."),
+) -> None:
+    """🔍 Deep-dive a symbol — find where it's defined and every place it's used,
+    then explain its contract, behaviour, and how callers depend on it.
+    """
+    from .symbol_lens import explain_prompt, locate
+
+    loc = locate(root, symbol)
+    if not loc["definitions"] and loc["total_sites"] == 0:
+        console.print(f"[yellow]no definition or usage of[/yellow] [bold]{symbol}[/bold] [dim]found.[/dim]")
+        raise typer.Exit(1)
+
+    for d in loc["definitions"]:
+        console.print(f"[#7aa2f7]🔍 {d.kind}[/#7aa2f7] [bold]{symbol}[/bold] "
+                      f"[dim]→[/dim] [cyan]{d.file}:{d.line}[/cyan]")
+    if not loc["definitions"]:
+        console.print(f"[#e0af68]🔍 {symbol}[/#e0af68] [dim]used but not defined here (imported?)[/dim]")
+    console.print(f"[#6b7089]{loc['total_sites']} call site(s)[/#6b7089]"
+                  + ("[dim] — showing first few:[/dim]" if loc["call_sites"] else ""))
+    for s in loc["call_sites"][:8]:
+        console.print(f"  [dim]{s.file}:{s.line}[/dim]  {s.text[:80]}")
+
+    if no_ai:
+        return
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print("[dim]set a provider for the full explanation.[/dim]")
+        return
+    from .code_mode import run_code_agent
+    console.print("\n[#6b7089]reading the code…[/#6b7089]\n")
+    run_code_agent(config, explain_prompt(loc, symbol), root=root, console=console,
+                   read_only=True, include_image_tool=False, max_iterations=12)
+
+
+# ---------- watch (re-run on save) ----------
+
+@app.command()
+def watch(
+    command: list[str] = typer.Argument(None, help="Command to run on change. Default: pytest -q."),
+    root: Path = typer.Option(Path("."), "--root", help="Directory to watch."),
+    interval: float = typer.Option(1.0, "--interval", help="Poll interval in seconds."),
+    fix: bool = typer.Option(False, "--fix", help="On failure, hand the output to ronin to fix it."),
+) -> None:
+    """👀 Re-run a command whenever your code changes — your tests by default.
+    With --fix, a failing run is handed straight to ronin to repair (then watching
+    resumes). Ctrl-C to stop.
+    """
+    import subprocess
+    import time
+
+    from .watch import changed, describe_change, snapshot
+
+    cmd = list(command) if command else ["pytest", "-q"]
+    cmd_str = " ".join(cmd)
+    console.print(f"[#7aa2f7]👀 watching[/#7aa2f7] [bold]{root}[/bold] "
+                  f"[dim]→ runs[/dim] [cyan]{cmd_str}[/cyan] [dim]on save · Ctrl-C to stop[/dim]")
+
+    def _run() -> int:
+        console.print(f"\n[#6b7089]── running[/#6b7089] [cyan]{cmd_str}[/cyan] [dim]──[/dim]")
+        try:
+            r = subprocess.run(cmd, cwd=str(root))
+            rc = r.returncode
+        except (OSError, subprocess.SubprocessError) as e:
+            console.print(f"[red]couldn't run: {e}[/red]")
+            return 1
+        if rc == 0:
+            console.print("[green]✓ passed[/green]")
+        else:
+            console.print(f"[#f7768e]✗ exit {rc}[/#f7768e]")
+            if fix:
+                config = load_config()
+                if config.has_provider_auth():
+                    from .code_mode import run_code_agent
+                    console.print("[#6b7089]handing the failure to ronin…[/#6b7089]")
+                    run_code_agent(
+                        config,
+                        f"The command `{cmd_str}` is failing. Run it, read the output, find "
+                        "the cause, and fix it. Keep changes minimal and re-run to confirm green.",
+                        root=root, console=console, max_iterations=20)
+        return rc
+
+    _run()
+    prev = snapshot(root)
+    try:
+        while True:
+            time.sleep(max(0.2, interval))
+            cur = snapshot(root)
+            hits = changed(prev, cur)
+            if hits:
+                prev = cur
+                console.print(f"\n[#e0af68]changed:[/#e0af68] [dim]{describe_change(hits, root)}[/dim]")
+                _run()
+                prev = snapshot(root)              # re-snapshot (a --fix run may edit files)
+    except KeyboardInterrupt:
+        console.print("\n[dim]👋 stopped watching.[/dim]")
+
+
+# ---------- grep (search code by intent) ----------
+
+@app.command()
+def grep(
+    query: list[str] = typer.Argument(..., help="What you're looking for, in plain words."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+    limit: int = typer.Option(12, "--limit", help="How many candidates to rank."),
+    no_ai: bool = typer.Option(False, "--no-ai", help="Just show ranked locations, don't ask the agent."),
+) -> None:
+    """🔎 Search by intent, not by string — "where do we handle retries?" ranks the
+    functions/classes most relevant to your question (name + docstring + body),
+    then the agent reads the winners and answers precisely.
+    """
+    from .intent_search import search, search_prompt
+
+    q = " ".join(query)
+    hits = search(root, q, limit=limit)
+    if not hits:
+        console.print(f"[yellow]nothing matched[/yellow] [bold]{q}[/bold] "
+                      "[dim](try different words?)[/dim]")
+        raise typer.Exit(1)
+    console.print(f"[#7aa2f7]🔎 \"{q}\"[/#7aa2f7] [dim]— top matches:[/dim]")
+    top = hits[0][1] or 1.0
+    for u, s in hits:
+        bars = "█" * max(1, round(5 * s / top))
+        console.print(f"  [#6b7089]{bars:<5}[/#6b7089] [cyan]{u.file}:{u.line}[/cyan] "
+                      f"[dim]{u.kind}[/dim] [bold]{u.name}[/bold]")
+
+    if no_ai:
+        return
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print("[dim]set a provider to have ronin read the winners and answer.[/dim]")
+        return
+    from .code_mode import run_code_agent
+    console.print("\n[#6b7089]reading the most relevant code…[/#6b7089]\n")
+    run_code_agent(config, search_prompt(q, hits), root=root, console=console,
+                   read_only=True, include_image_tool=False, max_iterations=12)
+
+
+# ---------- commit (stage + Conventional Commit message) ----------
+
+@app.command()
+def commit(
+    all_changes: bool = typer.Option(True, "--all/--staged", "-a", help="Stage all tracked changes first (default), or commit only what's staged."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show the message; don't commit."),
+    no_ai: bool = typer.Option(False, "--no-ai", help="Use the offline heuristic message instead of the agent."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """✍️  Write a Conventional Commit from your diff — infers type + scope from the
+    changed files, drafts a clean subject + body grounded in the actual changes,
+    and commits. --dry-run to preview, --no-ai for the offline heuristic.
+    """
+    import subprocess
+
+    from .commit_msg import commit_prompt, fallback_subject, infer_type
+
+    def _git(args: list[str]) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", *args], cwd=str(root), capture_output=True, text=True, timeout=60)
+
+    if _git(["rev-parse", "--git-dir"]).returncode != 0:
+        console.print("[red]not a git repository.[/red]")
+        raise typer.Exit(1)
+    if all_changes and not dry_run:
+        _git(["add", "-A"])
+
+    names = _git(["diff", "--cached", "--name-only"]).stdout.split()
+    patch = _git(["diff", "--cached"]).stdout
+    if not names:
+        console.print("[yellow]nothing staged to commit.[/yellow] [dim](edit files, or drop --staged)[/dim]")
+        raise typer.Exit(1)
+
+    summary = f"{len(names)} file(s): {', '.join(names[:6])}" + (" …" if len(names) > 6 else "")
+    console.print(f"[#7aa2f7]✍️  {summary}[/#7aa2f7]")
+
+    message = ""
+    config = load_config()
+    if not no_ai and config.has_provider_auth():
+        try:
+            from ronin_agent_patterns import Message
+
+            from .runner import build_single_provider
+            provider = build_single_provider(config)
+            with console.status("[dim] drafting commit message…[/dim]", spinner="dots"):
+                resp = provider.complete(
+                    system="You write clean, conventional git commit messages.",
+                    messages=[Message(role="user", content=commit_prompt(summary, patch, infer_type(names)))],
+                    tools=[], max_tokens=400)
+            message = (resp.text or "").strip().strip("`")
+        except Exception as e:  # noqa: BLE001
+            console.print(f"[dim]AI draft failed ({e}); using heuristic.[/dim]")
+    if not message:
+        message = fallback_subject(names)
+
+    from rich.panel import Panel
+    console.print(Panel(message, title="commit message", border_style="#6b7089", padding=(1, 2)))
+    if dry_run:
+        console.print("[dim]--dry-run: not committing.[/dim]")
+        return
+    r = _git(["commit", "-m", message])
+    if r.returncode == 0:
+        short = _git(["rev-parse", "--short", "HEAD"]).stdout.strip()
+        console.print(f"[green]✓ committed[/green] [bold]{short}[/bold]")
+    else:
+        console.print(f"[red]commit failed:[/red] {(r.stderr or r.stdout).strip()[:300]}")
+        raise typer.Exit(1)
+
+
+# ---------- lint (detect + run + optional --fix) ----------
+
+@app.command()
+def lint(
+    fix: bool = typer.Option(False, "--fix", help="Apply safe autofixes, then have ronin fix the rest."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """🧹 Run the project's linter (ruff/flake8/eslint, auto-detected) and report
+    the issue count. With --fix, apply the linter's own autofixes then hand any
+    remaining failures to ronin to repair.
+    """
+    import shutil
+    import subprocess
+
+    from .lint import detect_linter, fix_command, parse_issue_count
+
+    avail = {t for t in ("ruff", "flake8", "npx", "eslint") if shutil.which(t)}
+    cmd = detect_linter(root, available=avail)
+    if not cmd:
+        console.print("[yellow]no linter detected[/yellow] [dim](install ruff: "
+                      "[bold]uv tool install ruff[/bold])[/dim]")
+        raise typer.Exit(1)
+    cmd_str = " ".join(cmd)
+
+    if fix:
+        fc = fix_command(cmd)
+        if fc:
+            console.print(f"[#6b7089]applying safe autofixes:[/#6b7089] [cyan]{' '.join(fc)}[/cyan]")
+            try:
+                subprocess.run(fc, cwd=str(root), capture_output=True, text=True, timeout=180)
+            except (OSError, subprocess.SubprocessError):
+                pass
+
+    console.print(f"[#7aa2f7]🧹 linting[/#7aa2f7] [cyan]{cmd_str}[/cyan]")
+    try:
+        r = subprocess.run(cmd, cwd=str(root), capture_output=True, text=True, timeout=180)
+    except (OSError, subprocess.SubprocessError) as e:
+        console.print(f"[red]couldn't run linter: {e}[/red]")
+        raise typer.Exit(1)
+    output = (r.stdout or "") + (r.stderr or "")
+    n = parse_issue_count(output, cmd)
+    if r.returncode == 0 and n == 0:
+        console.print("[green]✓ clean — no lint issues.[/green]")
+        return
+    console.print(f"[#f7768e]✗ {n or 'some'} issue(s) remain[/#f7768e]")
+    snippet = "\n".join(output.splitlines()[:20])
+    console.print(f"[dim]{snippet}[/dim]")
+    if not fix:
+        console.print("\n[dim]add [bold]--fix[/bold] to autofix + have ronin repair the rest.[/dim]")
+        return
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print("[dim]set a provider to have ronin fix the remaining issues.[/dim]")
+        return
+    from .code_mode import run_code_agent
+    console.print("\n[#6b7089]handing the remaining lint errors to ronin…[/#6b7089]\n")
+    run_code_agent(
+        config,
+        f"`{cmd_str}` still reports lint issues after autofix. Run it, read the "
+        "errors, and fix them properly (not by suppressing). Re-run to confirm clean.\n\n"
+        f"Current output:\n{output[:6000]}",
+        root=root, console=console, max_iterations=20)
+
+
+# ---------- checkup (repo health report) ----------
+
+@app.command()
+def checkup(
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """🩺 Full repo health checkup — README, license, tests, dependency hygiene,
+    committed secrets, TODO load, oversized files — rolled into a health grade.
+    (Distinct from [bold]ronin doctor[/bold], which checks your config/provider.)
+    """
+    from .checkup import grade, health_score, run_checks
+
+    checks = run_checks(root)
+    score = health_score(checks)
+    g = grade(score)
+    color = "green" if g in {"A", "B"} else "#e0af68" if g in {"C", "D"} else "#f7768e"
+    console.print(f"[{color}]🩺 health [bold]{g}[/bold]  ({score}/100)[/{color}]\n")
+    icon = {"ok": "[green]✓[/green]", "warn": "[#e0af68]●[/#e0af68]", "fail": "[#f7768e]✗[/#f7768e]"}
+    for c in checks:
+        console.print(f"  {icon.get(c.status, '·')} [bold]{c.name:<13}[/bold] [dim]{c.detail}[/dim]")
+    fails = [c for c in checks if c.status == "fail"]
+    if fails:
+        console.print(f"\n[#f7768e]{len(fails)} critical issue(s) to address first.[/#f7768e]")
+    elif score == 100:
+        console.print("\n[green]spotless. ship it. 🚀[/green]")
+
+
+# ---------- complexity (cyclomatic hotspots) ----------
+
+@app.command()
+def complexity(
+    threshold: int = typer.Option(10, "--threshold", "-t", help="Minimum complexity to report."),
+    limit: int = typer.Option(25, "--limit", help="Max functions to list."),
+    refactor: bool = typer.Option(False, "--refactor", help="Have ronin simplify the worst offender."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """🌀 Rank your most complex functions by cyclomatic complexity (branches per
+    function) — the hardest code to test and maintain. --refactor hands the worst
+    one to ronin to simplify without changing behaviour.
+    """
+    from .complexity import find_complex, rating, refactor_prompt
+
+    hits = find_complex(root, threshold=threshold, limit=limit)
+    if not hits:
+        console.print(f"[green]✓ nothing at or above complexity {threshold} — tidy.[/green]")
+        return
+    console.print(f"[#7aa2f7]🌀 {len(hits)} function(s) ≥ complexity {threshold}[/#7aa2f7] "
+                  "[dim](worst first)[/dim]")
+    worst = hits[0].score or 1
+    for c in hits:
+        bars = "█" * max(1, round(8 * c.score / worst))
+        tone = "#f7768e" if c.score >= 20 else "#e0af68" if c.score >= 10 else "#6b7089"
+        console.print(f"  [{tone}]{c.score:>3}[/{tone}] [dim]{bars:<8}[/dim] "
+                      f"[cyan]{c.file}:{c.line}[/cyan] [bold]{c.name}[/bold] "
+                      f"[dim]{rating(c.score)}[/dim]")
+
+    if not refactor:
+        console.print("\n[dim]add [bold]--refactor[/bold] to have ronin simplify the worst one.[/dim]")
+        return
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print("[dim]set a provider to refactor.[/dim]")
+        return
+    from .code_mode import run_code_agent
+    console.print(f"\n[#6b7089]refactoring[/#6b7089] [bold]{hits[0].name}[/bold] "
+                  f"[dim](complexity {hits[0].score})[/dim]\n")
+    run_code_agent(config, refactor_prompt(hits[0]), root=root, console=console,
+                   max_iterations=20)
+
+
+# ---------- api (markdown API reference) ----------
+
+@app.command()
+def api(
+    out: Path = typer.Option(None, "--out", "-o", help="Write the reference to a file (default: print to stdout)."),
+    title: str = typer.Option("API Reference", "--title", help="Document title."),
+    root: Path = typer.Option(Path("."), "--root", help="Package/repo root."),
+) -> None:
+    """📚 Generate a Markdown API reference from public functions/classes and their
+    docstrings — no Sphinx, no config. Print it, or write it with --out.
+    """
+    from .api_ref import build_api, render_markdown
+
+    modules = build_api(root)
+    if not modules:
+        console.print("[yellow]no public API found[/yellow] [dim](no public defs, or all tests?)[/dim]")
+        raise typer.Exit(1)
+    md = render_markdown(modules, title=title)
+    total = sum(len(s) for _, s in modules)
+    if out:
+        try:
+            out.write_text(md, encoding="utf-8")
+        except OSError as e:
+            console.print(f"[red]write failed:[/red] {e}")
+            raise typer.Exit(1)
+        console.print(f"[green]✓[/green] {total} symbol(s) across {len(modules)} module(s) "
+                      f"→ [cyan]{out}[/cyan]")
+    else:
+        from rich.markdown import Markdown
+        console.print(Markdown(md))
+
+
+# ---------- subnet (CIDR calculator) ----------
+
+@app.command()
+def subnet(
+    cidr: str = typer.Argument(..., help="A CIDR or IP, e.g. 192.168.1.0/24 or 10.0.5.37/16."),
+) -> None:
+    """🌐 Subnet / CIDR calculator — network, broadcast, mask, usable host range.
+    IPv4 + IPv6. Offline.
+    """
+    from .subnet_calc import subnet_info
+
+    i = subnet_info(cidr)
+    if "error" in i:
+        console.print(f"[#f7768e]{i['error']}[/#f7768e]")
+        raise typer.Exit(1)
+    console.print(f"[#7aa2f7]🌐 {i['cidr']}[/#7aa2f7] [dim](IPv{i['version']}{', private' if i['is_private'] else ''})[/dim]")
+    console.print(f"   network    [bold]{i['network']}[/bold]")
+    if i.get("broadcast"):
+        console.print(f"   broadcast  [bold]{i['broadcast']}[/bold]")
+    console.print(f"   netmask    {i['netmask']}  [dim]/{i['prefix']}[/dim]")
+    if i.get("wildcard"):
+        console.print(f"   wildcard   {i['wildcard']}")
+    console.print(f"   hosts      [bold]{i['usable_hosts']:,}[/bold] usable "
+                  f"[dim]({i['first_host']} – {i['last_host']})[/dim]" if i["first_host"] else
+                  f"   addresses  [bold]{i['num_addresses']:,}[/bold]")
+
+
+# ---------- passphrase (memorable strong passwords) ----------
+
+@app.command()
+def passphrase(
+    words: int = typer.Argument(4, help="How many words (2-12)."),
+    separator: str = typer.Option("-", "--sep", help="Word separator."),
+    capitalize: bool = typer.Option(False, "--capitalize", help="Capitalize each word."),
+    number: bool = typer.Option(False, "--number", help="Append a random 2-digit number."),
+    count: int = typer.Option(1, "--count", "-n", help="How many to generate."),
+) -> None:
+    """🔑 Generate memorable, strong diceware-style passphrases. Offline."""
+    from .passphrase import passphrase as _gen
+
+    for _ in range(max(1, count)):
+        r = _gen(words, separator=separator, capitalize=capitalize, add_number=number)
+        console.print(f"[bold #9ece6a]{r['passphrase']}[/bold #9ece6a] "
+                      f"[dim]~{r['entropy_bits']} bits[/dim]")
+
+
+# ---------- toc (markdown table of contents) ----------
+
+@app.command()
+def toc(
+    file: Path = typer.Argument(..., help="A Markdown file."),
+    min_level: int = typer.Option(2, "--min", help="Smallest heading level to include (1-6)."),
+    max_level: int = typer.Option(4, "--max", help="Largest heading level to include."),
+) -> None:
+    """📑 Generate a Markdown table of contents (with anchor links) from a file."""
+    from .toc_gen import extract_headings, generate_toc
+
+    if not file.is_file():
+        console.print(f"[red]no such file:[/red] {file}")
+        raise typer.Exit(1)
+    headings = extract_headings(file.read_text(encoding="utf-8"))
+    if not headings:
+        console.print("[yellow]no headings found.[/yellow]")
+        raise typer.Exit(1)
+    out = generate_toc(headings, min_level=min_level, max_level=max_level)
+    print(out)
+
+
+# ---------- jwt (decode a JSON Web Token) ----------
+
+@app.command()
+def jwt(
+    token: str = typer.Argument(..., help="A JWT (header.payload.signature)."),
+) -> None:
+    """🪪 Decode a JWT's header & payload (no signature verification). Offline.
+
+    Decoding is NOT verification — never trust an unverified token for authz.
+    """
+    import json
+
+    from rich.syntax import Syntax
+
+    from .jwt_decode import decode_jwt
+
+    out = decode_jwt(token)
+    if "error" in out:
+        console.print(f"[#f7768e]{out['error']}[/#f7768e]")
+        raise typer.Exit(1)
+    console.print(f"[#7aa2f7]🪪 JWT[/#7aa2f7] [dim]alg={out['alg']}[/dim]")
+    console.print("[dim]── header ──[/dim]")
+    console.print(Syntax(json.dumps(out["header"], indent=2), "json", theme="dracula", background_color="default"))
+    console.print("[dim]── payload ──[/dim]")
+    console.print(Syntax(json.dumps(out["payload"], indent=2), "json", theme="dracula", background_color="default"))
+    if out["times"]:
+        console.print("[dim]── timestamps (UTC) ──[/dim]")
+        for claim, iso in out["times"].items():
+            console.print(f"   {claim:<10} [bold]{iso}[/bold]")
+    console.print("[yellow]signature not verified.[/yellow]")
+
+
+# ---------- uuid (generate / inspect) ----------
+
+@app.command()
+def uuid(
+    version: int = typer.Option(4, "--version", "-v", help="UUID version: 1, 3, 4 or 5."),
+    name: Optional[str] = typer.Option(None, "--name", help="Name for v3/v5 (name-based)."),
+    namespace: str = typer.Option("dns", "--namespace", help="Namespace for v3/v5: dns|url|oid|x500."),
+    count: int = typer.Option(1, "--count", "-n", help="How many to generate."),
+    inspect_value: Optional[str] = typer.Option(None, "--inspect", help="Inspect an existing UUID instead."),
+) -> None:
+    """🆔 Generate UUIDs (v4/v1/v5) or inspect one with --inspect. Offline."""
+    from .uuid_tools import generate, inspect
+
+    if inspect_value is not None:
+        info = inspect(inspect_value)
+        if "error" in info:
+            console.print(f"[#f7768e]{info['error']}[/#f7768e]")
+            raise typer.Exit(1)
+        console.print(f"[#7aa2f7]🆔 {info['uuid']}[/#7aa2f7]")
+        console.print(f"   version  [bold]{info['version']}[/bold]   variant  {info['variant']}")
+        if info.get("timestamp"):
+            console.print(f"   time     [bold]{info['timestamp']}[/bold]")
+        if info["is_nil"]:
+            console.print("   [dim]nil UUID[/dim]")
+        return
+    for _ in range(max(1, count)):
+        r = generate(version, name=name, namespace=namespace)
+        if "error" in r:
+            console.print(f"[#f7768e]{r['error']}[/#f7768e]")
+            raise typer.Exit(1)
+        console.print(f"[bold #9ece6a]{r['uuid']}[/bold #9ece6a]")
+
+
+# ---------- hash (digests / checksums) ----------
+
+@app.command()
+def hash(
+    source: str = typer.Argument(..., help="Text to hash, or @path for a file."),
+    algorithm: Optional[str] = typer.Option(None, "--algo", "-a", help="Only this algo: md5|sha1|sha256|sha512."),
+    check: Optional[str] = typer.Option(None, "--check", help="Verify the input matches this digest."),
+) -> None:
+    """#️⃣  Compute md5/sha1/sha256/sha512 of text or a @file. Offline.
+
+    md5/sha1 are for checksums/legacy only — not cryptographically safe.
+    """
+    from .hash_tools import ALGORITHMS, hash_file, hash_text, verify
+
+    algos = (algorithm,) if algorithm else ALGORITHMS
+    if source.startswith("@"):
+        digests = hash_file(source[1:], algorithms=algos)
+    else:
+        digests = hash_text(source, algorithms=algos)
+    if "error" in digests:
+        console.print(f"[#f7768e]{digests['error']}[/#f7768e]")
+        raise typer.Exit(1)
+    if check is not None:
+        ok = verify(check, digests)
+        console.print("[#9ece6a]✓ match[/#9ece6a]" if ok else "[#f7768e]✗ no match[/#f7768e]")
+        raise typer.Exit(0 if ok else 1)
+    for algo, digest in digests.items():
+        console.print(f"   {algo:<7} [bold]{digest}[/bold]")
+
+
+# ---------- curl2code (curl -> code) ----------
+
+@app.command(name="curl2code")
+def curl2code(
+    command: list[str] = typer.Argument(..., help="A curl command (quote it)."),
+    lang: str = typer.Option("python", "--lang", "-l", help="python | js | both."),
+) -> None:
+    """🔁 Convert a curl command into Python (httpx) or JavaScript (fetch) code."""
+    from rich.syntax import Syntax
+
+    from .curl_convert import parse_curl, to_javascript, to_python
+    parsed = parse_curl(" ".join(command))
+    if not parsed["url"]:
+        console.print("[yellow]couldn't find a URL in that curl command.[/yellow]")
+        raise typer.Exit(1)
+    if lang in ("python", "py", "both"):
+        console.print(Syntax(to_python(parsed), "python", theme="dracula", background_color="default"))
+    if lang in ("js", "javascript", "both"):
+        console.print(Syntax(to_javascript(parsed), "javascript", theme="dracula", background_color="default"))
+
+
+# ---------- count (wc-like) ----------
+
+@app.command()
+def count(
+    source: str = typer.Argument(..., help="Text: a string, @file, or '-' for stdin."),
+) -> None:
+    """🔢 Count lines, words, characters and bytes (a friendly wc). Offline."""
+    import sys
+
+    from .text_count import count_text
+    if source == "-":
+        raw = sys.stdin.read()
+    elif source.startswith("@"):
+        try:
+            raw = Path(source[1:]).read_text(encoding="utf-8")
+        except OSError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+    else:
+        raw = source
+    c = count_text(raw)
+    console.print(f"[bold]{c['lines']}[/bold] lines · [bold]{c['words']}[/bold] words · "
+                  f"[bold]{c['characters']}[/bold] chars · [bold]{c['bytes']}[/bold] bytes")
+
+
+# ---------- api-test (assert on an endpoint) ----------
+
+@app.command(name="api-test")
+def api_test_cmd(
+    url: str = typer.Argument(..., help="The endpoint to test."),
+    status: int = typer.Option(None, "--status", "-s", help="Expected HTTP status code."),
+    field: Optional[list[str]] = typer.Option(None, "--field", "-f", help="Assert a JSON field: path=value (e.g. data.0.id=5). Repeatable."),
+) -> None:
+    """🧪 Smoke-test an API endpoint: assert its status and JSON fields. Exits
+    non-zero if any assertion fails (handy in scripts/CI).
+    """
+    import time
+
+    import httpx
+
+    from .api_test import check_response, parse_expect
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    t0 = time.time()
+    try:
+        r = httpx.get(url, timeout=20, follow_redirects=True)
+    except Exception as e:  # noqa: BLE001
+        console.print(f"[red]request failed:[/red] {e}")
+        raise typer.Exit(2)
+    ms = round((time.time() - t0) * 1000)
+    body = None
+    try:
+        body = r.json()
+    except ValueError:
+        pass
+    console.print(f"[#7aa2f7]🧪 {url}[/#7aa2f7] [dim]→ {r.status_code} · {ms}ms[/dim]")
+    outcome = check_response(r.status_code, body, expect_status=status, expect=parse_expect(list(field or [])))
+    for res in outcome["results"]:
+        mark = "[green]✓[/green]" if res["passed"] else "[#f7768e]✗[/#f7768e]"
+        detail = "" if res["passed"] else f" [dim](got {res['actual']!r})[/dim]"
+        console.print(f"  {mark} {res['check']}{detail}")
+    if not outcome["results"]:
+        console.print("  [dim]no assertions — pass --status or --field to check something.[/dim]")
+    if not outcome["passed"]:
+        console.print("\n[#f7768e]FAILED[/#f7768e]")
+        raise typer.Exit(1)
+    console.print("\n[green]PASSED[/green]")
+
+
+# ---------- user-agent (parse a UA string) ----------
+
+@app.command(name="user-agent")
+def user_agent_cmd(
+    ua: list[str] = typer.Argument(..., help="A User-Agent string (quote it)."),
+) -> None:
+    """🧭 Parse a User-Agent string into browser / OS / device. Offline."""
+    from .user_agent import parse_user_agent
+
+    info = parse_user_agent(" ".join(ua))
+    ver = f" {info['version']}" if info["version"] else ""
+    console.print(f"[#7aa2f7]🧭 browser[/#7aa2f7] [bold]{info['browser']}{ver}[/bold]")
+    console.print(f"   [cyan]os[/cyan]      {info['os']}")
+    console.print(f"   [cyan]device[/cyan]  {info['device']}")
+
+
+# ---------- env-example (.env -> .env.example) ----------
+
+@app.command(name="env-example")
+def env_example_cmd(
+    source: str = typer.Option(".env", "--from", help="The .env file to read."),
+    write: bool = typer.Option(False, "--write", help="Write to .env.example."),
+    root: Path = typer.Option(Path("."), "--root", help="Project root."),
+) -> None:
+    """🔑 Generate a safe .env.example from your .env — keeps keys + safe defaults,
+    blanks the secret values so you can commit a template. Offline.
+    """
+    from .env_example import mask_env
+
+    src = Path(root) / source
+    if not src.is_file():
+        console.print(f"[yellow]no {source} found[/yellow] at {src}")
+        raise typer.Exit(1)
+    result = mask_env(src.read_text(encoding="utf-8"))
+    if write:
+        out = Path(root) / ".env.example"
+        out.write_text(result["text"], encoding="utf-8")
+        console.print(f"[green]✓[/green] wrote [cyan]{out}[/cyan] [dim]({len(result['keys'])} keys)[/dim]")
+    else:
+        console.print(result["text"])
+        console.print(f"[dim]{len(result['keys'])} keys · secret values blanked[/dim]")
+
+
+# ---------- time (world clock / timezone) ----------
+
+@app.command()
+def time(
+    zone: str = typer.Argument(None, help="A timezone, e.g. 'Asia/Tokyo'. Omit for a world clock."),
+) -> None:
+    """🕰️  World clock — current time across zones, or one zone. Offline."""
+    import datetime as _dt
+
+    from .time_zones import format_in, world_clock
+    now = _dt.datetime.now(_dt.timezone.utc)
+    if zone:
+        info = format_in(now, zone)
+        if info is None:
+            console.print(f"[yellow]unknown timezone '{zone}'[/yellow] [dim](e.g. Asia/Tokyo, Europe/London)[/dim]")
+            raise typer.Exit(1)
+        console.print(f"[#7aa2f7]🕰️  {info['zone']}[/#7aa2f7]  [bold]{info['time']}[/bold] "
+                      f"[dim]{info['day']} {info['date']} · UTC{info['offset']} {info['abbrev']}[/dim]")
+        return
+    console.print("[bold]🕰️  world clock[/bold]")
+    for info in world_clock(now):
+        console.print(f"  [cyan]{info['zone']:<22}[/cyan] [bold]{info['time']}[/bold] "
+                      f"[dim]{info['day'][:3]} · UTC{info['offset']}[/dim]")
+
+
+# ---------- http (explain a status code) ----------
+
+@app.command()
+def http(
+    code: int = typer.Argument(..., help="An HTTP status code, e.g. 404."),
+) -> None:
+    """🌐 Explain an HTTP status code. Offline."""
+    from .http_status import explain_status
+
+    info = explain_status(code)
+    if info is None:
+        console.print(f"[yellow]unknown status code {code}[/yellow]")
+        raise typer.Exit(1)
+    color = {"success": "green", "redirect": "#7aa2f7", "client error": "#e0af68",
+             "server error": "#f7768e", "informational": "#6b7089"}.get(info["category"], "white")
+    console.print(f"[{color}]🌐 {info['code']} {info['name']}[/{color}] [dim]({info['category']})[/dim]")
+    console.print(f"   {info['explanation']}")
+
+
+# ---------- redact (strip secrets/PII from text) ----------
+
+@app.command()
+def redact(
+    source: str = typer.Argument(..., help="Text to redact: a string, @file, or '-' for stdin."),
+) -> None:
+    """🕶️  Redact secrets & PII (emails, IPs, API keys, tokens, JWTs) from text so
+    you can share logs/errors safely. Offline.
+    """
+    import sys
+
+    from .redact import redact_text
+    if source == "-":
+        raw = sys.stdin.read()
+    elif source.startswith("@"):
+        try:
+            raw = Path(source[1:]).read_text(encoding="utf-8")
+        except OSError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+    else:
+        raw = source
+    result = redact_text(raw)
+    print(result["text"])
+    if result["total"]:
+        summary = ", ".join(f"{k}: {v}" for k, v in result["redactions"].items())
+        console.print(f"\n[dim]🕶️  redacted {result['total']} item(s) — {summary}[/dim]")
+    else:
+        console.print("[dim]🕶️  nothing to redact.[/dim]")
+
+
+# ---------- diff-json (structural JSON diff) ----------
+
+@app.command(name="diff-json")
+def diff_json_cmd(
+    a: str = typer.Argument(..., help="First JSON: string or @file.json."),
+    b: str = typer.Argument(..., help="Second JSON: string or @file.json."),
+) -> None:
+    """🔀 Structural diff between two JSON docs — added / removed / changed paths."""
+    import json as _json
+
+    from .diff_json import diff_json, summarize
+
+    def load(src: str):
+        raw = Path(src[1:]).read_text(encoding="utf-8") if src.startswith("@") else src
+        return _json.loads(raw)
+    try:
+        ja, jb = load(a), load(b)
+    except (OSError, _json.JSONDecodeError) as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
+    changes = diff_json(ja, jb)
+    if not changes:
+        console.print("[green]✓ identical[/green]")
+        return
+    icon = {"added": "[green]+[/green]", "removed": "[#f7768e]-[/#f7768e]", "changed": "[#e0af68]~[/#e0af68]"}
+    for c in changes[:200]:
+        if c["type"] == "changed":
+            console.print(f"  {icon['changed']} [cyan]{c['path']}[/cyan]: {c['old']!r} → {c['new']!r}")
+        elif c["type"] == "added":
+            console.print(f"  {icon['added']} [cyan]{c['path']}[/cyan]: {c['new']!r}")
+        else:
+            console.print(f"  {icon['removed']} [cyan]{c['path']}[/cyan]: {c['old']!r}")
+    s = summarize(changes)
+    console.print(f"\n[dim]{s['added']} added · {s['removed']} removed · {s['changed']} changed[/dim]")
+
+
+# ---------- chmod (explain unix permissions) ----------
+
+@app.command()
+def chmod(
+    spec: str = typer.Argument(..., help="A permission: 644, 0755, or rw-r--r--."),
+) -> None:
+    """🔐 Explain & convert unix file permissions (octal ↔ symbolic). Offline."""
+    from .chmod_explain import explain_perm
+
+    info = explain_perm(spec)
+    if "error" in info:
+        console.print(f"[#f7768e]{info['error']}[/#f7768e]")
+        raise typer.Exit(1)
+    console.print(f"[#7aa2f7]🔐 {info['octal']}[/#7aa2f7]  [bold]{info['symbolic']}[/bold]")
+    console.print(f"   [cyan]owner[/cyan]  {info['owner']}")
+    console.print(f"   [cyan]group[/cyan]  {info['group']}")
+    console.print(f"   [cyan]others[/cyan] {info['others']}")
+
+
+# ---------- json (query JSON with a path) ----------
+
+@app.command()
+def json(
+    path: str = typer.Argument(..., help="A path like users.0.name or '.' for the whole thing."),
+    source: str = typer.Argument(..., help="JSON string, or @file.json, or '-' to read stdin."),
+    keys: bool = typer.Option(False, "--keys", help="List the keys/indices at the path instead of the value."),
+) -> None:
+    """🔧 Query JSON with a path (jq-lite): `ronin json users.0.name @data.json`."""
+    import json as _json
+    import sys
+
+    from .json_query import QueryError, keys_at, query_json
+    if source == "-":
+        raw = sys.stdin.read()
+    elif source.startswith("@"):
+        try:
+            raw = Path(source[1:]).read_text(encoding="utf-8")
+        except OSError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+    else:
+        raw = source
+    try:
+        data = _json.loads(raw)
+    except _json.JSONDecodeError as e:
+        console.print(f"[red]invalid JSON:[/red] {e}")
+        raise typer.Exit(1)
+    try:
+        result = query_json(data, path)
+    except QueryError as e:
+        console.print(f"[yellow]{e}[/yellow]")
+        raise typer.Exit(1)
+    if keys:
+        console.print("\n".join(keys_at(result)) or "[dim](scalar — no keys)[/dim]")
+    elif isinstance(result, (dict, list)):
+        console.print_json(_json.dumps(result))
+    else:
+        console.print(str(result))
+
+
+# ---------- license (generate a LICENSE) ----------
+
+@app.command()
+def license(
+    kind: str = typer.Argument(None, help="License id: mit, isc, bsd-3-clause, unlicense. Omit to list."),
+    name: str = typer.Argument("", help="Copyright holder name."),
+    write: bool = typer.Option(False, "--write", help="Write to ./LICENSE."),
+    year: str = typer.Option("", "--year", help="Copyright year (default: from git/current)."),
+    root: Path = typer.Option(Path("."), "--root", help="Where to write."),
+) -> None:
+    """⚖️  Generate an open-source LICENSE file (mit/isc/bsd-3-clause/unlicense).
+    Offline. (Fixes the 'no LICENSE' finding from `ronin checkup`.)
+    """
+    import subprocess
+
+    from .license_gen import available, license_text
+
+    if not kind:
+        console.print("[bold]licenses[/bold]  " + ", ".join(available()))
+        console.print("[dim]e.g. [bold]ronin license mit \"Your Name\" --write[/bold][/dim]")
+        return
+    if not year:
+        # current year from git's last commit date, else leave to fill
+        try:
+            year = subprocess.run(["git", "-C", str(root), "log", "-1", "--format=%cd", "--date=format:%Y"],
+                                  capture_output=True, text=True, timeout=10).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            year = ""
+    text = license_text(kind, name, year)
+    if text is None:
+        console.print(f"[yellow]unknown license '{kind}'[/yellow] — try: {', '.join(available())}")
+        raise typer.Exit(1)
+    if write:
+        (Path(root) / "LICENSE").write_text(text, encoding="utf-8")
+        console.print(f"[green]✓[/green] wrote [cyan]{Path(root) / 'LICENSE'}[/cyan]")
+    else:
+        console.print(text)
+
+
+# ---------- gitignore (generate from templates) ----------
+
+@app.command()
+def gitignore(
+    stacks: list[str] = typer.Argument(None, help="Stacks/OS/editors, e.g. python node macos vscode. Omit to list available."),
+    out: bool = typer.Option(False, "--write", help="Write to ./.gitignore (append if it exists)."),
+    root: Path = typer.Option(Path("."), "--root", help="Where to write."),
+) -> None:
+    """🙈 Generate a .gitignore from built-in templates (python, node, go, rust,
+    macos, vscode, jetbrains, env…). Offline.
+    """
+    from .gitignore_gen import available, gitignore_for
+
+    if not stacks:
+        console.print("[bold]available templates[/bold]")
+        console.print("  " + ", ".join(available()))
+        console.print("[dim]e.g. [bold]ronin gitignore python node macos[/bold][/dim]")
+        return
+    content = gitignore_for(list(stacks))
+    if out:
+        target = Path(root) / ".gitignore"
+        existing = target.read_text(encoding="utf-8") if target.is_file() else ""
+        target.write_text((existing + "\n" + content) if existing else content, encoding="utf-8")
+        console.print(f"[green]✓[/green] {'appended to' if existing else 'wrote'} [cyan]{target}[/cyan]")
+    else:
+        console.print(content)
+
+
+# ---------- cron (explain a cron expression) ----------
+
+@app.command()
+def cron(
+    expression: list[str] = typer.Argument(..., help="A cron expression, e.g. '*/15 9-17 * * 1-5' (quote it)."),
+) -> None:
+    """⏰ Explain a cron expression in plain English. Offline."""
+    from .cron_describe import describe_cron
+
+    expr = " ".join(expression)
+    desc = describe_cron(expr)
+    if desc.lower().startswith("invalid"):
+        console.print(f"[#f7768e]{desc}[/#f7768e]")
+        raise typer.Exit(1)
+    console.print(f"[#7aa2f7]⏰ {expr}[/#7aa2f7]")
+    console.print(f"   [bold]{desc}[/bold]")
+
+
+# ---------- mock (fixture data from a schema) ----------
+
+@app.command()
+def mock(
+    source: str = typer.Argument(..., help="A JSON Schema, or a JSON sample (a schema is inferred from it), or @file."),
+    count: int = typer.Option(1, "--count", "-n", help="How many records to generate."),
+) -> None:
+    """🎭 Generate realistic mock/fixture data from a JSON Schema (or a sample).
+    Field names drive the values — email→an email, city→a city, created_at→a date.
+    """
+    import json
+
+    from .mock_data import generate_records
+    from .schema_infer import infer_schema
+    raw = source
+    if source.startswith("@"):
+        try:
+            raw = Path(source[1:]).read_text(encoding="utf-8")
+        except OSError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+    try:
+        obj = json.loads(raw)
+    except json.JSONDecodeError as e:
+        console.print(f"[red]invalid JSON:[/red] {e}")
+        raise typer.Exit(1)
+    # if it doesn't look like a schema (no top-level "type"), infer one from the sample
+    sch = obj if isinstance(obj, dict) and "type" in obj and "properties" in obj else infer_schema(obj)
+    records = generate_records(sch, count=count)
+    console.print_json(json.dumps(records if count > 1 else records[0]))
+
+
+# ---------- schema / endpoint (API toolkit) ----------
+
+@app.command()
+def schema(
+    source: str = typer.Argument(..., help="A JSON string, or @file.json to read from a file."),
+) -> None:
+    """🧬 Infer a JSON Schema from a JSON sample (string or @file)."""
+    import json
+
+    from .schema_infer import infer_schema, leaf_paths
+    raw = source
+    if source.startswith("@"):
+        try:
+            raw = Path(source[1:]).read_text(encoding="utf-8")
+        except OSError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        console.print(f"[red]invalid JSON:[/red] {e}")
+        raise typer.Exit(1)
+    sch = infer_schema(data)
+    console.print_json(json.dumps(sch))
+    paths = leaf_paths(data)
+    if paths:
+        console.print(f"\n[dim]fields: {', '.join(paths[:15])}[/dim]")
+
+
+@app.command()
+def endpoint(
+    url: str = typer.Argument(..., help="An HTTP(S) endpoint to probe."),
+) -> None:
+    """🛰️  Probe an API endpoint — status, latency, content-type, inferred response
+    schema, and a ready-to-run `ronin plugin from-api` command to turn it into a tool.
+    """
+    import json
+    import time
+
+    import httpx
+
+    from .schema_infer import infer_schema, leaf_paths
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    console.print(f"[#7aa2f7]🛰️  probing[/#7aa2f7] [bold]{url}[/bold]")
+    t0 = time.time()
+    try:
+        r = httpx.get(url, timeout=20, follow_redirects=True)
+    except Exception as e:  # noqa: BLE001
+        console.print(f"[red]request failed:[/red] {e}")
+        raise typer.Exit(1)
+    ms = round((time.time() - t0) * 1000)
+    ok = "[green]" if r.is_success else "[#f7768e]"
+    console.print(f"  {ok}{r.status_code}[/] · {ms}ms · {r.headers.get('content-type', '?')[:40]} · {len(r.content)} bytes")
+    try:
+        data = r.json()
+    except ValueError:
+        console.print("  [dim]non-JSON response — no schema to infer.[/dim]")
+        return
+    console.print("\n[bold]inferred schema[/bold]")
+    console.print_json(json.dumps(infer_schema(data)))
+    paths = leaf_paths(data)
+    if paths:
+        flags = " ".join(f"-f {p}" for p in paths[:5])
+        console.print(f"\n[dim]make it a tool:[/dim]\n  [cyan]ronin plugin from-api mytool '{url}' {flags}[/cyan]")
+
+
+# ---------- tree (annotated project map) ----------
+
+@app.command()
+def tree(
+    depth: int = typer.Option(3, "--depth", "-d", help="How many directory levels to show."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """🌳 An annotated project map — directories with code-file and line counts,
+    noise folders skipped. Grok a repo's shape in one screen.
+    """
+    from .tree_map import biggest_dirs, build_tree, render_lines
+
+    node = build_tree(root, max_depth=depth)
+    if node.files == 0:
+        console.print("[yellow]no code files found[/yellow] [dim](empty repo, or all skipped?)[/dim]")
+        return
+    for i, line in enumerate(render_lines(node)):
+        if i == 0:
+            console.print(f"[#7aa2f7]🌳 {line}[/#7aa2f7]")
+        else:
+            console.print(f"[#6b7089]{line}[/#6b7089]", highlight=False)
+    top = biggest_dirs(node)
+    if top:
+        chips = "  ".join(f"[cyan]{n}[/cyan] [dim]{ln:,}[/dim]" for n, ln in top)
+        console.print(f"\n[dim]heaviest:[/dim] {chips}")
+
+
+# ---------- deadcode (probably-unused symbols) ----------
+
+@app.command()
+def deadcode(
+    include_decorated: bool = typer.Option(False, "--include-decorated", help="Also flag decorated functions (CLI commands, fixtures, routes)."),
+    limit: int = typer.Option(100, "--limit", help="Max candidates to list."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """🪦 Find probably-unused code — public functions/classes whose name is never
+    referenced anywhere in the repo. Candidates to verify, not certainties:
+    decorated entry points, __all__ exports, tests and main are skipped; dynamic
+    dispatch can't be seen.
+    """
+    from .deadcode import find_dead
+
+    dead = find_dead(root, include_decorated=include_decorated, limit=limit)
+    if not dead:
+        console.print("[green]✓ no obviously-unused public symbols — lean.[/green]")
+        return
+    console.print(f"[#7aa2f7]🪦 {len(dead)} unused candidate(s)[/#7aa2f7] "
+                  "[dim](verify before deleting — dynamic use can't be detected)[/dim]")
+    by_file: dict[str, list] = {}
+    for d in dead:
+        by_file.setdefault(d.file, []).append(d)
+    for f, syms in by_file.items():
+        console.print(f"\n  [cyan]{f}[/cyan]")
+        for d in syms:
+            tag = " [#e0af68](decorated)[/#e0af68]" if d.decorated else ""
+            console.print(f"    [dim]{d.line:>4}[/dim]  [#6b7089]{d.kind}[/#6b7089] "
+                          f"[bold]{d.name}[/bold]{tag}")
+
+
+# ---------- release (bump + changelog + tag) ----------
+
+@app.command()
+def release(
+    kind: str = typer.Argument("patch", help="major | minor | patch."),
+    tag: bool = typer.Option(False, "--tag", help="Create a git tag for the new version."),
+    write_changelog: bool = typer.Option(True, "--changelog/--no-changelog", help="Prepend a CHANGELOG section."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """🚀 Cut a release — bump the version everywhere it's declared, generate the
+    changelog from commits since the last tag, and optionally create the git tag.
+    """
+    from .release import bump_version, current_version, find_version_files, set_version_in_text
+
+    files = find_version_files(root)
+    cur = current_version(files)
+    if not cur:
+        console.print("[yellow]couldn't find a version (__version__ / pyproject).[/yellow]")
+        raise typer.Exit(1)
+    try:
+        new = bump_version(cur, kind)
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(2)
+    console.print(f"[#7aa2f7]🚀 release[/#7aa2f7] [bold]{cur} → {new}[/bold]")
+    changed = 0
+    for f in files:
+        try:
+            text = f.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        new_text, n = set_version_in_text(text, new)
+        if n:
+            f.write_text(new_text, encoding="utf-8")
+            changed += n
+    console.print(f"  [green]✓[/green] bumped {changed} version declaration(s)")
+
+    if write_changelog:
+        from .changelog import render_changelog
+        from .git_helper import _git
+        since = _git(root, "describe", "--tags", "--abbrev=0").stdout.strip() or None
+        rng = f"{since}..HEAD" if since else "HEAD"
+        log = _git(root, "log", rng, "--pretty=%s", "--no-merges").stdout
+        subjects = [ln for ln in log.splitlines() if ln.strip()]
+        if subjects:
+            section = render_changelog(subjects, version=new)
+            cl = Path(root) / "CHANGELOG.md"
+            existing = cl.read_text(encoding="utf-8") if cl.is_file() else "# Changelog\n"
+            head, _, rest = existing.partition("\n")
+            cl.write_text(f"{head}\n\n{section}\n{rest.lstrip()}", encoding="utf-8")
+            console.print(f"  [green]✓[/green] CHANGELOG updated ({len(subjects)} commit(s))")
+    if tag:
+        from .git_helper import _git
+        r = _git(root, "tag", f"v{new}")
+        console.print(f"  [green]✓ tagged v{new}[/green]" if r.returncode == 0
+                      else f"[yellow]couldn't tag: {r.stderr.strip()[:80]}[/yellow]")
+    console.print("[dim]review the changes, then commit + push (and the tag).[/dim]")
+
+
+# ---------- docstring (find + write missing docstrings) ----------
+
+@app.command()
+def docstring(
+    execute: bool = typer.Option(False, "--execute", help="Write docstrings (default: list gaps)."),
+    limit: int = typer.Option(60, "--limit", help="Max symbols."),
+    budget: float = typer.Option(None, "--budget", help="USD spend cap."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """📝 Find public functions/classes with NO docstring, then (with --execute)
+    write one for each — test-gated, as reviewable patches.
+    """
+    from .docstring import find_doc_gaps, to_tasks
+
+    gaps = find_doc_gaps(root, limit=limit)
+    if not gaps:
+        console.print("[green]✓ every public symbol is documented.[/green]")
+        return
+    by_file: dict[str, int] = {}
+    for g in gaps:
+        by_file[g.file] = by_file.get(g.file, 0) + 1
+    console.print(f"[#7aa2f7]📝 {len(gaps)} undocumented symbol(s)[/#7aa2f7] in {len(by_file)} file(s):")
+    for f, n in list(by_file.items())[:20]:
+        console.print(f"  [cyan]{f}[/cyan] [dim]{n} symbol(s)[/dim]")
+    if not execute:
+        console.print("\n[dim]add [bold]--execute[/bold] to write docstrings (reviewable patches).[/dim]")
+        return
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold].")
+        raise typer.Exit(2)
+    from .nightshift import run_nightshift, summarize
+    console.print("[dim]writing docstrings (isolated worktrees, test-gated)…[/dim]\n")
+    results = run_nightshift(config, root, console, to_tasks(gaps), execute=True, budget=budget)
+    counts = summarize(results)
+    console.print(f"\n[bold]📝 docstrings[/bold] — [green]{counts['patched']} file(s) documented[/green]")
+    console.print("[dim]review with [bold]ronin patches[/bold].[/dim]")
+
+
+# ---------- todo (TODO/FIXME board) ----------
+
+@app.command()
+def todo(
+    execute: bool = typer.Option(False, "--execute", help="Work the TODOs autonomously (Nightshift)."),
+    duel: str = typer.Option(None, "--duel", help="Red-team each patch with a rival provider."),
+    budget: float = typer.Option(None, "--budget", help="USD spend cap."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """🗒  A board of every FIXME/TODO/HACK in your code; --execute works them
+    autonomously (each in isolation, test-gated) into reviewable patches.
+    """
+    from .kaizen import find_targets
+
+    targets = find_targets(root, limit=200)
+    if not targets:
+        console.print("[green]✓ no FIXME/TODO/HACK markers — clean.[/green]")
+        return
+    by_marker: dict[str, int] = {}
+    for t in targets:
+        by_marker[t.marker] = by_marker.get(t.marker, 0) + 1
+    summary = " · ".join(f"{m}: {n}" for m, n in by_marker.items())
+    console.print(f"[#7aa2f7]🗒 {len(targets)} marker(s)[/#7aa2f7] [dim]({summary})[/dim]")
+    for t in targets[:25]:
+        console.print(f"  [#e0af68]{t.marker:<6}[/#e0af68] [cyan]{t.file}:{t.line}[/cyan] "
+                      f"[dim]{t.text.strip()[:55]}[/dim]")
+    if not execute:
+        console.print("\n[dim]add [bold]--execute[/bold] to resolve them autonomously "
+                      "(reviewable patches via [bold]ronin patches[/bold]).[/dim]")
+        return
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold].")
+        raise typer.Exit(2)
+    from .consensus import parse_model_spec
+    duel_spec = parse_model_spec(duel) if duel else None
+    from .nightshift import gather_tasks, run_nightshift, summarize
+    tasks = gather_tasks(root, include_todos=True, limit=200)
+    console.print("[dim]working the board (isolated worktrees, test-gated)…[/dim]\n")
+    results = run_nightshift(config, root, console, tasks, execute=True,
+                             duel_against=duel_spec, budget=budget)
+    counts = summarize(results)
+    console.print(f"\n[bold]🗒 todo[/bold] — [green]{counts['patched']} resolved[/green], "
+                  f"{counts['failed-tests']} failed")
+
+
+# ---------- scaffold (generate a component) ----------
+
+@app.command()
+def scaffold(
+    what: str = typer.Argument(..., help="What to scaffold, e.g. \"a RetryClient with backoff\"."),
+    yolo: bool = typer.Option(False, "--yolo", help="Auto-approve the writes."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """🏗  Generate a new component that FITS your project — ronin detects your stack
+    and conventions, then writes the component + its test to match (not generic
+    boilerplate). Diffs are gated unless --yolo.
+    """
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold].")
+        raise typer.Exit(2)
+    from .code_mode import run_code_agent
+    from .scaffold import detect_stack, scaffold_prompt
+
+    stack = detect_stack(root)
+    console.print(f"[#7aa2f7]🏗 scaffolding[/#7aa2f7] [dim]{what[:70]}[/dim] "
+                  f"[#6b7089]· {', '.join(stack)}[/#6b7089]")
+    result = run_code_agent(config, scaffold_prompt(what, stack), root=root, console=console,
+                            yolo=yolo, max_iterations=20)
+    if result.blocked:
+        console.print(f"[red]✗[/red] {result.output}")
+        raise typer.Exit(2)
+    console.print("[bold green]✅ scaffolded[/bold green]")
+
+
+# ---------- estimate (scope a task before doing it) ----------
+
+@app.command()
+def estimate(
+    task: str = typer.Argument(..., help="The task to size up."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo to scope against."),
+) -> None:
+    """📊 Scope a task before doing it — ronin explores read-only and reports its
+    T-shirt size, files affected, risk, and a projected $ cost on your model.
+    """
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold].")
+        raise typer.Exit(2)
+    from .code_mode import run_code_agent
+    from .estimate import ESTIMATE_PROMPT, parse_estimate, project_cost
+
+    console.print(f"[#7aa2f7]📊 estimating[/#7aa2f7] [dim]{task[:80]}[/dim]")
+    result = run_code_agent(config, ESTIMATE_PROMPT.format(task=task), root=root,
+                            console=console, read_only=True, include_image_tool=False, max_iterations=10)
+    est = parse_estimate(result.output or "")
+    cost = project_cost(est.size, config.provider, config.resolved_model())
+    _risk_c = {"low": "green", "medium": "#e0af68", "high": "#f7768e"}.get(est.risk, "dim")
+    console.print()
+    console.print(f"  size   [bold]{est.size}[/bold]   files ~[bold]{est.files}[/bold]   "
+                  f"risk [{_risk_c}]{est.risk}[/{_risk_c}]")
+    cost_str = "free" if cost == 0 else f"~${cost:.4f}"
+    console.print(f"  projected cost on {config.provider}: [bold]{cost_str}[/bold] "
+                  "[dim](rough)[/dim]")
+
+
+# ---------- spec (design-doc-first) ----------
+
+@app.command()
+def spec(
+    feature: str = typer.Argument(..., help="The feature/change to spec out."),
+    out: str = typer.Option(None, "--out", help="Write the spec to this file (e.g. SPEC.md)."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo to ground the spec in."),
+) -> None:
+    """📐 Design-doc-first — ronin explores the repo (read-only) and writes a
+    concrete design spec (problem · approach · files to change · edge cases · test
+    plan · open questions) before any code is written. --out saves it.
+    """
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold].")
+        raise typer.Exit(2)
+    from .code_mode import run_code_agent
+    from .spec import spec_prompt
+
+    console.print(f"[#7aa2f7]📐 speccing[/#7aa2f7] [dim]{feature[:80]}[/dim]")
+    result = run_code_agent(config, spec_prompt(feature), root=root, console=console,
+                            read_only=True, include_image_tool=False, max_iterations=12)
+    if out and result.output:
+        try:
+            Path(out).write_text(result.output.strip() + "\n", encoding="utf-8")
+            console.print(f"\n[green]✓ spec written →[/green] [cyan]{out}[/cyan]")
+        except OSError as e:
+            console.print(f"[red]couldn't write {out}: {e}[/red]")
+
+
+# ---------- diagram (architecture map) ----------
+
+@app.command()
+def diagram(
+    pkg: str = typer.Option(None, "--pkg", help="Package directory (default: auto-detect the biggest)."),
+    out: str = typer.Option(None, "--out", help="Write the Mermaid diagram to this file."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """🗺  Architecture map — extract the real import graph between your modules and
+    render it as Mermaid (paste into Markdown/GitHub). Deterministic; no model needed.
+    """
+    from .diagram import detect_package, import_graph, stats, to_mermaid
+
+    pkg_dir = Path(pkg) if pkg else detect_package(root)
+    if not pkg_dir or not pkg_dir.is_dir():
+        console.print("[yellow]couldn't find a Python package — pass --pkg <dir>.[/yellow]")
+        raise typer.Exit(1)
+    graph = import_graph(pkg_dir)
+    if not graph:
+        console.print(f"[dim]no modules in {pkg_dir}.[/dim]")
+        return
+    s = stats(graph)
+    mer = to_mermaid(graph, title=str(pkg_dir.name))
+    console.print(f"[#7aa2f7]🗺 {s['modules']} modules · {s['edges']} import edges[/#7aa2f7] "
+                  f"[dim]({pkg_dir})[/dim]")
+    if s["most_depended"]:
+        console.print(f"  [dim]most depended-on:[/dim] [bold]{', '.join(s['most_depended'])}[/bold]")
+    if out:
+        try:
+            Path(out).write_text(mer + "\n", encoding="utf-8")
+            console.print(f"[green]✓ wrote diagram →[/green] [cyan]{out}[/cyan]")
+        except OSError as e:
+            console.print(f"[red]couldn't write {out}: {e}[/red]")
+    else:
+        import sys
+        sys.stdout.write(mer + "\n")
+
+
+# ---------- coverage (find + fill test gaps) ----------
+
+@app.command()
+def coverage(
+    execute: bool = typer.Option(False, "--execute", help="Actually write tests (default: list the gaps)."),
+    limit: int = typer.Option(40, "--limit", help="Max symbols."),
+    duel: str = typer.Option(None, "--duel", help="Red-team each test with a rival provider."),
+    budget: float = typer.Option(None, "--budget", help="USD spend cap."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """🧪 Find public functions/classes with NO test coverage, then (with --execute)
+    write a passing test for each — in isolation, test-gated, as reviewable patches.
+    """
+    from .coverage import find_gaps, to_tasks
+
+    gaps = find_gaps(root, limit=limit)
+    if not gaps:
+        console.print("[green]✓ every public symbol is referenced in a test.[/green]")
+        return
+    by_file: dict[str, list[str]] = {}
+    for g in gaps:
+        by_file.setdefault(g.file, []).append(g.symbol)
+    console.print(f"[#7aa2f7]🧪 {len(gaps)} untested symbol(s)[/#7aa2f7] in {len(by_file)} file(s):")
+    for f, syms in list(by_file.items())[:20]:
+        console.print(f"  [cyan]{f}[/cyan] [dim]{', '.join(syms[:8])}"
+                      f"{' …' if len(syms) > 8 else ''}[/dim]")
+    if not execute:
+        console.print("\n[dim]add [bold]--execute[/bold] to write a passing test for each "
+                      "(reviewable patches via [bold]ronin patches[/bold]).[/dim]")
+        return
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold].")
+        raise typer.Exit(2)
+    from .consensus import parse_model_spec
+    duel_spec = parse_model_spec(duel) if duel else None
+    from .nightshift import run_nightshift, summarize
+    console.print("[dim]writing tests (isolated worktrees, test-gated)…[/dim]\n")
+    results = run_nightshift(config, root, console, to_tasks(gaps), execute=True,
+                             duel_against=duel_spec, budget=budget)
+    counts = summarize(results)
+    console.print(f"\n[bold]🧪 coverage[/bold] — [green]{counts['patched']} test(s) added[/green], "
+                  f"{counts['failed-tests']} failed, {counts['no-change']} no-change")
+    console.print("[dim]review with [bold]ronin patches[/bold].[/dim]")
+
+
+# ---------- tournament (single-elim model bracket) ----------
+
+@app.command()
+def tournament(
+    question: str = typer.Argument(..., help="The question the models compete on."),
+    models: str = typer.Option(..., "--models", "-m", help="Contenders, e.g. 'anthropic,gemini,cerebras,groq'."),
+    judge: str = typer.Option(None, "--judge", help="provider[:model] judge (default: current)."),
+) -> None:
+    """🏟  A single-elimination bracket — models face off pairwise, a judge picks
+    each winner, advancing round by round until one champion remains.
+    """
+    from .bracket import run_tournament
+    from .consensus import parse_model_spec
+
+    config = load_config()
+    specs = [parse_model_spec(s) for s in models.split(",") if s.strip()]
+    if len(specs) < 2:
+        console.print("[yellow]a tournament needs at least 2 contenders.[/yellow]")
+        raise typer.Exit(2)
+    judge_spec = parse_model_spec(judge) if judge else None
+    console.print(f"[dim]🏟 {len(specs)} contenders enter the bracket…[/dim]")
+
+    def _on_match(m):
+        if m.b is None:
+            console.print(f"  [dim]{m.a} — bye →[/dim] [green]{m.winner}[/green]")
+        else:
+            console.print(f"  {m.a}  vs  {m.b}   →  [green]★ {m.winner}[/green]")
+
+    with console.status("[dim] running matchups…[/dim]", spinner="dots"):
+        result = run_tournament(config, question, specs, judge_spec=judge_spec, on_match=_on_match)
+    console.print(f"\n[bold #2dd4bf]🏆 champion: {result.champion}[/bold #2dd4bf] "
+                  f"[dim]({len(result.rounds)} round(s))[/dim]")
+
+
+# ---------- migrate (guided large refactor) ----------
+
+@app.command()
+def migrate(
+    change: str = typer.Argument(..., help="The migration, e.g. \"replace requests with httpx\"."),
+    match: str = typer.Option(None, "--match", help="Only files containing this substring (e.g. 'requests')."),
+    glob: str = typer.Option("*", "--glob", help="Only files matching this glob (e.g. '*.py')."),
+    execute: bool = typer.Option(False, "--execute", help="Actually do it (default: dry-run plan)."),
+    duel: str = typer.Option(None, "--duel", help="Red-team each patch with a rival provider."),
+    budget: float = typer.Option(None, "--budget", help="USD spend cap."),
+    limit: int = typer.Option(30, "--limit", help="Max files."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo to migrate."),
+) -> None:
+    """🛠  Guided large migration — find every file that needs a sweeping change,
+    work each ONE in isolation (test-gated), and leave a reviewable patch per file.
+    Dry-run by default; --execute to do it. `ronin patches` to review/apply.
+    """
+    from .migrate import find_targets, to_tasks
+
+    targets = find_targets(root, glob=glob, contains=match, limit=limit)
+    if not targets:
+        console.print(f"[dim]no files matched (glob={glob}"
+                      f"{', contains=' + match if match else ''}).[/dim]")
+        return
+    console.print(f"[#7aa2f7]🛠 migration plan — {len(targets)} file(s)[/#7aa2f7] [dim]{change}[/dim]")
+    for t in targets[:20]:
+        hits = f" [dim]({t.hits}×)[/dim]" if t.hits else ""
+        console.print(f"  [cyan]{t.path}[/cyan]{hits}")
+    if not execute:
+        console.print("\n[dim]dry-run — add [bold]--execute[/bold] to work the migration into patches.[/dim]")
+        return
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold].")
+        raise typer.Exit(2)
+    from .consensus import parse_model_spec
+    duel_spec = parse_model_spec(duel) if duel else None
+    from .nightshift import run_nightshift, summarize
+    from .migrate import to_tasks
+    tasks = to_tasks(change, targets)
+    console.print("[dim]working each file (isolated worktrees, test-gated)…[/dim]\n")
+    results = run_nightshift(config, root, console, tasks, execute=True,
+                             duel_against=duel_spec, budget=budget)
+    counts = summarize(results)
+    console.print(f"\n[bold]🛠 migration[/bold] — [green]{counts['patched']} patch(es)[/green], "
+                  f"{counts['failed-tests']} failed, {counts['no-change']} no-change")
+    console.print("[dim]review with [bold]ronin patches[/bold] · apply with "
+                  "[bold]ronin patches --apply --clean[/bold].[/dim]")
+
+
+# ---------- pair (ambient co-pilot) ----------
+
+@app.command()
+def pair(
+    interval: float = typer.Option(2.0, "--interval", help="Poll interval (seconds)."),
+    root: Path = typer.Option(Path("."), "--root", help="Directory to watch."),
+) -> None:
+    """👥 Ambient pair programmer — ronin watches your saves and chimes in with a
+    short suggestion on each change (a bug, a cleaner way, a missing test). Ctrl+C to stop.
+    """
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold].")
+        raise typer.Exit(2)
+    from .pair import run_pair
+    run_pair(config, root, console, interval=interval)
+
+
+# ---------- archaeology (why is this code here) ----------
+
+@app.command()
+def archaeology(
+    file: str = typer.Argument(..., help="The file to investigate."),
+    limit: int = typer.Option(25, "--limit", help="How many commits of history to read."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """🏺 Why is this code the way it is? ronin reconstructs the file's story from
+    git history and explains what each significant change was for + any gotchas.
+    """
+    from .archaeology import file_history, history_brief
+
+    commits = file_history(root, file, limit=limit)
+    if not commits:
+        console.print(f"[yellow]no git history for[/yellow] [bold]{file}[/bold] [dim](new file, or not tracked?)[/dim]")
+        raise typer.Exit(1)
+    console.print(f"[#6b7089]🏺 {len(commits)} commit(s) shaped[/#6b7089] [bold]{file}[/bold]")
+    for c in commits[:12]:
+        console.print(f"  [dim]{c['date']}[/dim] [cyan]{c['short']}[/cyan] "
+                      f"[#6b7089]{c['author'][:16]}[/#6b7089]  {c['subject'][:60]}")
+
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print("[dim]set a provider for the AI history analysis.[/dim]")
+        return
+    from .code_mode import run_code_agent
+    console.print("\n[#6b7089]reading the story…[/#6b7089]")
+    run_code_agent(
+        config,
+        f"Read @{file} and its git history below. Explain its archaeology concisely: "
+        "the major phases it went through, what each significant change solved, and "
+        "any gotchas or load-bearing decisions the history reveals.\n\n"
+        f"History (newest first):\n{history_brief(commits)}",
+        root=root, console=console, read_only=True, include_image_tool=False, max_iterations=8)
+
+
+# ---------- perf (benchmark + analyze) ----------
+
+@app.command()
+def perf(
+    command: list[str] = typer.Argument(..., help="The command to benchmark, e.g. \"pytest -q\"."),
+    runs: int = typer.Option(5, "--runs", help="Timed runs (after a warmup)."),
+    analyze: bool = typer.Option(False, "--analyze", help="Have ronin suggest where the time goes."),
+    root: Path = typer.Option(Path("."), "--root", help="Working directory."),
+) -> None:
+    """⏱  Benchmark a command (min / mean / median / max over N runs), with optional
+    AI analysis of where the time goes.
+    """
+    from .perf import benchmark
+
+    cmd = " ".join(command)
+    console.print(f"[#7aa2f7]⏱ benchmarking[/#7aa2f7] [bold]{cmd}[/bold] [dim]({runs} runs + warmup)[/dim]")
+    with console.status("[dim] running…[/dim]", spinner="dots"):
+        r = benchmark(cmd, runs=runs, root=root)
+    if r["runs"] == 0:
+        console.print("[yellow]no successful runs.[/yellow]")
+        raise typer.Exit(1)
+    console.print(f"  mean   [bold]{r['mean']:.3f}s[/bold]  [dim]± {r['stdev']:.3f}[/dim]")
+    console.print(f"  median {r['median']:.3f}s   min {r['min']:.3f}s   max {r['max']:.3f}s")
+    if r["failures"]:
+        console.print(f"  [yellow]{r['failures']} run(s) exited non-zero[/yellow]")
+    if analyze:
+        config = load_config()
+        if not config.has_provider_auth():
+            return
+        from .code_mode import run_code_agent
+        console.print("\n[#6b7089]analyzing…[/#6b7089]")
+        run_code_agent(
+            config,
+            f"`{cmd}` runs in ~{r['mean']:.3f}s (median {r['median']:.3f}s). Explore the "
+            "code it exercises and suggest the 1-3 highest-leverage speedups. Be specific.",
+            root=root, console=console, read_only=True, include_image_tool=False, max_iterations=10)
+
+
+# ---------- debate (multi-round cross-vendor argument) ----------
+
+@app.command()
+def debate(
+    question: str = typer.Argument(..., help="The question to debate."),
+    models: str = typer.Option(..., "--models", "-m", help="Panelists, e.g. 'anthropic,gemini,cerebras'."),
+    rounds: int = typer.Option(2, "--rounds", help="Debate rounds (≥2 lets them critique each other)."),
+    judge: str = typer.Option(None, "--judge", help="provider[:model] to synthesize (default: current)."),
+) -> None:
+    """🥊 Several models DEBATE a question across rounds — each sees the others'
+    answers, critiques them, and refines its own — then a judge synthesizes the
+    converged answer. Cross-examination across vendors, not a one-shot vote.
+    """
+    from .consensus import parse_model_spec
+    from .debate import run_debate
+
+    config = load_config()
+    specs = [parse_model_spec(s) for s in models.split(",") if s.strip()]
+    if len(specs) < 2:
+        console.print("[yellow]a debate needs at least 2 panelists[/yellow] — e.g. [cyan]-m anthropic,gemini[/cyan]")
+        raise typer.Exit(2)
+    judge_spec = parse_model_spec(judge) if judge else None
+    labels = ", ".join(f"{s['provider']}{':' + s['model'] if s.get('model') else ''}" for s in specs)
+    console.print(f"[dim]🥊 {len(specs)} panelists · {rounds} rounds — {labels}[/dim]")
+
+    def _on_round(r, panelists):
+        console.print(f"\n[bold #7aa2f7]── round {r + 1} ──[/bold #7aa2f7]")
+        for p in panelists:
+            if p.rounds and p.rounds[-1].strip():
+                console.print(f"[bold]{p.label}[/bold]")
+                console.print(f"  [#c0caf5]{p.rounds[-1][:500]}[/#c0caf5]")
+
+    result = run_debate(config, question, specs, rounds=rounds, judge_spec=judge_spec, on_round=_on_round)
+    from rich.panel import Panel
+    console.print(Panel(result.synthesis or "(no synthesis)",
+                        title="[bold #2dd4bf]⚖ synthesis[/bold #2dd4bf]", border_style="#2dd4bf", padding=(0, 1)))
+
+
+# ---------- bisect (autonomous regression hunt) ----------
+
+@app.command()
+def bisect(
+    command: list[str] = typer.Argument(..., help="The command that FAILS now but passed before, e.g. \"pytest -k test_login\"."),
+    good: str = typer.Option(None, "--good", help="A known-good ref (default: last tag, else HEAD~20)."),
+    bad: str = typer.Option("HEAD", "--bad", help="A known-bad ref (default: HEAD)."),
+    analyze: bool = typer.Option(True, "--analyze/--no-analyze", help="Have ronin explain the culprit diff."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo to bisect."),
+) -> None:
+    """🔬 Find the commit that broke something — automatically. ronin drives
+    git bisect (in an isolated worktree, your checkout untouched) using your
+    command as the oracle, then explains the culprit's diff and suggests a fix.
+    """
+    from .bisect import default_good, run_bisect
+
+    cmd = " ".join(command)
+    g = good or default_good(root)
+    if not g:
+        console.print("[yellow]couldn't find a known-good ref — pass --good <ref>.[/yellow]")
+        raise typer.Exit(2)
+    console.print(f"[#7aa2f7]🔬 bisecting[/#7aa2f7] [dim]{g[:12]} … {bad} · oracle: {cmd}[/dim]")
+    with console.status("[dim] running git bisect (isolated worktree)…[/dim]", spinner="dots"):
+        res = run_bisect(root, cmd, good=g, bad=bad)
+    if not res.culprit:
+        console.print(f"[yellow]no culprit found[/yellow] [dim]({res.note})[/dim]")
+        raise typer.Exit(1)
+    console.print(f"[bold #f7768e]✗ first bad commit:[/bold #f7768e] [bold]{res.subject}[/bold]")
+
+    if analyze:
+        config = load_config()
+        if not config.has_provider_auth():
+            console.print(f"[dim]commit {res.culprit[:12]} — set a provider to get an AI analysis.[/dim]")
+            return
+        from .code_mode import run_code_agent
+        console.print("[#6b7089]analyzing the culprit…[/#6b7089]")
+        run_code_agent(
+            config,
+            f"This commit introduced a regression that makes `{cmd}` fail. Read the "
+            f"diff and explain, concisely: (1) what change most likely caused it, and "
+            f"(2) a specific fix. Use read-only tools to check the current code if needed.\n\n"
+            f"```diff\n{res.diff[:12000]}\n```",
+            root=root, console=console, read_only=True, include_image_tool=False, max_iterations=8,
+        )
+
+
+# ---------- status (mission-control dashboard) ----------
+
+@app.command()
+def status(root: Path = typer.Option(Path("."), "--root", help="Repo to summarize.")) -> None:
+    """🛰  Mission control — one view of every ronin system: Cost-Router savings,
+    the Dojo leaderboard, what the self-tuning router has learned, your sessions,
+    git state, and the last Nightshift.
+    """
+    from .dashboard import gather, render
+    config = load_config()
+    render(console, gather(root, config))
+
+
+# ---------- leaderboard (dojo standings) ----------
+
+@app.command()
+def leaderboard(
+    reset: bool = typer.Option(False, "--reset", help="Clear the dojo leaderboard."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo whose dojo history to show."),
+) -> None:
+    """🏆 Standings from every `ronin dojo` you've run here — which provider keeps
+    winning your tasks, and the route_strong it recommends.
+    """
+    from .leaderboard import leaderboard_path, load_leaderboard
+
+    if reset:
+        try:
+            leaderboard_path(root).unlink()
+            console.print("[green]✓ leaderboard cleared[/green]")
+        except OSError:
+            console.print("[dim]nothing to reset.[/dim]")
+        return
+
+    lb = load_leaderboard(root)
+    standings = lb.standings()
+    if not standings:
+        console.print("[dim]no dojos recorded yet. Run [bold]ronin dojo \"<task>\" -m a,b,c[/bold].[/dim]")
+        return
+    table = Table(title="🏆 dojo leaderboard", box=box.ROUNDED)
+    table.add_column("#", justify="right", style="#6b7089")
+    table.add_column("provider", style="bold")
+    table.add_column("wins", justify="right")
+    table.add_column("contests", justify="right")
+    table.add_column("win rate", justify="right", style="cyan")
+    for i, r in enumerate(standings, 1):
+        table.add_row(str(i), r["provider"], str(r["wins"]), str(r["contests"]),
+                      f"{r['rate']*100:.0f}%")
+    console.print(table)
+    rec = lb.recommend_strong()
+    if rec:
+        console.print(f"[green]→ recommended[/green] [bold]route_strong = {rec}[/bold] "
+                      "[dim](it keeps winning your dojos)[/dim]")
+    else:
+        console.print("[dim]not enough contests for a confident recommendation yet.[/dim]")
+
+
+# ---------- router (self-tuning insight) ----------
+
+@app.command()
+def router(
+    reset: bool = typer.Option(False, "--reset", help="Forget everything the router has learned."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo whose routing stats to show."),
+) -> None:
+    """🧭 Show what the Self-tuning Router has learned about each blade in this
+    repo — per (tier, provider) success rate and whether it's being escalated.
+    """
+    from .router_stats import rows, stats_path
+
+    path = stats_path(root)
+    if reset:
+        try:
+            path.unlink()
+            console.print("[green]✓ router memory reset[/green]")
+        except OSError:
+            console.print("[dim]nothing to reset.[/dim]")
+        return
+
+    from .router_stats import load_stats
+    data = rows(load_stats(root))
+    if not data:
+        console.print(f"[dim]the router hasn't learned anything yet at[/dim] [cyan]{path}[/cyan]"
+                      "[dim]. Set route_fast/route_strong and run a few turns.[/dim]")
+        return
+    _status_style = {"reliable": "[green]reliable[/green]", "escalate": "[red]escalate[/red]",
+                     "learning": "[#6b7089]learning[/#6b7089]"}
+    table = Table(title="learned routing", box=box.ROUNDED)
+    table.add_column("tier", style="cyan")
+    table.add_column("provider", style="bold")
+    table.add_column("success", justify="right")
+    table.add_column("rate", justify="right")
+    table.add_column("status")
+    for r in data:
+        rate = f"{r['rate']*100:.0f}%" if r["rate"] is not None else "—"
+        table.add_row(r["tier"], r["provider"], f"{r['ok']}/{r['total']}", rate,
+                      _status_style.get(r["status"], r["status"]))
+    console.print(table)
+    console.print("[dim]escalate = proven unreliable here → routed to the strong blade.[/dim]")
+
+
+# ---------- costs ----------
+
+@app.command()
+def costs(
+    by: str = typer.Option("model", "--by", help="Group by 'model' or 'day'."),
+) -> None:
+    """Show token + cost usage recorded by previous ronin commands, plus lifetime
+    Cost-Router savings (when routing is in use)."""
+    from .usage import load_records, summarize, usage_path
+
+    # Lifetime Cost-Router savings (from .ronin/savings.jsonl) — shown first so it
+    # appears even before any per-call usage records exist.
+    from .savings import load_summary
+    _sv = load_summary(Path("."))
+    if _sv["turns"]:
+        panel = Table(box=box.ROUNDED, show_header=False, title="🪙 Cost Router (lifetime)")
+        panel.add_column(style="cyan", no_wrap=True)
+        panel.add_column(style="bold")
+        panel.add_row("routed turns", str(_sv["turns"]))
+        panel.add_row("free turns", f"{_sv['free_turns']}/{_sv['turns']}")
+        panel.add_row("spent", f"${_sv['spent']:.4f}")
+        panel.add_row("saved vs all-strong", f"[green]${_sv['saved']:.4f}[/green]")
+        console.print(panel)
+
+    records = load_records()
+    if not records:
+        console.print(
+            f"[dim]no usage recorded yet at[/dim] [cyan]{usage_path()}[/cyan][dim]. "
+            "Run [bold]ronin ask[/bold] a few times to populate.[/dim]"
+        )
+        return
+
+    summary = summarize(records)
+    header = Table(box=box.ROUNDED, show_header=False)
+    header.add_column(style="cyan", no_wrap=True)
+    header.add_column(style="bold")
+    header.add_row("total calls", str(summary.total_calls))
+    header.add_row("input tokens", f"{summary.total_input_tokens:,}")
+    header.add_row("output tokens", f"{summary.total_output_tokens:,}")
+    header.add_row("total cost", f"${summary.total_cost_usd:.4f}")
+    console.print(header)
+
+    bucket = summary.by_model if by == "model" else summary.by_day
+    label = "model" if by == "model" else "day"
+    table = Table(title=f"By {label}", box=box.ROUNDED)
+    table.add_column(label, style="cyan")
+    table.add_column("calls", justify="right")
+    table.add_column("input", justify="right")
+    table.add_column("output", justify="right")
+    table.add_column("cost", justify="right", style="bold")
+    for key in sorted(bucket.keys()):
+        s = bucket[key]
+        table.add_row(
+            key, str(s.total_calls),
+            f"{s.total_input_tokens:,}", f"{s.total_output_tokens:,}",
+            f"${s.total_cost_usd:.4f}",
+        )
+    console.print(table)
+
+
+# ---------- tui ----------
+
+@app.command()
+def tui() -> None:
+    """Launch a full-screen TUI (Textual) — chat pane + live trace + input box."""
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for provider [bold]{config.provider}[/bold]. Run [bold]ronin init[/bold] first.")
+        raise typer.Exit(2)
+    try:
+        from .tui import run_tui
+    except ImportError as exc:
+        console.print(f"[red]✗[/red] textual not installed: {exc}. Try [bold]uv pip install textual[/bold].")
+        raise typer.Exit(2)
+    run_tui(config=config)
+
+
+# ---------- briefing ----------
+
+@app.command()
+def briefing(
+    out: Optional[Path] = typer.Option(None, "--out", help="Write briefing to a Markdown file."),
+    raw: bool = typer.Option(False, "--raw", help="Print plain Markdown (no Rich panel)."),
+    slack: Optional[str] = typer.Option(None, "--slack", help="Post the briefing to a Slack channel (#founders or C123…)."),
+    email: Optional[str] = typer.Option(None, "--email", help="Send the briefing to an email address (requires RESEND_API_KEY)."),
+    template: Optional[Path] = typer.Option(None, "--template", help="Path to a briefing-template.toml. Defaults to .ronin/briefing-template.toml if present."),
+    history: bool = typer.Option(False, "--history", help="Show a trend table of past briefings instead of running a new one."),
+    no_save: bool = typer.Option(False, "--no-save", help="Don't persist this run to .ronin/briefings/."),
+) -> None:
+    """Weekly founder briefing: revenue, churn, payment failures, top engineering issues.
+
+    Works offline in demo mode; uses Claude (or your configured provider) in real mode.
+    Output is Markdown — paste into Slack, email, or a doc.
+
+    Each run is auto-saved to ``.ronin/briefings/<date>.json`` so subsequent runs can
+    show week-over-week deltas inline. Use ``--history`` to see the trend table.
+    Use ``--slack <channel>`` to post the briefing directly.
+    """
+    from .briefing import compute_briefing_data, render_briefing_md
+    from .briefing_history import (
+        BriefingSnapshot,
+        format_delta_line,
+        load_snapshots,
+        most_recent_prior,
+        save_snapshot,
+    )
+    from .briefing_history import BriefingDelta
+    from .tools import build_tools
+
+    config = load_config()
+
+    # --history mode: just show the trend table and exit.
+    if history:
+        snapshots = load_snapshots()
+        if not snapshots:
+            console.print(
+                "[dim]no briefing history yet at[/dim] [cyan].ronin/briefings/[/cyan][dim]. "
+                "Run [bold]ronin briefing[/bold] once to start the trend.[/dim]"
+            )
+            return
+        table = Table(title="Briefing history", box=box.ROUNDED)
+        table.add_column("date", style="cyan", no_wrap=True)
+        table.add_column("MRR", justify="right")
+        table.add_column("active", justify="right")
+        table.add_column("new/wk", justify="right")
+        table.add_column("churn/wk", justify="right")
+        table.add_column("failed/wk", justify="right", style="red")
+        table.add_column("urgent open", justify="right", style="yellow")
+        for s in snapshots:
+            table.add_row(
+                s.date,
+                f"${s.mrr_cents / 100:,.0f}",
+                str(s.active_subs),
+                str(s.new_subs_7d),
+                str(s.churned_subs_7d),
+                str(s.failed_charges_7d),
+                str(s.urgent_open_issues),
+            )
+        console.print(table)
+        return
+
+    tools = build_tools(config)
+    data = compute_briefing_data(tools)
+
+    # If a template TOML is configured (--template flag or .ronin/briefing-template.toml),
+    # use it. Otherwise render the four default sections.
+    from .briefing_template import BriefingTemplate, render_with_template
+    template_obj = BriefingTemplate.load(template)
+    if template is not None or (template_obj.sections != ["revenue", "payments", "engineering", "actions"] or template_obj.title != "Founder briefing — {{date}}"):
+        md = render_with_template(data, template_obj)
+    else:
+        md = render_briefing_md(data)
+
+    # Append "vs last week" line if we have a prior snapshot.
+    snapshot = BriefingSnapshot.from_briefing(data)
+    prior = most_recent_prior(snapshot.date)
+    if prior is not None:
+        delta = BriefingDelta.compute(snapshot, prior)
+        md = md.rstrip() + "\n\n" + format_delta_line(delta, prior.date) + "\n"
+
+    # Statistical anomalies vs trailing weeks (only fires after ≥4 prior runs).
+    from .briefing_anomaly import detect_anomalies, render_anomalies_section
+    history = load_snapshots()
+    anomalies = detect_anomalies(history, snapshot)
+    if anomalies:
+        md = md.rstrip() + "\n\n" + render_anomalies_section(anomalies) + "\n"
+
+    # Persist for trending (unless --no-save).
+    if not no_save:
+        save_snapshot(snapshot)
+
+    if out:
+        out.write_text(md, encoding="utf-8")
+        console.print(f"[green]✓[/green] wrote briefing to [cyan]{out}[/cyan]")
+
+    if slack:
+        bot_token = config.slack_bot_token or os.environ.get("SLACK_BOT_TOKEN")
+        if not bot_token:
+            console.print(
+                "[red]✗[/red] No SLACK_BOT_TOKEN configured. Run [bold]ronin init[/bold] or "
+                "set the env var (needs the chat:write scope)."
+            )
+            raise typer.Exit(2)
+        from .briefing_slack import post_briefing_to_slack
+        try:
+            resp = post_briefing_to_slack(bot_token, slack, md)
+            console.print(f"[green]✓[/green] posted to [cyan]{slack}[/cyan] (ts={resp.get('ts')})")
+        except (RuntimeError, ValueError) as exc:
+            console.print(f"[red]✗[/red] {exc}")
+            raise typer.Exit(2)
+
+    if email:
+        if not os.environ.get("RESEND_API_KEY"):
+            console.print(
+                "[red]✗[/red] No RESEND_API_KEY set. Get one at "
+                "[underline]https://resend.com/api-keys[/underline] then "
+                "[bold]export RESEND_API_KEY=re_...[/bold]"
+            )
+            raise typer.Exit(2)
+        from .briefing_email import send_briefing_email
+        try:
+            resp = send_briefing_email(email, md)
+            console.print(f"[green]✓[/green] emailed to [cyan]{email}[/cyan] (id={resp.get('id', '?')})")
+        except (ValueError, RuntimeError) as exc:
+            console.print(f"[red]✗[/red] {exc}")
+            raise typer.Exit(2)
+
+    if raw:
+        sys.stdout.write(md)
+        return
+    from rich.markdown import Markdown
+    console.print(Markdown(md))
+
+
+# ---------- agent ----------
+
+@app.command()
+def agent(
+    goal: list[str] = typer.Argument(..., help="The goal for the agent to pursue. Quote multi-word goals."),
+    confirm: bool = typer.Option(False, "--confirm", help="Pause for y/N approval before each tool call (Cline-style)."),
+    max_steps: int = typer.Option(15, "--max-steps", help="Iteration cap for the autonomous loop."),
+    raw: bool = typer.Option(False, "--raw", help="Plain output."),
+) -> None:
+    """Autonomous multi-step agent: give it a goal, it chains tool calls until done.
+
+    Unlike `ronin ask` (one-shot) and `ronin chat` (turn-by-turn), `agent` runs an
+    autonomous loop, narrating each step live. With --confirm it pauses for your
+    approval before every tool call.
+    """
+    config = load_config()
+    from .agent_mode import has_real_key, run_agent
+
+    if not has_real_key(config):
+        console.print(
+            f"[red]✗[/red] Agent mode needs a real LLM — the offline demo brain can't reason multi-step. "
+            f"Set credentials for provider [bold]{config.provider}[/bold] (e.g. [bold]export ANTHROPIC_API_KEY=...[/bold])."
+        )
+        raise typer.Exit(2)
+
+    text = " ".join(goal)
+    console.print(Panel.fit(f"[bold]Goal:[/bold] {text}", border_style="cyan", title="ronin agent"))
+
+    result = run_agent(config, text, console=console, confirm=confirm, max_iterations=max_steps)
+
+    console.print()
+    if result.blocked:
+        console.print(f"[red]✗[/red] {result.output}")
+        raise typer.Exit(2)
+    # If the answer already streamed inline, don't re-box it.
+    if result.streamed:
+        console.print("[bold green]✅ done[/bold green]")
+    else:
+        console.print(Panel(result.output or "[dim](no answer)[/dim]", title="Answer", border_style="green", padding=(1, 2)))
+    meta = f"iterations: {result.iterations}"
+    if result.usage:
+        meta += f" · in: {result.usage.get('input_tokens', 0)} · out: {result.usage.get('output_tokens', 0)}"
+    console.print(f"[dim]{meta}[/dim]")
+    if raw:
+        sys.stdout.write(result.output + "\n")
+
+
+# ---------- code ----------
+
+@app.command()
+def code(
+    task: list[str] = typer.Argument(None, help="The coding task. Omit to start an interactive session."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory the agent works in."),
+    yolo: bool = typer.Option(False, "--yolo", help="Auto-approve writes + commands (trusted sandboxes only)."),
+    max_steps: int = typer.Option(25, "--max-steps", help="Iteration cap."),
+    init_memory: bool = typer.Option(False, "--init", help="Scaffold a RONIN.md project-memory file and exit."),
+    continue_session: bool = typer.Option(False, "--continue", "-c", help="Resume this repo's last session."),
+    plan: bool = typer.Option(False, "--plan", help="Propose a plan first (read-only), confirm, then execute."),
+    scout: bool = typer.Option(False, "--scout", help="Scout→Strike: a free model does recon, the strong one edits (needs routing)."),
+) -> None:
+    """Coding agent (Claude Code / Cline shaped): reads files, edits code, runs commands.
+
+    Give a task for a one-shot run, or omit it to drop into an interactive
+    session (steer across turns, :undo to revert, :q to quit). Every write and
+    shell command is gated behind your y/N approval by default with a diff
+    preview; read operations run freely. --yolo auto-approves everything.
+
+    Reference files with @path. --plan proposes steps before editing.
+    --continue resumes your last session. Auto-loads RONIN.md / CLAUDE.md /
+    AGENTS.md; --init scaffolds a RONIN.md.
+    """
+    if init_memory:
+        from .project_memory import write_memory_template
+        path = write_memory_template(root)
+        console.print(f"[green]✓[/green] project memory at [cyan]{path}[/cyan] — edit it, then run [bold]ronin code[/bold].")
+        return
+
+    config = load_config()
+    from .agent_mode import has_real_key
+    from .code_mode import run_code_agent, run_code_session
+
+    if not has_real_key(config):
+        console.print(
+            f"[red]✗[/red] Code mode needs a real LLM. Set credentials for provider "
+            f"[bold]{config.provider}[/bold] (e.g. [bold]export ANTHROPIC_API_KEY=...[/bold])."
+        )
+        raise typer.Exit(2)
+
+    # No task → interactive session (the Claude Code experience).
+    if not task:
+        run_code_session(config, root=root, console=console, yolo=yolo,
+                         max_iterations=max_steps, continue_session=continue_session)
+        return
+
+    text = " ".join(task)
+    console.print(Panel.fit(
+        f"[bold]Task:[/bold] {text}\n[dim]root: {root.resolve()} · "
+        f"{'YOLO (auto-approve)' if yolo else 'writes + commands need approval'}[/dim]",
+        border_style="cyan", title="ronin code",
+    ))
+
+    # Plan mode: propose steps (read-only) → confirm → execute.
+    if plan:
+        console.print("[bold #2dd4bf]📋 planning (read-only)…[/bold #2dd4bf]")
+        plan_res = run_code_agent(
+            config, f"Produce a concise step-by-step PLAN to accomplish: {text}. "
+            "Explore with read-only tools if needed, but DO NOT edit anything — just list the steps.",
+            root=root, console=console, yolo=yolo, max_iterations=max_steps, read_only=True,
+        )
+        console.print()
+        if not Confirm.ask("[bold]Proceed with this plan?[/bold]", default=True):
+            console.print("[dim]aborted — nothing changed[/dim]")
+            return
+        text = f"Follow this plan:\n{plan_res.output}\n\nNow implement it: {text}"
+        console.print()
+
+    if scout and not plan:
+        from .scout import run_scout_strike
+        result = run_scout_strike(config, text, root=root, console=console,
+                                  max_steps=max_steps, yolo=yolo)
+    else:
+        result = run_code_agent(config, text, root=root, console=console, yolo=yolo, max_iterations=max_steps)
+
+    console.print()
+    if result.blocked:
+        console.print(f"[red]✗[/red] {result.output}")
+        raise typer.Exit(2)
+    # If the summary already streamed inline, don't re-box it — just confirm.
+    if result.streamed:
+        console.print("[bold green]✅ done[/bold green]")
+    else:
+        console.print(Panel(result.output or "[dim](no summary)[/dim]", title="Done", border_style="green", padding=(1, 2)))
+    meta = f"iterations: {result.iterations}"
+    if result.usage:
+        meta += f" · in: {result.usage.get('input_tokens', 0)} · out: {result.usage.get('output_tokens', 0)}"
+    console.print(f"[dim]{meta}[/dim]")
+
+
+# ---------- investigate ----------
+
+@app.command()
+def investigate(
+    symptom: list[str] = typer.Argument(..., help="The business symptom to root-cause. Quote it."),
+    root: Path = typer.Option(Path("."), "--root", help="Code repo to inspect for causes."),
+    yolo: bool = typer.Option(False, "--yolo", help="Auto-approve git commands."),
+    max_steps: int = typer.Option(20, "--max-steps", help="Iteration cap."),
+) -> None:
+    """Bridge business + code: root-cause a symptom across your data AND your codebase.
+
+    The thing Claude Code can't do (no business data) and a BI tool can't do
+    (can't read code). Give it a symptom — "failed payments spiked", "churn
+    jumped" — and it pulls the ops data to quantify/timestamp it, then searches
+    the code + git history to find the likely cause, and connects them.
+
+    Read-only: reads data, reads code, runs read-only git commands (gated).
+    """
+    config = load_config()
+    from .agent_mode import has_real_key
+    from .investigate_mode import run_investigate
+
+    if not has_real_key(config):
+        console.print(
+            f"[red]✗[/red] Investigate mode needs a real LLM. Set credentials for provider "
+            f"[bold]{config.provider}[/bold] (e.g. [bold]export ANTHROPIC_API_KEY=...[/bold])."
+        )
+        raise typer.Exit(2)
+
+    text = " ".join(symptom)
+    console.print(Panel.fit(
+        f"[bold]Symptom:[/bold] {text}\n[dim]data: {', '.join(config.configured_services()) or 'none'} · "
+        f"code: {root.resolve()}[/dim]",
+        border_style="cyan", title="ronin investigate",
+    ))
+
+    result = run_investigate(config, text, root=root, console=console, yolo=yolo, max_iterations=max_steps)
+
+    console.print()
+    if result.blocked:
+        console.print(f"[red]✗[/red] {result.output}")
+        raise typer.Exit(2)
+    console.print(Panel(result.output or "[dim](inconclusive)[/dim]", title="Root-cause analysis", border_style="green", padding=(1, 2)))
+    meta = f"iterations: {result.iterations}"
+    if result.usage:
+        meta += f" · in: {result.usage.get('input_tokens', 0)} · out: {result.usage.get('output_tokens', 0)}"
+    console.print(f"[dim]{meta}[/dim]")
+
+
+# ---------- fix ----------
+
+@app.command()
+def tdd(
+    spec: str = typer.Argument(..., help="What to build, e.g. \"parse_duration handles '2h30m'\"."),
+    test: str = typer.Option("pytest -q", "--test", help="Command that runs the test(s)."),
+    rounds: int = typer.Option(6, "--rounds", help="Max implement→re-run rounds."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    yolo: bool = typer.Option(False, "--yolo", help="Auto-approve edits (sandbox use)."),
+) -> None:
+    """🔴🟢 Test-first: ronin writes a FAILING test for the spec, then implements
+    until it (and the suite) pass — red → green, the disciplined way.
+
+    Example:  ronin tdd "slugify lowercases and strips punctuation"
+    """
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold].")
+        raise typer.Exit(2)
+    from .code_mode import run_code_agent
+    from .fix_mode import run_fix
+
+    console.print("[bold #f7768e]🔴 writing a failing test first…[/bold #f7768e]")
+    run_code_agent(
+        config,
+        f"Write a FAILING test that captures this requirement: {spec}\n\n"
+        "Create or extend the appropriate test file using the project's existing "
+        "test conventions. Do NOT implement the feature yet — write only the test, "
+        "so it fails for the right reason.",
+        root=root, console=console, yolo=yolo, max_iterations=12,
+    )
+    console.print("[bold #9ece6a]🟢 now implementing until it passes…[/bold #9ece6a]")
+    ok = run_fix(config, test, root=root, console=console, max_rounds=rounds, yolo=yolo)
+    console.print("[bold green]✅ green[/bold green]" if ok
+                  else "[yellow]still red after the round limit — pick it up from here[/yellow]")
+    raise typer.Exit(0 if ok else 1)
+
+
+@app.command(name="fix")
+def fix_cmd(
+    command: list[str] = typer.Argument(..., help="The command to make pass, e.g. \"pytest -q\"."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    rounds: int = typer.Option(5, "--rounds", help="Max fix→re-run rounds."),
+    yolo: bool = typer.Option(False, "--yolo", help="Auto-approve edits (sandbox use)."),
+) -> None:
+    """Autonomous fix-until-green: run a command, and if it fails, edit + re-run until it passes.
+
+    Examples:  ronin fix "pytest -q"  ·  ronin fix "npm test"  ·  ronin fix "python app.py"
+    """
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold]. "
+                      "Run [bold]ronin login[/bold] or [bold]ronin init[/bold] first.")
+        raise typer.Exit(2)
+    from .fix_mode import run_fix
+    ok = run_fix(config, " ".join(command), root=root, console=console, max_rounds=rounds, yolo=yolo)
+    raise typer.Exit(0 if ok else 1)
+
+
+# ---------- review ----------
+
+@app.command()
+def review(
+    base: str = typer.Option(None, "--base", help="Review this branch vs a base ref (e.g. main)."),
+    staged: bool = typer.Option(False, "--staged", help="Review only staged changes."),
+    pr: int = typer.Option(None, "--pr", help="Review a GitHub PR by number (diff fetched via gh)."),
+    comment: bool = typer.Option(False, "--comment", help="Post the review back onto the PR (needs --pr)."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo to review."),
+) -> None:
+    """AI code review of your changes — structured, severity-tagged findings (read-only).
+
+    Reviews your working-tree diff by default; ``--staged`` for staged changes,
+    ``--base main`` for the branch vs a base, or ``--pr N`` for a GitHub PR
+    (add ``--comment`` to post the review onto it).
+    """
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold]. "
+                      "Run [bold]ronin login[/bold] or [bold]ronin init[/bold] first.")
+        raise typer.Exit(2)
+    from .review_mode import run_review
+    run_review(config, root=root, base=base, staged=staged, pr=pr, comment=comment, console=console)
+
+
+@app.command()
+def triage(
+    limit: int = typer.Option(10, "--limit", help="How many open issues to triage."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo to triage."),
+) -> None:
+    """🗂 Read open GitHub issues and draft a triage — suggested labels, priority,
+    and a first-response sketch for each (read-only; nothing is posted).
+    """
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold].")
+        raise typer.Exit(2)
+    from .gh_helper import gh_available, open_issues
+    if not gh_available():
+        console.print("[yellow]the GitHub CLI 'gh' isn't installed.[/yellow] "
+                      "[dim]brew install gh && gh auth login[/dim]")
+        raise typer.Exit(2)
+    issues = open_issues(root, limit=limit)
+    if not issues:
+        console.print("[dim]no open issues (or gh not authenticated).[/dim]")
+        return
+    console.print(f"[#6b7089]triaging {len(issues)} open issue(s)…[/#6b7089]")
+    from .code_mode import run_code_agent
+    listing = "\n\n".join(f"#{i['number']} {i['title']}\n{i['body'][:600]}" for i in issues)
+    prompt = ("Triage these open GitHub issues. For each, suggest: labels (bug/feature/"
+              "question/etc.), a priority (P0–P3), and a one-line first response. Be concise.\n\n"
+              f"{listing}")
+    run_code_agent(config, prompt, root=root, console=console, read_only=True,
+                   include_image_tool=False, max_iterations=6)
+
+
+# ---------- version ----------
+
+@app.command()
+def version() -> None:
+    """Print the ronin version."""
+    console.print(f"ronin {__version__}")
+
+
+@app.command()
+def memory(
+    add: str = typer.Option(None, "--add", help="Add a fact to long-term memory."),
+    clear: bool = typer.Option(False, "--clear", help="Forget everything."),
+) -> None:
+    """Show (or edit) what ronin remembers about you across sessions.
+
+    Memory is persistent and user-global (~/.ronin/memory.json): ronin recalls
+    these facts in every future session. The agent also saves facts itself via
+    its `remember` tool when you share durable info.
+    """
+    from .memory_store import add_memory, forget_all, load_memories
+
+    if clear:
+        n = forget_all()
+        console.print(f"[green]✓[/green] forgot {n} memory item(s).")
+        return
+    if add:
+        ok = add_memory(add)
+        console.print(f"[green]✓[/green] remembered: {add}" if ok else "[dim]already in memory[/dim]")
+        return
+
+    mems = load_memories()
+    if not mems:
+        console.print("[dim]no memories yet. ronin will remember durable facts as you chat, "
+                      "or add one: [bold]ronin memory --add \"I prefer Python\"[/bold][/dim]")
+        return
+    from rich.panel import Panel
+    body = "\n".join(f"[#2dd4bf]•[/#2dd4bf] {m['text']}" for m in mems)
+    console.print(Panel(body, title=f"🧠 {len(mems)} thing(s) ronin remembers about you",
+                        border_style="#2dd4bf", padding=(1, 2)))
+    console.print("[dim]clear with [bold]ronin memory --clear[/bold][/dim]")
+
+
+@app.command()
+def panda(
+    activity: str = typer.Argument(None, help="dancing | running | playing | sleeping (default: all)"),
+    loops: int = typer.Option(3, "--loops", "-n", help="How many times to repeat each activity."),
+) -> None:
+    """Watch the ronin panda do its thing. No args = it cycles through them all."""
+    activities = list(_PANDA_ACTIVITIES)
+    if activity:
+        if activity not in _PANDA_ACTIVITIES:
+            console.print(f"[red]unknown activity[/red] '{activity}'. choose: {', '.join(activities)}")
+            raise typer.Exit(2)
+        activities = [activity]
+    for name in activities:
+        _render_panda(console, activity=name, loops=loops, tagline=False)
+
+
+@app.command()
+def image(
+    prompt: list[str] = typer.Argument(..., help="What to draw, e.g. \"a red panda coding at night, neon\"."),
+    out: Path = typer.Option(None, "--out", "-o", help="Where to save (default: ./ronin_image_<ts>.png)."),
+    backend: str = typer.Option("pollinations", "--backend", help="pollinations (free, no key) | openai (needs OPENAI_API_KEY)."),
+    size: str = typer.Option("1024x1024", "--size", help="WIDTHxHEIGHT."),
+    seed: int = typer.Option(None, "--seed", help="Seed for reproducible results (pollinations)."),
+    model: str = typer.Option(None, "--model", help="Backend model override (e.g. flux, gpt-image-1)."),
+    show: bool = typer.Option(True, "--show/--no-show", help="Display in the terminal after generating."),
+) -> None:
+    """Generate an image from text and show it in the terminal.
+
+    Free by default (Pollinations — no API key). Displays inline on iTerm2, via
+    chafa/viu/imgcat if installed, otherwise opens it in your image viewer.
+    """
+    from .media import display_image, generate_image
+
+    text = " ".join(prompt)
+    try:
+        width, height = (int(x) for x in size.lower().split("x", 1))
+    except ValueError:
+        console.print(f"[red]✗[/red] --size must look like 1024x1024 (got '{size}')")
+        raise typer.Exit(2)
+
+    with console.status(f"[cyan]drawing[/cyan] [dim]{text[:60]}[/dim] via {backend}…", spinner="dots"):
+        try:
+            path = generate_image(text, backend=backend, out=out, width=width, height=height,
+                                  seed=seed, model=model)
+        except Exception as e:  # noqa: BLE001 — surface any backend/network error cleanly
+            console.print(f"[red]✗ image generation failed:[/red] {e}")
+            raise typer.Exit(1)
+
+    console.print(f"[green]✓[/green] saved [cyan]{path}[/cyan]")
+    if show:
+        how = display_image(path)
+        if how == "none":
+            console.print("[dim]couldn't display inline — open the file above to view it. "
+                          "(tip: `brew install chafa` for in-terminal rendering)[/dim]")
+        elif how == "open":
+            console.print("[dim]opened in your image viewer[/dim]")
+
+
+@app.command()
+def video(
+    prompt: list[str] = typer.Argument(..., help="What to animate, e.g. \"a red panda surfing a neon wave\"."),
+    out: Path = typer.Option(None, "--out", "-o", help="Where to save the mp4 (default: ./ronin_video_<ts>.mp4)."),
+    frames: int = typer.Option(12, "--frames", "-n", help="Number of AI-generated frames."),
+    fps: int = typer.Option(8, "--fps", help="Frames per second of the output video."),
+    backend: str = typer.Option("pollinations", "--backend", help="Per-frame image backend (frames engine): pollinations (free) | openai."),
+    engine: str = typer.Option("frames", "--engine", help="frames (free, ffmpeg) | replicate (paid, real-motion; needs REPLICATE_API_TOKEN)."),
+    size: str = typer.Option("512x512", "--size", help="WIDTHxHEIGHT (even numbers; frames engine)."),
+    seed: int = typer.Option(None, "--seed", help="Base seed; each frame uses seed+i (frames engine)."),
+    model: str = typer.Option(None, "--model", help="Model override (frames: image model; replicate: owner/name slug)."),
+    show: bool = typer.Option(True, "--show/--no-show", help="Preview first frame inline + open the mp4."),
+) -> None:
+    """Generate a short video from text and open it.
+
+    Two engines:
+    - frames (default, FREE): generates N AI frames (Pollinations, no key) and
+      stitches them into a real .mp4 with ffmpeg. Frame-animation, not Sora-grade.
+    - replicate (PAID, real-motion): runs a text-to-video model on Replicate.
+      Needs REPLICATE_API_TOKEN and costs money per clip.
+
+    You can't play video *in* a terminal, so ronin previews the first frame
+    (frames engine) and opens the mp4 in your player.
+    """
+    from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
+
+    from .media import (
+        DEFAULT_REPLICATE_VIDEO_MODEL,
+        display_image,
+        ffmpeg_available,
+        generate_video,
+        generate_video_replicate,
+        open_file,
+    )
+
+    text = " ".join(prompt)
+
+    # --- paid real-motion path ------------------------------------------------
+    if engine == "replicate":
+        rep_model = model or DEFAULT_REPLICATE_VIDEO_MODEL
+        console.print(f"[dim]generating real-motion video on Replicate "
+                      f"([bold]{rep_model}[/bold]) — this costs money and can take minutes…[/dim]")
+        with console.status("[cyan]submitting…[/cyan]", spinner="dots") as status:
+            def on_status(s: str) -> None:
+                status.update(f"[cyan]replicate:[/cyan] {s}…")
+            try:
+                result = generate_video_replicate(text, out=out, model=rep_model, on_status=on_status)
+            except Exception as e:  # noqa: BLE001
+                console.print(f"[red]✗ video generation failed:[/red] {e}")
+                raise typer.Exit(1)
+        console.print(f"[green]✓[/green] saved [cyan]{result.path}[/cyan] [dim](real-motion · {rep_model})[/dim]")
+        if show:
+            open_file(result.path)
+            console.print("[dim]opened the video in your player[/dim]")
+        return
+
+    if engine != "frames":
+        console.print(f"[red]✗[/red] unknown --engine '{engine}' (choose: frames | replicate)")
+        raise typer.Exit(2)
+
+    # --- free frames path -----------------------------------------------------
+    if not ffmpeg_available():
+        console.print("[red]✗[/red] ffmpeg not found — install it to build videos "
+                      "([bold]brew install ffmpeg[/bold]).")
+        raise typer.Exit(2)
+    try:
+        width, height = (int(x) for x in size.lower().split("x", 1))
+    except ValueError:
+        console.print(f"[red]✗[/red] --size must look like 512x512 (got '{size}')")
+        raise typer.Exit(2)
+
+    console.print(f"[dim]generating {frames} frames via {backend} (this is frame-animation, "
+                  "not real-motion video)…[/dim]")
+    with Progress(
+        SpinnerColumn(), TextColumn("[cyan]frame[/cyan] {task.completed}/{task.total}"),
+        BarColumn(), console=console, transient=True,
+    ) as progress:
+        task_id = progress.add_task("frames", total=frames)
+
+        def on_frame(done: int, total: int) -> None:
+            progress.update(task_id, completed=done)
+
+        try:
+            result = generate_video(text, out=out, frames=frames, fps=fps, width=width,
+                                    height=height, seed=seed, backend=backend, model=model,
+                                    on_frame=on_frame)
+        except Exception as e:  # noqa: BLE001
+            console.print(f"[red]✗ video generation failed:[/red] {e}")
+            raise typer.Exit(1)
+
+    console.print(f"[green]✓[/green] saved [cyan]{result.path}[/cyan] "
+                  f"[dim]({result.frames} frames @ {result.fps}fps)[/dim]")
+    if show:
+        if result.poster is not None:
+            console.print("[dim]first frame:[/dim]")
+            display_image(result.poster)
+        open_file(result.path)
+        console.print("[dim]opened the video in your player[/dim]")
+
+
+@app.command()
+def say(
+    text: list[str] = typer.Argument(None, help="What to speak."),
+    voice: str = typer.Option(None, "--voice", "-v", help="Voice name (see --list-voices)."),
+    rate: int = typer.Option(None, "--rate", "-r", help="Words per minute."),
+    out: Path = typer.Option(None, "--out", "-o", help="Save audio to a file instead of speaking aloud."),
+    list_voices: bool = typer.Option(False, "--list-voices", help="List installed voices and exit."),
+) -> None:
+    """Speak text aloud — or save it as an audio file with --out.
+
+    Free, no API key: uses your OS speech engine (macOS `say`, Linux espeak).
+    """
+    from .audio import list_voices as _list_voices
+    from .audio import speak, tts_engine
+
+    if list_voices:
+        voices = _list_voices()
+        if not voices:
+            console.print("[dim]no voices found (macOS only for now)[/dim]")
+        else:
+            console.print("[bold]voices[/bold] [dim](use with --voice)[/dim]")
+            console.print("  " + ", ".join(voices))
+        return
+
+    if tts_engine() is None:
+        console.print("[red]✗[/red] no text-to-speech engine "
+                      "(macOS has `say`; on Linux install [bold]espeak-ng[/bold]).")
+        raise typer.Exit(2)
+    if not text:
+        console.print("[red]✗[/red] give me something to say, e.g. [cyan]ronin say \"hello\"[/cyan]")
+        raise typer.Exit(2)
+
+    spoken = " ".join(text)
+    try:
+        path = speak(spoken, voice=voice, rate=rate, out=out)
+    except RuntimeError as e:
+        console.print(f"[red]✗ {e}[/red]")
+        raise typer.Exit(1)
+    if path is not None:
+        console.print(f"[green]✓[/green] saved audio to [cyan]{path}[/cyan]")
+    else:
+        console.print("[green]✓[/green] [dim]spoke aloud[/dim]")
+
+
+@app.command()
+def see(
+    image: Path = typer.Argument(..., help="Path to a local image (png/jpg/gif/webp)."),
+    question: list[str] = typer.Argument(None, help="What to ask about it (default: describe it)."),
+) -> None:
+    """Ask the model about a local image — ronin's eyes.
+
+    Uses your configured provider's vision model (Claude, gpt-4o, etc.).
+    Text-only models can't see — switch to a vision-capable model if it refuses.
+    """
+    from .vision import describe_image
+
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print(f"[red]✗[/red] vision needs a provider key. Run [bold]ronin set-key[/bold] "
+                      f"(provider: [bold]{config.provider}[/bold]).")
+        raise typer.Exit(2)
+    q = " ".join(question) if question else None
+    # show the image inline first (nice for the demo), then the answer
+    try:
+        from .media import display_image
+        display_image(image)
+    except Exception:  # noqa: BLE001
+        pass
+    with console.status("[cyan]looking…[/cyan]", spinner="dots"):
+        try:
+            answer = describe_image(config, image, q)
+        except FileNotFoundError as e:
+            console.print(f"[red]✗[/red] {e}")
+            raise typer.Exit(2)
+        except Exception as e:  # noqa: BLE001
+            from .runner import _friendly_provider_error
+            console.print(_friendly_provider_error(e, config))
+            raise typer.Exit(1)
+    console.print(Panel(answer or "[dim](no answer)[/dim]", title=f"👁  {image.name}", border_style="green", padding=(1, 2)))
+
+
+@app.command()
+def explain(
+    target: str = typer.Argument(..., help="File, directory, or repo path to explain."),
+    question: list[str] = typer.Argument(None, help="Optional focus, e.g. 'how does auth work'."),
+    diagram: bool = typer.Option(True, "--diagram/--no-diagram", help="Also generate a Mermaid architecture diagram."),
+    speak: bool = typer.Option(False, "--speak", help="Narrate the explanation aloud (text-to-speech)."),
+    out: Path = typer.Option(None, "--out", "-o", help="Write the explanation + diagram to a Markdown file."),
+    root: Path = typer.Option(Path("."), "--root", help="Project root the paths are relative to."),
+    max_steps: int = typer.Option(15, "--max-steps", help="Iteration cap."),
+) -> None:
+    """Explain a codebase — in plain English, with an auto-generated architecture
+    diagram, and optionally narrated aloud. Onboard to any repo in minutes.
+
+    A pure coding agent explains; ronin also *draws* it (Mermaid) and *speaks* it.
+    Read-only — it explores and explains, never edits.
+    """
+    from .agent_mode import has_real_key
+    from .explain_mode import run_explain, strip_code_blocks
+
+    config = load_config()
+    if not has_real_key(config):
+        console.print(f"[red]✗[/red] explain needs an LLM key. Run [bold]ronin set-key[/bold] "
+                      f"(provider: [bold]{config.provider}[/bold]).")
+        raise typer.Exit(2)
+
+    q = " ".join(question) if question else None
+    console.print(Panel.fit(f"[bold]explaining[/bold] [cyan]{target}[/cyan]"
+                            + (f"\n[dim]focus: {q}[/dim]" if q else ""),
+                            border_style="cyan", title="ronin explain"))
+
+    result = run_explain(config, target, q, root=root, diagram=diagram, console=console, max_iterations=max_steps)
+    console.print()
+    if result.blocked:
+        console.print(f"[red]✗[/red] {result.output}")
+        raise typer.Exit(2)
+    if not result.streamed:
+        console.print(Panel(result.output or "[dim](no explanation)[/dim]", title="Explanation", border_style="green", padding=(1, 2)))
+
+    if result.mermaid:
+        console.print("\n[bold]Architecture diagram[/bold] [dim](Mermaid — renders on GitHub):[/dim]")
+        console.print(Panel(f"```mermaid\n{result.mermaid}\n```", border_style="#2dd4bf"))
+
+    if out:
+        md = f"# Explanation: {target}\n\n{result.output}\n"
+        out.write_text(md, encoding="utf-8")
+        console.print(f"[green]✓[/green] wrote [cyan]{out}[/cyan]")
+
+    if speak:
+        from .audio import speak as _speak
+        from .audio import tts_engine
+        if tts_engine() is None:
+            console.print("[dim](no text-to-speech engine — skipping --speak)[/dim]")
+        else:
+            console.print("[dim]🔊 narrating…[/dim]")
+            try:
+                _speak(strip_code_blocks(result.output)[:1200])
+            except RuntimeError:
+                pass
+
+    meta = f"iterations: {result.iterations}"
+    if result.usage:
+        meta += f" · in: {result.usage.get('input_tokens', 0)} · out: {result.usage.get('output_tokens', 0)}"
+    console.print(f"[dim]{meta}[/dim]")
+
+
+def _print_result(result: AgentResultRich, *, raw: bool) -> None:
+    if raw:
+        sys.stdout.write(result.output + "\n")
+        return
+
+    console.print()
+    from rich.markdown import Markdown
+    body = Markdown(result.output) if result.output else "[dim](empty)[/dim]"
+    console.print(Panel(body, title="Answer", border_style="green", padding=(1, 2)))
+    if result.trace:
+        table = Table(title=f"Trace ({len(result.trace)} steps)", box=box.SIMPLE, show_lines=False)
+        table.add_column("kind", style="bold yellow", no_wrap=True)
+        table.add_column("content", overflow="fold")
+        for step in result.trace:
+            content = step["content"]
+            if not isinstance(content, str):
+                import json as _json
+                content = _json.dumps(content, indent=2, default=str)
+            table.add_row(step["kind"], content[:600])
+        console.print(table)
+    meta = f"iterations: {result.iterations}"
+    if result.usage:
+        meta += f" · in: {result.usage.get('input_tokens', 0)} · out: {result.usage.get('output_tokens', 0)}"
+    if result.demo_mode:
+        meta += " · [yellow]demo mode[/yellow]"
+    console.print(f"[dim]{meta}[/dim]")
+
+
+# ---------- guard (intent / scope-creep gate) ----------
+
+@app.command()
+def guard(
+    intent: str = typer.Option(None, "--intent", help="What this change is meant to do — enables an LLM scope-creep check."),
+    analyze: bool = typer.Option(True, "--analyze/--no-analyze", help="With --intent, flag files that drift from it."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo to check."),
+) -> None:
+    """🛡  Pre-commit guard — scan your working diff for debug/secret leftovers
+    (stray breakpoints, console.log, merge markers, AWS keys) and, with --intent,
+    flag files that drift from the task. Exits non-zero on high-severity findings,
+    so it drops straight into a pre-commit hook or CI.
+    """
+    from .guard import collect_diff, run_guard
+
+    res = run_guard(root)
+    if res.note:
+        console.print(f"[dim]{res.note}[/dim]")
+        raise typer.Exit(0)
+    if not res.findings:
+        console.print(f"[green]✓ clean[/green] [dim]{len(res.changed_files)} file(s) changed, no leftovers[/dim]")
+    else:
+        table = Table(box=box.SIMPLE)
+        table.add_column("sev", no_wrap=True)
+        table.add_column("kind", style="bold", no_wrap=True)
+        table.add_column("file", style="cyan", no_wrap=True)
+        table.add_column("line", overflow="fold")
+        for f in res.findings:
+            color = "red" if f.severity == "high" else "yellow"
+            table.add_row(f"[{color}]{f.severity}[/{color}]", f.kind, f.file, f.text)
+        console.print(table)
+
+    if intent and analyze:
+        config = load_config()
+        if config.has_provider_auth():
+            from .code_mode import run_code_agent
+            console.print("[#6b7089]checking scope against intent…[/#6b7089]")
+            run_code_agent(
+                config,
+                f"The intended change was: {intent!r}. Files touched: {res.changed_files}. "
+                f"Read the diff and name, concisely, any file or hunk that does NOT serve that "
+                f"intent (scope creep) — or reply 'no scope creep'.\n\n"
+                f"```diff\n{collect_diff(root)[:12000]}\n```",
+                root=root, console=console, read_only=True, include_image_tool=False, max_iterations=6,
+            )
+    if res.high:
+        raise typer.Exit(1)
+
+
+# ---------- flake (flaky-test hunter) ----------
+
+@app.command()
+def flake(
+    command: list[str] = typer.Argument(..., help='Test command to repeat, e.g. "pytest -q -k login".'),
+    runs: int = typer.Option(5, "--runs", "-n", help="How many times to run it."),
+    root: Path = typer.Option(Path("."), "--root", help="Where to run."),
+) -> None:
+    """🎲 Flaky-test hunter — run your test command N times and report which tests
+    are non-deterministic (green on one run, red on the next), ranked by how often
+    they flip. A single run can't tell flaky from stable; this can.
+    """
+    from .flake import run_flake
+
+    cmd = " ".join(command)
+    console.print(f"[#7aa2f7]🎲 running[/#7aa2f7] [dim]{cmd} · {runs}×[/dim]")
+    with console.status("[dim] repeating test runs…[/dim]", spinner="dots"):
+        res = run_flake(root, cmd, runs=runs)
+    if res.note:
+        console.print(f"[yellow]{res.verdict}[/yellow] [dim]({res.note})[/dim]")
+        raise typer.Exit(2)
+    bar = "".join("[green]✓[/green]" if ok else "[red]✗[/red]" for ok in res.outcomes)
+    console.print(f"runs: {bar}  [dim]({res.verdict})[/dim]")
+    if res.verdict == "flaky":
+        table = Table(box=box.SIMPLE)
+        table.add_column("flaky test", style="cyan")
+        table.add_column("failed", justify="right")
+        for t, c in res.flaky:
+            table.add_row(t, f"{c}/{res.runs}")
+        console.print(table)
+        raise typer.Exit(1)
+    if res.verdict == "stable-pass":
+        console.print("[green]✓ green every run — no flakiness detected[/green]")
+    else:
+        console.print("[red]✗ stable failure — not flaky, just broken[/red]")
+        raise typer.Exit(1)
+
+
+# ---------- mutants (mutation-testing gate) ----------
+
+@app.command()
+def mutants(
+    target: str = typer.Argument(..., help="Source file to mutate, e.g. parser.py."),
+    test: str = typer.Option("python -m pytest -q", "--test", help="Test command that SHOULD catch mutations."),
+    max_mutants: int = typer.Option(40, "--max", help="Cap on mutants tried."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """🧬 Mutation testing — inject tiny faults into TARGET (== → !=, and → or, …),
+    run your suite against each, and list the mutants that SURVIVED: every survivor
+    is a bug your tests would have missed. Coverage says lines ran; this says they're
+    actually checked. The original file is always restored.
+    """
+    from .mutants import run_mutants
+
+    console.print(f"[#7aa2f7]🧬 mutating[/#7aa2f7] [dim]{target} · oracle: {test}[/dim]")
+    with console.status("[dim] running the suite per mutant…[/dim]", spinner="dots"):
+        res = run_mutants(root, target, test, max_mutants=max_mutants)
+    if res.note:
+        console.print(f"[yellow]{res.note}[/yellow]")
+        raise typer.Exit(2)
+    pct = round(res.score * 100)
+    color = "green" if res.score >= 0.8 else ("yellow" if res.score >= 0.5 else "red")
+    console.print(f"mutation score: [{color}]{res.killed}/{res.total} killed ({pct}%)[/{color}]")
+    if res.survivors:
+        table = Table(box=box.SIMPLE, title="survivors — tests didn't catch these")
+        table.add_column("line", justify="right", no_wrap=True)
+        table.add_column("mutation", style="bold")
+        for m in res.survivors:
+            table.add_row(str(m.lineno), m.label)
+        console.print(table)
+        raise typer.Exit(1)
+    console.print("[green]✓ every mutant killed — strong tests[/green]")
+
+
+# ---------- radius (blast radius + impact-aware tests) ----------
+
+@app.command()
+def radius(
+    run: bool = typer.Option(False, "--run", help="Also run the affected test files with pytest."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """🌐 Blast radius — from your uncommitted changes, walk the import graph
+    backwards to every module that depends on what you touched, and surface the
+    test modules in that radius so you can run only what matters.
+    """
+    from .radius import run_radius
+
+    res = run_radius(root)
+    if res.note:
+        console.print(f"[dim]{res.note}[/dim]")
+        raise typer.Exit(0)
+    console.print(f"[bold]changed:[/bold] {', '.join(res.changed)}")
+    extra = f" — {', '.join(res.radius)}" if res.radius else ""
+    console.print(f"[bold]blast radius:[/bold] {len(res.radius)} module(s){extra}")
+    if res.affected_tests:
+        console.print(f"[bold]affected tests:[/bold] {', '.join(res.affected_tests)}")
+    else:
+        console.print("[yellow]no test modules in the blast radius — this change may be untested[/yellow]")
+    if run and res.affected_tests:
+        import subprocess
+        console.print("[#6b7089]running affected tests…[/#6b7089]")
+        proc = subprocess.run(["python", "-m", "pytest", "-q", *res.affected_tests],
+                              cwd=str(Path(root).resolve()))
+        raise typer.Exit(proc.returncode)
+
+
+# ---------- smell (AST-based code-smell detector) ----------
+
+@app.command()
+def smell(
+    path: Path = typer.Argument(Path("."), help="A .py file or a directory to scan."),
+    max_statements: int = typer.Option(50, "--max-statements", help="Statements per function."),
+    max_params: int = typer.Option(6, "--max-params", help="Parameters per function."),
+    max_nesting: int = typer.Option(4, "--max-nesting", help="Control-flow nesting depth."),
+    max_returns: int = typer.Option(6, "--max-returns", help="Return statements per function."),
+    max_locals: int = typer.Option(15, "--max-locals", help="Distinct local names per function."),
+    strict: bool = typer.Option(False, "--strict", help="Exit non-zero on any smell (not just HIGH)."),
+) -> None:
+    """🕵️ Detect AST-based code smells (long functions, deep nesting, broad
+    excepts, …). Pure stdlib, no LLM, no network — exits non-zero on HIGH
+    smells so CI can gate on it.
+    """
+    from .smell import HIGH, Thresholds, detect_smells
+
+    targets: list[Path]
+    if path.is_file():
+        targets = [path]
+    elif path.is_dir():
+        targets = sorted(p for p in path.rglob("*.py") if ".venv" not in p.parts and "__pycache__" not in p.parts)
+    else:
+        console.print(f"[#f7768e]not a file or directory: {path}[/#f7768e]")
+        raise typer.Exit(2)
+
+    t = Thresholds(
+        max_statements=max_statements,
+        max_params=max_params,
+        max_nesting=max_nesting,
+        max_returns=max_returns,
+        max_locals=max_locals,
+    )
+    total = 0
+    high = 0
+    for fp in targets:
+        try:
+            source = fp.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        smells = detect_smells(source, t)
+        if not smells:
+            continue
+        rel = fp if not fp.is_absolute() else fp.resolve()
+        console.print(f"[bold]{rel}[/bold]")
+        for s in smells:
+            colour = "#f7768e" if s.severity == HIGH else "#e0af68"
+            console.print(f"  [{colour}]{s.severity:<4}[/{colour}] L{s.line:<4} {s.kind:<16} {s.function}() — {s.message}")
+            total += 1
+            if s.severity == HIGH:
+                high += 1
+    if total == 0:
+        console.print("[#9ece6a]✓ no smells found[/#9ece6a]")
+        return
+    console.print(f"\n[dim]{total} smell(s), {high} high-severity, across {len(targets)} file(s).[/dim]")
+    if high > 0 or (strict and total > 0):
+        raise typer.Exit(1)
+
+
+if __name__ == "__main__":  # pragma: no cover
+    app()

@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from ro_claude_kit_eval_suite import EvalCase, EvalSuite, GoldenDataset, Rubric
+from ronin_eval_suite import EvalCase, EvalSuite, GoldenDataset, Rubric
 
 
 def _resp(text: str) -> SimpleNamespace:
@@ -24,7 +24,7 @@ def test_suite_end_to_end_with_custom_runner() -> None:
     cases = [EvalCase(id="c1", input="hi"), EvalCase(id="c2", input="bye")]
     dataset = GoldenDataset(cases)
 
-    with patch("ro_claude_kit_eval_suite.suite.anthropic.Anthropic", return_value=fake_client):
+    with patch("ronin_eval_suite.suite.anthropic.Anthropic", return_value=fake_client):
         suite = EvalSuite(
             rubric=Rubric(criteria=["task_success", "helpfulness"]),
             target_runner=lambda case: f"answered: {case.input}",
@@ -53,7 +53,7 @@ def test_target_failure_does_not_kill_run() -> None:
             raise RuntimeError("boom")
         return "ok"
 
-    with patch("ro_claude_kit_eval_suite.suite.anthropic.Anthropic", return_value=fake_client):
+    with patch("ronin_eval_suite.suite.anthropic.Anthropic", return_value=fake_client):
         suite = EvalSuite(
             rubric=Rubric(criteria=["task_success"]),
             target_runner=runner,

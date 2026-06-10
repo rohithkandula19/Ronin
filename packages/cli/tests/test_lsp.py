@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from ro_claude_kit_cli import lsp
+from ronin_cli import lsp
 
 
 # ---------- framing ----------

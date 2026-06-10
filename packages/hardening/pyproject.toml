@@ -1,13 +1,31 @@
 [project]
-name = "ro-claude-kit-hardening"
-version = "0.0.1"
+name = "ronin-hardening"
+version = "0.58.0"
 description = "Production hardening for Claude agents: prompt-injection defense, tool guardrails, output validation, observability."
 readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Rohith Kandula", email = "rohithkandula937@gmail.com" }]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+]
 dependencies = [
     "anthropic>=0.40.0",
     "pydantic>=2.5",
 ]
+
+[project.urls]
+Homepage = "https://github.com/rohithkandula19/Ronin"
+Repository = "https://github.com/rohithkandula19/Ronin"
+Issues = "https://github.com/rohithkandula19/Ronin/issues"
 
 [dependency-groups]
 dev = [
@@ -15,11 +33,11 @@ dev = [
 ]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.26"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/ro_claude_kit_hardening"]
+packages = ["src/ronin_hardening"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

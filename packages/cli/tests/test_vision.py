@@ -8,9 +8,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
-from ro_claude_kit_cli import vision
-from ro_claude_kit_cli.config import CSKConfig
-from ro_claude_kit_cli.main import app
+from ronin_cli import vision
+from ronin_cli.config import RoninConfig
+from ronin_cli.main import app
 
 runner = CliRunner()
 PNG = b"\x89PNG\r\n\x1a\n" + b"img-bytes"
@@ -24,14 +24,14 @@ def test_media_type_detection(tmp_path: Path) -> None:
 
 
 def test_describe_missing_file(tmp_path: Path) -> None:
-    cfg = CSKConfig(provider="anthropic", anthropic_api_key="k")
+    cfg = RoninConfig(provider="anthropic", anthropic_api_key="k")
     with pytest.raises(FileNotFoundError):
         vision.describe_image(cfg, tmp_path / "nope.png")
 
 
 def test_anthropic_vision_sends_image_block(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     img = tmp_path / "pic.png"; img.write_bytes(PNG)
-    cfg = CSKConfig(provider="anthropic", anthropic_api_key="k", model="claude-sonnet-4-6")
+    cfg = RoninConfig(provider="anthropic", anthropic_api_key="k", model="claude-sonnet-4-6")
 
     captured = {}
     fake_block = MagicMock(); fake_block.type = "text"; fake_block.text = "A red panda."
@@ -53,7 +53,7 @@ def test_anthropic_vision_sends_image_block(tmp_path: Path, monkeypatch: pytest.
 
 def test_openai_vision_uses_image_url(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     img = tmp_path / "pic.jpg"; img.write_bytes(PNG)
-    cfg = CSKConfig(provider="openai", openai_api_key="sk-x", model="gpt-4o")
+    cfg = RoninConfig(provider="openai", openai_api_key="sk-x", model="gpt-4o")
 
     payload = {"choices": [{"message": {"content": "A cat."}}]}
 
@@ -79,7 +79,7 @@ def test_openai_vision_uses_image_url(tmp_path: Path, monkeypatch: pytest.Monkey
 def test_openai_vision_requires_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     img = tmp_path / "p.png"; img.write_bytes(PNG)
-    cfg = CSKConfig(provider="groq", model="x")
+    cfg = RoninConfig(provider="groq", model="x")
     with pytest.raises(RuntimeError, match="API key"):
         vision.describe_image(cfg, img)
 
@@ -98,8 +98,8 @@ def test_cli_see_happy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
     img = tmp_path / "p.png"; img.write_bytes(PNG)
-    with patch("ro_claude_kit_cli.vision.describe_image", return_value="A red panda samurai."), \
-         patch("ro_claude_kit_cli.media.display_image", return_value="none"):
+    with patch("ronin_cli.vision.describe_image", return_value="A red panda samurai."), \
+         patch("ronin_cli.media.display_image", return_value="none"):
         r = runner.invoke(app, ["see", str(img), "what", "is", "this?"])
     assert r.exit_code == 0, r.stdout
     assert "red panda samurai" in r.stdout

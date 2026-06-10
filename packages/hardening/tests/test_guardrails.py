@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from ro_claude_kit_hardening import ApprovalGate, ToolAllowlist
-from ro_claude_kit_hardening.guardrails import PendingApproval
+from ronin_hardening import ApprovalGate, ToolAllowlist
+from ronin_hardening.guardrails import PendingApproval
 
 
 def test_allowlist_allows_known_tools() -> None:

@@ -5,17 +5,17 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from ro_claude_kit_cli.briefing import compute_briefing_data, render_briefing_md
-from ro_claude_kit_cli.config import CSKConfig
-from ro_claude_kit_cli.main import app
-from ro_claude_kit_cli.tools import build_tools
+from ronin_cli.briefing import compute_briefing_data, render_briefing_md
+from ronin_cli.config import RoninConfig
+from ronin_cli.main import app
+from ronin_cli.tools import build_tools
 
 
 runner = CliRunner()
 
 
 def test_compute_briefing_in_demo_mode_is_non_trivial() -> None:
-    tools = build_tools(CSKConfig(demo_mode=True))
+    tools = build_tools(RoninConfig(demo_mode=True))
     data = compute_briefing_data(tools)
 
     # Revenue
@@ -39,7 +39,7 @@ def test_compute_briefing_in_demo_mode_is_non_trivial() -> None:
 
 
 def test_render_briefing_md_includes_key_sections() -> None:
-    tools = build_tools(CSKConfig(demo_mode=True))
+    tools = build_tools(RoninConfig(demo_mode=True))
     data = compute_briefing_data(tools)
     md = render_briefing_md(data)
 

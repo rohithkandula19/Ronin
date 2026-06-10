@@ -7,8 +7,8 @@ import httpx
 import pytest
 from typer.testing import CliRunner
 
-from ro_claude_kit_cli.briefing_email import markdown_to_html, send_briefing_email
-from ro_claude_kit_cli.main import app
+from ronin_cli.briefing_email import markdown_to_html, send_briefing_email
+from ronin_cli.main import app
 
 
 runner = CliRunner()

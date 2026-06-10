@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ro_claude_kit_hardening import InjectionScanner, OutputLeakScanner
+from ronin_hardening import InjectionScanner, OutputLeakScanner
 
 
 def test_clean_input_passes() -> None:

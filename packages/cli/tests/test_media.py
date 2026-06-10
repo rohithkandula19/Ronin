@@ -7,8 +7,8 @@ from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
-from ro_claude_kit_cli import media
-from ro_claude_kit_cli.main import app
+from ronin_cli import media
+from ronin_cli.main import app
 
 runner = CliRunner()
 
@@ -76,7 +76,7 @@ def test_display_falls_back_to_open(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 def test_cli_image_no_show(tmp_path: Path) -> None:
     fake_path = tmp_path / "ronin_image.png"
     fake_path.write_bytes(PNG_BYTES)
-    with patch("ro_claude_kit_cli.media.generate_image", return_value=fake_path):
+    with patch("ronin_cli.media.generate_image", return_value=fake_path):
         r = runner.invoke(app, ["image", "a", "red", "panda", "--no-show", "--out", str(fake_path)])
     assert r.exit_code == 0, r.stdout
     assert "saved" in r.stdout
@@ -89,7 +89,7 @@ def test_cli_image_bad_size(tmp_path: Path) -> None:
 
 
 def test_cli_image_backend_error_is_clean() -> None:
-    with patch("ro_claude_kit_cli.media.generate_image", side_effect=RuntimeError("network down")):
+    with patch("ronin_cli.media.generate_image", side_effect=RuntimeError("network down")):
         r = runner.invoke(app, ["image", "x", "--no-show"])
     assert r.exit_code == 1
     assert "failed" in r.stdout and "network down" in r.stdout
