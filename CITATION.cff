@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+title: "Ronin: a masterless, terminal-native, provider-agnostic AI coding agent"
+message: "If you use Ronin in your work, please cite it using the metadata below."
+type: software
+authors:
+  - given-names: Rohith
+    family-names: Kandula
+repository-code: "https://github.com/rohithkandula19/Ronin"
+url: "https://github.com/rohithkandula19/Ronin"
+abstract: >-
+  Ronin is a Claude-Code-style AI coding agent that reads, edits, and runs code
+  from the terminal, built on a provider-agnostic agent framework with evals,
+  memory, security hardening, and MCP tool integrations. It runs on Claude or on
+  free models (Gemini, Cerebras, Groq, OpenRouter, Ollama).
+license: MIT
+version: 0.58.0
+date-released: 2026-06-10
+keywords:
+  - ai-agent
+  - coding-agent
+  - llm
+  - cli
+  - mcp
+  - provider-agnostic
+  - terminal
