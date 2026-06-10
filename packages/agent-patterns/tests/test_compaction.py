@@ -61,3 +61,56 @@ def test_compaction_under_threshold_is_noop() -> None:
     result = agent.run("just answer")
     assert result.success
     assert not any("context compacted" in str(s.content) for s in result.trace)
+
+
+def test_est_tokens_counts_tool_call_arguments() -> None:
+    """A persisted history whose bulk is in tool-call ARGUMENTS (write_file
+    payloads) must trigger eviction — counting only m.content would miss it and
+    let the history grow past the window unchecked."""
+    from ronin_agent_patterns import Message
+
+    # Build a long prior history where each turn's weight is a big write_file arg,
+    # not tool-result content. 6 complete turn-groups.
+    history: list[Message] = []
+    for i in range(6):
+        history.append(Message(role="user", content=f"turn {i}"))
+        history.append(Message(
+            role="assistant", content="",
+            tool_calls=[ToolCall(id=f"w{i}", name="write_file",
+                                 arguments={"path": f"f{i}.py", "content": "Z" * 4000})],
+        ))
+        history.append(Message(role="tool", tool_call_id=f"w{i}", name="write_file", content="ok"))
+        history.append(Message(role="assistant", content="done"))
+
+    provider = FakeProvider(responses=[LLMResponse(text="final", stop_reason="end_turn")])
+    agent = ReActAgent(system="x", provider=provider, compact_after_tokens=2000, compact_keep_recent=4)
+    result = agent.run("new turn", history=history)
+
+    # The provider must have been handed an evicted (shorter) history — eviction
+    # fired because tool-call args were counted. Without the fix the 24-msg history
+    # would sail under a content-only estimate and never compact.
+    sent = provider.calls[0]["messages"]
+    user_turns = [m for m in sent if m["role"] == "user"]
+    assert len(user_turns) < 7              # oldest groups evicted
+    assert user_turns[-1]["content"] == "new turn"   # current turn always kept
+    # never leaves an orphan tool result at the front
+    assert sent[0]["role"] == "user"
+
+
+def test_eviction_preserves_pairing_and_keeps_current_turn() -> None:
+    """Even with a huge history, eviction must keep the list starting at a user
+    message (no orphan tool results) and keep the most recent turn."""
+    from ronin_agent_patterns import Message
+
+    history: list[Message] = []
+    for i in range(10):
+        history.append(Message(role="user", content=f"q{i}"))
+        history.append(Message(role="assistant", content="A" * 3000))
+
+    provider = FakeProvider(responses=[LLMResponse(text="ok", stop_reason="end_turn")])
+    agent = ReActAgent(system="x", provider=provider, compact_after_tokens=1500, compact_keep_recent=2)
+    agent.run("current", history=history)
+
+    sent = provider.calls[0]["messages"]
+    assert sent[0]["role"] == "user"                 # valid conversation start
+    assert sent[-1]["content"] == "current"          # current turn survives

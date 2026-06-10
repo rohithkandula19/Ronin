@@ -142,3 +142,69 @@ def test_react_provider_receives_assistant_messages_with_tool_calls() -> None:
     assert roles == ["user", "assistant", "tool"]
     assert second_call_messages[1]["tool_calls"][0]["name"] == "echo"
     assert second_call_messages[2]["content"] == "yo"
+
+
+def test_run_returns_full_message_history() -> None:
+    """AgentResult.messages carries the user turn and the final assistant reply
+    so a caller can persist it and feed it back next turn."""
+    provider = FakeProvider(responses=[
+        LLMResponse(text="hi there", stop_reason="end_turn"),
+    ])
+    result = ReActAgent(system="...", provider=provider).run("hello")
+
+    roles = [m.role for m in result.messages]
+    assert roles == ["user", "assistant"]
+    assert result.messages[0].content == "hello"
+    assert result.messages[1].content == "hi there"
+
+
+def test_history_seeds_the_next_run() -> None:
+    """Passing prior messages as history prepends them to the conversation the
+    provider sees — the agent 'remembers' the earlier turn."""
+    provider1 = FakeProvider(responses=[LLMResponse(text="blue", stop_reason="end_turn")])
+    r1 = ReActAgent(system="...", provider=provider1).run("favorite color?")
+
+    provider2 = FakeProvider(responses=[LLMResponse(text="because", stop_reason="end_turn")])
+    ReActAgent(system="...", provider=provider2).run("why?", history=r1.messages)
+
+    seen = provider2.calls[0]["messages"]
+    roles = [m["role"] for m in seen]
+    # prior user + prior assistant, then this turn's user — full context, no text tail
+    assert roles == ["user", "assistant", "user"]
+    assert seen[0]["content"] == "favorite color?"
+    assert seen[1]["content"] == "blue"
+    assert seen[2]["content"] == "why?"
+
+
+def test_history_accumulates_tool_calls_across_turns() -> None:
+    """Tool calls/results from a prior turn survive into the next turn's history."""
+    tool = Tool(
+        name="echo",
+        description="echo",
+        input_schema={"type": "object", "properties": {"v": {"type": "string"}}, "required": ["v"]},
+        handler=lambda v: v,
+    )
+    p1 = FakeProvider(responses=[
+        LLMResponse(text="", tool_calls=[ToolCall(id="t1", name="echo", arguments={"v": "x"})], stop_reason="tool_use"),
+        LLMResponse(text="done", stop_reason="end_turn"),
+    ])
+    r1 = ReActAgent(system="...", tools=[tool], provider=p1).run("first")
+    # turn-1 history: user, assistant+tool_call, tool, assistant(final)
+    assert [m.role for m in r1.messages] == ["user", "assistant", "tool", "assistant"]
+
+    p2 = FakeProvider(responses=[LLMResponse(text="ok", stop_reason="end_turn")])
+    ReActAgent(system="...", tools=[tool], provider=p2).run("second", history=r1.messages)
+    roles = [m["role"] for m in p2.calls[0]["messages"]]
+    assert roles == ["user", "assistant", "tool", "assistant", "user"]
+
+
+def test_history_is_not_mutated_in_place() -> None:
+    """Seeding with history must not append onto the caller's list."""
+    prior = FakeProvider(responses=[LLMResponse(text="a", stop_reason="end_turn")])
+    r1 = ReActAgent(system="...", provider=prior).run("one")
+    snapshot = list(r1.messages)
+
+    nxt = FakeProvider(responses=[LLMResponse(text="b", stop_reason="end_turn")])
+    ReActAgent(system="...", provider=nxt).run("two", history=r1.messages)
+    # the original list the caller held is untouched
+    assert r1.messages == snapshot

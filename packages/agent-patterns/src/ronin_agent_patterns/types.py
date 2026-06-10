@@ -51,3 +51,9 @@ class AgentResult(BaseModel):
     trace: list[Step] = Field(default_factory=list)
     error: str | None = None
     usage: dict[str, int] = Field(default_factory=dict)
+    # The full structured conversation after the run — the seeded ``history`` (if
+    # any), this turn's user message, every assistant/tool exchange, and the final
+    # assistant reply. Callers persist this and feed it back as ``history`` on the
+    # next turn so the agent keeps real context (not a flattened text tail).
+    # Typed ``Any`` to avoid a types→providers import cycle; items are ``Message``.
+    messages: list[Any] = Field(default_factory=list)

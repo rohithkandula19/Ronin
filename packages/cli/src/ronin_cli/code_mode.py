@@ -149,6 +149,9 @@ class CodeRunResult:
     error: str | None = None
     blocked: bool = False
     streamed: bool = False  # True if the answer already streamed to the console
+    # Full structured conversation after this turn (Message list), for the session
+    # to persist and feed back next turn. Empty when the turn errored/was blocked.
+    messages: list = field(default_factory=list)
 
 
 import hashlib as _hashlib
@@ -493,6 +496,7 @@ def run_code_agent(
     max_iterations: int = 25,
     undo_stack: list | None = None,
     history_prefix: str = "",
+    message_history: list | None = None,
     read_only: bool = False,
     extra_tools: list | None = None,
     extra_system: str = "",
@@ -609,7 +613,12 @@ def run_code_agent(
     # only — sub-agents/evals pass console=None and stay deterministic).
     # Auto-context front-loads relevant files — skipped in fast mode (leaner
     # context = faster turns; the agent can still read what it needs on demand).
-    if console is not None and getattr(config, "auto_context", False) and not getattr(config, "fast", False):
+    # Only on the FIRST turn (no structured history yet): injecting query-specific
+    # files into `system` every turn would change the system block each time and
+    # invalidate the prompt-cache prefix — defeating the point of persistent
+    # history. Once history exists, the agent already carries what it read forward.
+    if (console is not None and getattr(config, "auto_context", False)
+            and not getattr(config, "fast", False) and not message_history):
         from .context_engine import relevant_context
         _ctx = relevant_context(task, root)
         if _ctx:
@@ -655,11 +664,20 @@ def run_code_agent(
     after_tool = build_after_tool(_hooks, root, console=console) if _hooks else None
 
     task = expand_file_mentions(task, root, offline=config.offline)  # inline @path / @url refs
-    prompt = f"{history_prefix}\n\nCurrent request: {task}" if history_prefix else task
+    # When we have real structured history (the REPL keeps it alive across turns),
+    # seed the agent with the actual Message list and send just this turn's task —
+    # no flattened text tail, which would double-count context and break the cache.
+    # The text ``history_prefix`` is the fallback for callers without structured
+    # history (one-shots, resumed sessions on their first turn).
+    if message_history:
+        prompt = task
+    else:
+        prompt = f"{history_prefix}\n\nCurrent request: {task}" if history_prefix else task
     if renderer is not None:
         renderer.start()  # soft "thinking…" spinner until the first token
     try:
-        result = agent.run(prompt, on_step=on_step, before_tool=before_tool,
+        result = agent.run(prompt, history=message_history or None,
+                           on_step=on_step, before_tool=before_tool,
                            on_text=on_text, after_tool=after_tool,
                            parallel_safe=lambda n: n in _PARALLEL_TOOLS)
     except KeyboardInterrupt:
@@ -697,6 +715,7 @@ def run_code_agent(
         usage=result.usage,
         error=result.error,
         streamed=bool(renderer and renderer.streamed_text),
+        messages=result.messages,
     )
 
 
@@ -1200,6 +1219,7 @@ def handle_slash_command(
     config: RoninConfig,
     undo_stack: list,
     transcript: list[str],
+    message_history: list | None = None,
 ) -> str:
     """Dispatch an in-session command. Returns:
     ``"passthrough"`` (not a command → send to the agent),
@@ -1227,7 +1247,8 @@ def handle_slash_command(
         console.print(f"[yellow]unknown command[/yellow] /{cmd} — try [cyan]/help[/cyan]")
         return "handled"
     return handler(SlashCtx(parts=parts, console=console, root=root, config=config,
-                            undo_stack=undo_stack, transcript=transcript))
+                            undo_stack=undo_stack, transcript=transcript,
+                            message_history=message_history if message_history is not None else []))
 
 
 def run_code_session(
@@ -1248,6 +1269,12 @@ def run_code_session(
     """
     undo_stack: list = []
     transcript: list[str] = load_session(root) if continue_session else []
+    # Structured conversation kept alive across turns — the real Message list with
+    # tool calls/results, so the agent remembers files it read and the prompt-cache
+    # prefix stays warm. ``transcript`` (text) lives on for /resume + display; this
+    # is what actually feeds the model. Starts empty (a resumed session falls back
+    # to the text tail for its first turn, then accumulates structured history).
+    message_history: list = []
 
     resumed = " · resumed" if (continue_session and transcript) else ""
     _welcome(console, config, root, yolo,
@@ -1335,6 +1362,7 @@ def run_code_session(
                 action = handle_slash_command(
                     user, console=console, root=root, config=config,
                     undo_stack=undo_stack, transcript=transcript,
+                    message_history=message_history,
                 )
                 if action == "exit":
                     return
@@ -1346,6 +1374,10 @@ def run_code_session(
         if new_root is not None:
             root = new_root
             console.print(f"  [#6b7089]→ now working in[/#6b7089] [bold]{root}[/bold]")
+            # Switching projects: drop structured history so the agent doesn't carry
+            # the OLD root's tool results (absolute paths, file contents) into the new
+            # directory. Treat it like a soft /clear for the conversation context.
+            message_history = []
             if not rest:
                 continue
             # Ground the agent in THIS directory so it doesn't drift to a
@@ -1354,8 +1386,10 @@ def run_code_session(
                     f"(list_files / read_file / search_files) here; ignore any other "
                     f"project paths mentioned earlier or in memory.)\n\n{rest}")
 
+        # Text fallback only when there's no structured history yet (first turn of
+        # a resumed session). Once message_history is populated it carries context.
         history_prefix = ""
-        if transcript:
+        if transcript and not message_history:
             history_prefix = "Conversation so far:\n" + "\n".join(transcript[-6:])
 
         # Shift+Tab edit mode: plan → read-only, auto-accept → yolo, normal → default
@@ -1388,7 +1422,8 @@ def run_code_session(
             result = run_code_agent(
                 turn_cfg, user, root=root, console=console, yolo=_turn_yolo,
                 max_iterations=max_iterations, undo_stack=undo_stack,
-                history_prefix=history_prefix, read_only=_read_only,
+                history_prefix=history_prefix, message_history=message_history,
+                read_only=_read_only,
                 extra_tools=(build_background_tools(root) + build_checkpoint_tools(root)
                              + build_vision_tools(turn_cfg, root)
                              + build_semantic_tools(turn_cfg, root)),
@@ -1409,7 +1444,8 @@ def run_code_session(
                 _retry = run_code_agent(
                     _strong, user, root=root, console=console, yolo=_turn_yolo,
                     max_iterations=max_iterations, undo_stack=undo_stack,
-                    history_prefix=history_prefix, read_only=_read_only,
+                    history_prefix=history_prefix, message_history=message_history,
+                    read_only=_read_only,
                     extra_tools=(build_background_tools(root) + build_checkpoint_tools(root)
                                  + build_vision_tools(_strong, root)
                                  + build_semantic_tools(_strong, root)),
@@ -1438,6 +1474,11 @@ def run_code_session(
         transcript.append(f"USER: {user}")
         transcript.append(f"ASSISTANT: {result.output}")
         save_session(root, transcript)  # persist so `ronin code --continue` can resume
+        # Adopt the structured conversation so the next turn keeps full context.
+        # Only on success — a failed/blocked turn returns no messages, so we keep
+        # the prior history intact rather than dropping a half-finished exchange in.
+        if result.success and result.messages:
+            message_history = result.messages
         if not result.success:
             console.print(f"\n{result.output}\n")   # clean error (e.g. rate-limit), session continues
         else:
@@ -1504,6 +1545,8 @@ def run_unified_session(
 
     undo_stack: list = []
     transcript: list[str] = load_session(root) if continue_session else []
+    # Structured cross-turn conversation (see run_code_session for the rationale).
+    message_history: list = []
     artifacts: list = []
     # media (image/video/speech) + data (stripe/linear/…) + persistent memory,
     # layered on the coding agent's machinery (streaming, diffs, gate, todos).
@@ -1617,6 +1660,7 @@ def run_unified_session(
                 action = handle_slash_command(
                     user, console=console, root=root, config=config,
                     undo_stack=undo_stack, transcript=transcript,
+                    message_history=message_history,
                 )
                 if action == "exit":
                     return
@@ -1629,6 +1673,10 @@ def run_unified_session(
         if new_root is not None:
             root = new_root
             console.print(f"  [#6b7089]→ now working in[/#6b7089] [bold]{root}[/bold]")
+            # Switching projects: drop structured history so the agent doesn't carry
+            # the OLD root's tool results (absolute paths, file contents) into the new
+            # directory. Treat it like a soft /clear for the conversation context.
+            message_history = []
             if not rest:
                 continue
             # Ground the agent in THIS directory so it doesn't drift to a
@@ -1637,8 +1685,10 @@ def run_unified_session(
                     f"(list_files / read_file / search_files) here; ignore any other "
                     f"project paths mentioned earlier or in memory.)\n\n{rest}")
 
+        # Text fallback only when there's no structured history yet (first turn of
+        # a resumed session). Once message_history is populated it carries context.
         history_prefix = ""
-        if transcript:
+        if transcript and not message_history:
             history_prefix = "Conversation so far:\n" + "\n".join(transcript[-6:])
 
         # Cost Router (+ self-tuning): route this turn to the fast/free or strong
@@ -1665,11 +1715,15 @@ def run_unified_session(
             result = run_code_agent(
                 turn_cfg, user, root=root, console=console, yolo=_turn_yolo,
                 max_iterations=max_iterations, undo_stack=undo_stack,
-                history_prefix=history_prefix, extra_tools=extra, read_only=_read_only,
+                history_prefix=history_prefix, message_history=message_history,
+                extra_tools=extra, read_only=_read_only,
                 base_system=UNIFIED_SYSTEM, extra_system=mem_block, include_image_tool=False,
             )
         pending.extend(_iq.drain())
         _elapsed = _time.time() - _t0
+        # Adopt structured history on success so the next turn keeps full context.
+        if result.success and result.messages:
+            message_history = result.messages
 
         # smarter agent: opt-in self-verification after a turn that made changes
         if config.verify and result.success and any(
@@ -1683,12 +1737,18 @@ def run_unified_session(
             _vres = run_code_agent(
                 turn_cfg, _vprompt, root=root, console=console, yolo=_turn_yolo,
                 max_iterations=max_iterations, undo_stack=undo_stack,
-                history_prefix=f"USER: {user}\nASSISTANT: {result.output}",
+                message_history=message_history,
                 extra_tools=extra, base_system=UNIFIED_SYSTEM, extra_system=mem_block,
                 include_image_tool=False,
             )
             if _vres.success and _vres.output:
                 result.output = f"{result.output}\n\n[verified] {_vres.output}"
+                # NOTE: do NOT adopt _vres.messages into message_history. The verify
+                # pass is seeded with a synthetic "Review your work…" user prompt;
+                # threading its messages forward would inject that fake user turn
+                # into every future request. Any fixes verify made live on disk and
+                # the next real turn sees them through the file tools — so we keep
+                # message_history at the main turn's clean history (set above).
 
         if ledger is not None:
             _u = result.usage or {}

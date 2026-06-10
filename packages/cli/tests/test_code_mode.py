@@ -348,3 +348,50 @@ def test_keyboard_interrupt_stops_turn_not_session(tmp_path: Path) -> None:
         res = run_code_agent(config, "do a thing", root=tmp_path, console=None)
     assert res.success is False
     assert res.error == "interrupted"
+
+
+def test_run_code_agent_returns_and_threads_message_history(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """run_code_agent surfaces the structured history and, when fed back as
+    message_history, the next turn's provider sees the prior conversation —
+    no flattened 'Conversation so far' text tail."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+    config = RoninConfig(provider="anthropic")
+
+    # turn 1
+    p1 = FakeProvider(responses=[LLMResponse(text="it's blue", stop_reason="end_turn")])
+    with patch("ronin_cli.code_mode.build_provider", return_value=p1):
+        r1 = run_code_agent(config, "what color is the sky?", root=tmp_path, console=None, yolo=True)
+    assert r1.success
+    assert [m.role for m in r1.messages] == ["user", "assistant"]
+
+    # turn 2 — feed turn 1's history back
+    p2 = FakeProvider(responses=[LLMResponse(text="because Rayleigh scattering", stop_reason="end_turn")])
+    with patch("ronin_cli.code_mode.build_provider", return_value=p2):
+        r2 = run_code_agent(config, "why?", root=tmp_path, console=None, yolo=True,
+                            message_history=r1.messages)
+    assert r2.success
+    # the provider on turn 2 saw the full prior exchange + the new question
+    seen = [m["content"] for m in p2.calls[0]["messages"]]
+    assert "what color is the sky?" in seen
+    assert "it's blue" in seen
+    assert "why?" in seen
+
+
+def test_message_history_takes_precedence_over_text_prefix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """When structured history is present, the text history_prefix is ignored so
+    context isn't double-counted (and the cache prefix stays stable)."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+    config = RoninConfig(provider="anthropic")
+    prior = [
+        __import__("ronin_agent_patterns").Message(role="user", content="earlier question"),
+        __import__("ronin_agent_patterns").Message(role="assistant", content="earlier answer"),
+    ]
+    p = FakeProvider(responses=[LLMResponse(text="ok", stop_reason="end_turn")])
+    with patch("ronin_cli.code_mode.build_provider", return_value=p):
+        run_code_agent(config, "new question", root=tmp_path, console=None, yolo=True,
+                       history_prefix="Conversation so far:\nUSER: SHOULD-NOT-APPEAR",
+                       message_history=prior)
+    contents = "\n".join(m["content"] for m in p.calls[0]["messages"])
+    assert "SHOULD-NOT-APPEAR" not in contents          # text tail suppressed
+    assert "earlier question" in contents               # structured history used
+    assert "new question" in contents

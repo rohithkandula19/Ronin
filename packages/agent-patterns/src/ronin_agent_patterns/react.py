@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Callable
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -64,6 +65,7 @@ class ReActAgent(BaseModel):
         self,
         user_message: str,
         *,
+        history: "list[Message] | None" = None,
         on_step: OnStep | None = None,
         before_tool: BeforeTool | None = None,
         on_text: OnText | None = None,
@@ -72,6 +74,12 @@ class ReActAgent(BaseModel):
     ) -> AgentResult:
         """Run the agent.
 
+        ``history``: optional prior conversation (a list of ``Message``) to seed
+        this run with. When supplied, the agent keeps real cross-turn context —
+        files it read, tool results, prior answers — instead of starting cold.
+        The full updated list is returned as ``AgentResult.messages`` so the
+        caller can feed it back next turn. Also keeps the provider's prompt-cache
+        prefix stable across turns (a big latency/cost win on Anthropic).
         ``on_step``: optional callback fired for every Step as it happens — use
         it to narrate the agent's work live (the basis of ``csk agent``).
         ``before_tool``: optional gate called with (tool_name, arguments) before
@@ -89,7 +97,9 @@ class ReActAgent(BaseModel):
             if on_step is not None:
                 on_step(step)
 
-        messages: list[Message] = [Message(role="user", content=user_message)]
+        # Seed with any prior conversation, then append this turn's user message.
+        messages: list[Message] = list(history) if history else []
+        messages.append(Message(role="user", content=user_message))
         trace: list[Step] = []
         usage = {"input_tokens": 0, "output_tokens": 0}
 
@@ -132,12 +142,16 @@ class ReActAgent(BaseModel):
             if not response.tool_calls:
                 final = response.text or "(no output)"
                 emit(Step(kind="final", content=final))
+                # Keep the final answer in the history so the next turn (when the
+                # caller feeds ``messages`` back as ``history``) sees what we said.
+                messages.append(Message(role="assistant", content=final))
                 return AgentResult(
                     success=True,
                     output=final,
                     iterations=i + 1,
                     trace=trace,
                     usage=usage,
+                    messages=messages,
                 )
 
             messages.append(Message(
@@ -164,6 +178,7 @@ class ReActAgent(BaseModel):
             trace=trace,
             error=f"hit max_iterations={self.max_iterations}",
             usage=usage,
+            messages=messages,
         )
 
     def _resolve_and_gate(self, tc, tools_by_name, before_tool, emit):
@@ -243,21 +258,39 @@ class ReActAgent(BaseModel):
                 "file/section to see more.]")
 
     def _maybe_compact(self, messages: list[Message], emit) -> None:
-        """Shrink old tool-result payloads when the history grows too large.
+        """Keep the running history under the context budget.
 
-        Truncates the *content* of old ``tool`` messages in place rather than
-        removing messages — this preserves the assistant↔tool_call_id pairing
-        the API requires (no orphaned tool results), while reclaiming the bulk
-        of the tokens (file dumps, command output). The last
-        ``compact_keep_recent`` messages are left untouched so the model keeps
-        full recent context.
+        Two stages, both pairing-safe:
+
+        1. **Truncate** the *content* of old ``tool`` messages in place (file
+           dumps, command output) — reclaims the bulk of the tokens without
+           removing any message, so assistant↔tool_call_id pairing is intact.
+        2. **Evict** whole oldest turn-groups when truncation isn't enough.
+           Persisted cross-turn history accumulates user/assistant text and
+           tool-call *arguments* that tool-truncation can't reclaim; without a
+           cap a very long session would grow past the window and wedge (every
+           later turn re-sends the oversized history and re-fails). A group
+           starts at a ``user`` message, so dropping from the front at a user
+           boundary never orphans a ``tool`` result. The most recent group (the
+           current turn) is always kept.
+
+        The last ``compact_keep_recent`` messages are left untouched in stage 1
+        so the model keeps full recent context.
         """
         threshold = self.compact_after_tokens
         if threshold is None:
             return
 
         def est_tokens() -> int:
-            return sum(len(m.content or "") for m in messages) // 4
+            # Count tool-call ARGUMENTS too — write_file/edit_file payloads live
+            # in m.tool_calls[].arguments, not m.content, so counting only content
+            # would wildly undercount a persisted, edit-heavy history.
+            total = 0
+            for m in messages:
+                total += len(m.content or "")
+                for tc in (m.tool_calls or []):
+                    total += len(json.dumps(tc.arguments, default=str))
+            return total // 4
 
         if est_tokens() <= threshold:
             return
@@ -268,5 +301,22 @@ class ReActAgent(BaseModel):
             if m.role == "tool" and m.content and len(m.content) > 240 and marker not in m.content:
                 m.content = m.content[:200] + marker
                 compacted += 1
-        if compacted:
-            emit(Step(kind="thought", content=f"[context compacted: truncated {compacted} old tool result(s)]"))
+
+        # Stage 2: still over budget after truncating tool output → evict oldest
+        # complete turn-groups (everything before the 2nd user message) until we
+        # fit or only the current turn remains.
+        evicted = 0
+        while est_tokens() > threshold:
+            user_idx = [i for i, m in enumerate(messages) if m.role == "user"]
+            if len(user_idx) <= 1:
+                break  # never drop the most recent turn-group
+            del messages[: user_idx[1]]
+            evicted += 1
+
+        if compacted or evicted:
+            note = []
+            if compacted:
+                note.append(f"truncated {compacted} old tool result(s)")
+            if evicted:
+                note.append(f"dropped {evicted} oldest turn(s)")
+            emit(Step(kind="thought", content=f"[context compacted: {', '.join(note)}]"))

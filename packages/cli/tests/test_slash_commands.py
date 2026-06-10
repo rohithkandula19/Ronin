@@ -14,12 +14,13 @@ def _console() -> tuple[Console, io.StringIO]:
     return Console(file=buf, force_terminal=False, width=100), buf
 
 
-def _call(user: str, *, root: Path, undo_stack=None, transcript=None):
+def _call(user: str, *, root: Path, undo_stack=None, transcript=None, message_history=None):
     console, buf = _console()
     action = handle_slash_command(
         user, console=console, root=root, config=RoninConfig(provider="anthropic"),
         undo_stack=undo_stack if undo_stack is not None else [],
         transcript=transcript if transcript is not None else [],
+        message_history=message_history,
     )
     return action, buf.getvalue()
 
@@ -293,6 +294,44 @@ def test_compact_replaces_transcript_with_summary(tmp_path: Path, monkeypatch) -
     assert len(transcript) == 1
     assert "decided X" in transcript[0]
     assert "compacted" in out
+
+
+def test_clear_also_clears_structured_history(tmp_path: Path) -> None:
+    # /clear must wipe the structured Message history in step with the text one,
+    # or the model would keep "remembering" a conversation the user just cleared.
+    transcript = ["USER: hi", "ASSISTANT: yo"]
+    history = [object(), object()]  # stand-ins for Message objects
+    action, _ = _call("/clear", root=tmp_path, transcript=transcript, message_history=history)
+    assert action == "handled"
+    assert transcript == []
+    assert history == []  # cleared in place (same list the session loop holds)
+
+
+def test_compact_also_clears_structured_history(tmp_path: Path, monkeypatch) -> None:
+    class _Resp:
+        text = "- summary"
+
+    class _Provider:
+        def complete(self, **kw):  # noqa: ANN003
+            return _Resp()
+
+    monkeypatch.setattr("ronin_cli.runner.build_provider", lambda cfg: _Provider())
+    transcript = [f"USER: msg {i}" for i in range(6)]
+    history = [object(), object(), object()]
+    action, _ = _call("/compact", root=tmp_path, transcript=transcript, message_history=history)
+    assert action == "handled"
+    assert len(transcript) == 1          # replaced with the summary
+    assert history == []                 # structured history dropped to match
+
+
+def test_resume_clears_structured_history(tmp_path: Path, monkeypatch) -> None:
+    from ronin_cli import sessions
+    # one archived session to resume into
+    sessions.save_session(tmp_path, ["USER: old", "ASSISTANT: reply"])
+    history = [object(), object()]
+    action, _ = _call("/resume 1", root=tmp_path, transcript=[], message_history=history)
+    assert action == "handled"
+    assert history == []  # loaded session is text-only → structured history reset
 
 
 def test_vim_toggles_keybindings(tmp_path: Path) -> None:
