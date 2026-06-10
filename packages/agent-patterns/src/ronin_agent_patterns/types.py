@@ -14,6 +14,11 @@ class Tool(BaseModel):
     description: str
     input_schema: dict[str, Any]
     handler: Callable[..., Any]
+    # Marks a tool as side-effecting / not auto-approvable — the host's approval
+    # gate should prompt before running it (e.g. an MCP write, a user plugin).
+    # Built-in file/shell tools are gated by name on the host side, so they leave
+    # this False; it's the signal for tools the host can't enumerate ahead of time.
+    sensitive: bool = False
 
     def to_anthropic(self) -> dict[str, Any]:
         return {

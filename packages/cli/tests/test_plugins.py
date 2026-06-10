@@ -96,3 +96,16 @@ def test_example_weather_plugin_loads() -> None:
     assert any(r.name == "weather" and r.error is None for r in results)
     tools = load_plugin_tools(repo / "examples" / "plugins")
     assert any(t.name == "weather" for t in tools)
+
+
+def test_built_plugin_tools_are_sensitive(tmp_path: Path) -> None:
+    # build_plugin_tools hardens each tool AND marks it sensitive so the approval
+    # gate prompts before a user/library plugin runs (it used to bypass the gate).
+    from ronin_cli.plugins import build_plugin_tools
+    pdir = tmp_path / ".ronin" / "plugins"
+    pdir.mkdir(parents=True)
+    (pdir / "ok.py").write_text(PLUGIN_OK, encoding="utf-8")
+    tools = build_plugin_tools(tmp_path)
+    assert len(tools) == 1
+    assert tools[0].name == "echo"
+    assert tools[0].sensitive is True

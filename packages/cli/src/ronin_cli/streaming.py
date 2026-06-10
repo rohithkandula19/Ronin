@@ -199,7 +199,10 @@ class LiveRenderer:
                 if preview:
                     self.console.print(f"  [{MUTE}]{CONNECTOR}  {preview}[/{MUTE}]")
         elif step.kind == "error":
-            self.console.print(f"  [{ERR}]{CONNECTOR}  ⚠ {_short(c, 160)}[/{ERR}]")
+            # escape: error content can carry arbitrary user text (a free-text
+            # gate-denial reason) with [brackets] that would crash Rich's parser.
+            from rich.markup import escape as _esc
+            self.console.print(f"  [{ERR}]{CONNECTOR}  ⚠ {_esc(_short(c, 160))}[/{ERR}]")
         elif step.kind == "plan":
             self.console.print(f"  [{ACCENT}]🗂 {_short(c, 160)}[/{ACCENT}]")
         elif step.kind == "reflection":

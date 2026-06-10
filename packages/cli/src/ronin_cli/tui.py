@@ -21,7 +21,6 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Footer, Header, Input, Markdown, Static
 
-from .code_tools import SENSITIVE_TOOLS
 from .config import RoninConfig, load_config
 
 HELP_TEXT = """\
@@ -239,8 +238,8 @@ class RoninApp(App):
             self.call_from_thread(self._trace_add, f"  {mark} {res}")
 
     def _gate(self, name: str, args: dict) -> bool:
-        if name not in SENSITIVE_TOOLS:
-            return True
+        # run_code_agent only routes tools that actually need approval here
+        # (built-in mutators + sensitive MCP/plugin tools), so always prompt.
         done = threading.Event()
         box = {"ok": False}
 

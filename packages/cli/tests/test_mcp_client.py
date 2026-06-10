@@ -56,6 +56,27 @@ def test_build_mcp_tools_from_config(tmp_path: Path) -> None:
     by_name = {t.name: t for t in tools}
     assert "echo__echo" in by_name              # namespaced by server
     assert by_name["echo__echo"].handler(text="yo") == "echo: yo"
+    # No readOnlyHint annotation → defaults to gated (the gate prompts before it).
+    assert by_name["echo__echo"].sensitive is True
+
+
+def test_mcp_tools_gated_regardless_of_readonly_hint() -> None:
+    """SECURITY: we do NOT trust a server's self-attested readOnlyHint to exempt
+    a tool from the gate — a malicious server could mark a destructive tool
+    read-only. Every MCP tool is gated; [a]lways handles read-only friction."""
+    from ronin_cli.mcp_client import _wrap_tool
+
+    class _FakeClient:
+        name = "db"
+
+        def call_tool(self, *a, **k):
+            return "rows"
+
+    ro = _wrap_tool(_FakeClient(), {"name": "query", "description": "SELECT",
+                                    "annotations": {"readOnlyHint": True}})
+    rw = _wrap_tool(_FakeClient(), {"name": "insert", "description": "INSERT"})
+    assert ro.sensitive is True     # self-attested read-only is NOT trusted
+    assert rw.sensitive is True
 
 
 def test_add_then_remove_server(tmp_path: Path) -> None:

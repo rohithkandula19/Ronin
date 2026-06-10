@@ -11,8 +11,10 @@ from .types import AgentResult, Step, Tool
 
 # Live-narration hook: called for every step as it's appended to the trace.
 OnStep = Callable[[Step], None]
-# Pre-tool approval hook: (tool_name, arguments) -> bool. Return False to deny.
-BeforeTool = Callable[[str, dict], bool]
+# Pre-tool approval hook: (tool_name, arguments) -> bool | str.
+#   True  → allow.  False → deny (generic).  A non-empty str → deny *with that
+#   reason*, which is handed back to the model so it can adjust (reject-with-feedback).
+BeforeTool = Callable[[str, dict], "bool | str"]
 # Token-streaming hook: called with each text delta as the model generates it.
 OnText = Callable[[str], None]
 # Post-tool hook: (tool_name, arguments, result, is_error) -> None. Fires after
@@ -191,10 +193,20 @@ class ReActAgent(BaseModel):
             err = f"tool '{tc.name}' is not registered"
             emit(Step(kind="error", content=err))
             return None, f"ERROR: {err}"
-        if before_tool is not None and not before_tool(tc.name, tc.arguments or {}):
-            emit(Step(kind="error", content=f"tool '{tc.name}' denied by user"))
-            return None, ("DENIED: the user declined this action. Do not retry it; "
-                          "find another way or stop.")
+        if before_tool is not None:
+            verdict = before_tool(tc.name, tc.arguments or {})
+            # Contract: a non-empty str → deny WITH that reason (reject-with-
+            # feedback); False/None/"" → generic deny; any other truthy (True, or
+            # a legacy sentinel) → allow.
+            reason = verdict.strip() if isinstance(verdict, str) else ""
+            if reason:
+                emit(Step(kind="error", content=f"tool '{tc.name}' denied: {reason}"))
+                return None, (f"DENIED by the user, who said: \"{reason}\". Adjust your "
+                              "approach based on this feedback; do not retry the same call.")
+            if not verdict:
+                emit(Step(kind="error", content=f"tool '{tc.name}' denied by user"))
+                return None, ("DENIED: the user declined this action. Do not retry it; "
+                              "find another way or stop.")
         return tool, None
 
     def _record(self, tc, result, is_err, after_tool, emit, messages):

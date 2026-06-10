@@ -208,3 +208,65 @@ def test_history_is_not_mutated_in_place() -> None:
     ReActAgent(system="...", provider=nxt).run("two", history=r1.messages)
     # the original list the caller held is untouched
     assert r1.messages == snapshot
+
+
+def test_gate_string_return_is_reject_with_feedback() -> None:
+    """A before_tool that returns a string denies the call AND feeds that string
+    to the model as the reason (reject-with-feedback)."""
+    tool = Tool(
+        name="run_command",
+        description="run",
+        input_schema={"type": "object", "properties": {"command": {"type": "string"}}},
+        handler=lambda command: "ran",
+    )
+    provider = FakeProvider(responses=[
+        LLMResponse(text="", tool_calls=[ToolCall(id="t1", name="run_command",
+                    arguments={"command": "npm test"})], stop_reason="tool_use"),
+        LLMResponse(text="ok, using pnpm", stop_reason="end_turn"),
+    ])
+    ran: list = []
+
+    def gate(name, args):
+        ran.append((name, args))
+        return "use pnpm, not npm"   # reject with feedback
+
+    result = ReActAgent(system="x", tools=[tool], provider=provider).run(
+        "run the tests", before_tool=gate)
+
+    # the tool result message handed back to the model carries the reason verbatim
+    second_call = provider.calls[1]["messages"]
+    tool_msgs = [m for m in second_call if m["role"] == "tool"]
+    assert tool_msgs and "use pnpm, not npm" in tool_msgs[0]["content"]
+    assert tool_msgs[0]["is_error"] is True
+
+
+def test_gate_false_still_denies_generically() -> None:
+    """A plain False denial keeps the old generic message (back-compat)."""
+    tool = Tool(name="write_file", description="w",
+                input_schema={"type": "object", "properties": {}}, handler=lambda: "ok")
+    provider = FakeProvider(responses=[
+        LLMResponse(text="", tool_calls=[ToolCall(id="t1", name="write_file", arguments={})],
+                    stop_reason="tool_use"),
+        LLMResponse(text="fine", stop_reason="end_turn"),
+    ])
+    result = ReActAgent(system="x", tools=[tool], provider=provider).run(
+        "write", before_tool=lambda n, a: False)
+    tool_msgs = [m for m in provider.calls[1]["messages"] if m["role"] == "tool"]
+    assert "declined" in tool_msgs[0]["content"]
+
+
+def test_gate_lenient_allows_truthy_sentinel() -> None:
+    """A legacy gate returning a truthy non-True sentinel (e.g. 1) still allows."""
+    tool = Tool(name="read_file", description="r",
+                input_schema={"type": "object", "properties": {}}, handler=lambda: "ok")
+    provider = FakeProvider(responses=[
+        LLMResponse(text="", tool_calls=[ToolCall(id="t1", name="read_file", arguments={})],
+                    stop_reason="tool_use"),
+        LLMResponse(text="done", stop_reason="end_turn"),
+    ])
+    ran: list = []
+    result = ReActAgent(system="x", tools=[tool], provider=provider).run(
+        "read", before_tool=lambda n, a: (ran.append(1) or 1))   # returns int 1 → allow
+    tool_msgs = [m for m in provider.calls[1]["messages"] if m["role"] == "tool"]
+    assert "ok" in tool_msgs[0]["content"]      # the tool actually ran
+    assert tool_msgs[0]["is_error"] is False
