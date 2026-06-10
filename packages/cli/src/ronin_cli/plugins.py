@@ -123,7 +123,9 @@ def harden(tool: Tool) -> Tool:
         except Exception as exc:  # noqa: BLE001 - a tool must never take down the agent
             return {"error": f"{tool.name} failed: {type(exc).__name__}: {exc}"}
 
-    return tool.model_copy(update={"handler": safe_handler})
+    # Plugin tools run arbitrary user/library code with full privileges, so mark
+    # them gated by default — the approval gate prompts once and 'always' remembers.
+    return tool.model_copy(update={"handler": safe_handler, "sensitive": True})
 
 
 def build_plugin_tools(root: str | Path = ".", *, console=None) -> list[Tool]:

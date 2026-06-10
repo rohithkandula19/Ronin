@@ -34,8 +34,26 @@ def test_run_code_agent_drives_headless_callbacks(monkeypatch, tmp_path) -> None
 
     assert result.success
     assert "done reading" in "".join(texts)     # streamed via on_text_cb
-    assert "read_file" in gated                   # gate_cb was consulted
     assert "tool_call" in steps and "tool_result" in steps
+    # read_file is read-only → run_code_agent filters it out before the front-end
+    # gate, so the (TUI/headless) gate_cb is never bothered with reads.
+    assert gated == []
+
+
+def test_run_code_agent_consults_gate_cb_for_sensitive(monkeypatch, tmp_path) -> None:
+    """A sensitive tool (write_file) IS routed to the front-end gate_cb."""
+    provider = FakeProvider(responses=[
+        LLMResponse(text="", tool_calls=[ToolCall(id="1", name="write_file",
+                    arguments={"path": "out.txt", "content": "hi"})]),
+        LLMResponse(text="wrote it"),
+    ])
+    monkeypatch.setattr(code_mode, "build_provider", lambda cfg: provider)
+    gated: list[str] = []
+    code_mode.run_code_agent(
+        _cfg(), "write out.txt", root=tmp_path, console=None,
+        gate_cb=lambda name, args: (gated.append(name) or True),
+    )
+    assert gated == ["write_file"]                # the gate was consulted
 
 
 def test_run_code_agent_gate_denial_is_respected(monkeypatch, tmp_path) -> None:
@@ -54,12 +72,27 @@ def test_run_code_agent_gate_denial_is_respected(monkeypatch, tmp_path) -> None:
     assert not (tmp_path / "x.txt").exists()      # the write was gated → never happened
 
 
-def test_tui_gate_allows_nonsensitive() -> None:
-    from ronin_cli.tui import RoninApp
-    app = RoninApp(config=_cfg(), root=".")
-    # non-sensitive tools never block on a modal — immediate True
-    assert app._gate("read_file", {}) is True
-    assert app._gate("search_files", {"query": "x"}) is True
+def test_run_code_agent_gates_sensitive_mcp_plugin_tool(monkeypatch, tmp_path) -> None:
+    """A sensitive MCP/plugin tool reaches the front-end gate_cb too — it used to
+    bypass approval entirely because it wasn't in the built-in SENSITIVE_TOOLS."""
+    from ronin_agent_patterns import Tool
+    charged: list = []
+    danger = Tool(name="stripe__charge", description="charge a card",
+                  input_schema={"type": "object", "properties": {}},
+                  handler=lambda: charged.append(1) or "charged", sensitive=True)
+    provider = FakeProvider(responses=[
+        LLMResponse(text="", tool_calls=[ToolCall(id="1", name="stripe__charge", arguments={})]),
+        LLMResponse(text="declined"),
+    ])
+    monkeypatch.setattr(code_mode, "build_provider", lambda cfg: provider)
+    gated: list[str] = []
+    code_mode.run_code_agent(
+        _cfg(), "charge the card", root=tmp_path, console=None,
+        extra_tools=[danger],
+        gate_cb=lambda name, args: (gated.append(name) or False),  # deny
+    )
+    assert gated == ["stripe__charge"]   # gated, not silently executed
+    assert charged == []                 # denial respected → never ran
 
 
 def test_tui_imports_and_constructs() -> None:

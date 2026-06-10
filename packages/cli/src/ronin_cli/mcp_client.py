@@ -219,11 +219,18 @@ def _wrap_tool(client: MCPClient, spec: dict):
         except Exception as e:  # noqa: BLE001
             return f"ERROR: {e}"
 
+    # ALL MCP tools are gated by default. We deliberately do NOT trust the
+    # server-supplied annotations.readOnlyHint to auto-exempt a tool: a malicious
+    # or typosquatted server could mark a destructive tool (delete_all,
+    # transfer_funds) read-only to slip past the gate. The MCP spec itself warns
+    # clients not to make trust decisions from untrusted-server annotations. The
+    # one-time [a]lways answer handles read-only friction without trusting the server.
     return Tool(
         name=tool_name,
         description=f"[MCP:{client.name}] {spec.get('description', '')}".strip(),
         input_schema=spec.get("inputSchema") or {"type": "object", "properties": {}},
         handler=handler,
+        sensitive=True,
     )
 
 

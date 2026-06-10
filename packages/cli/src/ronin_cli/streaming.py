@@ -18,6 +18,7 @@ from __future__ import annotations
 import re
 
 from rich.console import Console
+from rich.markup import escape as _esc
 
 from ronin_agent_patterns import Step
 
@@ -187,23 +188,28 @@ class LiveRenderer:
                 return
             from .theme import tool_label
             verb, target = tool_label(name, c.get("input"))
-            tgt = f"[{MUTE}]({target})[/{MUTE}]" if target else ""
+            # escape target/preview/etc: tool inputs and results carry arbitrary
+            # text (a command like `grep "[/INST]"`, a file with [brackets], a
+            # model-authored plan) that would crash Rich's markup parser otherwise.
+            tgt = f"[{MUTE}]({_esc(str(target))})[/{MUTE}]" if target else ""
             self.console.print(f"{BULLET} [bold {TOOL}]{verb}[/bold {TOOL}]{tgt}")
         elif step.kind == "tool_result" and isinstance(c, dict):
             if c.get("name") == "update_todos":
                 return  # the checklist was already drawn on the tool_call
             if c.get("is_error"):
-                self.console.print(f"  [{ERR}]{CONNECTOR}  ✗ {_short(c.get('result', ''), 100)}[/{ERR}]")
+                self.console.print(f"  [{ERR}]{CONNECTOR}  ✗ {_esc(_short(c.get('result', ''), 100))}[/{ERR}]")
             else:
                 preview = _summarize_result(c.get("result", ""))
                 if preview:
-                    self.console.print(f"  [{MUTE}]{CONNECTOR}  {preview}[/{MUTE}]")
+                    self.console.print(f"  [{MUTE}]{CONNECTOR}  {_esc(preview)}[/{MUTE}]")
         elif step.kind == "error":
-            self.console.print(f"  [{ERR}]{CONNECTOR}  ⚠ {_short(c, 160)}[/{ERR}]")
+            # error content can carry arbitrary user text (a free-text gate-denial
+            # reason) with [brackets] that would crash Rich's parser.
+            self.console.print(f"  [{ERR}]{CONNECTOR}  ⚠ {_esc(_short(c, 160))}[/{ERR}]")
         elif step.kind == "plan":
-            self.console.print(f"  [{ACCENT}]🗂 {_short(c, 160)}[/{ACCENT}]")
+            self.console.print(f"  [{ACCENT}]🗂 {_esc(_short(c, 160))}[/{ACCENT}]")
         elif step.kind == "reflection":
-            self.console.print(f"  [{OK}]🔎 {_short(c, 160)}[/{OK}]")
+            self.console.print(f"  [{OK}]🔎 {_esc(_short(c, 160))}[/{OK}]")
 
     def finish(self) -> None:
         """Call once the run is over: stop the spinner and close the text block.

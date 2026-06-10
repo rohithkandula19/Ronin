@@ -512,6 +512,31 @@ def _slash_doctor_config(ctx: SlashCtx) -> str:
     return "handled"
 
 
+def _slash_permissions(ctx: SlashCtx) -> str:
+    """Show the standing allow/deny rules the approval gate remembers, or wipe
+    them with ``/permissions clear``."""
+    from .permissions import clear_rules, load_rules
+    console, root, parts = ctx.console, ctx.root, ctx.parts
+    if len(parts) > 1 and parts[1].lower() in ("clear", "reset"):
+        clear_rules(root)
+        console.print("[dim]✓ cleared your permission rules for this project "
+                      "(committed deny-rules in settings.json stay)[/dim]")
+        return "handled"
+    rules = load_rules(root).rules
+    if not rules:
+        console.print("[dim]no standing permission rules — answer [bold]a[/bold] (always) "
+                      "at an approval prompt to add one[/dim]")
+        return "handled"
+    console.print(f"[bold]permission rules[/bold] [dim]· {len(rules)} · .ronin/settings.json[/dim]")
+    for r in rules:
+        colour = "#9ece6a" if r.action == "allow" else "#f7768e"
+        console.print(f"  [{colour}]{r.action:<5}[/{colour}] [cyan]{r.tool}[/cyan] "
+                      f"[dim]{r.match}[/dim]", highlight=False)
+    console.print("  [dim]wipe with [bold]/permissions clear[/bold] · "
+                  "edit globs in [bold].ronin/settings.json[/bold][/dim]")
+    return "handled"
+
+
 # command name (and aliases) → handler
 SLASH_DISPATCH: dict[str, Callable[[SlashCtx], str]] = {
     "q": _slash_quit, "quit": _slash_quit, "exit": _slash_quit,
@@ -541,5 +566,6 @@ SLASH_DISPATCH: dict[str, Callable[[SlashCtx], str]] = {
     "status": _slash_status,
     "router": _slash_router,
     "vim": _slash_vim,
+    "permissions": _slash_permissions, "perms": _slash_permissions,
     "doctor": _slash_doctor_config, "config": _slash_doctor_config,
 }

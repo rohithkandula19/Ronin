@@ -13,10 +13,32 @@ where the blocking REPL behaves exactly as before.
 """
 from __future__ import annotations
 
+import contextlib
 import queue
 import sys
 import threading
+import time
 from typing import Callable
+
+# The currently-running capture reader, if any. A blocking foreground prompt
+# (the approval gate) pauses it via ``pause_capture()`` so the two don't race
+# for the same stdin fd — otherwise the gate's input() and the reader can each
+# steal the other's line (a 'y' echoed as a queued message, the prompt hangs).
+_active_queue: "InputQueue | None" = None
+
+
+@contextlib.contextmanager
+def pause_capture():
+    """Suspend the active input-capture reader for the duration of a blocking
+    foreground prompt, then resume it. A no-op when no reader is active."""
+    q = _active_queue
+    if q is not None:
+        q.pause()
+    try:
+        yield
+    finally:
+        if q is not None:
+            q.resume()
 
 
 def _default_select() -> tuple:
@@ -32,6 +54,7 @@ class InputQueue:
                  readline_fn: Callable | None = None, force_active: bool | None = None):
         self._q: queue.Queue[str] = queue.Queue()
         self._stop = threading.Event()
+        self._paused = threading.Event()
         self._thread: threading.Thread | None = None
         self._console = console
         self._select_fn = select_fn or _default_select
@@ -63,25 +86,41 @@ class InputQueue:
         if self._console is not None:
             self._console.print(f"[dim]  ⏎ queued — will run after this turn:[/dim] {text}")
 
+    def pause(self) -> None:
+        """Stop reading stdin (a foreground prompt now owns it)."""
+        self._paused.set()
+
+    def resume(self) -> None:
+        self._paused.clear()
+
     def _run(self) -> None:
         while not self._stop.is_set():
+            if self._paused.is_set():
+                time.sleep(0.05)   # a foreground prompt owns stdin — don't touch it
+                continue
             try:
                 self._poll_once()
             except Exception:  # noqa: BLE001 — never let the reader crash a turn
                 return
 
     def start(self) -> None:
+        global _active_queue
         if not self._active:
             return
         self._stop.clear()
+        self._paused.clear()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
+        _active_queue = self
 
     def stop(self) -> None:
+        global _active_queue
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=0.5)
             self._thread = None
+        if _active_queue is self:
+            _active_queue = None
 
     def drain(self) -> list[str]:
         """Return (and clear) every line captured during the turn, in order."""

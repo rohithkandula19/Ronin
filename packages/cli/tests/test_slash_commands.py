@@ -510,3 +510,27 @@ def test_integrations_empty_suggests_how_to_add(tmp_path: Path) -> None:
     action, out = _call("/int", root=tmp_path)        # alias works
     assert action == "handled"
     assert "ronin mcp install" in out and "ronin plugin add" in out
+
+
+def test_permissions_lists_and_clears(tmp_path: Path, monkeypatch) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    from ronin_cli.permissions import Rule, add_allow_rule, load_rules
+    add_allow_rule(tmp_path, Rule(tool="run_command", action="allow", match="npm test"))
+
+    action, out = _call("/permissions", root=tmp_path)
+    assert action == "handled"
+    assert "allow" in out and "npm test" in out
+
+    action, out = _call("/permissions clear", root=tmp_path)
+    assert action == "handled" and "cleared" in out
+    assert load_rules(tmp_path).rules == []
+
+
+def test_permissions_empty(tmp_path: Path, monkeypatch) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    action, out = _call("/permissions", root=tmp_path)
+    assert action == "handled" and "no standing permission rules" in out

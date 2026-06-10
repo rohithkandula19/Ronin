@@ -75,3 +75,23 @@ def test_echoes_queued_message_to_console() -> None:
     iq = _iq(["queued idea\n"], console=console)
     iq._poll_once()
     assert "queued" in buf.getvalue().lower()
+
+
+def test_pause_capture_suspends_the_active_reader() -> None:
+    # While paused, the reader must not consume stdin (so a foreground approval
+    # prompt's input() can read the line instead of the background thread).
+    from ronin_cli.input_queue import pause_capture
+    iq = _iq(["typed during gate\n"])
+    iq.start()
+    try:
+        with pause_capture():
+            assert iq._paused.is_set()      # reader is suspended
+        assert not iq._paused.is_set()      # resumed on exit
+    finally:
+        iq.stop()
+
+
+def test_pause_capture_is_noop_without_active_reader() -> None:
+    from ronin_cli.input_queue import pause_capture
+    with pause_capture():                   # nothing active → must not raise
+        pass

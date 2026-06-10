@@ -422,18 +422,40 @@ def _render_diff(console: Console, diff: str, path: str | None = None) -> None:
             console.print(row)
 
 
-def _selective_gate(console: Console | None, yolo: bool, root: _Path) -> Callable[[str, dict], bool]:
-    """Auto-approve read tools; gate SENSITIVE_TOOLS unless yolo.
+def _selective_gate(
+    console: Console | None, yolo: bool, root: _Path,
+    *, extra_gated: set[str] | None = None, rules: "PermissionRules | None" = None,
+) -> Callable[[str, dict], "bool | str"]:
+    """Auto-approve read tools; gate SENSITIVE_TOOLS (and ``extra_gated`` — the
+    sensitive MCP/plugin tools) unless yolo.
 
-    For write_file / edit_file, render a unified diff of the proposed change
+    Consults persisted permission rules first (``.ronin/settings.json``): a
+    standing **allow** runs un-prompted, a standing **deny** is refused with a
+    reason. Otherwise it prompts ``[y]es · [a]lways · [n]o · or type why not``:
+    **always** writes an allow-rule so the action sticks; any free-text answer
+    becomes the denial reason handed back to the model (reject-with-feedback).
+
+    For write_file / edit_file, renders a unified diff of the proposed change
     *before* asking — so you approve a visible diff, not a blind action.
     """
-    # Only real mutations (file edits + shell) are gated. Image generation is a
-    # free, low-risk creative action — it runs without an approval prompt.
-    def gate(name: str, args: dict) -> bool:
-        if name not in SENSITIVE_TOOLS:
+    from .permissions import load_rules
+    gated = (extra_gated or set())
+    _rules = rules if rules is not None else load_rules(root)
+
+    def gate(name: str, args: dict) -> "bool | str":
+        # Deny-rules are a KILL-SWITCH: checked for EVERY tool (even read-only
+        # ones) and even under --yolo, so a committed `deny read_file *.env` or
+        # `deny rm -rf*` actually hard-blocks. This must precede every short-circuit.
+        deny = _rules.deny_reason(name, args)
+        if deny is not None:
+            return (f"blocked by a standing deny-rule ({deny!r}) in "
+                    ".ronin/settings.json — do not retry; choose another approach.")
+        if name not in SENSITIVE_TOOLS and name not in gated:
             return True  # reads + media generation run freely
         if yolo:
+            return True
+        # A standing allow short-circuits the prompt (the cure for approval fatigue).
+        if _rules.check(name, args) == "allow":
             return True
         if console is None:
             return False  # no way to ask → deny by default
@@ -453,7 +475,10 @@ def _selective_gate(console: Console | None, yolo: bool, root: _Path) -> Callabl
             _after_content = after
             _render_diff(console, unified_diff(rel, before, after), path=rel)
         elif name == "run_command":
-            console.print(f"  [#7dcfff]$[/#7dcfff] [bold]{args.get('command')}[/bold]")
+            # escape: a command with [brackets] (globs, JSX routes) must not be
+            # parsed as Rich markup — that would crash the prompt.
+            from rich.markup import escape as _esc
+            console.print(f"  [#7dcfff]$[/#7dcfff] [bold]{_esc(str(args.get('command', '')))}[/bold]")
         elif name == "multi_edit":
             rel = args.get("path", "?")
             target = (root / rel)
@@ -466,7 +491,8 @@ def _selective_gate(console: Console | None, yolo: bool, root: _Path) -> Callabl
             _after_content = after
             _render_diff(console, unified_diff(rel, before, after), path=rel)
         else:
-            console.print(f"  [grey50]{args}[/grey50]")
+            from rich.markup import escape as _esc
+            console.print(f"  [grey50]{_esc(str(args))}[/grey50]")
 
         # Secret-leak guard: warn loudly (don't block) if the new content looks
         # like it carries a live credential.
@@ -476,12 +502,38 @@ def _selective_gate(console: Console | None, yolo: bool, root: _Path) -> Callabl
             if _w:
                 console.print(_w)
 
-        console.print("    [yellow]approve?[/yellow] [grey50]y / N[/grey50] ", end="")
+        console.print("    [yellow]approve?[/yellow] [grey50][y]es · [a]lways · "
+                      "[n]o · or type why not[/grey50] ", end="")
+        # Pause the type-ahead reader so its background thread doesn't steal the
+        # approval keystroke (which would hang the prompt and replay 'y' as a turn).
+        from .input_queue import pause_capture
         try:
-            answer = input().strip().lower()
+            with pause_capture():
+                raw = input().strip()
         except (EOFError, KeyboardInterrupt):
             return False
-        return answer in ("y", "yes")
+        low = raw.lower()
+        if low in ("y", "yes"):
+            return True
+        if low in ("a", "always"):
+            from rich.markup import escape as _esc
+
+            from .permissions import add_allow_rule
+            rule = _rules.rule_for(name, args, "allow")
+            _rules.add(rule)            # short-circuit the rest of THIS session
+            add_allow_rule(root, rule)  # persist to the user-global per-repo store
+            # Be honest about scope: a "*" match (MCP/plugin/rewind tools, which
+            # match on name) auto-approves ALL future calls of that tool, any args.
+            scope = (f"[bold]all[/bold] {_esc(rule.tool)} calls (any arguments)"
+                     if rule.match == "*" else f"{_esc(rule.tool)} {_esc(repr(rule.match))}")
+            console.print(f"    [#6b7089]✓ always allowing[/#6b7089] [dim]{scope} "
+                          f"— manage with /permissions[/dim]")
+            return True
+        if low in ("n", "no", ""):
+            return False
+        # Any other text is reject-with-feedback: hand the reason to the model so
+        # it can adjust ("use pnpm, not npm") instead of just hitting a dead end.
+        return raw
 
     return gate
 
@@ -649,7 +701,35 @@ def run_code_agent(
         max_tool_result_chars=6000 if _fast else 16000,
     )
 
-    before_tool = gate_cb or _selective_gate(console, yolo, _Path(root).resolve())
+    # The set of tools that must pass the approval gate: the built-in mutators
+    # plus any tool that flags itself sensitive=True (MCP writes, user plugins).
+    # These used to bypass approval entirely. Read-only MCP tools stay out of it.
+    _sensitive_names = set(SENSITIVE_TOOLS) | {t.name for t in tools if getattr(t, "sensitive", False)}
+    _gate_root = _Path(root).resolve()
+    if gate_cb is not None:
+        # A front-end gate (TUI / headless) handles the human prompt, but the
+        # sensitivity decision AND the standing permission rules live HERE so
+        # MCP/plugin writes can't slip past a gate that only knew about the
+        # built-in SENSITIVE_TOOLS, and so a deny-rule hard-blocks in every UI.
+        from .permissions import load_rules as _load_rules
+        _fe_rules = _load_rules(_gate_root)
+
+        def before_tool(name: str, args: dict):
+            # Deny is a kill-switch for every tool (see the console gate).
+            deny = _fe_rules.deny_reason(name, args)
+            if deny is not None:
+                return (f"blocked by a standing deny-rule ({deny!r}) in "
+                        ".ronin/settings.json — do not retry; choose another approach.")
+            if name not in _sensitive_names:
+                return True
+            if yolo:
+                return True
+            if _fe_rules.check(name, args) == "allow":
+                return True
+            return gate_cb(name, args)
+    else:
+        before_tool = _selective_gate(console, yolo, _gate_root,
+                                      extra_gated=_sensitive_names)
 
     # Stream the model's reasoning + summary live (the Claude-Code feel) when we
     # have a console; fall back to the step-narrator for non-interactive runs.
@@ -985,6 +1065,7 @@ SLASH_COMMANDS: dict[str, str] = {
     "cost": "show lifetime Cost-Router spend + savings",
     "router": "show routing + what the self-tuning router has learned",
     "status": "mission control — every ronin system in one view",
+    "permissions": "show standing approval rules (/permissions clear to wipe)",
     "quit": "exit the session",
 }
 
