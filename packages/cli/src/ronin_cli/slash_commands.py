@@ -12,7 +12,7 @@ Every handler returns ``"handled"`` (command ran → loop again) or ``"exit"``
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
@@ -30,6 +30,11 @@ class SlashCtx:
     config: RoninConfig
     undo_stack: list
     transcript: list[str]
+    # Structured cross-turn Message history the session feeds back to the agent.
+    # Handlers that reset the conversation (clear/compact/resume) must clear this
+    # too, in place, so it stays consistent with ``transcript``. Defaults to an
+    # empty list so callers that don't track it (tests, one-shots) still work.
+    message_history: list = field(default_factory=list)
 
     @property
     def cmd(self) -> str:
@@ -90,6 +95,7 @@ def _slash_login(ctx: SlashCtx) -> str:
 
 def _slash_clear(ctx: SlashCtx) -> str:
     ctx.transcript.clear()
+    ctx.message_history.clear()  # keep structured history in sync with the text one
     ctx.console.print("[dim]✓ conversation cleared[/dim]")
     return "handled"
 
@@ -345,6 +351,9 @@ def _slash_resume(ctx: SlashCtx) -> str:
         chosen = sess[idx]
         transcript.clear()
         transcript.extend(_load_sess(chosen["id"]))
+        # Drop live structured history — the loaded session is text-only, so the
+        # next turn re-seeds from the text tail (history_prefix) and rebuilds.
+        ctx.message_history.clear()
         set_current_session(chosen["id"])   # continue this one
         console.print(f"[green]✓[/green] resumed [dim]{chosen['turns']} turns · "
                       f"{chosen['title']!r}[/dim]", highlight=False)
@@ -386,24 +395,52 @@ def _slash_export(ctx: SlashCtx) -> str:
 def _slash_compact(ctx: SlashCtx) -> str:
     from . import code_mode
     code_mode._compact_transcript(ctx.config, ctx.transcript, ctx.console)
+    # The text transcript is now a single summary entry; drop the structured
+    # history so the next turn re-seeds from that summary instead of double-
+    # carrying the full (now-summarized) message list.
+    ctx.message_history.clear()
     return "handled"
 
 
 def _slash_context(ctx: SlashCtx) -> str:
     from . import code_mode
     console, config, transcript = ctx.console, ctx.config, ctx.transcript
-    convo = "\n".join(transcript)
     turns = sum(1 for e in transcript if e.startswith("USER: "))
+    # Estimate from the STRUCTURED history the model actually receives — it
+    # carries tool calls + tool results (file dumps, command output) that the
+    # text transcript never records, so transcript alone drastically under-counts.
+    # Fall back to the transcript text when there's no structured history yet.
+    if ctx.message_history:
+        convo = _serialize_history(ctx.message_history)
+        entries = f"{len(ctx.message_history)} messages"
+    else:
+        convo = "\n".join(transcript)
+        entries = f"{len(transcript)} entries"
     toks = code_mode._estimate_tokens(convo)
     window = 120_000 if config.provider == "anthropic" else 28_000
     pct = min(100, round(toks / window * 100)) if window else 0
     console.print("[bold]context[/bold]")
     console.print(f"  {code_mode.render_bar(toks, window)} [dim]~{toks:,} / {window:,} tokens "
                   f"({pct}%)[/dim]", highlight=False)
-    console.print(f"  [#6b7089]{turns} turns · {len(transcript)} entries · "
+    console.print(f"  [#6b7089]{turns} turns · {entries} · "
                   f"~{len(convo):,} chars[/#6b7089]", highlight=False)
     console.print("  [dim]shrink with [bold]/compact[/bold] · wipe with [bold]/clear[/bold][/dim]")
     return "handled"
+
+
+def _serialize_history(messages: list) -> str:
+    """Flatten a structured Message history to text for size estimation —
+    includes tool-call arguments and tool results, the bulk of real context."""
+    import json
+    parts: list[str] = []
+    for m in messages:
+        parts.append(getattr(m, "content", "") or "")
+        for tc in (getattr(m, "tool_calls", None) or []):
+            try:
+                parts.append(json.dumps(tc.arguments, default=str))
+            except (TypeError, ValueError):
+                pass
+    return "\n".join(parts)
 
 
 def _slash_status(ctx: SlashCtx) -> str:

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import re
+import uuid
 from typing import Any, Iterable
 
 from .base import ToolCall
@@ -111,4 +112,10 @@ def extract_text_tool_calls(text: str, valid_names: Iterable[str]) -> list[ToolC
                 seen.add(key)
                 found.append(coerced)
 
-    return [ToolCall(id=f"text-{i}", name=n, arguments=a) for i, (n, a) in enumerate(found)]
+    # IDs must be GLOBALLY unique, not per-response. Open models emit tool calls
+    # as text every response; with persistent cross-turn history these ids pile up
+    # in one conversation, and duplicates (`text-0` reused each turn) make
+    # tool_use↔tool_result mapping ambiguous — Anthropic rejects non-unique
+    # tool_use ids with a 400 when an Ollama-built history is later routed to it.
+    # A short uuid per recovered call keeps every id distinct across turns/providers.
+    return [ToolCall(id=f"text-{uuid.uuid4().hex[:8]}", name=n, arguments=a) for (n, a) in found]

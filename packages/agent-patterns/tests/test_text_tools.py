@@ -58,9 +58,21 @@ def test_multiple_calls_deduped() -> None:
     assert {c.arguments["path"] for c in calls} == {"a", "b"}
 
 
-def test_synthetic_ids() -> None:
+def test_synthetic_ids_are_prefixed() -> None:
     text = '{"name": "read_file", "arguments": {"path": "a"}}'
-    assert extract_text_tool_calls(text, TOOLS)[0].id == "text-0"
+    assert extract_text_tool_calls(text, TOOLS)[0].id.startswith("text-")
+
+
+def test_synthetic_ids_are_globally_unique() -> None:
+    # IDs must not repeat across separate extractions — otherwise persistent
+    # cross-turn history accumulates colliding tool_use ids and Anthropic 400s
+    # when an open-model history is routed back to it.
+    text = ('{"name": "read_file", "arguments": {"path": "a"}}\n'
+            '{"name": "read_file", "arguments": {"path": "b"}}')
+    first = [c.id for c in extract_text_tool_calls(text, TOOLS)]
+    second = [c.id for c in extract_text_tool_calls(text, TOOLS)]
+    assert len(set(first)) == 2          # unique within one extraction
+    assert not (set(first) & set(second))  # and across extractions (no reuse)
 
 
 def test_empty_and_no_tools() -> None:
