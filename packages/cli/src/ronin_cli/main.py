@@ -2097,6 +2097,70 @@ def watch(
         console.print("\n[dim]👋 stopped watching.[/dim]")
 
 
+# ---------- verify (detect + run the repo's tests; --fix repairs to green) ----------
+
+@app.command()
+def verify(
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+    fix: bool = typer.Option(False, "--fix", help="If red, hand the failure to ronin and repair to green."),
+    rounds: int = typer.Option(3, "--rounds", help="Max repair attempts with --fix."),
+) -> None:
+    """✅ Detect and run this repo's test command (pytest, npm, cargo, go, make,
+    or a `verify:` line in RONIN.md) and report pass/fail. With --fix, a failing
+    run is handed to ronin, which fixes and re-runs until green (or --rounds).
+    """
+    from .verify_cmd import detect_verify_command, run_verify
+
+    detected = detect_verify_command(root)
+    if detected is None:
+        console.print("[yellow]no test command detected[/yellow] — add a "
+                      "[bold]verify: <command>[/bold] line to RONIN.md to set one.")
+        raise typer.Exit(2)
+    cmd, runner = detected
+    console.print(f"[#7aa2f7]✅ verify[/#7aa2f7] [dim]({runner})[/dim] [cyan]{' '.join(cmd)}[/cyan]")
+
+    if not fix:
+        v = run_verify(root)
+        if v.passed:
+            console.print(f"[green]✓ green[/green] [dim]{v.summary}[/dim]")
+            raise typer.Exit(0)
+        console.print(f"[#f7768e]✗ red[/#f7768e] [dim]{v.summary}[/dim]")
+        raise typer.Exit(1)
+
+    # --fix: repair to green
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print("[yellow]--fix needs a provider key[/yellow] — run [bold]ronin login[/bold].")
+        raise typer.Exit(2)
+    from .code_mode import run_code_agent
+    from .repair import repair_to_green
+
+    # --fix auto-approves edits (yolo) on the real tree, so snapshot first — a
+    # repair that makes things worse can be undone with `ronin rewind` / the
+    # checkpoint tools. (Best-effort: a non-git tree just skips the snapshot.)
+    try:
+        from .checkpoint import create_checkpoint
+        cp = create_checkpoint(root, label="before ronin verify --fix")
+        console.print(f"[dim]📌 checkpoint #{cp.id} taken — `ronin rewind` to undo[/dim]")
+    except Exception:  # noqa: BLE001 — never block the fix on snapshot failure
+        pass
+
+    def _run_agent(prompt: str) -> None:
+        run_code_agent(config, prompt, root=root, console=console, yolo=True, max_iterations=25)
+
+    def _on_round(attempt: int, v) -> None:
+        console.print(f"[#6b7089]↻ repair {attempt}/{rounds} — handing the failure "
+                      f"to ronin…[/#6b7089] [dim]{v.summary}[/dim]")
+
+    final = repair_to_green(root, _run_agent, rounds=rounds, on_round=_on_round)
+    if final.passed:
+        console.print(f"[green]✓ green[/green] [dim]{final.summary}[/dim]")
+        raise typer.Exit(0)
+    console.print(f"[#f7768e]✗ still red after {rounds} attempt(s)[/#f7768e] "
+                  f"[dim]{final.summary}[/dim]")
+    raise typer.Exit(1)
+
+
 # ---------- grep (search code by intent) ----------
 
 @app.command()

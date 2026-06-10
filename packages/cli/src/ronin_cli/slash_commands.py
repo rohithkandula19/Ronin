@@ -402,6 +402,46 @@ def _slash_compact(ctx: SlashCtx) -> str:
     return "handled"
 
 
+def _slash_fix(ctx: SlashCtx) -> str:
+    """Red-to-green: run this repo's tests and, if they fail, hand the failure to
+    ronin to repair — re-running until green (or a few attempts)."""
+    console, config, root = ctx.console, ctx.config, ctx.root
+    from .repair import repair_to_green
+    from .verify_cmd import detect_verify_command
+
+    detected = detect_verify_command(root)
+    if detected is None:
+        console.print("[yellow]no test command detected[/yellow] — add a "
+                      "[bold]verify: <command>[/bold] line to RONIN.md.")
+        return "handled"
+    cmd, runner = detected
+    console.print(f"[#7aa2f7]✅ verify[/#7aa2f7] [dim]({runner})[/dim] [cyan]{' '.join(cmd)}[/cyan]")
+    if not config.has_provider_auth():
+        # no key → just report, don't try to repair
+        from .verify_cmd import run_verify
+        v = run_verify(root)
+        console.print("[green]✓ green[/green]" if v.passed else f"[#f7768e]✗ red[/#f7768e] [dim]{v.summary}[/dim]")
+        return "handled"
+
+    from .code_mode import run_code_agent
+
+    def _agent(prompt: str) -> None:
+        run_code_agent(config, prompt, root=root, console=console, max_iterations=25)
+
+    def _on_round(attempt: int, v) -> None:
+        console.print(f"[#6b7089]↻ repair {attempt} — handing the failure to ronin…[/#6b7089] "
+                      f"[dim]{v.summary}[/dim]")
+
+    final = repair_to_green(root, _agent, on_round=_on_round)
+    if not final.ran:
+        console.print(f"[dim]{final.summary}[/dim]")
+    elif final.passed:
+        console.print(f"[green]✓ green[/green] [dim]{final.summary}[/dim]")
+    else:
+        console.print(f"[#f7768e]✗ still red[/#f7768e] [dim]{final.summary}[/dim]")
+    return "handled"
+
+
 def _slash_context(ctx: SlashCtx) -> str:
     from . import code_mode
     console, config, transcript = ctx.console, ctx.config, ctx.transcript
@@ -567,5 +607,6 @@ SLASH_DISPATCH: dict[str, Callable[[SlashCtx], str]] = {
     "router": _slash_router,
     "vim": _slash_vim,
     "permissions": _slash_permissions, "perms": _slash_permissions,
+    "fix": _slash_fix,
     "doctor": _slash_doctor_config, "config": _slash_doctor_config,
 }
