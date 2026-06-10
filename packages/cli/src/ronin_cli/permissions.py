@@ -57,11 +57,16 @@ def _repo_key(root: str | Path) -> str:
 
 
 def subject_for(tool: str, args: dict) -> str:
-    """The string a rule's ``match`` glob is tested against for this call."""
+    """The string a rule's ``match`` glob is tested against for this call:
+    the command for command tools, the path for ANY tool that takes one (so a
+    deny like ``read_file *.env`` actually scopes by path), else the tool name."""
     if tool in _COMMAND_TOOLS:
         return str(args.get("command", ""))
-    if tool in _PATH_TOOLS:
-        return str(args.get("path", ""))
+    if "path" in args:
+        # normalize so 'src/a.py' and './src/a.py' resolve to the same rule
+        # subject (a granted allow shouldn't re-prompt on a cosmetic path form).
+        import os
+        return os.path.normpath(str(args["path"]))
     return tool  # MCP / plugin / other → match on the tool name itself
 
 

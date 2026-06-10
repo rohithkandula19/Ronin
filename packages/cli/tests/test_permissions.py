@@ -195,3 +195,24 @@ def test_gate_command_with_brackets_does_not_crash(tmp_path) -> None:
     gate = _selective_gate(_console(), yolo=False, root=tmp_path, extra_gated={"run_command"})
     with patch("builtins.input", return_value="n"):
         assert gate("run_command", {"command": "ls [a-z]*.py && echo [done]"}) is False
+
+
+def test_deny_rule_blocks_even_a_read_only_tool(tmp_path) -> None:
+    # A committed deny on read_file '*.env' must hard-block (kill-switch is for
+    # EVERY tool, not just sensitive ones) — exfiltration protection.
+    repo = tmp_path / "repo"
+    (repo / ".ronin").mkdir(parents=True)
+    (repo / ".ronin" / "settings.json").write_text(json.dumps({
+        "permissions": [{"tool": "read_file", "action": "deny", "match": "*.env"}]
+    }), encoding="utf-8")
+    gate = _selective_gate(_console(), yolo=True, root=repo)  # read_file not in extra_gated
+    verdict = gate("read_file", {"path": "secrets.env"})
+    assert isinstance(verdict, str) and "deny-rule" in verdict   # blocked despite read-only + yolo
+    assert gate("read_file", {"path": "main.py"}) is True        # unrelated read still free
+
+
+def test_path_subject_is_normalized(tmp_path) -> None:
+    rules = PermissionRules(rules=[Rule(tool="write_file", action="allow", match="src/a.py")])
+    # './src/a.py' normalizes to 'src/a.py' → the granted rule still matches
+    assert rules.check("write_file", {"path": "./src/a.py"}) == "allow"
+    assert subject_for("write_file", {"path": "./src/a.py"}) == "src/a.py"

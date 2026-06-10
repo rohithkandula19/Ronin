@@ -443,14 +443,15 @@ def _selective_gate(
     _rules = rules if rules is not None else load_rules(root)
 
     def gate(name: str, args: dict) -> "bool | str":
-        if name not in SENSITIVE_TOOLS and name not in gated:
-            return True  # reads + media generation run freely
-        # Deny-rules are a KILL-SWITCH: enforced even under --yolo / auto-accept,
-        # so a hand-written "never rm -rf" actually hard-blocks.
+        # Deny-rules are a KILL-SWITCH: checked for EVERY tool (even read-only
+        # ones) and even under --yolo, so a committed `deny read_file *.env` or
+        # `deny rm -rf*` actually hard-blocks. This must precede every short-circuit.
         deny = _rules.deny_reason(name, args)
         if deny is not None:
             return (f"blocked by a standing deny-rule ({deny!r}) in "
                     ".ronin/settings.json — do not retry; choose another approach.")
+        if name not in SENSITIVE_TOOLS and name not in gated:
+            return True  # reads + media generation run freely
         if yolo:
             return True
         # A standing allow short-circuits the prompt (the cure for approval fatigue).
@@ -521,8 +522,12 @@ def _selective_gate(
             rule = _rules.rule_for(name, args, "allow")
             _rules.add(rule)            # short-circuit the rest of THIS session
             add_allow_rule(root, rule)  # persist to the user-global per-repo store
-            console.print(f"    [#6b7089]✓ always allowing[/#6b7089] [dim]{_esc(rule.tool)} "
-                          f"{_esc(repr(rule.match))} — manage with /permissions[/dim]")
+            # Be honest about scope: a "*" match (MCP/plugin/rewind tools, which
+            # match on name) auto-approves ALL future calls of that tool, any args.
+            scope = (f"[bold]all[/bold] {_esc(rule.tool)} calls (any arguments)"
+                     if rule.match == "*" else f"{_esc(rule.tool)} {_esc(repr(rule.match))}")
+            console.print(f"    [#6b7089]✓ always allowing[/#6b7089] [dim]{scope} "
+                          f"— manage with /permissions[/dim]")
             return True
         if low in ("n", "no", ""):
             return False
@@ -710,12 +715,13 @@ def run_code_agent(
         _fe_rules = _load_rules(_gate_root)
 
         def before_tool(name: str, args: dict):
-            if name not in _sensitive_names:
-                return True
+            # Deny is a kill-switch for every tool (see the console gate).
             deny = _fe_rules.deny_reason(name, args)
             if deny is not None:
                 return (f"blocked by a standing deny-rule ({deny!r}) in "
                         ".ronin/settings.json — do not retry; choose another approach.")
+            if name not in _sensitive_names:
+                return True
             if yolo:
                 return True
             if _fe_rules.check(name, args) == "allow":

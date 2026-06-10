@@ -195,14 +195,19 @@ class ReActAgent(BaseModel):
             return None, f"ERROR: {err}"
         if before_tool is not None:
             verdict = before_tool(tc.name, tc.arguments or {})
-            # Contract: a non-empty str → deny WITH that reason (reject-with-
-            # feedback); False/None/"" → generic deny; any other truthy (True, or
-            # a legacy sentinel) → allow.
-            reason = verdict.strip() if isinstance(verdict, str) else ""
-            if reason:
-                emit(Step(kind="error", content=f"tool '{tc.name}' denied: {reason}"))
-                return None, (f"DENIED by the user, who said: \"{reason}\". Adjust your "
-                              "approach based on this feedback; do not retry the same call.")
+            # Contract: ANY str → a denial (non-empty = reject-with-feedback with
+            # that reason; blank = generic deny — a string never means allow);
+            # False/None/0 → generic deny; any other truthy (True or a legacy
+            # sentinel) → allow.
+            if isinstance(verdict, str):
+                reason = verdict.strip()
+                if reason:
+                    emit(Step(kind="error", content=f"tool '{tc.name}' denied: {reason}"))
+                    return None, (f"DENIED by the user, who said: \"{reason}\". Adjust your "
+                                  "approach based on this feedback; do not retry the same call.")
+                emit(Step(kind="error", content=f"tool '{tc.name}' denied by user"))
+                return None, ("DENIED: the user declined this action. Do not retry it; "
+                              "find another way or stop.")
             if not verdict:
                 emit(Step(kind="error", content=f"tool '{tc.name}' denied by user"))
                 return None, ("DENIED: the user declined this action. Do not retry it; "

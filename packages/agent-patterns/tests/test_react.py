@@ -270,3 +270,20 @@ def test_gate_lenient_allows_truthy_sentinel() -> None:
     tool_msgs = [m for m in provider.calls[1]["messages"] if m["role"] == "tool"]
     assert "ok" in tool_msgs[0]["content"]      # the tool actually ran
     assert tool_msgs[0]["is_error"] is False
+
+
+def test_whitespace_verdict_denies_not_allows() -> None:
+    """A blank-but-truthy string verdict must DENY (a string never means allow)."""
+    tool = Tool(name="write_file", description="w",
+                input_schema={"type": "object", "properties": {}}, handler=lambda: "ok")
+    provider = FakeProvider(responses=[
+        LLMResponse(text="", tool_calls=[ToolCall(id="t1", name="write_file", arguments={})],
+                    stop_reason="tool_use"),
+        LLMResponse(text="fine", stop_reason="end_turn"),
+    ])
+    ran: list = []
+    ReActAgent(system="x", tools=[tool],
+               provider=provider).run("w", before_tool=lambda n, a: (ran.append(1) and "") or "   ")
+    tool_msgs = [m for m in provider.calls[1]["messages"] if m["role"] == "tool"]
+    assert tool_msgs[0]["is_error"] is True          # denied, not run
+    assert "declined" in tool_msgs[0]["content"]
