@@ -3,7 +3,7 @@
 > **A masterless, terminal-native Claude agent.** ronin is a **Claude-Code-style AI coding agent** — it reads, edits, and runs your code from the terminal — built on a **provider-agnostic agent framework** with first-class evals, memory, security hardening, and MCP tool integrations. Plug in Claude for top quality, or run it **free** on Gemini / Cerebras / Groq / Ollama.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-v0.56.0-blue)](CHANGELOG.md)
+[![Status](https://img.shields.io/badge/status-v0.58.0-blue)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-1004%20passing-brightgreen.svg)](#-whats-under-the-hood)
 [![Providers](https://img.shields.io/badge/providers-Claude%20·%20Gemini%20·%20Cerebras%20·%20Groq%20·%20OpenRouter%20·%20Ollama%20·%20OpenAI-d4a373)](#-supported-providers)

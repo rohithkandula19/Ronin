@@ -2439,6 +2439,101 @@ def toc(
     print(out)
 
 
+# ---------- jwt (decode a JSON Web Token) ----------
+
+@app.command()
+def jwt(
+    token: str = typer.Argument(..., help="A JWT (header.payload.signature)."),
+) -> None:
+    """🪪 Decode a JWT's header & payload (no signature verification). Offline.
+
+    Decoding is NOT verification — never trust an unverified token for authz.
+    """
+    import json
+
+    from rich.syntax import Syntax
+
+    from .jwt_decode import decode_jwt
+
+    out = decode_jwt(token)
+    if "error" in out:
+        console.print(f"[#f7768e]{out['error']}[/#f7768e]")
+        raise typer.Exit(1)
+    console.print(f"[#7aa2f7]🪪 JWT[/#7aa2f7] [dim]alg={out['alg']}[/dim]")
+    console.print("[dim]── header ──[/dim]")
+    console.print(Syntax(json.dumps(out["header"], indent=2), "json", theme="dracula", background_color="default"))
+    console.print("[dim]── payload ──[/dim]")
+    console.print(Syntax(json.dumps(out["payload"], indent=2), "json", theme="dracula", background_color="default"))
+    if out["times"]:
+        console.print("[dim]── timestamps (UTC) ──[/dim]")
+        for claim, iso in out["times"].items():
+            console.print(f"   {claim:<10} [bold]{iso}[/bold]")
+    console.print("[yellow]signature not verified.[/yellow]")
+
+
+# ---------- uuid (generate / inspect) ----------
+
+@app.command()
+def uuid(
+    version: int = typer.Option(4, "--version", "-v", help="UUID version: 1, 3, 4 or 5."),
+    name: Optional[str] = typer.Option(None, "--name", help="Name for v3/v5 (name-based)."),
+    namespace: str = typer.Option("dns", "--namespace", help="Namespace for v3/v5: dns|url|oid|x500."),
+    count: int = typer.Option(1, "--count", "-n", help="How many to generate."),
+    inspect_value: Optional[str] = typer.Option(None, "--inspect", help="Inspect an existing UUID instead."),
+) -> None:
+    """🆔 Generate UUIDs (v4/v1/v5) or inspect one with --inspect. Offline."""
+    from .uuid_tools import generate, inspect
+
+    if inspect_value is not None:
+        info = inspect(inspect_value)
+        if "error" in info:
+            console.print(f"[#f7768e]{info['error']}[/#f7768e]")
+            raise typer.Exit(1)
+        console.print(f"[#7aa2f7]🆔 {info['uuid']}[/#7aa2f7]")
+        console.print(f"   version  [bold]{info['version']}[/bold]   variant  {info['variant']}")
+        if info.get("timestamp"):
+            console.print(f"   time     [bold]{info['timestamp']}[/bold]")
+        if info["is_nil"]:
+            console.print("   [dim]nil UUID[/dim]")
+        return
+    for _ in range(max(1, count)):
+        r = generate(version, name=name, namespace=namespace)
+        if "error" in r:
+            console.print(f"[#f7768e]{r['error']}[/#f7768e]")
+            raise typer.Exit(1)
+        console.print(f"[bold #9ece6a]{r['uuid']}[/bold #9ece6a]")
+
+
+# ---------- hash (digests / checksums) ----------
+
+@app.command()
+def hash(
+    source: str = typer.Argument(..., help="Text to hash, or @path for a file."),
+    algorithm: Optional[str] = typer.Option(None, "--algo", "-a", help="Only this algo: md5|sha1|sha256|sha512."),
+    check: Optional[str] = typer.Option(None, "--check", help="Verify the input matches this digest."),
+) -> None:
+    """#️⃣  Compute md5/sha1/sha256/sha512 of text or a @file. Offline.
+
+    md5/sha1 are for checksums/legacy only — not cryptographically safe.
+    """
+    from .hash_tools import ALGORITHMS, hash_file, hash_text, verify
+
+    algos = (algorithm,) if algorithm else ALGORITHMS
+    if source.startswith("@"):
+        digests = hash_file(source[1:], algorithms=algos)
+    else:
+        digests = hash_text(source, algorithms=algos)
+    if "error" in digests:
+        console.print(f"[#f7768e]{digests['error']}[/#f7768e]")
+        raise typer.Exit(1)
+    if check is not None:
+        ok = verify(check, digests)
+        console.print("[#9ece6a]✓ match[/#9ece6a]" if ok else "[#f7768e]✗ no match[/#f7768e]")
+        raise typer.Exit(0 if ok else 1)
+    for algo, digest in digests.items():
+        console.print(f"   {algo:<7} [bold]{digest}[/bold]")
+
+
 # ---------- curl2code (curl -> code) ----------
 
 @app.command(name="curl2code")
@@ -4708,6 +4803,66 @@ def radius(
         proc = subprocess.run(["python", "-m", "pytest", "-q", *res.affected_tests],
                               cwd=str(Path(root).resolve()))
         raise typer.Exit(proc.returncode)
+
+
+# ---------- smell (AST-based code-smell detector) ----------
+
+@app.command()
+def smell(
+    path: Path = typer.Argument(Path("."), help="A .py file or a directory to scan."),
+    max_statements: int = typer.Option(50, "--max-statements", help="Statements per function."),
+    max_params: int = typer.Option(6, "--max-params", help="Parameters per function."),
+    max_nesting: int = typer.Option(4, "--max-nesting", help="Control-flow nesting depth."),
+    max_returns: int = typer.Option(6, "--max-returns", help="Return statements per function."),
+    max_locals: int = typer.Option(15, "--max-locals", help="Distinct local names per function."),
+    strict: bool = typer.Option(False, "--strict", help="Exit non-zero on any smell (not just HIGH)."),
+) -> None:
+    """🕵️ Detect AST-based code smells (long functions, deep nesting, broad
+    excepts, …). Pure stdlib, no LLM, no network — exits non-zero on HIGH
+    smells so CI can gate on it.
+    """
+    from .smell import HIGH, Thresholds, detect_smells
+
+    targets: list[Path]
+    if path.is_file():
+        targets = [path]
+    elif path.is_dir():
+        targets = sorted(p for p in path.rglob("*.py") if ".venv" not in p.parts and "__pycache__" not in p.parts)
+    else:
+        console.print(f"[#f7768e]not a file or directory: {path}[/#f7768e]")
+        raise typer.Exit(2)
+
+    t = Thresholds(
+        max_statements=max_statements,
+        max_params=max_params,
+        max_nesting=max_nesting,
+        max_returns=max_returns,
+        max_locals=max_locals,
+    )
+    total = 0
+    high = 0
+    for fp in targets:
+        try:
+            source = fp.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        smells = detect_smells(source, t)
+        if not smells:
+            continue
+        rel = fp if not fp.is_absolute() else fp.resolve()
+        console.print(f"[bold]{rel}[/bold]")
+        for s in smells:
+            colour = "#f7768e" if s.severity == HIGH else "#e0af68"
+            console.print(f"  [{colour}]{s.severity:<4}[/{colour}] L{s.line:<4} {s.kind:<16} {s.function}() — {s.message}")
+            total += 1
+            if s.severity == HIGH:
+                high += 1
+    if total == 0:
+        console.print("[#9ece6a]✓ no smells found[/#9ece6a]")
+        return
+    console.print(f"\n[dim]{total} smell(s), {high} high-severity, across {len(targets)} file(s).[/dim]")
+    if high > 0 or (strict and total > 0):
+        raise typer.Exit(1)
 
 
 if __name__ == "__main__":  # pragma: no cover
