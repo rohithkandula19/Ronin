@@ -8,6 +8,7 @@
 [![Tests](https://img.shields.io/badge/tests-1376%20passing-brightgreen.svg)](#-whats-under-the-hood)
 [![Providers](https://img.shields.io/badge/providers-Claude%20·%20Gemini%20·%20Cerebras%20·%20Groq%20·%20OpenRouter%20·%20Ollama%20·%20OpenAI-d4a373)](#-supported-providers)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![Sponsor](https://img.shields.io/badge/%E2%9D%A4%EF%B8%8F_Sponsor-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/rohithkandula19)
 
 > **Runs free, no credit card.** Point it at a free model (Gemini / Cerebras / Groq / OpenRouter) and go, or plug in Claude for top quality. Same agent, same UI, your choice of brain.
 
