@@ -334,6 +334,17 @@ Ronin/
 - [CHANGELOG.md](CHANGELOG.md): what's new
 - [CONTRIBUTING.md](CONTRIBUTING.md): how to add MCP servers, providers, etc.
 
+## Support Ronin
+
+Ronin is MIT licensed and free, and it stays that way. If it saves you time, [sponsoring](https://github.com/sponsors/rohithkandula19) keeps it moving: sponsorship pays for the API costs behind the eval suite that gates every release, CI minutes, and maintainer time on issues and reviews.
+
+Tiers come with real perks: supporters get their name in the list below, and the company tier gets a logo here plus priority issue triage.
+
+### Supporters
+
+*Be the first. Your name or logo lands here with a sponsorship of $25/month or more.*
+
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
