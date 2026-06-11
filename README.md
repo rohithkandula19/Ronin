@@ -8,7 +8,6 @@
 [![Tests](https://img.shields.io/badge/tests-1376%20passing-brightgreen.svg)](#-whats-under-the-hood)
 [![Providers](https://img.shields.io/badge/providers-Claude%20·%20Gemini%20·%20Cerebras%20·%20Groq%20·%20OpenRouter%20·%20Ollama%20·%20OpenAI-d4a373)](#-supported-providers)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
-[![Sponsor](https://img.shields.io/badge/%E2%9D%A4%EF%B8%8F_Sponsor-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/rohithkandula19)
 
 > **Runs free, no credit card.** Point it at a free model (Gemini / Cerebras / Groq / OpenRouter) and go, or plug in Claude for top quality. Same agent, same UI, your choice of brain.
 
@@ -333,17 +332,6 @@ Ronin/
 - [Documentation site](apps/docs/): concepts, production checklist, ADRs (run `mintlify dev` from `apps/docs/` to preview)
 - [CHANGELOG.md](CHANGELOG.md): what's new
 - [CONTRIBUTING.md](CONTRIBUTING.md): how to add MCP servers, providers, etc.
-
-## Support Ronin
-
-Ronin is MIT licensed and free, and it stays that way. If it saves you time, [sponsoring](https://github.com/sponsors/rohithkandula19) keeps it moving: sponsorship pays for the API costs behind the eval suite that gates every release, CI minutes, and maintainer time on issues and reviews.
-
-Tiers come with real perks: supporters get their name in the list below, and the company tier gets a logo here plus priority issue triage.
-
-### Supporters
-
-*Be the first. Your name or logo lands here with a sponsorship of $25/month or more.*
-
 
 ## License
 
