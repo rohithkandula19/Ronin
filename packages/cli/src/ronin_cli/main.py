@@ -3276,6 +3276,115 @@ def cron(
     console.print(f"   [bold]{desc}[/bold]")
 
 
+# ---------- schedule (store / list / run-due tasks) ----------
+
+schedule_app = typer.Typer(
+    help="A real task scheduler: store agent tasks on a cron schedule, list them, "
+         "and run the ones that are due. Offline-capable (no key, no network).",
+)
+app.add_typer(schedule_app, name="schedule")
+
+
+@schedule_app.command("add")
+def schedule_add(
+    name: str = typer.Argument(..., help="Short task name, e.g. 'morning-briefing'."),
+    prompt: str = typer.Argument(..., help="The prompt ronin should run when the task fires."),
+    cron: str = typer.Option(..., "--cron", help="A 5-field cron expression or @alias, e.g. '0 9 * * 1-5' (quote it)."),
+) -> None:
+    """⏱️ Store a task: a prompt plus a cron schedule. Saved to ~/.ronin/schedule.json."""
+    from .cron_describe import describe_cron
+    from .scheduler import add_task
+
+    try:
+        task = add_task(name, prompt, cron)
+    except ValueError as e:
+        console.print(f"[#f7768e]{e}[/#f7768e]")
+        raise typer.Exit(1)
+    console.print(f"[green]✓ stored[/green] [cyan]{task.name}[/cyan] [dim]({task.cron} - {describe_cron(task.cron)})[/dim]")
+    console.print(f"   [dim]run due tasks with [bold]ronin schedule run-due[/bold] (or wire it to cron once a minute).[/dim]")
+
+
+@schedule_app.command("list")
+def schedule_list() -> None:
+    """📋 List stored tasks with their schedule and next run time."""
+    from datetime import datetime
+
+    from rich.table import Table
+
+    from .scheduler import load_tasks, next_run_after
+
+    tasks = load_tasks()
+    if not tasks:
+        console.print("[dim]no scheduled tasks yet - add one with [bold]ronin schedule add[/bold].[/dim]")
+        return
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("name", style="cyan")
+    table.add_column("cron")
+    table.add_column("next run")
+    table.add_column("runs", justify="right")
+    table.add_column("prompt", overflow="fold")
+    now = datetime.now()
+    for t in sorted(tasks, key=lambda x: x.name):
+        nxt = next_run_after(t.cron, now)
+        nxt_s = nxt.strftime("%Y-%m-%d %H:%M") if nxt else "-"
+        flag = "" if t.enabled else " [dim](disabled)[/dim]"
+        table.add_row(t.name + flag, t.cron, nxt_s, str(t.runs), t.prompt[:60])
+    console.print(table)
+
+
+@schedule_app.command("remove")
+def schedule_remove(
+    name: str = typer.Argument(..., help="Name of the task to remove."),
+) -> None:
+    """🗑️ Remove a stored task by name."""
+    from .scheduler import remove_task
+
+    if remove_task(name):
+        console.print(f"[green]✓ removed[/green] [cyan]{name}[/cyan]")
+    else:
+        console.print(f"[dim]no task named {name!r}.[/dim]")
+        raise typer.Exit(1)
+
+
+@schedule_app.command("run-due")
+def schedule_run_due(
+    at: str = typer.Option(None, "--at", help="Evaluate due tasks at this time (YYYY-MM-DD HH:MM) instead of now."),
+) -> None:
+    """🏃 Run every task that is due right now through ronin's agent.
+
+    Uses the configured provider, falling back to the offline demo brain when no
+    key is set, so this works at $0 with no network. Wire it to the system
+    crontab (``ronin nightshift --schedule '* * * * *'`` style) to fire on time,
+    or invoke it by hand.
+    """
+    from datetime import datetime
+
+    from .scheduler import due_tasks, load_tasks, run_due
+
+    now = datetime.now()
+    if at:
+        try:
+            now = datetime.strptime(at.strip(), "%Y-%m-%d %H:%M")
+        except ValueError:
+            console.print("[#f7768e]--at must look like 'YYYY-MM-DD HH:MM'[/#f7768e]")
+            raise typer.Exit(1)
+
+    pending = due_tasks(load_tasks(), now)
+    if not pending:
+        console.print(f"[dim]nothing due at {now.strftime('%Y-%m-%d %H:%M')}.[/dim]")
+        return
+    console.print(f"[#7aa2f7]🏃 running {len(pending)} due task(s)…[/#7aa2f7]")
+    config = load_config()
+    results = run_due(config, now)
+    for r in results:
+        if r.success:
+            console.print(f"[green]✓[/green] [cyan]{r.name}[/cyan]")
+            if r.output.strip():
+                console.print(f"   [dim]{r.output.strip()[:300]}[/dim]")
+        else:
+            console.print(f"[#f7768e]✗ {r.name}[/#f7768e] [dim]{(r.error or '')[:160]}[/dim]")
+
+
 # ---------- mock (fixture data from a schema) ----------
 
 @app.command()

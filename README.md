@@ -201,6 +201,7 @@ database_url = "postgres://readonly_user:...@host:5432/db"   # a read-only role
 | `ronin tui` | Full-screen Textual UI: chat + live trace, F1 help. |
 | `ronin mcp add <name> <command>` | Register an MCP tool server (then `/mcp` lists them in-session). |
 | `ronin serve --port 8000` | Expose the agent as an HTTP API (`POST /ask`). |
+| `ronin schedule add <name> "<prompt>" --cron "<expr>"` | Store an agent task on a cron schedule. `schedule list` shows each task + its next run, `schedule run-due` runs the tasks due now through the agent, `schedule remove <name>` deletes one. Tasks persist to `~/.ronin/schedule.json`; `run-due` falls back to the offline demo brain when no key is set. |
 | `ronin tools` / `ronin doctor [--check]` | List tools / health-check provider + auth + services (live ping). |
 | `ronin image` / `video` / `say` / `see` | Media: text-to-image, video, text-to-speech, vision. |
 | `ronin set-key [--provider X] [--model Y]` | Set the LLM API key (masked). In-session, use `/login`. |
@@ -231,6 +232,8 @@ ronin can write files and run commands, so safety is built into the core, not bo
 
 ronin is MIT-licensed and meant to be picked up by other people. A few notes if you're deploying it for a team:
 
+- **Task scheduler.** `ronin schedule` stores named tasks (a prompt plus a 5-field cron expression) in `~/.ronin/schedule.json`, lists them with their next run time, and computes which are *due* at a given instant. `ronin schedule run-due` runs the due tasks through the agent and records each one; wire it to the system crontab to fire once a minute. The cron matcher is dependency-free and pure (unit-tested), persistence is a single JSON file, and `run-due` falls back to the offline demo brain when no key is set, so the whole thing works at $0 with no network.
+- **Agent webhook gateway.** The hosted API (`apps/api`) exposes `POST /webhooks/agent`: send `{"message": "..."}` with your Bearer token and the agent runs the message and returns the reply. This is a **generic HTTP endpoint**, no Telegram/Slack account or live integration required. A chat platform can forward messages to it with a thin adapter that translates its webhook shape, but that adapter is **optional and not shipped here**. When the user has no provider key stored, the agent answers from the offline demo brain (no network egress).
 - **`--yolo` / auto-accept bypasses the approval gate** and lets the model run shell commands unattended. Only use it in a sandbox or CI you trust: interactive use keeps every mutation gated.
 - **Parallel sub-agents cost real tokens.** `parallel_task` / `isolated_task` / `consensus` / `bench` fan out *N* model runs at once; concurrency is capped (3–4 workers) but spend scales with the number of tasks/models: budget accordingly.
 - **`isolated_task` needs a git repo** (worktrees are a git feature) and returns diffs for review rather than auto-merging: parallel changes stay reviewable.

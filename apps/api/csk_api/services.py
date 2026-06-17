@@ -88,6 +88,40 @@ def config_for_user(session: Session, user: User) -> RoninConfig:
     )
 
 
+# ---------- agent gateway ----------
+
+def run_agent_message(session: Session, user: User, message: str) -> dict[str, Any]:
+    """Run a single inbound message through ronin's agent as ``user`` and return
+    the answer.
+
+    This is the engine behind the agent webhook gateway: an inbound message comes
+    in over HTTP, we run it through the same one-shot agent path the CLI uses
+    (``run_ask``), and hand back the reply. When the user has no real provider key
+    stored, the agent falls back to ronin's offline demo brain, so the gateway
+    answers with no API key and no network egress. Returns a plain dict so the API
+    layer can shape the HTTP response without importing the CLI result type.
+    """
+    from ronin_cli.runner import run_ask
+
+    text = (message or "").strip()
+    if not text:
+        return {"ok": False, "reply": "", "error": "empty message"}
+
+    config = config_for_user(session, user)
+    # No real provider key stored -> run the offline demo brain (deterministic,
+    # no network). With a key, the user's configured provider answers for real.
+    if not config.has_provider_auth():
+        config = config.model_copy(update={"demo_mode": True})
+
+    result = run_ask(config, text)
+    return {
+        "ok": bool(result.success),
+        "reply": result.output,
+        "demo_mode": bool(result.demo_mode),
+        "error": result.error,
+    }
+
+
 # ---------- briefings ----------
 
 def run_briefing_for_user(session: Session, user: User) -> BriefingRun:

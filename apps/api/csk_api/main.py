@@ -24,6 +24,7 @@ from .services import (
     create_user,
     list_briefings,
     list_connections,
+    run_agent_message,
     run_briefing_for_user,
     store_connection,
     upsert_schedule,
@@ -65,6 +66,17 @@ class ScheduleIn(BaseModel):
     cron: str | None = None
     slack_channel: str | None = None
     enabled: bool = True
+
+
+class AgentMessageIn(BaseModel):
+    message: str = Field(..., description="The inbound message to run through the agent.")
+
+
+class AgentMessageOut(BaseModel):
+    ok: bool
+    reply: str
+    demo_mode: bool
+    error: str | None = None
 
 
 class ScheduleOut(BaseModel):
@@ -189,6 +201,29 @@ def make_app() -> FastAPI:
             slack_channel=schedule.slack_channel,
             enabled=bool(schedule.enabled),
             last_run_at=schedule.last_run_at,
+        )
+
+    # ---------- agent webhook gateway ----------
+    #
+    # A generic inbound-message endpoint: POST a message and the authenticated
+    # user's agent runs it and returns the reply. This is a plain HTTP gateway,
+    # no Telegram/Slack account or live integration is required. A chat platform
+    # can forward messages here with a thin adapter (translate its webhook shape
+    # to {"message": "..."} plus the user's Bearer token), but that adapter is
+    # OPTIONAL and not shipped here. With no provider key stored, the agent
+    # answers from ronin's offline demo brain (no network egress).
+    @app.post("/webhooks/agent", response_model=AgentMessageOut)
+    def agent_gateway(
+        body: AgentMessageIn,
+        session: Session = Depends(db_dep),
+        user=Depends(current_user),
+    ) -> AgentMessageOut:
+        result = run_agent_message(session, user, body.message)
+        return AgentMessageOut(
+            ok=bool(result["ok"]),
+            reply=result.get("reply", ""),
+            demo_mode=bool(result.get("demo_mode", False)),
+            error=result.get("error"),
         )
 
     # ---------- OAuth ----------
