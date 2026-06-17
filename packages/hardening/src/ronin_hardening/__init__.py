@@ -2,12 +2,24 @@
 
 Modules:
 - ``injection``       — prompt-injection scanners (pattern + LLM) for input and output.
+- ``faithfulness``    — grounding harness: are an answer's claims supported by the
+                        sources the agent actually read? Decomposes into claims,
+                        flags hallucinated code symbols, scores 0..1, abstains low.
 - ``guardrails``      — tool allowlists and human-in-the-loop approval gates.
 - ``validation``      — structured-output validation with retry-on-failure.
 - ``tracing``         — provider-agnostic trace emitter + PII redaction.
 - ``secret_scanner``  — detect leaked API keys / JWTs / etc. in agent output.
 - ``token_budget``    — hard token / cost cap that aborts the run before bills explode.
 """
+from .faithfulness import (
+    ClaimVerdict,
+    FaithfulnessHarness,
+    FaithfulnessReport,
+    Source,
+    extract_symbols,
+    sources_from_trace,
+    split_claims,
+)
 from .guardrails import ApprovalGate, ToolAllowlist
 from .injection import InjectionScanner, OutputLeakScanner, ScanResult
 from .secret_scanner import (
@@ -23,6 +35,9 @@ from .validation import OutputValidator, ValidationFailure
 __all__ = [
     "ApprovalGate",
     "BudgetExceededError",
+    "ClaimVerdict",
+    "FaithfulnessHarness",
+    "FaithfulnessReport",
     "InjectionScanner",
     "OutputLeakScanner",
     "OutputValidator",
@@ -31,10 +46,14 @@ __all__ = [
     "SecretLeakDetected",
     "SecretLeakScanner",
     "SecretScanResult",
+    "Source",
     "TokenBudget",
     "ToolAllowlist",
     "TraceEmitter",
     "ValidationFailure",
     "estimate_cost_usd",
+    "extract_symbols",
     "redact_pii",
+    "sources_from_trace",
+    "split_claims",
 ]
