@@ -94,6 +94,7 @@ Because ronin is **provider-agnostic**, it can do things a single-vendor agent s
 - **📊 Eval-driven model bake-off**: `ronin bench -m anthropic,gemini,ollama:llama3.1` runs the **objective** eval battery (no LLM judge) across models and tells you the **cheapest model that clears your quality bar**. Pick a model with data, not vibes.
 - **🥷 Kaizen · the self-forging agent**: `ronin kaizen` finds a weakness in ronin's *own* source, drafts a fix in an **isolated git worktree**, and runs the **test suite as an objective fitness gate**: the diff only reaches your tree if the tests pass there. An agent that improves its own code, with eval-proof it worked, on a free model for $0.
 - **🥋 The Dojo · rival models fight over your code**: `ronin dojo "<task>" -m anthropic,gemini,cerebras` has each model attempt the *same* change in **parallel isolated worktrees**; a judge crowns the best diff. Claude vs Gemini vs DeepSeek, then you apply the winner.
+- **🪖 The Orchestrator · one goal, many provider-agnostic subagents**: `ronin orchestrate "<goal>" --roster anthropic,gemini,cerebras` has a **planner** decompose the goal into subtasks, then runs each as its own **subagent** (research subagents explore read-only, edit subagents change files **isolated in their own git worktree**, in **parallel** where independent), and a **synthesizer** fuses the results. Unlike consensus (same question, N models), the dojo (same change, N models compete), and swarm (fixed roles), the orchestrator runs **different** subtasks, and with `--roster` **each subagent runs on a different provider/model**. The main coding agent can also call it mid-run via the `orchestrate` delegate tool.
 - **⚔️ Ronin Duel · cross-vendor review**: `ronin duel --against gemini` hands your diff to a **different** provider that adversarially hunts for what's wrong. The author model can't see its own blind spots; a rival vendor can. Advisory, CI-friendly.
 - **🔭 Scout → Strike · explore cheap, edit strong**: `ronin code --scout "<task>"` runs read-only recon on a free blade, then a strong blade executes only the edits. Frontier quality where it counts, $0 everywhere else.
 - **🗡 Bushido · your code of honor, everywhere**: a global `~/.ronin/bushido.md` of standing personal conventions the agent carries into **every** repo (a repo's own notes always override it).
@@ -191,6 +192,7 @@ database_url = "postgres://readonly_user:...@host:5432/db"   # a read-only role
 | **`ronin review [--base main]`** | **AI code review of your diff: severity-tagged findings, read-only.** |
 | **`ronin fix "<command>"`** | **Autonomous fix-until-green: runs the command, edits + re-runs until it passes.** |
 | **`ronin consensus "<task>" -m a,b,c`** | **Multi-model panel: ask several models in parallel, then synthesize one cross-checked answer.** |
+| **`ronin orchestrate "<goal>" --roster a,b,c`** | **Decompose a goal into subagents (research + worktree-isolated edits, parallel where independent), each on its own provider, then synthesize.** |
 | **`ronin bench -m a,b,c`** | **Eval-driven model bake-off: score models on the objective battery, recommend the cheapest that passes.** |
 | **`ronin --offline`** | **Zero-network mode: local brain (Ollama) + network tools stripped; nothing leaves the machine.** |
 | **`ronin briefing`** | **Founder ops briefing, auto-saved with week-over-week deltas.** |
@@ -333,6 +335,7 @@ Ronin/
 ## Documentation
 
 - [Documentation site](apps/docs/): concepts, production checklist, ADRs (run `mintlify dev` from `apps/docs/` to preview)
+- [docs/ORCHESTRATOR.md](docs/ORCHESTRATOR.md): the provider-agnostic multi-agent orchestrator (design, public API, offline tests)
 - [CHANGELOG.md](CHANGELOG.md): what's new
 - [CONTRIBUTING.md](CONTRIBUTING.md): how to add MCP servers, providers, etc.
 
