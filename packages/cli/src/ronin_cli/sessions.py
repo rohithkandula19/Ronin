@@ -31,6 +31,17 @@ def _dir() -> Path:
     return _SESSIONS_SUBDIR
 
 
+def _dir_in(base: Path | str) -> Path:
+    """The sessions dir under an explicit project root ``base`` (``base/.ronin/sessions``).
+
+    The default :func:`_dir` is CWD-relative (the CLI always runs in the repo it
+    operates on). A long-lived reader like the ``ronin ui`` dashboard, by contrast,
+    serves a project chosen at startup, so it needs to read that project's sessions
+    regardless of the server's own working directory — this gives it a rooted view
+    without changing the CWD-relative default the rest of the CLI relies on."""
+    return Path(base) / _SESSIONS_SUBDIR
+
+
 def _proj_key(root: Path | str) -> str:
     return hashlib.sha1(str(Path(root).resolve()).encode()).hexdigest()[:12]
 
@@ -59,12 +70,17 @@ def _title_of(transcript: list[str]) -> str:
 
 
 def save_session(root: Path | str, transcript: list[str], *,
-                 session_id: str | None = None) -> Path | None:
-    """Archive ``transcript`` (in full) to this session's file. Returns the path."""
+                 session_id: str | None = None,
+                 base: Path | str | None = None) -> Path | None:
+    """Archive ``transcript`` (in full) to this session's file. Returns the path.
+
+    ``base`` (advanced) writes under ``base/.ronin/sessions`` instead of the
+    CWD-relative default — the rooted counterpart of :func:`list_sessions`'s
+    ``base``. ``root`` is still recorded as the project the session belongs to."""
     if not transcript:
         return None
     sid = session_id or current_session_id()
-    d = _dir()
+    d = _dir_in(base) if base is not None else _dir()
     try:
         d.mkdir(parents=True, exist_ok=True)
     except OSError:
@@ -86,10 +102,14 @@ def save_session(root: Path | str, transcript: list[str], *,
     return path
 
 
-def list_sessions(root: Path | str | None = None) -> list[dict]:
+def list_sessions(root: Path | str | None = None, *, base: Path | str | None = None) -> list[dict]:
     """Metadata for archived sessions, most-recent first. If ``root`` is given,
-    only that project's sessions. Tolerates legacy ``code-*.json`` files."""
-    d = _dir()
+    only that project's sessions. Tolerates legacy ``code-*.json`` files.
+
+    ``base`` (advanced) reads from ``base/.ronin/sessions`` instead of the
+    CWD-relative default — used by the ``ronin ui`` dashboard to surface a chosen
+    project's sessions independent of the server's working directory."""
+    d = _dir_in(base) if base is not None else _dir()
     if not d.is_dir():
         return []
     key = _proj_key(root) if root is not None else None
@@ -120,9 +140,13 @@ def list_sessions(root: Path | str | None = None) -> list[dict]:
     return out
 
 
-def load_session(session_id: str) -> list[str]:
-    """The transcript for a session id (empty list if missing)."""
-    path = _dir() / f"{session_id}.json"
+def load_session(session_id: str, *, base: Path | str | None = None) -> list[str]:
+    """The transcript for a session id (empty list if missing).
+
+    ``base`` reads from ``base/.ronin/sessions`` instead of the CWD-relative
+    default (see :func:`list_sessions`)."""
+    d = _dir_in(base) if base is not None else _dir()
+    path = d / f"{session_id}.json"
     if not path.is_file():
         return []
     try:
