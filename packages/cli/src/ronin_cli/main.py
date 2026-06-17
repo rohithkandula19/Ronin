@@ -1727,6 +1727,86 @@ def swarm(
     console.print("[bold green]✅ swarm done[/bold green]")
 
 
+# ---------- orchestrate (plan -> provider-agnostic sub-agents -> synthesize) ----------
+
+@app.command()
+def orchestrate(
+    goal: str = typer.Argument(..., help="The high-level goal to decompose and work."),
+    roster: str = typer.Option(
+        None, "--roster", "-r",
+        help="Role→provider, e.g. 'researcher=anthropic,implementer=cerebras,reviewer=gemini'. "
+             "Roles not listed run on the base provider."),
+    write: bool = typer.Option(
+        False, "--write",
+        help="Let implementer sub-agents edit code in isolated git worktrees (needs git). "
+             "Default is read-only (research/plan)."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    offline: bool = typer.Option(
+        False, "--offline", help="Run on a local brain only; no network, no API keys."),
+) -> None:
+    """🧭 Decompose a goal into subtasks, assign each to a specialist sub-agent, run
+    them (in parallel where independent), and synthesize the results.
+
+    The differentiator is provider-agnostic sub-agents: each role can run on a
+    DIFFERENT vendor's model via --roster, while the planner and synthesizer run
+    on your base provider. Complements `swarm` (a fixed architect→implementer→
+    reviewer pipeline) by letting the planner choose the subtasks and their
+    dependencies dynamically.
+
+    Example:  ronin orchestrate "add retry + tests to the http client" \\
+              -r researcher=anthropic,implementer=cerebras,reviewer=gemini --write
+    """
+    from .orchestrate import role_label, run_orchestrate
+
+    config = load_config()
+    if offline:
+        from .offline import apply_offline
+        config = apply_offline(config.model_copy(update={"offline": True}))
+        console.print("[dim]🔒 offline — local brain, nothing leaves this machine[/dim]")
+    elif not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for [bold]{config.provider}[/bold]. "
+                      "Run [cyan]ronin init[/cyan] or pass [cyan]--offline[/cyan].")
+        raise typer.Exit(2)
+
+    parsed = {}
+    if roster:
+        from .orchestrate import parse_roster
+        parsed = parse_roster(roster)
+    line = " · ".join(
+        f"{r}: [bold]{role_label(config, parsed.get(r))}[/bold]"
+        for r in ("researcher", "implementer", "reviewer")
+    )
+    console.print(f"[#7aa2f7]🧭 orchestrate[/#7aa2f7] {line}")
+    if write:
+        console.print("[dim]✍️  implementer may edit code in isolated worktrees[/dim]")
+
+    def _on_subtask_start(st, label) -> None:
+        console.print(f"  [#bb9af7]◆[/#bb9af7] [bold]{st.id}[/bold] → [dim]{label}[/dim]: {st.description}")
+
+    with console.status("[dim]planning + running sub-agents…[/dim]", spinner="dots"):
+        outcome = run_orchestrate(
+            config, goal, roster_spec=roster, root=root,
+            on_subtask_start=_on_subtask_start, read_only=not write,
+        )
+
+    console.print()
+    if not outcome.plan_subtasks:
+        console.print(f"[red]✗ orchestration failed:[/red] {outcome.error or 'no plan'}")
+        raise typer.Exit(1)
+    for r in outcome.subtask_results:
+        mark = "[green]✓[/green]" if r["success"] else "[red]✗[/red]"
+        console.print(f"{mark} [bold]{r['subtask_id']}[/bold] [dim]({r['assignee']})[/dim]")
+    console.print()
+    from rich.markdown import Markdown
+    console.print(Markdown(outcome.output or "_(no output)_"))
+    if write and outcome.diff.strip():
+        console.print("\n[bold]diff (in isolated worktree — review before applying)[/bold]:")
+        from .kaizen import _print_diff
+        _print_diff(console, outcome.diff)
+    if not outcome.success:
+        raise typer.Exit(1)
+
+
 # ---------- nightshift (autonomous backlog) ----------
 
 @app.command()
