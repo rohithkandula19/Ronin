@@ -8,5 +8,12 @@ Exposes:
 - GET  /briefings         — list past briefings
 - POST /briefings/schedule — enable weekly briefing (cron worker picks it up)
 - POST /webhooks/billing  — Stripe billing webhook stub
+
+Web dashboard (ronin ui), read-only + self-contained + offline:
+- GET  /                  : the single self-contained dashboard HTML page
+- GET  /ui/runs           : recent runs (orchestrations + chat sessions)
+- GET  /ui/runs/{id}      : a run's planner to sub-agent tree + faithfulness scores
+- GET  /ui/memory         : durable memory entries
+- GET  /ui/skills         : crystallized repo-local skills
 """
 __version__ = "0.0.1"
