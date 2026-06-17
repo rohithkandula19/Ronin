@@ -214,6 +214,7 @@ database_url = "postgres://readonly_user:...@host:5432/db"   # a read-only role
 | `ronin radius [--run]` | Blast radius of your diff + the affected test modules. |
 | `ronin flake "<cmd>" [-n N]` | Run a test command N times; rank non-deterministic tests. |
 | `ronin guard [--intent "<task>"]` | Scan the diff for debug/secret leftovers + scope creep. |
+| `ronin memory add "<fact>"` / `list` / `forget <n\|id\|text>` | Durable facts ronin remembers about you across sessions (`~/.ronin/memory.json`), auto-injected into the agent's context every run. `forget --all` clears everything. Offline. |
 | `ronin version` | Print the version. |
 
 ## 🔒 Safety & security

@@ -61,6 +61,48 @@ def test_forget_all(home: Path) -> None:
     assert memory_store.load_memories() == []
 
 
+# ---------- per-fact ids + forget_one ----------
+
+def test_each_fact_gets_a_stable_id(home: Path) -> None:
+    memory_store.add_memory("I use Groq")
+    memory_store.add_memory("I prefer Python")
+    mems = memory_store.load_memories()
+    ids = [m["id"] for m in mems]
+    assert all(ids) and len(set(ids)) == 2          # present and unique
+    assert memory_store.load_memories()[0]["id"] == ids[0]  # stable across loads
+
+
+def test_legacy_records_without_ids_are_backfilled(home: Path) -> None:
+    # Simulate an old store written before ids existed.
+    memory_store._save([{"text": "old fact", "ts": 1.0}])  # no id
+    mems = memory_store.load_memories()
+    assert mems[0]["id"]                             # backfilled
+    # and the backfill was persisted, so the handle is stable across reloads
+    reloaded = memory_store.load_memories()
+    assert reloaded[0]["id"] == mems[0]["id"]
+
+
+def test_forget_one_by_id_position_and_substring(home: Path) -> None:
+    memory_store.add_memory("My name is Rohith")
+    memory_store.add_memory("I use Groq")
+    memory_store.add_memory("I live in the terminal")
+    fid = memory_store.load_memories()[1]["id"]
+
+    assert memory_store.forget_one(fid) == "I use Groq"        # by id
+    assert memory_store.forget_one("1") == "My name is Rohith"  # by 1-based position
+    assert memory_store.forget_one("terminal") == "I live in the terminal"  # by substring
+    assert memory_store.load_memories() == []
+
+
+def test_forget_one_ambiguous_or_missing_returns_none(home: Path) -> None:
+    memory_store.add_memory("I like apples")
+    memory_store.add_memory("I like apricots")
+    assert memory_store.forget_one("nope") is None       # no match
+    assert memory_store.forget_one("I like") is None     # ambiguous substring -> no-op
+    assert len(memory_store.load_memories()) == 2         # nothing removed
+    assert memory_store.forget_one("") is None
+
+
 # ---------- CLI ----------
 
 def test_cli_memory_add_list_clear(home: Path) -> None:
@@ -72,6 +114,32 @@ def test_cli_memory_add_list_clear(home: Path) -> None:
     assert "forgot 1" in r.stdout
     r = runner.invoke(app, ["memory"])
     assert "no memories yet" in r.stdout
+
+
+def test_cli_memory_add_list_forget_verbs(home: Path) -> None:
+    r = runner.invoke(app, ["memory", "add", "I", "prefer", "Python"])
+    assert r.exit_code == 0 and "remembered" in r.stdout
+    runner.invoke(app, ["memory", "add", "I use Groq"])
+
+    r = runner.invoke(app, ["memory", "list"])
+    assert "I prefer Python" in r.stdout and "I use Groq" in r.stdout
+
+    # forget by 1-based position
+    r = runner.invoke(app, ["memory", "forget", "1"])
+    assert r.exit_code == 0 and "forgot: I prefer Python" in r.stdout
+
+    # forget the rest
+    r = runner.invoke(app, ["memory", "forget", "--all"])
+    assert "forgot 1" in r.stdout
+    r = runner.invoke(app, ["memory", "list"])
+    assert "no memories yet" in r.stdout
+
+
+def test_cli_memory_forget_no_match_exits_nonzero(home: Path) -> None:
+    runner.invoke(app, ["memory", "add", "something"])
+    r = runner.invoke(app, ["memory", "forget", "zzz-nope"])
+    assert r.exit_code == 1
+    assert len(memory_store.load_memories()) == 1
 
 
 # ---------- the agent saves across sessions ----------

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from pathlib import Path
 
 from ronin_agent_patterns import Tool
@@ -25,15 +26,31 @@ def _memory_path() -> Path:
     return Path.home() / ".ronin" / "memory.json"
 
 
+def _new_id() -> str:
+    """A short, stable handle for one fact — used by ``ronin memory forget <id>``."""
+    return uuid.uuid4().hex[:8]
+
+
 def load_memories() -> list[dict]:
+    """Every stored fact, oldest first. Each item has ``text`` and ``ts``; an
+    ``id`` is backfilled in memory for any legacy record written before ids
+    existed, so ``list``/``forget <id>`` work even on an old store."""
     p = _memory_path()
     if not p.is_file():
         return []
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
-        return list(data.get("memories", []))
+        memories = list(data.get("memories", []))
     except (OSError, ValueError):
         return []
+    changed = False
+    for m in memories:
+        if not m.get("id"):
+            m["id"] = _new_id()
+            changed = True
+    if changed:  # persist backfilled ids once so handles stay stable across runs
+        _save(memories)
+    return memories
 
 
 def _save(memories: list[dict]) -> None:
@@ -53,7 +70,7 @@ def add_memory(text: str) -> bool:
     memories = load_memories()
     if any(m.get("text", "").lower() == text.lower() for m in memories):
         return False
-    memories.append({"text": text, "ts": time.time()})
+    memories.append({"id": _new_id(), "text": text, "ts": time.time()})
     _save(memories)
     return True
 
@@ -62,6 +79,45 @@ def forget_all() -> int:
     n = len(load_memories())
     _save([])
     return n
+
+
+def forget_one(handle: str) -> str | None:
+    """Forget a single fact by id, by 1-based list position, or by a unique
+    case-insensitive substring of its text. Returns the forgotten text, or
+    ``None`` if nothing matched (or a substring matched more than one fact)."""
+    handle = (handle or "").strip()
+    if not handle:
+        return None
+    memories = load_memories()
+    if not memories:
+        return None
+
+    # 1) exact id match
+    for i, m in enumerate(memories):
+        if m.get("id") == handle:
+            text = m.get("text", "")
+            del memories[i]
+            _save(memories)
+            return text
+
+    # 2) 1-based position (as shown by `ronin memory list`)
+    if handle.isdigit():
+        idx = int(handle) - 1
+        if 0 <= idx < len(memories):
+            text = memories[idx].get("text", "")
+            del memories[idx]
+            _save(memories)
+            return text
+
+    # 3) unique case-insensitive substring of the fact text
+    low = handle.lower()
+    matches = [i for i, m in enumerate(memories) if low in m.get("text", "").lower()]
+    if len(matches) == 1:
+        text = memories[matches[0]].get("text", "")
+        del memories[matches[0]]
+        _save(memories)
+        return text
+    return None
 
 
 def memory_prompt_block(limit: int = _INJECT_RECENT) -> str:

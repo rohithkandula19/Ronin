@@ -4672,19 +4672,50 @@ def version() -> None:
     console.print(f"ronin {__version__}")
 
 
-@app.command()
+# ---------- memory (durable user/project facts, auto-injected each run) ----------
+
+memory_app = typer.Typer(
+    help="Durable facts ronin remembers about you across sessions, auto-injected "
+         "into the agent's context each run. add / list / forget.",
+    invoke_without_command=True,
+)
+app.add_typer(memory_app, name="memory")
+
+
+def _print_memories() -> None:
+    from .memory_store import load_memories
+    mems = load_memories()
+    if not mems:
+        console.print("[dim]no memories yet. ronin will remember durable facts as you chat, "
+                      "or add one: [bold]ronin memory add \"I prefer Python\"[/bold][/dim]")
+        return
+    from rich.panel import Panel
+    body = "\n".join(
+        f"[#6b7089]{i}.[/#6b7089] [#2dd4bf]•[/#2dd4bf] {m['text']} [dim]({m.get('id', '?')})[/dim]"
+        for i, m in enumerate(mems, 1)
+    )
+    console.print(Panel(body, title=f"🧠 {len(mems)} thing(s) ronin remembers about you",
+                        border_style="#2dd4bf", padding=(1, 2)))
+    console.print("[dim]forget one with [bold]ronin memory forget <n|id|text>[/bold], "
+                  "all with [bold]ronin memory forget --all[/bold][/dim]")
+
+
+@memory_app.callback()
 def memory(
-    add: str = typer.Option(None, "--add", help="Add a fact to long-term memory."),
-    clear: bool = typer.Option(False, "--clear", help="Forget everything."),
+    ctx: typer.Context,
+    add: str = typer.Option(None, "--add", help="(legacy) Add a fact. Prefer: ronin memory add \"…\"."),
+    clear: bool = typer.Option(False, "--clear", help="(legacy) Forget everything. Prefer: ronin memory forget --all."),
 ) -> None:
     """Show (or edit) what ronin remembers about you across sessions.
 
     Memory is persistent and user-global (~/.ronin/memory.json): ronin recalls
     these facts in every future session. The agent also saves facts itself via
-    its `remember` tool when you share durable info.
+    its `remember` tool when you share durable info. Bare `ronin memory` lists
+    everything; use the add / list / forget subcommands to edit.
     """
-    from .memory_store import add_memory, forget_all, load_memories
-
+    if ctx.invoked_subcommand is not None:
+        return  # a subcommand (add/list/forget) handles it
+    from .memory_store import add_memory, forget_all
     if clear:
         n = forget_all()
         console.print(f"[green]✓[/green] forgot {n} memory item(s).")
@@ -4693,17 +4724,46 @@ def memory(
         ok = add_memory(add)
         console.print(f"[green]✓[/green] remembered: {add}" if ok else "[dim]already in memory[/dim]")
         return
+    _print_memories()
 
-    mems = load_memories()
-    if not mems:
-        console.print("[dim]no memories yet. ronin will remember durable facts as you chat, "
-                      "or add one: [bold]ronin memory --add \"I prefer Python\"[/bold][/dim]")
+
+@memory_app.command("add")
+def memory_add(
+    fact: list[str] = typer.Argument(..., help="The durable fact to remember, e.g. \"I prefer Python\"."),
+) -> None:
+    """Remember a durable fact about you or your projects."""
+    from .memory_store import add_memory
+    text = " ".join(fact).strip()
+    ok = add_memory(text)
+    console.print(f"[green]✓[/green] remembered: {text}" if ok else "[dim]already in memory (or blank)[/dim]")
+
+
+@memory_app.command("list")
+def memory_list() -> None:
+    """List everything ronin remembers about you (with handles for `forget`)."""
+    _print_memories()
+
+
+@memory_app.command("forget")
+def memory_forget(
+    handle: str = typer.Argument(None, help="Which fact to forget: list position (n), id, or a unique substring."),
+    all_: bool = typer.Option(False, "--all", help="Forget every stored fact."),
+) -> None:
+    """Forget one fact (by position, id, or substring) or, with --all, every fact."""
+    from .memory_store import forget_all, forget_one
+    if all_:
+        n = forget_all()
+        console.print(f"[green]✓[/green] forgot {n} memory item(s).")
         return
-    from rich.panel import Panel
-    body = "\n".join(f"[#2dd4bf]•[/#2dd4bf] {m['text']}" for m in mems)
-    console.print(Panel(body, title=f"🧠 {len(mems)} thing(s) ronin remembers about you",
-                        border_style="#2dd4bf", padding=(1, 2)))
-    console.print("[dim]clear with [bold]ronin memory --clear[/bold][/dim]")
+    if not handle:
+        console.print("[red]✗[/red] say which fact to forget (n / id / text) or pass --all.")
+        raise typer.Exit(2)
+    text = forget_one(handle)
+    if text is None:
+        console.print(f"[dim]no single fact matched [bold]{handle}[/bold]. "
+                      f"Run [bold]ronin memory list[/bold] to see handles.[/dim]")
+        raise typer.Exit(1)
+    console.print(f"[green]✓[/green] forgot: {text}")
 
 
 @app.command()
