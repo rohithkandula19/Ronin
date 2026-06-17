@@ -83,12 +83,38 @@ def test_build_subagents_assigns_distinct_providers(monkeypatch) -> None:
     monkeypatch.setattr(orchestrate, "provider_for_spec", fake_provider)
     subs = orchestrate.build_subagents(
         _cfg(),
-        {"researcher": "anthropic", "implementer": "cerebras", "reviewer": "gemini"},
+        {"researcher": "anthropic", "implementer": "cerebras", "reviewer": "gemini",
+         "tester": "groq"},
     )
     by_role = {s.role: s for s in subs}
     assert by_role["researcher"].provider.model == "anthropic"
     assert by_role["implementer"].provider.model == "cerebras"
     assert by_role["reviewer"].provider.model == "gemini"
+    assert by_role["tester"].provider.model == "groq"
+
+
+def test_default_roster_includes_the_four_builtin_roles() -> None:
+    """The built-in specialist roster is researcher/implementer/reviewer/tester."""
+    assert set(orchestrate.DEFAULT_ROLES) == {
+        "researcher", "implementer", "reviewer", "tester",
+    }
+    # every role also carries a human description for the planner's roster block
+    assert set(orchestrate.DEFAULT_DESCRIPTIONS) == set(orchestrate.DEFAULT_ROLES)
+
+
+def test_tester_role_can_run_commands_in_readonly(tmp_path) -> None:
+    """The tester gets run_command even in read-only mode so it can execute an
+    existing suite, while researcher/reviewer stay strictly read-only."""
+    _init_repo(tmp_path)
+    tools_for_role = orchestrate._tools_for_roles(
+        _cfg(), tmp_path, read_only=True, mutate_root=tmp_path)
+    tester_tools = {t.name for t in tools_for_role["tester"]}
+    researcher_tools = {t.name for t in tools_for_role["researcher"]}
+    assert "run_command" in tester_tools
+    assert "run_command" not in researcher_tools
+    # the tester must not get mutating tools in read-only mode
+    assert "write_file" not in tester_tools
+    assert "edit_file" not in tester_tools
 
 
 # ---------- end-to-end run, fully offline ----------

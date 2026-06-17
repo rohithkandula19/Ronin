@@ -45,7 +45,13 @@ Every orchestration run has three roles, and each can be a different provider:
 2. Sub-agents. Do the work. Each sub-agent has a role, a system prompt, a tool
    subset, and an assigned provider/model. Independent sub-agents run in
    parallel; a sub-agent with no provider of its own falls back to the base
-   provider.
+   provider. The CLI ships four built-in specialist roles, each pinnable to its
+   own provider via --roster:
+   - researcher: read-only investigation; reports facts (read/list/search/glob).
+   - implementer: edits and creates code (full toolbelt in --write mode).
+   - reviewer: read-only critique of a change for correctness and completeness.
+   - tester: writes and runs tests and reports pass/fail (gets run_command so it
+     can actually execute a suite).
 3. Synthesizer. Combines the sub-agents' outputs into one final answer. Defaults
    to the planner's provider; can be overridden.
 
@@ -110,7 +116,7 @@ Examples:
 
     # provider-agnostic roster: each role on a different vendor's model
     ronin orchestrate "add retry + tests to the http client" \
-      -r researcher=anthropic,implementer=cerebras,reviewer=gemini --write
+      -r researcher=anthropic,implementer=cerebras,reviewer=gemini,tester=groq --write
 
     # fully offline (local brain only, zero egress)
     ronin orchestrate "summarize the module layout" --offline

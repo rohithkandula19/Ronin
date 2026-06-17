@@ -1734,8 +1734,9 @@ def orchestrate(
     goal: str = typer.Argument(..., help="The high-level goal to decompose and work."),
     roster: str = typer.Option(
         None, "--roster", "-r",
-        help="Role→provider, e.g. 'researcher=anthropic,implementer=cerebras,reviewer=gemini'. "
-             "Roles not listed run on the base provider."),
+        help="Role→provider, e.g. 'researcher=anthropic,implementer=cerebras,"
+             "reviewer=gemini,tester=groq'. Built-in roles: researcher, "
+             "implementer, reviewer, tester. Roles not listed run on the base provider."),
     write: bool = typer.Option(
         False, "--write",
         help="Let implementer sub-agents edit code in isolated git worktrees (needs git). "
@@ -1753,8 +1754,11 @@ def orchestrate(
     reviewer pipeline) by letting the planner choose the subtasks and their
     dependencies dynamically.
 
+    Built-in specialist roles: researcher (read-only investigation), implementer
+    (edits code), reviewer (critiques a change), tester (writes and runs tests).
+
     Example:  ronin orchestrate "add retry + tests to the http client" \\
-              -r researcher=anthropic,implementer=cerebras,reviewer=gemini --write
+              -r researcher=anthropic,implementer=cerebras,reviewer=gemini,tester=groq --write
     """
     from .orchestrate import role_label, run_orchestrate
 
@@ -1774,7 +1778,7 @@ def orchestrate(
         parsed = parse_roster(roster)
     line = " · ".join(
         f"{r}: [bold]{role_label(config, parsed.get(r))}[/bold]"
-        for r in ("researcher", "implementer", "reviewer")
+        for r in ("researcher", "implementer", "reviewer", "tester")
     )
     console.print(f"[#7aa2f7]🧭 orchestrate[/#7aa2f7] {line}")
     if write:

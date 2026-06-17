@@ -48,17 +48,25 @@ _REVIEWER_SYS = (
     "critique it: correctness bugs, missed cases, broken tests. Be specific. If "
     "it is solid, say so."
 )
+_TESTER_SYS = (
+    "You are the TESTER. Write or extend tests for the change in your isolated "
+    "worktree and run them. Report exactly which commands you ran, whether they "
+    "passed, and any failures with the relevant output. Do not change production "
+    "code to make a test pass — surface real failures."
+)
 
 DEFAULT_ROLES: dict[str, str] = {
     "researcher": _RESEARCHER_SYS,
     "implementer": _IMPLEMENTER_SYS,
     "reviewer": _REVIEWER_SYS,
+    "tester": _TESTER_SYS,
 }
 
 DEFAULT_DESCRIPTIONS: dict[str, str] = {
     "researcher": "explores read-only and reports facts about the code/question",
     "implementer": "writes and edits code to make a change",
     "reviewer": "reviews a change for correctness and completeness",
+    "tester": "writes and runs tests for a change and reports pass/fail",
 }
 
 
@@ -253,8 +261,13 @@ def _tools_for_roles(
 
     _READONLY = {"read_file", "list_files", "search_files", "glob"}
     sandbox = not getattr(base, "full_access", False)
-    readonly_tools = [
-        t for t in build_code_tools(root, sandbox=sandbox) if t.name in _READONLY
+    base_tools = build_code_tools(root, sandbox=sandbox)
+    readonly_tools = [t for t in base_tools if t.name in _READONLY]
+    # The tester needs to actually RUN a suite, so it gets the explorer tools plus
+    # run_command even in read-only mode (it can run an existing suite without
+    # editing production code).
+    tester_readonly = [
+        t for t in base_tools if t.name in (_READONLY | {"run_command"})
     ]
     out: dict[str, list[Tool]] = {
         "researcher": readonly_tools,
@@ -262,8 +275,11 @@ def _tools_for_roles(
     }
     if read_only:
         out["implementer"] = readonly_tools
+        out["tester"] = tester_readonly
     else:
-        # Full toolbelt bound to the isolated worktree, so mutations land there.
-        out["implementer"] = build_code_tools(
-            mutate_root or root, sandbox=sandbox)
+        # Full toolbelt bound to the isolated worktree, so mutations (and any new
+        # test files the tester writes) land there, not the main checkout.
+        worktree_tools = build_code_tools(mutate_root or root, sandbox=sandbox)
+        out["implementer"] = worktree_tools
+        out["tester"] = worktree_tools
     return out
