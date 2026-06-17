@@ -123,6 +123,50 @@ def role_label(base: RoninConfig, spec: str | None) -> str:
     return f"{cfg.provider}:{cfg.resolved_model()}"
 
 
+def roster_labels(base: RoninConfig, roster_spec: str | None) -> dict[str, str]:
+    """Map each built-in specialist role to the provider:model it will run on.
+
+    This is the sub-agent tree the dashboard renders: the planner/synthesizer run
+    on the base provider, and each role on its own (possibly different) vendor's
+    model via ``--roster``. Pure label resolution — no providers are built."""
+    parsed = parse_roster(roster_spec)
+    return {role: role_label(base, parsed.get(role)) for role in DEFAULT_ROLES}
+
+
+def score_final_faithfulness(outcome: "OrchestrateOutcome") -> "dict[str, Any] | None":
+    """Score how grounded the synthesized final answer is in its sub-agents' work.
+
+    The synthesizer writes the final answer FROM the completed subtask outputs
+    (see ``OrchestratorAgent._synthesize`` — its prompt is built from exactly
+    those outputs). So those outputs ARE the sources the final answer must be
+    grounded in. We run the offline faithfulness harness over the answer against
+    them and return ``{score, grounded, abstain}`` — real lexical/symbol
+    grounding, not a canned number. Returns ``None`` when there is nothing to
+    score (no answer or no source outputs)."""
+    answer = (outcome.output or "").strip()
+    source_texts = [
+        r.get("output", "")
+        for r in outcome.subtask_results
+        if (r.get("output") or "").strip()
+    ]
+    if not answer or not source_texts:
+        return None
+    try:
+        from ronin_hardening import FaithfulnessHarness, Source
+
+        sources = [Source(origin=f"subtask:{i}", text=t) for i, t in enumerate(source_texts)]
+        report = FaithfulnessHarness().check(answer, sources)
+    except Exception:  # noqa: BLE001 — scoring must never break a run
+        return None
+    return {
+        "score": round(report.score, 3),
+        "grounded": (not report.abstain) and report.score >= 0.5,
+        "abstain": bool(report.abstain),
+        "reason": report.reason,
+        "n_sources": report.n_sources,
+    }
+
+
 def build_subagents(
     base: RoninConfig,
     roster: dict[str, str | None],

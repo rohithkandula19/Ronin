@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any, Iterator
 
 from fastapi import Depends, FastAPI, HTTPException, Header, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
@@ -120,6 +120,45 @@ def make_app() -> FastAPI:
     @app.get("/health")
     def health() -> dict:
         return {"ok": True, "version": "0.0.1"}
+
+    # ---------- web dashboard (ronin ui) ----------
+    #
+    # A single self-contained HTML page (inline CSS, vanilla JS, no external
+    # resource URLs, fully offline) plus a few READ-ONLY JSON endpoints it calls.
+    # The endpoints surface REAL stored data — orchestrated runs and chat
+    # sessions, a run's planner -> sub-agent tree with faithfulness scores, the
+    # durable memory store, and crystallized skills — read from the same .ronin
+    # home the CLI writes to. No auth: read-only on local data, served on
+    # localhost by `ronin ui`. When there is no data yet the UI shows an honest
+    # empty state.
+
+    @app.get("/", response_class=HTMLResponse, include_in_schema=False)
+    def dashboard() -> HTMLResponse:
+        from .dashboard_html import DASHBOARD_HTML
+        return HTMLResponse(content=DASHBOARD_HTML)
+
+    @app.get("/ui/runs")
+    def ui_runs(limit: int = 50) -> list[dict]:
+        from .dashboard import recent_runs
+        return recent_runs(limit=max(1, min(200, limit)))
+
+    @app.get("/ui/runs/{run_id}")
+    def ui_run_detail(run_id: str) -> dict:
+        from .dashboard import run_detail
+        detail = run_detail(run_id)
+        if detail is None:
+            raise HTTPException(status_code=404, detail="run not found")
+        return detail
+
+    @app.get("/ui/memory")
+    def ui_memory(limit: int = 200) -> list[dict]:
+        from .dashboard import memory_entries
+        return memory_entries(limit=max(1, min(500, limit)))
+
+    @app.get("/ui/skills")
+    def ui_skills() -> list[dict]:
+        from .dashboard import skill_entries
+        return skill_entries(".")
 
     @app.post("/signup", response_model=SignupOut, status_code=201)
     def signup(body: SignupIn, session: Session = Depends(db_dep)) -> SignupOut:

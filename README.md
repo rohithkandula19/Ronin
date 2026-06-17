@@ -146,6 +146,47 @@ ronin eval --model gpt-oss-120b                                  # objective sco
 ronin image "a red panda hacking at night, neon, flat vector"    # free, no API key
 ```
 
+## ronin ui · the web dashboard
+
+`ronin ui` serves a local web dashboard for the agent. It is a SINGLE
+self-contained HTML page: inline CSS, vanilla JavaScript, no external resource
+URLs (no CDN, no web fonts, no remote images), so it works fully offline. The
+page talks only to this app's own read-only endpoints and renders the REAL data
+ronin already wrote under `.ronin/` (and `~/.ronin/`). Nothing leaves your
+machine; there is no auth because it is read-only on local data served on
+localhost.
+
+```bash
+ronin orchestrate "add retry + tests to the http client" --offline   # populate a run
+ronin ui                                                             # serve at http://127.0.0.1:8765/
+ronin ui --port 9000 --no-open                                       # custom port, do not open a browser
+```
+
+What it shows:
+
+| Panel | What it surfaces | Source on disk |
+|---|---|---|
+| Recent runs | Orchestrated runs and chat sessions, most recent first, with success state | `<RONIN_HOME>/runs/*.json`, `.ronin/sessions/*.json` |
+| Run detail | An expandable orchestrator sub-agent tree: the planner node, then each specialist sub-agent by role and provider/model, with the subtasks assigned to it | the stored run record |
+| Faithfulness badges | Grounding score per answer: green grounded, red ungrounded, amber abstain, on the synthesized answer and per subtask | the offline faithfulness harness output stored on the run |
+| Memory | The durable facts ronin remembers about you | `~/.ronin/memory.json` |
+| Skills | Crystallized repo-local skills | `.ronin/commands/*.md` |
+
+When there is no data yet, each panel shows an honest empty state instead of a
+sample. The dashboard reuses the existing FastAPI gateway in `apps/api`; the
+data endpoints are read-only.
+
+Quick check without a browser (the page is served at `/`, the data at `/ui/*`):
+
+```bash
+ronin ui --no-open &                       # serve in the background
+curl -s http://127.0.0.1:8765/ | head      # the self-contained HTML page
+curl -s http://127.0.0.1:8765/ui/runs      # recent runs (JSON)
+```
+
+For a screenshot, open `http://127.0.0.1:8765/` in a browser after running
+`ronin ui`.
+
 ## 30-second quickstart (no real credentials)
 
 ```bash
@@ -199,6 +240,7 @@ database_url = "postgres://readonly_user:...@host:5432/db"   # a read-only role
 | `ronin briefing --slack <#chan>` / `--history` / `--out file.md` | Post to Slack / trend table / write to Markdown. |
 | `ronin ask "<question>"` | One-shot: print answer + typed trace. |
 | `ronin tui` | Full-screen Textual UI: chat + live trace, F1 help. |
+| **`ronin ui [--port 8765]`** | **Web dashboard: a single self-contained page (offline, no external resources) showing recent runs, an expandable orchestrator sub-agent tree, faithfulness badges, memory, and skills. Read-only.** |
 | `ronin mcp add <name> <command>` | Register an MCP tool server (then `/mcp` lists them in-session). |
 | `ronin serve --port 8000` | Expose the agent as an HTTP API (`POST /ask`). |
 | `ronin schedule add <name> "<prompt>" --cron "<expr>"` | Store an agent task on a cron schedule. `schedule list` shows each task + its next run, `schedule run-due` runs the tasks due now through the agent, `schedule remove <name>` deletes one. Tasks persist to `~/.ronin/schedule.json`; `run-due` falls back to the offline demo brain when no key is set. |

@@ -58,6 +58,32 @@ uv run uvicorn app.main:app --reload --port 8000 --app-dir apps/api
 uv --project apps/api run python -m app.worker --interval 60
 ```
 
+## Web dashboard (ronin ui)
+
+This app also serves the ronin web dashboard. It is a single self-contained HTML
+page (inline CSS, vanilla JS, no external resource URLs, fully offline) plus a
+few read-only JSON endpoints that surface REAL data ronin wrote under `.ronin/`:
+
+| Route | Returns |
+|---|---|
+| `GET /` | The self-contained dashboard HTML page |
+| `GET /ui/runs` | Recent runs: orchestrations and chat sessions, newest first |
+| `GET /ui/runs/{id}` | One run's detail: planner -> sub-agent tree, faithfulness scores, output (or a session transcript) |
+| `GET /ui/memory` | Durable memory entries (`~/.ronin/memory.json`) |
+| `GET /ui/skills` | Crystallized skills (`.ronin/commands/*.md`) |
+
+The dashboard code lives in `csk_api/dashboard.py` (read-only data layer) and
+`csk_api/dashboard_html.py` (the page). The endpoints honour `RONIN_HOME` and the
+current working directory exactly as the CLI does, so tests point a temp `.ronin`
+home at them. Launch it with `ronin ui` (serves on localhost and opens a
+browser) or:
+
+```bash
+uv run uvicorn csk_api.main:app --port 8765 --app-dir apps/api
+curl -s http://127.0.0.1:8765/ | head      # the page
+curl -s http://127.0.0.1:8765/ui/runs      # recent runs (JSON)
+```
+
 ## End-to-end smoke
 
 ```bash
