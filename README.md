@@ -118,6 +118,53 @@ Plus, on the coding agent itself:
 - **🖥️ Background processes**: `run_background` a dev server / test-watcher, tail its logs, and keep working ("watch-and-fix"); **⏪ checkpoint & rewind** snapshots the whole workspace and rolls it back; **👁️ vision-in-the-loop** screenshots a UI and analyzes it so the agent can self-correct.
 - **🛡️ Built for free models**: tool calls survive near-miss argument names (auto-remapped), oversized tool results are capped, context compacts earlier off-Anthropic, clarifying questions (`ask_user`) head off wrong guesses, and per-provider keys mean switching providers never clobbers a key.
 
+### 🛰 The OPS layer · scheduler, notifications, doctor
+
+An assistant layer for running ronin unattended, all offline, $0, no keys needed:
+
+- **Scheduler (`ronin schedule`)**: give the agent a goal and a cron schedule (`@daily`, `0 9 * * 1-5`, `*/15 * * * *`); it is stored locally in `.ronin/schedule.toml` (plaintext, diffable). `run-due` is a **real runner**: it finds every task whose time has passed, invokes the agent through the same path as `ronin ask`, records the outcome (`last_run` / `last_status` / `run_count`), and notifies. A task is only marked run after the agent actually returns. A task never fires twice for the same minute; `--grace N` catches up a firing missed while the machine was asleep. There is **no faked always-on daemon**: the honest, portable way to run it on a cadence is your OS scheduler. `ronin schedule cron-line` prints a ready-to-paste crontab line, and the launchd (macOS) / systemd-timer (Linux) recipes are below.
+- **Notifications (pluggable backends)**: a small `Notifier` abstraction fans a message out to every configured backend. The **local backend** always runs: it appends to `~/.ronin/notifications.log` and best-effort raises a native desktop notification (macOS `osascript`, Linux `notify-send`), so notifications work with zero config, offline. An **optional webhook backend** POSTs `{"text": ...}` to any incoming webhook (Slack / Discord / Mattermost / generic) when you set `RONIN_NOTIFY_WEBHOOK` or `notify_webhook` in config. The scheduler and long tasks use it; nothing here ever raises (a notification can't break the run that triggered it).
+- **Doctor (`ronin doctor`)**: diagnoses the install, config, and providers and reports each problem **with a concrete fix** (Python version, config file, known provider, auth/credentials, custom `base_url`, the `ollama` binary, offline-vs-cloud consistency). Exits non-zero on a failure (with `--strict`, on warnings too) so it works as a setup or CI gate; `--check` adds a live key+model ping. The check functions are pure and unit-tested.
+
+#### Running the scheduler on a real cadence
+
+The scheduler stores and runs tasks; your OS scheduler provides the heartbeat. Pick one:
+
+```bash
+# 1) cron: run the due tasks every minute (ronin schedule cron-line prints this)
+* * * * * ronin schedule run-due >> ~/.ronin/schedule.log 2>&1
+```
+
+```ini
+# 2) Linux systemd-timer: ~/.config/systemd/user/ronin-schedule.service + .timer
+# ronin-schedule.service
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/ronin schedule run-due
+WorkingDirectory=%h/your-project
+
+# ronin-schedule.timer
+[Timer]
+OnCalendar=minutely
+Persistent=true
+[Install]
+WantedBy=timers.target
+# then: systemctl --user enable --now ronin-schedule.timer
+```
+
+```xml
+<!-- 3) macOS launchd: ~/Library/LaunchAgents/dev.ronin.schedule.plist -->
+<!-- ProgramArguments: ronin schedule run-due; StartInterval: 60 -->
+<!-- load with: launchctl load ~/Library/LaunchAgents/dev.ronin.schedule.plist -->
+```
+
+```bash
+# Example: a weekday-morning standup digest, sent to a webhook
+export RONIN_NOTIFY_WEBHOOK="https://hooks.example/your-incoming-webhook"
+ronin schedule add standup "0 9 * * 1-5" "summarize what changed in git since yesterday"
+ronin schedule run-due        # runs it when due; logs + webhook on completion
+```
+
 ## Install
 
 ```bash
@@ -201,7 +248,12 @@ database_url = "postgres://readonly_user:...@host:5432/db"   # a read-only role
 | `ronin tui` | Full-screen Textual UI: chat + live trace, F1 help. |
 | `ronin mcp add <name> <command>` | Register an MCP tool server (then `/mcp` lists them in-session). |
 | `ronin serve --port 8000` | Expose the agent as an HTTP API (`POST /ask`). |
-| `ronin tools` / `ronin doctor [--check]` | List tools / health-check provider + auth + services (live ping). |
+| `ronin tools` | List the tools registered for the current config. |
+| `ronin doctor [--check] [--strict]` | Diagnose install/config/providers: runs a check battery (Python, config file, provider, auth, base_url, ollama, offline consistency) and lists each problem with a concrete fix. Exits non-zero on a failure (with `--strict`, on warnings too) so it works as a setup/CI gate. `--check` adds a live key+model ping. |
+| `ronin schedule add <name> <cron> "<goal>"` | Add a scheduled task (a goal + a 5-field cron or `@alias`), stored in `.ronin/schedule.toml`. |
+| `ronin schedule list [-v]` / `remove <name>` / `enable <name> [--off]` | List, remove, or enable/disable scheduled tasks. |
+| `ronin schedule run-due [--grace N] [--dry-run] [--no-webhook]` | Run every task whose time has passed (a real runner: invokes the agent, records the run, notifies). `--grace` catches up firings missed while the machine was off. |
+| `ronin schedule cron-line [--every N]` | Print a crontab line that runs `run-due` on a real OS cadence (the honest "daemon" is your OS scheduler). |
 | `ronin image` / `video` / `say` / `see` | Media: text-to-image, video, text-to-speech, vision. |
 | `ronin set-key [--provider X] [--model Y]` | Set the LLM API key (masked). In-session, use `/login`. |
 | `ronin mutants <file> [--test "<cmd>"]` | Mutation-test a file: list mutants the suite fails to catch. |

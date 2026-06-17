@@ -723,11 +723,20 @@ def _provider_live_check(config: RoninConfig) -> str:
 @app.command()
 def doctor(
     check: bool = typer.Option(False, "--check", help="Ping the provider to verify the key + model actually work (network)."),
+    strict: bool = typer.Option(False, "--strict", help="Exit non-zero if any check fails or warns. Use as a setup / CI gate (default: report-only, always exits 0)."),
 ) -> None:
-    """Health check: config location, provider auth, configured services.
+    """Diagnose the install, config, and providers; report problems with fixes.
 
-    Add --check to make a live call that confirms the key is valid and the
+    Runs a battery of checks (Python version, config file, provider, auth,
+    base_url, ollama binary, offline consistency), prints an info table, and then
+    lists any problems with a concrete fix for each. Report-only by default
+    (always exits 0); pass --strict to exit non-zero on any problem so it works
+    as a setup / CI gate.
+
+    Add --check to also make a live call that confirms the key is valid and the
     configured model exists (instead of just checking a key is present)."""
+    from . import doctor as doc
+
     config = load_config()
     path = find_config_path()
 
@@ -753,8 +762,217 @@ def doctor(
     table.add_row("ronin version", __version__)
 
     console.print(table)
+
+    # Diagnostics: surface each check's status + a fix for anything wrong.
+    diagnoses = doc.run_checks(config, path)
+    _glyph = {doc.OK: "[green]✓[/green]", doc.WARN: "[yellow]●[/yellow]", doc.FAIL: "[red]✗[/red]"}
+    problems = [d for d in diagnoses if d.status != doc.OK]
+    if problems:
+        console.print("\n[bold]problems found:[/bold]")
+        for d in problems:
+            console.print(f"  {_glyph[d.status]} [cyan]{d.name}[/cyan]: {d.message}")
+            if d.fix:
+                console.print(f"      [dim]fix:[/dim] {d.fix}")
+    else:
+        console.print("\n[green]✓ all checks passed[/green]")
+
     if not check:
         console.print("[dim]tip: run [bold]ronin doctor --check[/bold] to verify the key + model actually work.[/dim]")
+
+    # Report-only by default (exit 0) so `ronin doctor` stays a glanceable status
+    # report. --strict turns it into a gate: any problem (warn or fail) exits 1.
+    if strict and doc.overall_status(diagnoses) != doc.OK:
+        raise typer.Exit(1)
+
+
+# ---------- scheduler (ronin schedule ...) ----------
+
+schedule_app = typer.Typer(
+    help="Scheduled agent tasks: a goal + a cron schedule, stored locally. "
+         "'add' / 'list' / 'remove' manage them; 'run-due' executes any that are due "
+         "(point your OS cron/launchd at run-due — no faked daemon).",
+)
+app.add_typer(schedule_app, name="schedule")
+
+
+def _schedule_runner(config: RoninConfig):
+    """Return a callable that runs one ScheduledTask's goal via the real agent.
+
+    Reuses ``run_ask`` — the exact path ``ronin ask`` uses — so a scheduled run is
+    a real agent run, not a stub. The result is wrapped in a RunRecord (ok/error
+    plus a one-line summary) for the run log and notifications."""
+    from .scheduler import RunRecord
+
+    def _run(task) -> "RunRecord":  # noqa: F821 — RunRecord imported above
+        try:
+            result = run_ask(config, task.goal)
+        except Exception as exc:  # noqa: BLE001 — one bad task can't abort the batch
+            return RunRecord(name=task.name, status="error", error=f"{exc.__class__.__name__}: {exc}")
+        if result.success:
+            summary = (result.output or "").strip().splitlines()
+            return RunRecord(name=task.name, status="ok", summary=(summary[0][:160] if summary else "done"))
+        return RunRecord(name=task.name, status="error", error=(result.error or "agent reported failure"))
+
+    return _run
+
+
+@schedule_app.command("add")
+def schedule_add(
+    name: str = typer.Argument(..., help="Short slug-style name (letters / digits / '-' / '_')."),
+    cron: str = typer.Argument(..., help="5-field cron schedule or a @alias, e.g. '@daily' or '0 9 * * 1-5'."),
+    goal: list[str] = typer.Argument(..., help="The goal handed to the agent when it runs. Quote multi-word goals."),
+    description: str = typer.Option("", "--description", "-d", help="Optional one-line description."),
+) -> None:
+    """Add a scheduled task (a goal + a cron schedule), stored in .ronin/schedule.toml."""
+    from .cron_describe import describe_cron
+    from .scheduler import ScheduleStore, default_path
+
+    path = default_path()
+    store = ScheduleStore.load(path)
+    text = " ".join(goal)
+    try:
+        task = store.add(name, text, cron, description=description)
+    except ValueError as exc:
+        console.print(f"[red]✗[/red] {exc}")
+        raise typer.Exit(2)
+    store.save(path)
+    console.print(f"[green]✓[/green] scheduled [bold]{name}[/bold] · [cyan]{task.cron}[/cyan]")
+    console.print(f"  [dim]{describe_cron(task.cron)}[/dim]")
+    console.print(f"  [dim]goal:[/dim] {text}")
+    console.print("[dim]run due tasks with [bold]ronin schedule run-due[/bold]; "
+                  "see [bold]ronin schedule cron-line[/bold] to wire your OS scheduler.[/dim]")
+
+
+@schedule_app.command("list")
+def schedule_list(
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show the full goal text and last run."),
+) -> None:
+    """List scheduled tasks."""
+    from .cron_describe import describe_cron
+    from .scheduler import ScheduleStore, default_path
+
+    store = ScheduleStore.load(default_path())
+    items = store.list_all()
+    if not items:
+        console.print("[dim]no scheduled tasks. Add one: [bold]ronin schedule add <name> '@daily' \"<goal>\"[/bold][/dim]")
+        return
+    table = Table(box=box.ROUNDED)
+    table.add_column("name", style="cyan", no_wrap=True)
+    table.add_column("schedule", no_wrap=True)
+    table.add_column("goal" if not verbose else "goal / schedule")
+    table.add_column("last run", no_wrap=True)
+    table.add_column("on", justify="center", no_wrap=True)
+    for t in items:
+        goal_cell = t.goal if verbose else (t.goal[:48] + ("…" if len(t.goal) > 48 else ""))
+        if verbose:
+            goal_cell = f"{t.goal}\n[dim]{describe_cron(t.cron)}[/dim]"
+        last = t.last_run or "[dim]never[/dim]"
+        if t.last_status == "error":
+            last = f"[red]{last} (err)[/red]"
+        on = "[green]●[/green]" if t.enabled else "[dim]○[/dim]"
+        table.add_row(t.name, t.cron, goal_cell, last, on)
+    console.print(table)
+
+
+@schedule_app.command("remove")
+def schedule_remove(
+    name: str = typer.Argument(..., help="Name of the scheduled task to remove."),
+) -> None:
+    """Remove a scheduled task by name."""
+    from .scheduler import ScheduleStore, default_path
+
+    path = default_path()
+    store = ScheduleStore.load(path)
+    if store.remove(name):
+        store.save(path)
+        console.print(f"[green]✓[/green] removed [bold]{name}[/bold]")
+    else:
+        console.print(f"[red]✗[/red] no scheduled task named [bold]{name}[/bold]. See [bold]ronin schedule list[/bold].")
+        raise typer.Exit(2)
+
+
+@schedule_app.command("enable")
+def schedule_enable(
+    name: str = typer.Argument(..., help="Name of the scheduled task."),
+    off: bool = typer.Option(False, "--off", help="Disable instead of enable."),
+) -> None:
+    """Enable (or, with --off, disable) a scheduled task without removing it."""
+    from .scheduler import ScheduleStore, default_path
+
+    path = default_path()
+    store = ScheduleStore.load(path)
+    try:
+        store.set_enabled(name, not off)
+    except KeyError:
+        console.print(f"[red]✗[/red] no scheduled task named [bold]{name}[/bold].")
+        raise typer.Exit(2)
+    store.save(path)
+    console.print(f"[green]✓[/green] {name} is now [bold]{'disabled' if off else 'enabled'}[/bold]")
+
+
+@schedule_app.command("run-due")
+def schedule_run_due(
+    grace: int = typer.Option(0, "--grace", help="Catch-up window in minutes: also fire tasks whose time passed while the machine was off (0 = only this minute)."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="List what would run without running the agent."),
+    no_webhook: bool = typer.Option(False, "--no-webhook", help="Local log/desktop notification only; skip the webhook backend."),
+) -> None:
+    """Run every scheduled task whose time has passed (a real runner).
+
+    For each due task this invokes the agent (the same path as `ronin ask`),
+    records the outcome in .ronin/schedule.toml, and sends a notification (local
+    log + desktop, plus a webhook when configured). Point your OS scheduler at
+    this command (see `ronin schedule cron-line`) to run it on a real cadence."""
+    from .notify import build_notifier
+    from .scheduler import ScheduleStore, default_path, run_due
+
+    path = default_path()
+    store = ScheduleStore.load(path)
+    due = store.due(grace_minutes=grace)
+    if not due:
+        console.print("[dim]nothing due right now.[/dim]")
+        return
+
+    if dry_run:
+        console.print(f"[bold]{len(due)} task(s) due:[/bold]")
+        for t in due:
+            console.print(f"  [cyan]{t.name}[/cyan] · {t.cron} — {t.goal[:60]}")
+        return
+
+    config = load_config()
+    webhook = None if no_webhook else (config.extra.get("notify_webhook") if isinstance(config.extra, dict) else None)
+    notifier = build_notifier(webhook_url=webhook)
+
+    console.print(f"[dim]running {len(due)} due task(s)…[/dim]")
+    records = run_due(
+        store,
+        grace_minutes=grace,
+        runner=_schedule_runner(config),
+        notifier=notifier.notify,
+    )
+    store.save(path)
+    for r in records:
+        if r.status == "ok":
+            console.print(f"[green]✓[/green] [cyan]{r.name}[/cyan] — {r.summary}")
+        else:
+            console.print(f"[red]✗[/red] [cyan]{r.name}[/cyan] — {r.error}")
+    console.print(f"[dim]notified via: {', '.join(notifier.backend_names())}[/dim]")
+
+
+@schedule_app.command("cron-line")
+def schedule_cron_line(
+    every: int = typer.Option(1, "--every", help="Minutes between run-due passes (1 = every minute)."),
+) -> None:
+    """Print a crontab line that runs `schedule run-due` on a real OS cadence.
+
+    The honest 'daemon' is your OS scheduler: paste this into `crontab -e`. The
+    README documents the launchd (macOS) and systemd-timer (Linux) equivalents."""
+    from .scheduler import crontab_line
+
+    line = crontab_line(every_minute=(every <= 1))
+    console.print("[dim]# add to your crontab (crontab -e):[/dim]")
+    console.print(line)
+    console.print("[dim]# macOS launchd / Linux systemd-timer recipes are in the README "
+                  "(Scheduler section).[/dim]")
 
 
 # ---------- saved queries ----------
