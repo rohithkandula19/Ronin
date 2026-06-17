@@ -1,14 +1,24 @@
 """Production-grade agent patterns for Claude — and any OpenAI-compatible LLM.
 
-Four patterns shipped:
+Five patterns shipped:
 - ``ReActAgent`` — Reason-Act-Observe loop with tool retry and iteration cap.
 - ``PlannerExecutorAgent`` — Plan-then-execute with checkpoint/resume.
-- ``SupervisorAgent`` — Orchestrator that delegates to specialist sub-agents.
+- ``SupervisorAgent`` — Delegates dynamically to specialist sub-agents via tools.
+- ``OrchestratorAgent`` — Decomposes a goal into assigned subtasks and runs
+  provider-agnostic sub-agents (parallel where independent), then synthesizes.
 - ``ReflexionAgent`` — Act → critique → retry-with-feedback.
 
 Plus shared types (``Tool``, ``AgentResult``, ``Step``) and providers
 (``AnthropicProvider``, ``OpenAICompatProvider``, ``OllamaProvider``, ``FakeProvider``).
 """
+from .orchestrator import (
+    OrchestrationPlan,
+    OrchestrationResult,
+    OrchestratorAgent,
+    OrchestratorSubAgent,
+    Subtask,
+    SubtaskResult,
+)
 from .planner_executor import Plan, PlannerExecutorAgent
 from .providers import (
     AnthropicProvider,
@@ -38,6 +48,10 @@ __all__ = [
     "Message",
     "OllamaProvider",
     "OpenAICompatProvider",
+    "OrchestrationPlan",
+    "OrchestrationResult",
+    "OrchestratorAgent",
+    "OrchestratorSubAgent",
     "Plan",
     "PlannerExecutorAgent",
     "ReActAgent",
@@ -45,6 +59,8 @@ __all__ = [
     "Step",
     "StreamEvent",
     "SubAgent",
+    "Subtask",
+    "SubtaskResult",
     "SupervisorAgent",
     "Tool",
     "ToolCall",

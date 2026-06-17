@@ -8,7 +8,8 @@ Production-grade agent patterns for Claude. Pure Python, Pydantic-typed state, o
 |---|---|
 | `ReActAgent` | Single execution thread, tools are mostly reliable, want the simplest pattern that survives prod. |
 | `PlannerExecutorAgent` | Multi-step task that benefits from upfront planning, with checkpoint/resume across replans. |
-| `SupervisorAgent` | Heterogeneous sub-tasks with different tool sets / personas; need failure isolation. |
+| `SupervisorAgent` | One orchestrator delegates dynamically to named sub-agents via tools; heterogeneous personas, failure isolation. |
+| `OrchestratorAgent` | Decompose a goal into assigned subtasks and run provider-agnostic sub-agents (each on its own model, parallel where independent), then synthesize. |
 | `ReflexionAgent` | Output quality matters more than latency; you can articulate a critic prompt. |
 
 ## Install (workspace dev)
