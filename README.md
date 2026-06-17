@@ -204,6 +204,7 @@ database_url = "postgres://readonly_user:...@host:5432/db"   # a read-only role
 | `ronin set-key [--provider X] [--model Y]` | Set the LLM API key (masked). In-session, use `/login`. |
 | `ronin mutants <file> [--test "<cmd>"]` | Mutation-test a file: list mutants the suite fails to catch. |
 | `ronin stash [--no-ai]` / `stash list` / `stash pop [n]` | Git stash with an AI-summarized one-line label (offline fallback). |
+| `ronin undo-commit [--revert] [--force]` | Show the last commit, then soft-reset (default) or revert it (gated; refuses pushed HEAD). |
 | `ronin radius [--run]` | Blast radius of your diff + the affected test modules. |
 | `ronin flake "<cmd>" [-n N]` | Run a test command N times; rank non-deterministic tests. |
 | `ronin guard [--intent "<task>"]` | Scan the diff for debug/secret leftovers + scope creep. |

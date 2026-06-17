@@ -1382,6 +1382,89 @@ def pr(
     open_pr(console, root, config)
 
 
+# ---------- undo-commit (explain + soft-reset / revert the last commit) ----------
+
+@app.command(name="undo-commit")
+def undo_commit(
+    revert: bool = typer.Option(
+        False, "--revert",
+        help="Record a new commit that undoes the last one (instead of soft-reset)."),
+    force: bool = typer.Option(
+        False, "--force",
+        help="Allow soft-reset even when HEAD is pushed (rewrites shared history)."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """Show the last commit, then undo it — soft-reset (keeps changes staged,
+    default) or a true revert. Gated: it prints the commit and waits for y/N, and
+    refuses to soft-reset a pushed HEAD without --force (don't rewrite shared
+    history). --revert is always safe (it adds a new commit).
+    """
+    from .git_helper import _git
+    from .git_undo import SHOW_FORMAT, format_commit_info, is_pushed, parse_commit_info
+
+    if _git(root, "rev-parse", "--is-inside-work-tree").returncode != 0:
+        console.print("[yellow]not a git repository[/yellow]")
+        raise typer.Exit(2)
+    head = _git(root, "rev-parse", "HEAD")
+    if head.returncode != 0:
+        console.print("[yellow]no commits yet — nothing to undo[/yellow]")
+        raise typer.Exit(2)
+    head_sha = head.stdout.strip()
+    if _git(root, "rev-parse", "HEAD~1").returncode != 0:
+        console.print("[yellow]this is the first commit — a soft-reset has no parent. "
+                      "Use [bold]--revert[/bold] to undo it as a new commit, or reset manually.[/yellow]")
+        if not revert:
+            raise typer.Exit(2)
+
+    info = parse_commit_info(_git(root, "show", "--stat", f"--format={SHOW_FORMAT}", "HEAD").stdout)
+    if info is None:
+        console.print("[red]couldn't read the last commit.[/red]")
+        raise typer.Exit(1)
+
+    from rich.panel import Panel
+    console.print(Panel(format_commit_info(info), title="last commit", border_style="#6b7089", padding=(1, 2)))
+
+    # Determine whether HEAD is pushed (so a rewrite would touch shared history).
+    upstream = _git(root, "rev-parse", "@{upstream}")
+    upstream_sha = upstream.stdout.strip() if upstream.returncode == 0 else ""
+    head_in_upstream = (
+        upstream_sha != ""
+        and _git(root, "merge-base", "--is-ancestor", "HEAD", "@{upstream}").returncode == 0
+    )
+    pushed = is_pushed(upstream_sha, head_sha, head_in_upstream)
+
+    if revert:
+        action = "revert (add a new commit that undoes it)"
+    else:
+        action = "soft-reset HEAD~1 (keep your changes staged)"
+        if pushed and not force:
+            console.print(
+                "[yellow]HEAD has been pushed — soft-reset would rewrite shared history.[/yellow]\n"
+                "[dim]Use [bold]--revert[/bold] (safe, adds a new commit) or "
+                "[bold]--force[/bold] to override.[/dim]")
+            raise typer.Exit(2)
+        if pushed:
+            console.print("[red]warning: HEAD is pushed — --force will rewrite shared history.[/red]")
+
+    console.print(f"[bold]action:[/bold] [cyan]{action}[/cyan]")
+    if not yes and not Confirm.ask("proceed?", default=False):
+        console.print("[dim]aborted[/dim]")
+        raise typer.Exit(0)
+
+    if revert:
+        r = _git(root, "revert", "--no-edit", "HEAD")
+        ok_msg = "[green]✓ reverted[/green] — recorded a new commit undoing it."
+    else:
+        r = _git(root, "reset", "--soft", "HEAD~1")
+        ok_msg = "[green]✓ undone[/green] — commit removed; your changes are staged."
+    if r.returncode == 0:
+        console.print(ok_msg)
+    else:
+        console.print(f"[red]undo failed:[/red] {(r.stderr or r.stdout).strip()[:300]}")
+        raise typer.Exit(1)
+
+
 # ---------- stash (AI-labelled git stash) ----------
 
 stash_app = typer.Typer(
