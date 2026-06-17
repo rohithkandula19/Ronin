@@ -89,6 +89,7 @@ ronin auto-retries free-tier rate limits (429) with backoff, and round-trips Gem
 Because ronin is **provider-agnostic**, it can do things a single-vendor agent structurally can't:
 
 - **🧩 Multi-model consensus**: `ronin consensus "<task>" -m anthropic,gemini,cerebras` runs the *same* question on several models in parallel, then a judge model synthesizes one cross-checked answer (with a "where they agreed / diverged" note). More robust on hard design/review/decision questions than any single model. Read-only.
+- **🧭 Multi-agent orchestrator · provider-agnostic sub-agents**: `ronin orchestrate "<goal>" -r researcher=anthropic,implementer=cerebras,reviewer=gemini` decomposes a goal into subtasks, assigns each to a specialist sub-agent **on its own vendor's model**, runs the independent ones in **parallel**, and synthesizes the result. `--write` runs editing sub-agents in **isolated git worktrees** (no collisions); `--offline` keeps it $0 with zero egress. Complements `consensus`/`dojo` (same task, many models) by splitting *different* subtasks across models. See [docs/ORCHESTRATOR.md](docs/ORCHESTRATOR.md).
 - **🔁 Cross-provider failover**: set `failover` in config and a turn that hits a rate-limit or outage on the primary **transparently continues on the next provider** instead of dying. (Tokens already streamed aren't silently re-answered.)
 - **🔒 Fully offline mode**: `ronin --offline` forces a **local brain** (Ollama / any localhost model) and **strips every network tool**, so ronin codes on a plane or in an air-gapped box with **zero egress**: nothing leaves the machine.
 - **📊 Eval-driven model bake-off**: `ronin bench -m anthropic,gemini,ollama:llama3.1` runs the **objective** eval battery (no LLM judge) across models and tells you the **cheapest model that clears your quality bar**. Pick a model with data, not vibes.
@@ -191,6 +192,7 @@ database_url = "postgres://readonly_user:...@host:5432/db"   # a read-only role
 | **`ronin review [--base main]`** | **AI code review of your diff: severity-tagged findings, read-only.** |
 | **`ronin fix "<command>"`** | **Autonomous fix-until-green: runs the command, edits + re-runs until it passes.** |
 | **`ronin consensus "<task>" -m a,b,c`** | **Multi-model panel: ask several models in parallel, then synthesize one cross-checked answer.** |
+| **`ronin orchestrate "<goal>" -r role=provider,...`** | **Decompose a goal into subtasks, run provider-agnostic sub-agents (parallel where independent), synthesize. `--write` isolates edits in git worktrees.** |
 | **`ronin bench -m a,b,c`** | **Eval-driven model bake-off: score models on the objective battery, recommend the cheapest that passes.** |
 | **`ronin --offline`** | **Zero-network mode: local brain (Ollama) + network tools stripped; nothing leaves the machine.** |
 | **`ronin briefing`** | **Founder ops briefing, auto-saved with week-over-week deltas.** |
