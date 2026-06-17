@@ -4903,6 +4903,89 @@ def _print_result(result: AgentResultRich, *, raw: bool) -> None:
     console.print(f"[dim]{meta}[/dim]")
 
 
+# ---------- explain-error (parse a trace, get cause + fix) ----------
+
+@app.command(name="explain-error")
+def explain_error(
+    trace: list[str] = typer.Argument(None, help="The error/stack trace. Omit to read piped stdin."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root the cited paths are relative to."),
+    context: int = typer.Option(3, "--context", "-C", help="Source lines of context around each cited line."),
+) -> None:
+    """Paste a stack trace, get a root-cause + fix sketch. Read-only.
+
+    Takes the trace as an argument or piped stdin (like ronin ask). Parses the
+    referenced files/lines (Python, Node, Go, Rust), pulls those source lines from
+    the repo as context, and asks the model for a plain-English cause + a concrete
+    fix. With no provider key it still prints the parsed frames + cited source.
+
+    Examples:
+      ronin explain-error "Traceback ... ValueError: bad"
+      pytest 2>&1 | ronin explain-error
+    """
+    from .explain_error import (
+        build_prompt,
+        extract_error_message,
+        format_frames,
+        gather_snippets,
+        parse_trace,
+    )
+
+    text = " ".join(trace) if trace else ""
+    # Pipe support mirrors `ronin ask`: fold piped stdin in as the trace.
+    if not sys.stdin.isatty():
+        try:
+            piped = sys.stdin.read().strip()
+        except Exception:  # noqa: BLE001
+            piped = ""
+        if piped:
+            text = f"{text}\n{piped}" if text else piped
+    if not text.strip():
+        console.print("[red]✗[/red] nothing to explain — give a trace or pipe input "
+                      "([dim]pytest 2>&1 | ronin explain-error[/dim]).")
+        raise typer.Exit(2)
+
+    frames = parse_trace(text)
+    error_message = extract_error_message(text)
+    snippets = gather_snippets(frames, root, context=context)
+
+    if error_message:
+        console.print(f"[bold red]error:[/bold red] {error_message}")
+    console.print("[bold]frames[/bold]")
+    console.print(format_frames(frames))
+    for s in snippets:
+        if s.found:
+            loc = f"{s.frame.file}:{s.frame.line}"
+            console.print(Panel(s.snippet, title=loc, border_style="#6b7089", padding=(0, 1)))
+
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print("[dim]no provider key — showing parsed frames + cited source only. "
+                      "Run [bold]ronin set-key[/bold] for a cause + fix.[/dim]")
+        return
+
+    prompt = build_prompt(error_message, snippets, text)
+    try:
+        from ronin_agent_patterns import Message
+
+        from .runner import build_single_provider
+        provider = build_single_provider(config)
+        with console.status("[dim] analyzing…[/dim]", spinner="dots"):
+            resp = provider.complete(
+                system="You are a senior engineer who diagnoses errors precisely. "
+                       "Give the root cause, then a concrete fix.",
+                messages=[Message(role="user", content=prompt)],
+                tools=[], max_tokens=600)
+        answer = (resp.text or "").strip()
+    except Exception as e:  # noqa: BLE001 — degrade to the offline view
+        console.print(f"[dim]model call failed ({e}); parsed frames + source shown above.[/dim]")
+        return
+
+    from rich.markdown import Markdown
+    console.print()
+    console.print(Panel(Markdown(answer) if answer else "[dim](no answer)[/dim]",
+                        title="cause + fix", border_style="green", padding=(1, 2)))
+
+
 # ---------- guard (intent / scope-creep gate) ----------
 
 @app.command()
