@@ -1308,6 +1308,54 @@ def recall(
     console.print(f"\n[dim]replay one with [bold]ronin replay <id>[/bold].[/dim]")
 
 
+# ---------- search (full-text index over past sessions) ----------
+
+@app.command()
+def search(
+    query: list[str] = typer.Argument(None, help="What to search your past sessions for."),
+    here: bool = typer.Option(False, "--here", help="Only this repo's sessions (default: all)."),
+    limit: int = typer.Option(8, "--limit", help="Max results."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo (with --here)."),
+    reindex_flag: bool = typer.Option(False, "--reindex", help="Rebuild the index, then exit."),
+) -> None:
+    """🔎 Full-text search your past sessions (SQLite FTS5) and show snippets.
+
+    Builds (incrementally) a local FTS index at ~/.ronin/sessions.db over every
+    archived session transcript and ranks matches with BM25. Use --here to scope
+    to this repo. `ronin replay <id>` plays a hit back in full. Offline; falls
+    back to a pure ranker if this SQLite build lacks FTS5.
+    """
+    from . import session_index
+
+    if reindex_flag:
+        n = session_index.reindex(root if here else None)
+        if session_index.fts5_available():
+            console.print(f"[green]✓[/green] indexed {n} session(s) into ~/.ronin/sessions.db.")
+        else:
+            console.print("[yellow]![/yellow] this SQLite build lacks FTS5; search uses the "
+                          "in-process ranker (no index).")
+        return
+
+    q = " ".join(query or []).strip()
+    if not q:
+        console.print("[red]✗[/red] give something to search for (or --reindex to rebuild the index).")
+        raise typer.Exit(2)
+
+    hits = session_index.search(q, root=root if here else None, limit=limit)
+    if not hits:
+        scope = "this repo's" if here else "any"
+        console.print(f"[dim]no {scope} sessions matched [bold]{q}[/bold].[/dim]")
+        return
+    engine = "FTS5" if session_index.fts5_available() else "ranker"
+    console.print(f"[#6b7089]{len(hits)} match(es) for [bold]{q}[/bold] [dim]({engine})[/dim]:[/#6b7089]")
+    for h in hits:
+        console.print(f"\n[cyan]{h.session_id[:14]}[/cyan] [dim]· score {h.score} ·[/dim] "
+                      f"[bold]{h.title[:60]}[/bold]")
+        if h.snippet:
+            console.print(f"  [#c0caf5]{h.snippet}[/#c0caf5]")
+    console.print(f"\n[dim]replay one with [bold]ronin replay <id>[/bold].[/dim]")
+
+
 # ---------- replay (session history) ----------
 
 @app.command()

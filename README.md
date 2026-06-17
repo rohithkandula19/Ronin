@@ -118,6 +118,14 @@ Plus, on the coding agent itself:
 - **🖥️ Background processes**: `run_background` a dev server / test-watcher, tail its logs, and keep working ("watch-and-fix"); **⏪ checkpoint & rewind** snapshots the whole workspace and rolls it back; **👁️ vision-in-the-loop** screenshots a UI and analyzes it so the agent can self-correct.
 - **🛡️ Built for free models**: tool calls survive near-miss argument names (auto-remapped), oversized tool results are capped, context compacts earlier off-Anthropic, clarifying questions (`ask_user`) head off wrong guesses, and per-provider keys mean switching providers never clobbers a key.
 
+### 🧠 Learning layer · ronin gets to know you
+
+Three local, offline stores that make ronin pick up where it left off. Nothing leaves the machine; no provider key is needed for any of them.
+
+- **Memory · durable facts about you.** `ronin memory add "I deploy with fly.io"` saves a fact to `~/.ronin/memory.json`; `ronin memory list` shows every fact with a handle, and `ronin memory forget <n|id|text>` drops one (`--all` clears all). These facts are **auto-injected into the agent's system prompt every run**, so a fresh `ronin` next week already knows your stack and conventions. The agent also saves facts itself via its `remember` tool.
+- **Skills · reusable procedures.** A skill is a named, parameterized recipe with `{placeholder}` slots. Learn one from a finished task (`ronin skills new cut-release --steps "1. bump {file}\n2. tag v{version}"`, or `--from-session <id>` to learn from a past transcript), then `ronin skills run cut-release file=pyproject.toml version=2.0` prints the filled-in steps. Saved skills are **offered to the agent each run** (it sees their names + params and can fetch the full steps with the `use_skill` tool). Stored as JSON under `~/.ronin/skills/`.
+- **Session search · find that past conversation.** Every session is archived; `ronin search "auth bug"` runs a **full-text search (SQLite FTS5, BM25-ranked)** over every stored transcript and returns the matching past sessions with snippets (`--here` scopes to this repo, `--reindex` rebuilds the index). The index is incremental (only changed sessions are re-indexed) and lives at `~/.ronin/sessions.db`; it falls back to an in-process ranker if this SQLite build lacks FTS5.
+
 ## Install
 
 ```bash
@@ -216,6 +224,7 @@ database_url = "postgres://readonly_user:...@host:5432/db"   # a read-only role
 | `ronin guard [--intent "<task>"]` | Scan the diff for debug/secret leftovers + scope creep. |
 | `ronin memory add "<fact>"` / `list` / `forget <n\|id\|text>` | Durable facts ronin remembers about you across sessions (`~/.ronin/memory.json`), auto-injected into the agent's context every run. `forget --all` clears everything. Offline. |
 | `ronin skills new <name> --steps "<procedure>"` / `list` / `show <name>` / `run <name> [k=v …]` / `forget <name>` | Reusable, parameterized procedures (`{placeholder}` slots) saved locally (`~/.ronin/skills/`). Learn one from a finished task (`--from-session <id>` or piped stdin), then `run` it to get the filled-in steps. Saved skills are offered to the agent each run and it can fetch one with the `use_skill` tool. Offline. |
+| `ronin search "<query>" [--here] [--reindex]` | Full-text search (SQLite FTS5, local) over every archived session transcript; returns matching past sessions with snippets, ranked by BM25. `--here` scopes to this repo, `--reindex` rebuilds the index (`~/.ronin/sessions.db`). Falls back to an in-process ranker if FTS5 is unavailable. Offline. |
 | `ronin version` | Print the version. |
 
 ## 🔒 Safety & security
