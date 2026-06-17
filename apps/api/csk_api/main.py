@@ -109,6 +109,12 @@ def make_app() -> FastAPI:
     def health() -> dict:
         return {"ok": True, "version": "0.0.1"}
 
+    # Read-only ronin dashboard: recent runs, the orchestrator subagent tree,
+    # faithfulness scores, memory, and skills — plus the single-page UI at "/".
+    # Served by `ronin ui` and mounted here so the gateway exposes it too.
+    from .dashboard_api import mount_dashboard
+    mount_dashboard(app)
+
     @app.post("/signup", response_model=SignupOut, status_code=201)
     def signup(body: SignupIn, session: Session = Depends(db_dep)) -> SignupOut:
         token = generate_api_token(settings.api_token_bytes)

@@ -1244,6 +1244,61 @@ def serve(
     uvicorn.run(app_obj, host=host, port=port, log_level="info")
 
 
+# ---------- ui (read-only dashboard) ----------
+
+def build_ui_app(root: Path | str = "."):
+    """A standalone FastAPI app serving only the read-only dashboard routes.
+
+    Reuses ``csk_api.dashboard_api`` (the same router the hosted gateway mounts)
+    so ``ronin ui`` and the SaaS API expose identical /api/* endpoints and the
+    same single-page UI at ``/``. The project-local stores are read from ``root``
+    via the ``RONIN_HOME`` env the dashboard honours. No DB, no provider, no keys.
+    """
+    import os as _os
+
+    from fastapi import FastAPI
+
+    from csk_api.dashboard_api import mount_dashboard
+
+    _os.environ.setdefault("RONIN_HOME", str(Path(root).resolve()))
+    app_obj = FastAPI(title="ronin dashboard", version="0.0.1")
+    return mount_dashboard(app_obj)
+
+
+@app.command()
+def ui(
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind address (localhost by default)."),
+    port: int = typer.Option(8765, "--port", help="Port to serve the dashboard on."),
+    root: Path = typer.Option(Path("."), "--root", help="Project whose .ronin/ stores to surface."),
+) -> None:
+    """🖥  Serve the read-only ronin dashboard on localhost.
+
+    A single self-contained web page showing your recent runs, the orchestrator
+    subagent tree for an orchestrated run, faithfulness score badges (green
+    grounded / red ungrounded), memory, and skills, read straight from the
+    on-disk .ronin/ stores. Offline: no keys, no external resources, no CDN.
+
+    Example:  ronin ui            then open http://127.0.0.1:8765/
+    """
+    try:
+        import uvicorn
+    except ImportError:
+        console.print("[red]✗[/red] uvicorn not installed. Run: [bold]uv pip install uvicorn[/bold]")
+        raise typer.Exit(2)
+
+    # Point the dashboard at this project's .ronin/ stores.
+    os.environ["RONIN_HOME"] = str(Path(root).resolve())
+    app_obj = build_ui_app(root)
+    console.print(Panel.fit(
+        f"[bold cyan]ronin ui[/bold cyan]\n"
+        f"http://{host}:{port}/            →   dashboard\n"
+        f"http://{host}:{port}/api/runs    →   recent runs (sessions + orchestrations)\n"
+        f"reading .ronin/ under: {Path(root).resolve()}",
+        title="ready", border_style="green",
+    ))
+    uvicorn.run(app_obj, host=host, port=port, log_level="warning")
+
+
 # ---------- export (session → markdown) ----------
 
 @app.command()
@@ -1861,6 +1916,20 @@ def orchestrate(
     if not outcome.plan_subtasks:
         console.print(f"[red]✗ orchestration failed:[/red] {outcome.error or 'no plan'}")
         raise typer.Exit(1)
+    # Persist the subagent tree so `ronin ui` can surface this real run.
+    try:
+        from .run_store import record_orchestration
+        record_orchestration(
+            goal,
+            success=outcome.success,
+            plan_subtasks=outcome.plan_subtasks,
+            subtask_results=outcome.subtask_results,
+            output=outcome.output,
+            error=outcome.error,
+            root=root,
+        )
+    except Exception:  # noqa: BLE001 — persistence must never break the command
+        pass
     for r in outcome.subtask_results:
         mark = "[green]✓[/green]" if r["success"] else "[red]✗[/red]"
         console.print(f"{mark} [bold]{r['subtask_id']}[/bold] [dim]({r['assignee']})[/dim]")
@@ -4440,6 +4509,22 @@ def agent(
     # for the user to accept or reject (the warning was already rendered by the
     # hook inside run_agent).
     outcome = getattr(result, "faithfulness", None)
+    if outcome is not None:
+        # Persist the score so `ronin ui` can surface this real grounding check.
+        try:
+            from .run_store import record_faithfulness
+            _r = outcome.report
+            _verdict = "abstain" if outcome.abstain else ("ungrounded" if outcome.ungrounded else "grounded")
+            record_faithfulness(
+                _r.score,
+                verdict=_verdict,
+                n_sources=_r.n_sources,
+                abstain=outcome.abstain,
+                answer=result.output or "",
+                hallucinated_symbols=list(_r.hallucinated_symbols),
+            )
+        except Exception:  # noqa: BLE001 — persistence must never break the command
+            pass
     if outcome is not None and outcome.should_gate:
         console.print(
             "[yellow]![/yellow] this answer is not well grounded in the sources the "
@@ -5658,6 +5743,22 @@ def faithfulness_check(
 
     source_paths = list(sources or [])
     outcome, missing = check(text, source_paths, mode=MODE_WARN)
+
+    # Persist the score so `ronin ui` can surface this real grounding check.
+    try:
+        from .run_store import record_faithfulness
+        _r = outcome.report
+        _verdict = "abstain" if outcome.abstain else ("ungrounded" if outcome.ungrounded else "grounded")
+        record_faithfulness(
+            _r.score,
+            verdict=_verdict,
+            n_sources=_r.n_sources,
+            abstain=outcome.abstain,
+            answer=text,
+            hallucinated_symbols=list(_r.hallucinated_symbols),
+        )
+    except Exception:  # noqa: BLE001 — persistence must never break the command
+        pass
 
     if json_out:
         sys.stdout.write(to_json(outcome, missing=missing) + "\n")

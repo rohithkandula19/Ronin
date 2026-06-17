@@ -126,6 +126,32 @@ Three local, offline stores that make ronin pick up where it left off. Nothing l
 - **Skills · reusable procedures.** A skill is a named, parameterized recipe with `{placeholder}` slots. Learn one from a finished task (`ronin skills new cut-release --steps "1. bump {file}\n2. tag v{version}"`, or `--from-session <id>` to learn from a past transcript), then `ronin skills run cut-release file=pyproject.toml version=2.0` prints the filled-in steps. Saved skills are **offered to the agent each run** (it sees their names + params and can fetch the full steps with the `use_skill` tool). Stored as JSON under `~/.ronin/skills/`.
 - **Session search · find that past conversation.** Every session is archived; `ronin search "auth bug"` runs a **full-text search (SQLite FTS5, BM25-ranked)** over every stored transcript and returns the matching past sessions with snippets (`--here` scopes to this repo, `--reindex` rebuilds the index). The index is incremental (only changed sessions are re-indexed) and lives at `~/.ronin/sessions.db`; it falls back to an in-process ranker if this SQLite build lacks FTS5.
 
+### 🖥 Dashboard · `ronin ui`
+
+`ronin ui` serves a read-only web dashboard on localhost that surfaces the data ronin already stores on disk. It is a single self-contained HTML page (vanilla JS, inline CSS, no external resource URLs, no CDN), so it works fully offline with no keys.
+
+What it shows:
+
+- **Recent runs** · the conversation sessions from `.ronin/sessions/` and the orchestrated runs from `.ronin/orchestrations/`, newest first. Click a run to open it.
+- **Subagent tree** · for an orchestrated run, the planner's decomposition plus every named sub-agent's result (assignee, dependencies, output, pass/fail), expandable from the run detail.
+- **Faithfulness badges** · recent grounding scores from `.ronin/faithfulness.jsonl`, color-coded green (grounded) / red (ungrounded) / amber (abstain), with a running total and mean score.
+- **Memory** · the durable user facts from `~/.ronin/memory.json`.
+- **Skills** · the learned procedures from `~/.ronin/skills/`, with their parameters and steps.
+
+When a store is empty it shows an honest empty state rather than fabricated data. The same routes are also mounted on the hosted gateway in `apps/api`.
+
+```bash
+ronin ui                                  # serve at http://127.0.0.1:8765/
+ronin ui --port 9000 --root /path/to/repo # pick a port and a project to surface
+
+# Or hit the JSON endpoints directly (curl note):
+curl -s http://127.0.0.1:8765/api/runs            # recent sessions + orchestrations
+curl -s http://127.0.0.1:8765/api/runs/<run-id>   # one run; orchestrations include the subagent tree
+curl -s http://127.0.0.1:8765/api/faithfulness    # recent grounding scores + summary
+curl -s http://127.0.0.1:8765/api/memory          # durable user facts
+curl -s http://127.0.0.1:8765/api/skills          # learned procedures
+```
+
 ## Install
 
 ```bash
@@ -209,6 +235,7 @@ database_url = "postgres://readonly_user:...@host:5432/db"   # a read-only role
 | `ronin tui` | Full-screen Textual UI: chat + live trace, F1 help. |
 | `ronin mcp add <name> <command>` | Register an MCP tool server (then `/mcp` lists them in-session). |
 | `ronin serve --port 8000` | Expose the agent as an HTTP API (`POST /ask`). |
+| **`ronin ui [--port 8765]`** | **Read-only web dashboard on localhost: recent runs, the orchestrator subagent tree, faithfulness score badges (green grounded / red ungrounded), memory, and skills, read straight from the on-disk `.ronin/` stores. One self-contained HTML page, no external resources, fully offline.** |
 | `ronin tools` / `ronin doctor [--check]` | List tools / health-check provider + auth + services (live ping). |
 | `ronin image` / `video` / `say` / `see` | Media: text-to-image, video, text-to-speech, vision. |
 | `ronin set-key [--provider X] [--model Y]` | Set the LLM API key (masked). In-session, use `/login`. |
