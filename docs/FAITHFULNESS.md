@@ -143,6 +143,74 @@ This composes with the rest of the hardening package: run the injection scanner
 on the input, the faithfulness harness on the output, and gate sensitive tools
 with the approval gate.
 
+## CLI wiring
+
+The harness is wired into the `ronin` CLI in three places (the wiring lives in
+`packages/cli/src/ronin_cli/faithfulness_hook.py`, a thin layer over the
+hardening core).
+
+### `ronin faithfulness check`
+
+Score a finished answer against the files it should be grounded in:
+
+```
+ronin faithfulness check "login calls make_token and returns a Session" --sources auth.py
+cat answer.txt | ronin faithfulness check -s a.py -s b.py --json
+```
+
+- `--sources / -s` (repeatable): the files the agent read.
+- `--json`: emit the full report (score, per-claim verdicts, hallucinated
+  symbols) as JSON.
+- `--strict`: exit non-zero so a script or CI can branch on the verdict.
+  Exit codes: `0` grounded, `1` ungrounded, `2` abstain.
+
+The answer can be an argument or piped on stdin. With no readable sources the
+harness abstains (it cannot ground anything against nothing).
+
+### `ronin agent --faithfulness`
+
+The autonomous agent loop (`ronin agent`) takes `--faithfulness off|warn|gate`:
+
+- `off` (default): the harness never runs; zero overhead.
+- `warn`: after the answer, the post-answer hook scores it against the agent's
+  trace and prints a non-blocking faithfulness panel (score, ungrounded claims,
+  hallucinated symbols).
+- `gate`: same as warn, and when the answer is ungrounded or the harness
+  abstains it is held for a y/N confirmation before the run is accepted (exit 3
+  if you reject it).
+
+The flag overrides the config setting for a single run.
+
+### Config setting
+
+The default mode is stored in `RoninConfig.faithfulness` and is settable:
+
+```
+ronin config --set faithfulness=warn
+```
+
+Allowed values are `off`, `warn`, and `gate`; an unknown value is rejected by
+`config set` and falls back to `off` if it somehow reaches the config loader.
+
+### Hook API (for embedders)
+
+`faithfulness_hook.py` exposes the wiring as plain functions so other surfaces
+can reuse it:
+
+- `evaluate_answer(answer, sources, *, mode)` / `evaluate_answer_from_trace(answer, trace, *, mode)`
+  -- the post-answer hook.
+- `evaluate_edit(new_code, sources, *, mode)` / `evaluate_edit_from_trace(...)`
+  -- the file-edit / write guard.
+- `mode_of(config)` -- resolve the mode from a config object.
+- `render(outcome, console)` -- print a Rich panel (and return the plain-text
+  summary).
+
+Each returns a `FaithfulnessOutcome` wrapping the `FaithfulnessReport` plus
+`ungrounded`, `abstain`, `should_warn`, and `should_gate` decisions. An abstain
+(too little evidence) is kept distinct from ungrounded (a real grounding
+problem), so a zero-source check reports abstain rather than flagging every
+symbol as hallucinated.
+
 ## Offline test strategy
 
 Every test runs with no provider, no keys, and no network.
@@ -161,8 +229,16 @@ Every test runs with no provider, no keys, and no network.
   answer off `sources_from_trace(result.trace)` -- one grounded run and one where
   the canned answer fabricates a function, which the harness flags.
 
-Run the harness tests:
+The CLI wiring has its own offline tests (no provider, no keys): the post-answer
+hook and edit guard in `packages/cli/tests/test_faithfulness_hook.py` (including
+two that drive the real `run_agent` loop through the `FakeProvider` so a stub
+that always reports "grounded" fails), and the `ronin faithfulness check`
+command plus the `config set faithfulness=...` path in
+`packages/cli/tests/test_faithfulness_cli.py`.
+
+Run the harness and wiring tests:
 
 ```
 uv run pytest packages/hardening/tests/test_faithfulness.py
+uv run pytest packages/cli/tests/test_faithfulness_hook.py packages/cli/tests/test_faithfulness_cli.py
 ```

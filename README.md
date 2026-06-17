@@ -208,6 +208,8 @@ database_url = "postgres://readonly_user:...@host:5432/db"   # a read-only role
 | `ronin stash [--no-ai]` / `stash list` / `stash pop [n]` | Git stash with an AI-summarized one-line label (offline fallback). |
 | `ronin undo-commit [--revert] [--force]` | Show the last commit, then soft-reset (default) or revert it (gated; refuses pushed HEAD). |
 | `ronin explain-error [<trace>]` | Parse a traceback (Python/Node/Go/Rust), cite the source lines, explain the cause + fix. Read-only. |
+| `ronin faithfulness check "<answer>" --sources a.py b.py` | Grounding harness: score an answer against the files it should be grounded in. Flags ungrounded claims + hallucinated code symbols, prints a 0..1 score, abstains when evidence is thin. `--json`, `--strict` (exit 1 ungrounded / 2 abstain). Offline. |
+| `ronin agent "<goal>" --faithfulness warn\|gate` | Run the autonomous agent with the grounding harness on its final answer: `warn` surfaces the score + ungrounded claims, `gate` holds an ungrounded answer for your confirmation. Default mode is the `faithfulness` config setting. |
 | `ronin radius [--run]` | Blast radius of your diff + the affected test modules. |
 | `ronin flake "<cmd>" [-n N]` | Run a test command N times; rank non-deterministic tests. |
 | `ronin guard [--intent "<task>"]` | Scan the diff for debug/secret leftovers + scope creep. |
@@ -219,6 +221,7 @@ ronin can write files and run commands, so safety is built into the core, not bo
 
 - **Gated mutations.** Every file write and shell command in the coding agent is held behind a **diff preview + your approval**: read operations run freely. **Plan mode** (`--plan`) is fully read-only.
 - **Prompt-injection scanning.** User input passes through an injection scanner (`packages/hardening`) before it reaches a tool-calling planner.
+- **Faithfulness / grounding harness.** The injection scanner guards the input; the faithfulness harness guards the output. After an agent answer (and on a proposed edit), it checks whether each claim is supported by the sources the agent actually read, flags references to functions / files / attributes that appear in nothing it opened, scores grounding 0..1, and **abstains** when the evidence is too thin to judge. Opt in with `--faithfulness warn|gate` or `config set faithfulness=...`; lexical and offline by default, so it runs with no provider. This is a faithfulness/grounding check in the standard sense (claim decomposition plus per-claim grounding), with a code specialization for hallucinated symbols; it does not claim novelty over that literature. See [docs/FAITHFULNESS.md](docs/FAITHFULNESS.md).
 - **Read-only data integrations.** The Stripe / Linear / Slack / Notion / Postgres MCP templates are read-only by default; the recommended Postgres setup uses a read-only DB role.
 - **Secrets discipline.** API keys are user-supplied and stored only in local `.ronin/` (gitignored), never committed (the repo is public). PII (emails, SSNs, cards, keys) is redacted from traces before anything leaves your process.
 - **Offline guarantee.** `ronin --offline` forces a local brain and removes every network-touching tool, a hard guarantee for air-gapped / privacy-sensitive work.
@@ -241,7 +244,7 @@ ronin is MIT-licensed and meant to be picked up by other people. A few notes if 
 | `agent-patterns` | ReAct, Planner-Executor, Multi-Agent Supervisor, Reflexion + a provider abstraction (streaming, 429 retry, MCP-style metadata) | 81 |
 | `eval-suite` | LLM-as-a-judge, golden datasets, drift detection, HTML reports | 11 |
 | `memory` | Short-term (rolling summary), long-term (pluggable vector store), user preferences | 11 |
-| `hardening` | Prompt-injection scanner, tool allowlist, approval gates, output validator, token budgets, tracing | 40 |
+| `hardening` | Prompt-injection scanner, faithfulness/grounding harness, tool allowlist, approval gates, output validator, token budgets, tracing | 60 |
 | `mcp-servers` | Read-only Postgres, Stripe, Linear, Slack, Notion, Tavily, GitHub templates | 67 |
 | `cli` | The `ronin` binary: agent loop, MCP client, web tools, subagents, eval, media | 1396 |
 | `deployment-templates` | Docker Compose, Modal, Vercel, Railway | - |
