@@ -743,6 +743,20 @@ def run_code_agent(
     _hooks = load_hooks(root)
     after_tool = build_after_tool(_hooks, root, console=console) if _hooks else None
 
+    # Faithfulness edit guard: score every proposed write/edit against the files
+    # the agent actually read. Off by default; opt in via config faithfulness=
+    # warn|gate (or --faithfulness on `csk code`, which sets it on the config).
+    # ``warn`` surfaces an ungrounded-edit score; ``gate`` HOLDS an ungrounded
+    # edit for the agent to revise, even under --yolo. Read-only / plan runs and
+    # sub-agents (read_only=True) have no writes to guard, so it is a no-op there.
+    from .code_faithfulness import EditGuard, wrap_after_tool, wrap_before_tool
+    from .faithfulness_hook import mode_of as _faith_mode_of
+    if not read_only:
+        _guard = EditGuard(mode=_faith_mode_of(config), config=config)
+        if _guard.active:
+            after_tool = wrap_after_tool(after_tool, _guard)
+            before_tool = wrap_before_tool(before_tool, _guard, console=console)
+
     task = expand_file_mentions(task, root, offline=config.offline)  # inline @path / @url refs
     # When we have real structured history (the REPL keeps it alive across turns),
     # seed the agent with the actual Message list and send just this turn's task —

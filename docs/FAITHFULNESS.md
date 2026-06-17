@@ -145,9 +145,10 @@ with the approval gate.
 
 ## CLI wiring
 
-The harness is wired into the `ronin` CLI in three places (the wiring lives in
-`packages/cli/src/ronin_cli/faithfulness_hook.py`, a thin layer over the
-hardening core).
+The harness is wired into the `ronin` CLI in four places. The mode-aware wiring
+lives in `packages/cli/src/ronin_cli/faithfulness_hook.py` (a thin layer over the
+hardening core); the coding-agent edit guard adds a small composition layer in
+`packages/cli/src/ronin_cli/code_faithfulness.py`.
 
 ### `ronin faithfulness check`
 
@@ -180,6 +181,33 @@ The autonomous agent loop (`ronin agent`) takes `--faithfulness off|warn|gate`:
   if you reject it).
 
 The flag overrides the config setting for a single run.
+
+### `ronin code` edit guard
+
+The interactive coding agent (`ronin code` / the default session) takes the same
+`--faithfulness off|warn|gate`, and it runs the harness on a different surface:
+every proposed file write, not the final answer. The wiring lives in
+`code_faithfulness.py` (`EditGuard` plus `wrap_before_tool` / `wrap_after_tool`),
+composed into `run_code_agent`:
+
+- As the agent works, each read-tool result (`read_file`, `search_files`,
+  `list_files`, `glob`, `repo_map`, ...) is collected as a `Source` - the
+  evidence the agent actually observed this turn.
+- When the agent proposes a `write_file`, `edit_file`, or `multi_edit`, the new
+  code is pulled from the tool arguments and scored with `evaluate_edit` against
+  everything read so far.
+- `warn`: the score is surfaced as a non-blocking panel and the normal approval
+  gate proceeds.
+- `gate`: an ungrounded edit (one referencing a symbol absent from every file
+  the agent opened) is **held** - `before_tool` returns reject-with-feedback, so
+  the agent is told which symbols are unsupported and must read the defining file
+  or revise. This hold stands even under `--full-access` / yolo, where the normal
+  approval gate would auto-approve.
+
+The guard never re-implements grounding (it reuses `evaluate_edit`) and never
+crashes a run: any internal error degrades to "no opinion" and the normal gate
+handles the write. Plan mode and read-only sub-agents have no writes to guard, so
+it is a no-op there.
 
 ### Config setting
 
@@ -232,8 +260,11 @@ Every test runs with no provider, no keys, and no network.
 The CLI wiring has its own offline tests (no provider, no keys): the post-answer
 hook and edit guard in `packages/cli/tests/test_faithfulness_hook.py` (including
 two that drive the real `run_agent` loop through the `FakeProvider` so a stub
-that always reports "grounded" fails), and the `ronin faithfulness check`
-command plus the `config set faithfulness=...` path in
+that always reports "grounded" fails), the coding-agent edit guard in
+`packages/cli/tests/test_code_faithfulness.py` (which drives the real
+`run_code_agent` loop through the `FakeProvider` and asserts an ungrounded write
+is held in `gate` mode while a grounded one lands), and the
+`ronin faithfulness check` command plus the `config set faithfulness=...` path in
 `packages/cli/tests/test_faithfulness_cli.py`.
 
 Run the harness and wiring tests:

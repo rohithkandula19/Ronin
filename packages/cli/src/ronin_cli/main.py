@@ -86,6 +86,12 @@ def _root(
         help="Snappier turns: ship only the core coding tools (smaller per-call "
              "payload → less latency + fewer rate-limit hits). Trades breadth for speed.",
     ),
+    faithfulness: str = typer.Option(
+        None, "--faithfulness",
+        help="Faithfulness edit guard: score every proposed write/edit against the "
+             "files the agent read. 'warn' surfaces an ungrounded-edit score; 'gate' "
+             "holds an ungrounded edit for revision (even under --full-access).",
+    ),
 ) -> None:
     if ctx.invoked_subcommand is not None:
         return
@@ -156,6 +162,16 @@ def _root(
     if fast:
         config = config.model_copy(update={"fast": True})
         console.print("[#6b7089]⚡ fast mode — core tools only, snappier turns[/#6b7089]")
+    if isinstance(faithfulness, str) and faithfulness.strip():
+        _fmode = faithfulness.strip().lower()
+        if _fmode in ("off", "warn", "gate"):
+            config = config.model_copy(update={"faithfulness": _fmode})
+            if _fmode != "off":
+                console.print(f"[#6b7089]🔎 faithfulness {_fmode} - edits scored against the "
+                              "files the agent read[/#6b7089]")
+        else:
+            console.print(f"[#e0af68]unknown --faithfulness mode {faithfulness!r}; "
+                          "use off|warn|gate[/#e0af68]")
 
     root = Path(".")
 
