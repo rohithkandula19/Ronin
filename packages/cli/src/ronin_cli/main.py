@@ -1244,6 +1244,77 @@ def serve(
     uvicorn.run(app_obj, host=host, port=port, log_level="info")
 
 
+# ---------- gateway (talk to ronin from anywhere) ----------
+
+@app.command()
+def gateway(
+    host: str = typer.Option("127.0.0.1", "--host"),
+    port: int = typer.Option(8787, "--port"),
+    token: str = typer.Option(
+        None, "--token",
+        help="Bearer token required on /message. Defaults to $RONIN_GATEWAY_TOKEN. "
+             "Omit both to run open (localhost / offline demos)."),
+    offline: bool = typer.Option(
+        False, "--offline", help="Run on a local brain only; no network, no API keys."),
+) -> None:
+    """💬 Talk to ronin from anywhere over a generic HTTP webhook.
+
+    Starts a small server with one endpoint:
+      POST /message  {"text": "...", "session_id": "..."}  ->  {"reply": "..."}
+
+    The webhook is generic — it needs ZERO external accounts; a plain curl can
+    drive it. Each session_id keeps its own conversation history. Pass --token
+    (or set RONIN_GATEWAY_TOKEN) to require an Authorization: Bearer header.
+
+    An OPTIONAL Telegram adapter mounts only when RONIN_GATEWAY_TELEGRAM=1 and
+    TELEGRAM_BOT_TOKEN are set; it is never required to run the generic webhook.
+
+    Example:
+      ronin gateway --offline
+      curl -s localhost:8787/message -H 'content-type: application/json' \\
+        -d '{"text": "how many active subscriptions do we have?", "session_id": "demo"}'
+    """
+    config = load_config()
+    if offline:
+        from .offline import apply_offline
+        config = apply_offline(config.model_copy(update={"offline": True}))
+        console.print("[dim]🔒 offline — local brain, nothing leaves this machine[/dim]")
+    elif not config.has_provider_auth():
+        console.print(f"[red]✗[/red] No credentials for provider [bold]{config.provider}[/bold]. "
+                      "Run [bold]ronin init[/bold] first, or pass [bold]--offline[/bold].")
+        raise typer.Exit(2)
+
+    try:
+        import uvicorn
+    except ImportError:
+        console.print("[red]✗[/red] uvicorn not installed. Run: [bold]uv pip install uvicorn[/bold]")
+        raise typer.Exit(2)
+
+    from .gateway import make_gateway_app
+
+    auth_token = token or os.environ.get("RONIN_GATEWAY_TOKEN") or None
+    app_obj = make_gateway_app(config, token=auth_token)
+
+    # OPTIONAL Telegram adapter — only when explicitly enabled via env.
+    from .gateway_telegram import mount_telegram, telegram_enabled
+
+    telegram_on = telegram_enabled()
+    if telegram_on:
+        mount_telegram(app_obj, token=os.environ["TELEGRAM_BOT_TOKEN"].strip())
+
+    auth_line = "[green]on[/green] (Authorization: Bearer …)" if auth_token else "[yellow]off[/yellow] (open)"
+    tg_line = "[green]on[/green] (/telegram/<token>)" if telegram_on else "off (optional)"
+    console.print(Panel.fit(
+        f"[bold cyan]ronin gateway[/bold cyan]\n"
+        f"GET  http://{host}:{port}/health    →   health check\n"
+        f"POST http://{host}:{port}/message   →   {{\"text\": \"...\", \"session_id\": \"...\"}}\n\n"
+        f"provider: {config.provider} · model: {config.resolved_model()}\n"
+        f"auth: {auth_line} · telegram: {tg_line}",
+        title="ready", border_style="green",
+    ))
+    uvicorn.run(app_obj, host=host, port=port, log_level="info")
+
+
 # ---------- export (session → markdown) ----------
 
 @app.command()

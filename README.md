@@ -139,12 +139,38 @@ ronin is one agent with several focused entry points beyond `code`:
 - **`ronin briefing`**: a founder ops briefing (revenue, churn, failed payments, urgent issues) aggregated from Stripe / Linear / Slack / Notion / Postgres via read-only MCP servers; auto-saved with week-over-week deltas, `--slack` to post.
 - **`ronin investigate "<symptom>"`**: root-cause a problem across your **business data AND your code** (e.g. "failed payments spiked the 9th → `stripe_webhook.py` changed in commit `a1b2c3`").
 - **`ronin image` / `ronin video` / `ronin say` / `ronin see`** · terminal-native media: text-to-image (free via Pollinations, shown inline), frames+ffmpeg video, OS text-to-speech, and vision Q&A on a local image.
+- **`ronin gateway`** · talk to ronin from anywhere over a **generic HTTP webhook**: `POST /message` with `{"text", "session_id"}` returns `{"reply"}`. Each `session_id` keeps its own conversation history, an optional `--token` adds bearer auth, and an **optional** env-gated Telegram adapter front-ends a real bot. The webhook needs **zero external accounts** -- a plain `curl` drives it, and `--offline` keeps it $0 with no egress. See **[the gateway section](#-ronin-gateway--talk-to-ronin-from-anywhere)**.
 
 ```bash
 ronin explain packages/cli                                       # explain a module + diagram
 ronin eval --model gpt-oss-120b                                  # objective score, any provider
 ronin image "a red panda hacking at night, neon, flat vector"    # free, no API key
 ```
+
+### 💬 `ronin gateway` · talk to ronin from anywhere
+
+`ronin gateway` starts a small FastAPI server with one generic endpoint so any
+client that can POST JSON can drive the agent. No Telegram, Slack, or any other
+account is required -- a plain `curl` is enough.
+
+```bash
+# Start the gateway (offline keeps it $0 with no network egress).
+ronin gateway --offline --port 8787
+
+# In another terminal, talk to it. session_id isolates conversation history.
+curl -s localhost:8787/message \
+  -H 'content-type: application/json' \
+  -d '{"text": "how many active subscriptions do we have?", "session_id": "demo"}'
+# -> {"reply": "...", "session_id": "demo", "success": true, ...}
+
+# Health probe.
+curl -s localhost:8787/health
+```
+
+- **Endpoints.** `POST /message` (`{text, session_id}` -> `{reply, session_id, success, iterations, usage, demo_mode, error}`) and `GET /health`.
+- **Auth (optional).** Pass `--token T` or set `RONIN_GATEWAY_TOKEN`; then every `/message` call must send `Authorization: Bearer T`. With no token the endpoint runs open (handy for localhost / offline demos). `/health` is never gated.
+- **Sessions are real.** Each `session_id` keeps its own short-term history in process memory, so a follow-up message sees the earlier turns. Bounded so a long-running gateway can't grow without bound.
+- **Telegram adapter (optional).** Off by default and **not** required for the generic webhook. Enable a real bot front-end by setting `RONIN_GATEWAY_TELEGRAM=1` and `TELEGRAM_BOT_TOKEN=<from @BotFather>`; the gateway then mounts `POST /telegram/<token>`, which you register once via Telegram's `setWebhook`. The outbound reply uses Telegram's `sendMessage` API. No live integration is claimed when the env flag is unset.
 
 ## 30-second quickstart (no real credentials)
 
@@ -201,6 +227,7 @@ database_url = "postgres://readonly_user:...@host:5432/db"   # a read-only role
 | `ronin tui` | Full-screen Textual UI: chat + live trace, F1 help. |
 | `ronin mcp add <name> <command>` | Register an MCP tool server (then `/mcp` lists them in-session). |
 | `ronin serve --port 8000` | Expose the agent as an HTTP API (`POST /ask`). |
+| **`ronin gateway [--token T] [--offline]`** | **Talk to ronin from anywhere: generic HTTP webhook (`POST /message` with `{text, session_id}` -> `{reply}`). Per-session history, optional bearer auth, optional env-gated Telegram adapter. Zero external accounts; a plain curl drives it.** |
 | `ronin tools` / `ronin doctor [--check]` | List tools / health-check provider + auth + services (live ping). |
 | `ronin image` / `video` / `say` / `see` | Media: text-to-image, video, text-to-speech, vision. |
 | `ronin set-key [--provider X] [--model Y]` | Set the LLM API key (masked). In-session, use `/login`. |
