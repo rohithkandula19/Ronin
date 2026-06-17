@@ -68,3 +68,19 @@ def open_issues(root: Path | str = ".", limit: int = 20) -> list[dict]:
     if proc.returncode != 0:
         return []
     return parse_issues(proc.stdout)
+
+
+def create_issue(title: str, body: str, root: Path | str = ".",
+                 labels: list[str] | None = None) -> str | None:
+    """Create a GitHub issue via `gh issue create`. Returns the issue URL `gh`
+    prints on success, or None on failure (missing gh / not a repo / network)."""
+    args = ["issue", "create", "--title", title, "--body", body]
+    for lbl in labels or []:
+        args += ["--label", lbl]
+    try:
+        proc = _gh(*args, root=root)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    return (proc.stdout or "").strip() or None

@@ -4645,15 +4645,67 @@ def docstring(
 
 # ---------- todo (TODO/FIXME board) ----------
 
+def _todo_to_issues(targets, *, root: Path, only: str, yes: bool) -> None:
+    """Draft (and optionally file) a GitHub issue per marker. Dry-run by default."""
+    from .gh_helper import create_issue, gh_available
+    from .todo import context_lines, marker_to_issue
+
+    wanted = {m.strip().upper() for m in only.split(",") if m.strip()} if only else None
+    picked = [t for t in targets if not wanted or t.marker.upper() in wanted]
+    if not picked:
+        console.print(f"[dim]no markers match --only {only}[/dim]")
+        return
+
+    drafts = []
+    for t in picked:
+        ctx: list[str] = []
+        src = Path(root) / t.file
+        try:
+            lines = src.read_text(encoding="utf-8", errors="ignore").splitlines()
+            ctx = context_lines(lines, t.line)
+        except OSError:
+            ctx = []
+        drafts.append(marker_to_issue(t.file, t.line, t.marker, t.text, context=ctx))
+
+    console.print(f"\n[#7aa2f7]drafting {len(drafts)} issue(s)[/#7aa2f7]"
+                  + (" [dim](dry-run — add --yes to file them)[/dim]" if not yes else ""))
+    for d in drafts:
+        console.print(f"  [#e0af68]• {d.title}[/#e0af68] [dim]({', '.join(d.labels)})[/dim]")
+
+    if not yes:
+        console.print("\n[dim]nothing filed. add [bold]--yes[/bold] to create these on GitHub.[/dim]")
+        return
+    if not gh_available():
+        console.print("\n[yellow]the GitHub CLI 'gh' isn't installed — printed drafts only.[/yellow] "
+                      "[dim]brew install gh && gh auth login[/dim]")
+        raise typer.Exit(2)
+    filed = 0
+    for d in drafts:
+        url = create_issue(d.title, d.body, root=root, labels=d.labels)
+        if url:
+            filed += 1
+            console.print(f"  [green]✓[/green] {url}")
+        else:
+            console.print(f"  [red]✗ failed:[/red] [dim]{d.title}[/dim]")
+    console.print(f"\n[bold]filed {filed}/{len(drafts)} issue(s).[/bold]")
+
+
 @app.command()
 def todo(
     execute: bool = typer.Option(False, "--execute", help="Work the TODOs autonomously (Nightshift)."),
+    issues: bool = typer.Option(False, "--issues", help="Draft a GitHub issue per marker (dry-run unless --yes)."),
+    only: str = typer.Option("", "--only", help="With --issues, limit to these markers (e.g. \"FIXME,HACK\")."),
+    yes: bool = typer.Option(False, "--yes", help="With --issues, actually file the issues via gh (no prompt)."),
     duel: str = typer.Option(None, "--duel", help="Red-team each patch with a rival provider."),
     budget: float = typer.Option(None, "--budget", help="USD spend cap."),
     root: Path = typer.Option(Path("."), "--root", help="Repo root."),
 ) -> None:
     """🗒  A board of every FIXME/TODO/HACK in your code; --execute works them
     autonomously (each in isolation, test-gated) into reviewable patches.
+
+    [bold]--issues[/bold] drafts a GitHub issue per marker (file:line + code
+    context) and prints them; add [bold]--yes[/bold] to actually file them via
+    [bold]gh[/bold]. Narrow with [bold]--only FIXME,HACK[/bold].
     """
     from .kaizen import find_targets
 
@@ -4669,6 +4721,10 @@ def todo(
     for t in targets[:25]:
         console.print(f"  [#e0af68]{t.marker:<6}[/#e0af68] [cyan]{t.file}:{t.line}[/cyan] "
                       f"[dim]{t.text.strip()[:55]}[/dim]")
+
+    if issues:
+        _todo_to_issues(targets, root=root, only=only, yes=yes)
+        return
     if not execute:
         console.print("\n[dim]add [bold]--execute[/bold] to resolve them autonomously "
                       "(reviewable patches via [bold]ronin patches[/bold]).[/dim]")

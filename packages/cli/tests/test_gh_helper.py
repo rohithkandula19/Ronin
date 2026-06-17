@@ -48,3 +48,30 @@ def test_pr_diff_returns_stdout_on_success(monkeypatch, tmp_path) -> None:
         stdout = "diff --git a/x b/x\n+hi"
     monkeypatch.setattr(gh_helper, "_gh", lambda *a, **k: P())
     assert "diff --git" in gh_helper.pr_diff(5, tmp_path)
+
+
+def test_create_issue_returns_url_and_passes_labels(monkeypatch, tmp_path) -> None:
+    captured: list[str] = []
+
+    class P:
+        returncode = 0
+        stdout = "https://github.com/o/r/issues/42\n"
+
+    def fake_gh(*args, **kwargs):
+        captured.extend(args)
+        return P()
+
+    monkeypatch.setattr(gh_helper, "_gh", fake_gh)
+    url = gh_helper.create_issue("title", "body", root=tmp_path, labels=["ronin", "fixme"])
+    assert url == "https://github.com/o/r/issues/42"
+    assert "issue" in captured and "create" in captured
+    # both labels are forwarded as --label flags
+    assert captured.count("--label") == 2 and "ronin" in captured and "fixme" in captured
+
+
+def test_create_issue_none_on_failure(monkeypatch, tmp_path) -> None:
+    class P:
+        returncode = 1
+        stdout = ""
+    monkeypatch.setattr(gh_helper, "_gh", lambda *a, **k: P())
+    assert gh_helper.create_issue("t", "b", root=tmp_path) is None

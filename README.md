@@ -397,6 +397,8 @@ database_url = "postgres://readonly_user:...@host:5432/db"   # a read-only role
 | `ronin radius [--run]` | Blast radius of your diff + the affected test modules. |
 | `ronin flake "<cmd>" [-n N]` | Run a test command N times; rank non-deterministic tests. |
 | `ronin guard [--intent "<task>"]` | Scan the diff for debug/secret leftovers + scope creep. |
+| `ronin scan [--staged] [--history]` | Scan for committed secrets — working tree, staged diff, or whole git history. Exits non-zero on a hit. |
+| `ronin todo [--issues] [--execute]` | Board of every FIXME/TODO/HACK; `--issues` drafts a GitHub issue per marker (dry-run; `--yes` files via gh), `--execute` resolves them autonomously. |
 | `ronin version` | Print the version. |
 
 ## 🔒 Safety & security
