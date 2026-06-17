@@ -52,6 +52,7 @@ jobs:
             packages/mcp-servers \
             packages/cli \
             apps/demo \
+            apps/api \
             -q
 
       - name: Smoke test ronin CLI
