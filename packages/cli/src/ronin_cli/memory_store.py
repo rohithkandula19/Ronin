@@ -12,6 +12,7 @@ when you want relevance). No vector DB, no extra deps.
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 
@@ -22,7 +23,11 @@ _INJECT_RECENT = 40
 
 
 def _memory_path() -> Path:
-    return Path.home() / ".ronin" / "memory.json"
+    """Location of the memory file. Honors ``RONIN_HOME`` (the same override
+    bushido and the run store use), defaulting to ``~/.ronin``."""
+    home = os.environ.get("RONIN_HOME")
+    base = Path(home) if home else Path.home() / ".ronin"
+    return base / "memory.json"
 
 
 def load_memories() -> list[dict]:
