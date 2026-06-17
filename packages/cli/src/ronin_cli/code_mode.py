@@ -1623,6 +1623,7 @@ def run_unified_session(
 
     from .media import build_media_tools, show_artifacts
     from .memory_store import build_remember_tool, memory_prompt_block
+    from .orchestrator import build_orchestrate_tool
     from .tools import build_tools
 
     undo_stack: list = []
@@ -1653,6 +1654,7 @@ def run_unified_session(
              + [build_task_tool(config, root),
                 build_parallel_task_tool(config, root),
                 build_isolated_task_tool(config, root),
+                build_orchestrate_tool(config, root),
                 build_remember_tool()])
     # cross-session memory: what ronin remembers about the user (loaded into the
     # system prompt; we no longer print a "🧠 remembered" banner at launch).

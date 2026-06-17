@@ -316,9 +316,17 @@ def _slash_agents(ctx: SlashCtx) -> str:
     grid.add_column()
     grid.add_row("task", "read-only sub-agent — explores the codebase and reports "
                          "back; the agent spawns it to scope big multi-part jobs")
+    grid.add_row("parallel_task", "fan out SEVERAL read-only sub-agents at once and "
+                                  "collect all their findings together")
+    grid.add_row("isolated_task", "MUTATING sub-agents, each in its own git worktree "
+                                  "in parallel — their edits can't collide")
+    grid.add_row("orchestrate", "decomposes a big goal into a plan of subagents "
+                                "(research + isolated edits), runs them, synthesizes one "
+                                "result; each can run on a different provider")
     console.print("[bold]sub-agents[/bold]")
     console.print(grid)
-    console.print("[dim]the agent delegates to these on its own; you don't call them directly[/dim]")
+    console.print("[dim]the agent delegates to these on its own; you don't call them directly. "
+                  "For a standalone run: [/dim][cyan]ronin orchestrate \"<goal>\" --roster anthropic,gemini[/cyan]")
     return "handled"
 
 
