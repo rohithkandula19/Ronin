@@ -14,6 +14,12 @@ SETTABLE: dict[str, tuple[str, str]] = {
     "route_strong": ("str", "strong blade for complex turns (provider:model)"),
     "budget": ("float", "session spend cap in USD (or '-' to clear)"),
     "sentinel": ("bool", "abstain-over-bluff mode (true/false)"),
+    "faithfulness": ("enum", "grounding harness mode (off/warn/gate)"),
+}
+
+# Allowed values for "enum"-kind settings.
+ENUM_CHOICES: dict[str, tuple[str, ...]] = {
+    "faithfulness": ("off", "warn", "gate"),
 }
 
 _TRUE = {"true", "1", "yes", "on", "y"}
@@ -31,6 +37,12 @@ def coerce_value(field: str, raw: str):
         raise BadSetting(f"unknown setting {field!r} — settable: {', '.join(sorted(SETTABLE))}")
     kind = SETTABLE[field][0]
     raw = raw.strip()
+    if kind == "enum":
+        choices = ENUM_CHOICES[field]
+        low = raw.lower()
+        if low not in choices:
+            raise BadSetting(f"{field}: expected one of {', '.join(choices)}, got {raw!r}")
+        return low
     if raw in ("-", "") and kind != "bool":
         return None
     if kind == "bool":

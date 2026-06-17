@@ -106,6 +106,15 @@ class RoninConfig(BaseModel):
     # access beyond the project root, auto-approve (no y/n gate), longer command
     # timeouts + bigger output caps. Powerful and unsandboxed; off by default.
     full_access: bool = False
+    # Faithfulness / grounding harness mode. After an agent answer (and on a
+    # proposed edit), the harness checks whether the output is grounded in the
+    # sources the agent actually read:
+    #   "off"  — never run the harness (default; zero overhead).
+    #   "warn" — run it and surface a faithfulness score + ungrounded claims /
+    #            hallucinated symbols as a non-blocking warning.
+    #   "gate" — run it and, when the answer is ungrounded or the harness
+    #            abstains, hold the answer / edit for confirmation.
+    faithfulness: str = "off"  # off | warn | gate
 
     anthropic_api_key: str | None = None
     openai_api_key: str | None = None  # legacy shared slot (openai/together/groq/…)
@@ -132,6 +141,17 @@ class RoninConfig(BaseModel):
         if isinstance(data, dict) and data.get("api_key") and not data.get("openai_api_key"):
             data = {**data, "openai_api_key": data["api_key"]}
         return data
+
+    @model_validator(mode="after")
+    def _normalize_faithfulness(self) -> "RoninConfig":
+        """Normalize and validate the faithfulness mode. An unknown value falls
+        back to ``"off"`` rather than crashing config load (a typo in the TOML
+        should not brick the CLI)."""
+        mode = (self.faithfulness or "off").strip().lower()
+        if mode not in ("off", "warn", "gate"):
+            mode = "off"
+        self.faithfulness = mode
+        return self
 
     def resolved_model(self) -> str:
         if self.model:

@@ -48,6 +48,9 @@ class AgentRunResult:
     error: str | None = None
     blocked: bool = False
     streamed: bool = False  # True if the answer already streamed to the console
+    # Post-answer faithfulness outcome (None unless the harness was run). Typed
+    # loosely to avoid importing the hook module at type-check time.
+    faithfulness: Any | None = None
 
 
 def _narrate(console: Console) -> Callable[[Step], None]:
@@ -104,11 +107,18 @@ def run_agent(
     console: Console | None = None,
     confirm: bool = False,
     max_iterations: int = 15,
+    faithfulness: str | None = None,
 ) -> AgentRunResult:
     """Run the autonomous agent loop toward ``goal``.
 
     Requires a real provider key — agent mode does not fall back to the offline
     demo brain (an autonomous multi-step loop is meaningless without a real LLM).
+
+    ``faithfulness`` overrides ``config.faithfulness`` for this run (``off`` /
+    ``warn`` / ``gate``). When not ``off``, the post-answer hook scores the
+    finished answer against the sources the agent actually read (its trace) and
+    attaches the outcome to the result; ``warn`` surfaces a non-blocking warning,
+    ``gate`` additionally asks for confirmation when the answer is ungrounded.
     """
     scan = InjectionScanner().scan(goal)
     if scan.flagged:
@@ -142,7 +152,8 @@ def run_agent(
     result = agent.run(goal, on_step=on_step, before_tool=before_tool, on_text=on_text)
     if renderer is not None:
         renderer.finish()
-    return AgentRunResult(
+
+    run_result = AgentRunResult(
         success=result.success,
         output=result.output,
         iterations=result.iterations,
@@ -151,6 +162,25 @@ def run_agent(
         error=result.error,
         streamed=bool(renderer and renderer.streamed_text),
     )
+
+    # Post-answer faithfulness hook: score the finished answer against the
+    # sources the agent actually read. Off by default; opt in via config or the
+    # --faithfulness flag. Never breaks the run if the harness errors.
+    from .faithfulness_hook import MODE_OFF, evaluate_answer_from_trace, mode_of, render
+
+    mode = (faithfulness or mode_of(config)).strip().lower()
+    if mode != MODE_OFF and result.output and result.output.strip():
+        try:
+            outcome = evaluate_answer_from_trace(
+                result.output, result.trace, mode=mode, config=config
+            )
+            run_result.faithfulness = outcome
+            if outcome.should_warn:
+                render(outcome, console)
+        except Exception:  # noqa: BLE001 - the hook must never crash a real run
+            pass
+
+    return run_result
 
 
 def has_real_key(config: RoninConfig) -> bool:

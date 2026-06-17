@@ -4319,15 +4319,28 @@ def agent(
     confirm: bool = typer.Option(False, "--confirm", help="Pause for y/N approval before each tool call (Cline-style)."),
     max_steps: int = typer.Option(15, "--max-steps", help="Iteration cap for the autonomous loop."),
     raw: bool = typer.Option(False, "--raw", help="Plain output."),
+    faithfulness: str = typer.Option(
+        None, "--faithfulness",
+        help="Grounding harness: off | warn | gate. Scores the answer against the "
+             "sources the agent read. Defaults to the config setting.",
+    ),
 ) -> None:
     """Autonomous multi-step agent: give it a goal, it chains tool calls until done.
 
     Unlike `ronin ask` (one-shot) and `ronin chat` (turn-by-turn), `agent` runs an
     autonomous loop, narrating each step live. With --confirm it pauses for your
     approval before every tool call.
+
+    --faithfulness off|warn|gate runs the grounding harness on the final answer:
+    warn surfaces a faithfulness score and any ungrounded claims / hallucinated
+    symbols; gate additionally holds an ungrounded answer for your confirmation.
     """
     config = load_config()
     from .agent_mode import has_real_key, run_agent
+
+    if faithfulness is not None and faithfulness.strip().lower() not in ("off", "warn", "gate"):
+        console.print("[red]✗[/red] --faithfulness must be one of: off, warn, gate.")
+        raise typer.Exit(2)
 
     if not has_real_key(config):
         console.print(
@@ -4339,7 +4352,11 @@ def agent(
     text = " ".join(goal)
     console.print(Panel.fit(f"[bold]Goal:[/bold] {text}", border_style="cyan", title="ronin agent"))
 
-    result = run_agent(config, text, console=console, confirm=confirm, max_iterations=max_steps)
+    fmode = faithfulness.strip().lower() if faithfulness is not None else None
+    result = run_agent(
+        config, text, console=console, confirm=confirm,
+        max_iterations=max_steps, faithfulness=fmode,
+    )
 
     console.print()
     if result.blocked:
@@ -4354,6 +4371,24 @@ def agent(
     if result.usage:
         meta += f" · in: {result.usage.get('input_tokens', 0)} · out: {result.usage.get('output_tokens', 0)}"
     console.print(f"[dim]{meta}[/dim]")
+
+    # Faithfulness gate: in gate mode, an ungrounded / abstaining answer is held
+    # for the user to accept or reject (the warning was already rendered by the
+    # hook inside run_agent).
+    outcome = getattr(result, "faithfulness", None)
+    if outcome is not None and outcome.should_gate:
+        console.print(
+            "[yellow]![/yellow] this answer is not well grounded in the sources the "
+            "agent read. Accept it anyway? [y/N] ", end="",
+        )
+        try:
+            ok = input().strip().lower() in ("y", "yes")
+        except (EOFError, KeyboardInterrupt):
+            ok = False
+        if not ok:
+            console.print("[red]✗[/red] answer held back as ungrounded.")
+            raise typer.Exit(3)
+
     if raw:
         sys.stdout.write(result.output + "\n")
 
@@ -5283,6 +5318,73 @@ def smell(
     console.print(f"\n[dim]{total} smell(s), {high} high-severity, across {len(targets)} file(s).[/dim]")
     if high > 0 or (strict and total > 0):
         raise typer.Exit(1)
+
+
+# ---------- faithfulness (grounding harness) ----------
+
+faithfulness_app = typer.Typer(
+    help="Grounding harness: is an answer supported by the sources it cites? "
+         "Decomposes claims, flags hallucinated code symbols, scores 0..1.",
+)
+app.add_typer(faithfulness_app, name="faithfulness")
+
+
+@faithfulness_app.command("check")
+def faithfulness_check(
+    answer: list[str] = typer.Argument(None, help="The answer to check. Omit to read piped stdin."),
+    sources: list[Path] = typer.Option(
+        None, "--sources", "-s",
+        help="Source files the answer should be grounded in (repeatable). "
+             "These are the files the agent read.",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit the full report as JSON."),
+    strict: bool = typer.Option(
+        False, "--strict",
+        help="Exit non-zero when the answer is ungrounded (1) or the harness "
+             "abstains (2). Useful in CI.",
+    ),
+) -> None:
+    """Score an ANSWER against the SOURCES it should be grounded in.
+
+    Reads each --sources file, decomposes the answer into atomic claims, grounds
+    each against the union of sources (content-word overlap plus exact code-symbol
+    presence), flags hallucinated symbols (functions / paths / attributes absent
+    from every source), and prints a calibrated 0..1 faithfulness score. The
+    harness abstains when the evidence is too thin to judge honestly.
+
+    Examples:
+      ronin faithfulness check "login calls make_token" --sources auth.py
+      cat answer.txt | ronin faithfulness check -s a.py -s b.py --json
+    """
+    from .faithfulness_cmd import check, exit_code, to_json
+    from .faithfulness_hook import MODE_WARN, render
+
+    text = " ".join(answer) if answer else ""
+    if not sys.stdin.isatty():
+        try:
+            piped = sys.stdin.read().strip()
+        except Exception:  # noqa: BLE001
+            piped = ""
+        if piped:
+            text = f"{text}\n{piped}" if text else piped
+    if not text.strip():
+        console.print("[red]✗[/red] nothing to check - give an answer or pipe input.")
+        raise typer.Exit(2)
+
+    source_paths = list(sources or [])
+    outcome, missing = check(text, source_paths, mode=MODE_WARN)
+
+    if json_out:
+        sys.stdout.write(to_json(outcome, missing=missing) + "\n")
+    else:
+        for m in missing:
+            console.print(f"[yellow]![/yellow] could not read source: [dim]{m}[/dim]")
+        render(outcome, console)
+
+    if strict:
+        code = exit_code(outcome)
+        if code:
+            raise typer.Exit(code)
 
 
 if __name__ == "__main__":  # pragma: no cover
