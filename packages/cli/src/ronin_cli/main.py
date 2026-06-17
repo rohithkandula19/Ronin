@@ -1382,6 +1382,112 @@ def pr(
     open_pr(console, root, config)
 
 
+# ---------- stash (AI-labelled git stash) ----------
+
+stash_app = typer.Typer(
+    help="Safe AI-labelled git stash: bare 'ronin stash' saves with an auto-summary; "
+         "'list' shows entries, 'pop [n]' restores.",
+    invoke_without_command=True,
+)
+app.add_typer(stash_app, name="stash")
+
+
+def _stash_drafter(config: RoninConfig):
+    """Return a drafter callable for git_stash.summarize_diff, or None when offline.
+
+    The callable wraps git_helper._draft (the configured provider). When there is no
+    provider auth we return None so summarize_diff uses its deterministic fallback.
+    """
+    if not config.has_provider_auth():
+        return None
+    from .git_helper import _draft
+
+    def _draft_label(system: str, prompt: str) -> str:
+        return _draft(config, system, prompt, max_tokens=80)
+
+    return _draft_label
+
+
+@stash_app.callback(invoke_without_command=True)
+def stash_default(
+    ctx: typer.Context,
+    no_ai: bool = typer.Option(False, "--no-ai", help="Use the offline heuristic label instead of the model."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """Bare ``ronin stash`` → save the working tree with an AI-summarized label."""
+    if ctx.invoked_subcommand is not None:
+        return  # a subcommand (list / pop) was given
+    from .git_helper import _git
+    from .git_stash import summarize_diff
+
+    if _git(root, "rev-parse", "--is-inside-work-tree").returncode != 0:
+        console.print("[yellow]not a git repository[/yellow]")
+        raise typer.Exit(2)
+    # Include untracked files in the diff so the summary reflects the full change set.
+    diff = _git(root, "diff", "HEAD").stdout
+    names = [n for n in _git(root, "diff", "HEAD", "--name-only").stdout.split() if n]
+    untracked = [n for n in _git(root, "ls-files", "--others", "--exclude-standard").stdout.split() if n]
+    names = names + untracked
+    if not _git(root, "status", "--porcelain").stdout.strip():
+        console.print("[dim]nothing to stash — working tree clean[/dim]")
+        return
+    diff_stat = _git(root, "diff", "HEAD", "--stat").stdout
+
+    config = load_config()
+    drafter = None if no_ai else _stash_drafter(config)
+    with console.status("[dim] summarizing changes…[/dim]", spinner="dots"):
+        label = summarize_diff(diff, diff_stat, names, drafter=drafter)
+
+    # -u stashes untracked files too, so the summary and the stash agree.
+    r = _git(root, "stash", "push", "-u", "-m", label)
+    if r.returncode == 0:
+        console.print(f"[green]✓ stashed[/green] [cyan]{label}[/cyan]")
+        console.print("[dim]restore with [bold]ronin stash pop[/bold][/dim]")
+    else:
+        console.print(f"[red]stash failed:[/red] {(r.stderr or r.stdout).strip()[:200]}")
+        raise typer.Exit(1)
+
+
+@stash_app.command("list")
+def stash_list(
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """List stash entries with their summaries."""
+    from .git_helper import _git
+    from .git_stash import format_stash_list, parse_stash_list
+
+    if _git(root, "rev-parse", "--is-inside-work-tree").returncode != 0:
+        console.print("[yellow]not a git repository[/yellow]")
+        raise typer.Exit(2)
+    entries = parse_stash_list(_git(root, "stash", "list").stdout)
+    if not entries:
+        console.print("[dim]no stashes.[/dim]")
+        return
+    console.print(format_stash_list(entries))
+
+
+@stash_app.command("pop")
+def stash_pop(
+    n: int = typer.Argument(0, help="Stash index to restore (default: 0, the most recent)."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """Restore (pop) a stash by index, default the most recent."""
+    from .git_helper import _git
+
+    if _git(root, "rev-parse", "--is-inside-work-tree").returncode != 0:
+        console.print("[yellow]not a git repository[/yellow]")
+        raise typer.Exit(2)
+    r = _git(root, "stash", "pop", f"stash@{{{n}}}")
+    if r.returncode == 0:
+        console.print(f"[green]✓ restored[/green] stash@{{{n}}}")
+        out = (r.stdout or "").strip()
+        if out:
+            console.print(f"[dim]{out[:300]}[/dim]")
+    else:
+        console.print(f"[red]pop failed:[/red] {(r.stderr or r.stdout).strip()[:200]}")
+        raise typer.Exit(1)
+
+
 # ---------- style (fine-tuning dataset from your sessions) ----------
 
 @app.command()
