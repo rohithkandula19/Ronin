@@ -1816,6 +1816,28 @@ def orchestrate(
     for r in outcome.subtask_results:
         mark = "[green]✓[/green]" if r["success"] else "[red]✗[/red]"
         console.print(f"{mark} [bold]{r['subtask_id']}[/bold] [dim]({r['assignee']})[/dim]")
+
+    # Archive the run so `ronin ui` can render its planner -> sub-agent tree and
+    # the faithfulness of the synthesized answer. Best-effort: a write failure
+    # must never sink the run the user just paid for.
+    try:
+        from .orchestrate import (
+            roster_labels,
+            score_final_faithfulness,
+        )
+        from .run_store import record_from_outcome, save_run
+
+        final_faith = score_final_faithfulness(outcome)
+        record = record_from_outcome(
+            goal,
+            outcome,
+            planner_label=role_label(config, None),
+            roster=roster_labels(config, roster),
+        )
+        record["faithfulness"] = final_faith
+        save_run(record)
+    except Exception:  # noqa: BLE001 — archiving is never allowed to break a run
+        pass
     console.print()
     from rich.markdown import Markdown
     console.print(Markdown(outcome.output or "_(no output)_"))
@@ -1825,6 +1847,51 @@ def orchestrate(
         _print_diff(console, outcome.diff)
     if not outcome.success:
         raise typer.Exit(1)
+
+
+# ---------- ui (web dashboard) ----------
+
+@app.command()
+def ui(
+    host: str = typer.Option("127.0.0.1", "--host", help="Interface to bind (localhost by default)."),
+    port: int = typer.Option(8765, "--port", "-p", help="Port to serve the dashboard on."),
+    open_browser: bool = typer.Option(True, "--open/--no-open", help="Open the dashboard in your browser."),
+) -> None:
+    """🖥  Serve the ronin web dashboard on localhost.
+
+    A single self-contained page (no external resources, works offline) that
+    shows your recent runs, an expandable orchestrator sub-agent tree (planner →
+    specialists by role/provider), faithfulness score badges on answers, your
+    memory, and your skills. Read-only: it surfaces the REAL data ronin already
+    wrote under .ronin/ — nothing leaves your machine.
+
+    Run `ronin orchestrate "..."` first to populate the run tree, then open the
+    dashboard with `ronin ui`.
+    """
+    try:
+        import uvicorn
+
+        from csk_api.main import app as dashboard_app  # noqa: F401
+    except ImportError as exc:
+        console.print(
+            "[red]✗[/red] the dashboard needs the api app + uvicorn. Install the "
+            "workspace dev deps:\n  [cyan]uv sync --all-packages[/cyan]\n"
+            f"[dim]({exc})[/dim]"
+        )
+        raise typer.Exit(2)
+
+    url = f"http://{host}:{port}/"
+    console.print(f"[#7aa2f7]🖥  ronin ui[/#7aa2f7] serving the dashboard at [bold]{url}[/bold]")
+    console.print("[dim]read-only · offline · ctrl-c to stop[/dim]")
+    if open_browser:
+        try:
+            import threading
+            import webbrowser
+
+            threading.Timer(0.8, lambda: webbrowser.open(url)).start()
+        except Exception:  # noqa: BLE001 — opening a browser must never block serving
+            pass
+    uvicorn.run(dashboard_app, host=host, port=port, log_level="warning")
 
 
 # ---------- nightshift (autonomous backlog) ----------
