@@ -4766,6 +4766,167 @@ def memory_forget(
     console.print(f"[green]✓[/green] forgot: {text}")
 
 
+# ---------- skills (reusable, parameterized procedures the agent can follow) ----------
+
+skills_app = typer.Typer(
+    help="Reusable, parameterized procedures ronin learns from a finished task. "
+         "Saved locally (~/.ronin/skills/) and offered to the agent each run. "
+         "new / list / show / run / forget.",
+    invoke_without_command=True,
+)
+app.add_typer(skills_app, name="skills")
+
+
+@skills_app.callback()
+def skills(ctx: typer.Context) -> None:
+    """Manage skills — named procedures with {placeholder} slots you fill at run
+    time. Bare `ronin skills` lists them; use the subcommands to create and run.
+    """
+    if ctx.invoked_subcommand is not None:
+        return
+    _list_skills_table()
+
+
+def _list_skills_table() -> None:
+    from .skills_store import list_skills
+    items = list_skills()
+    if not items:
+        console.print("[dim]no skills yet. Save one: "
+                      "[bold]ronin skills new ship-release --steps \"1. bump {file}\\n2. tag v{version}\"[/bold][/dim]")
+        return
+    from rich.table import Table
+    table = Table(title=f"🛠  {len(items)} skill(s)", box=box.ROUNDED)
+    table.add_column("name", style="#2dd4bf")
+    table.add_column("description")
+    table.add_column("params", style="#6b7089")
+    for s in items:
+        table.add_row(s.name, s.description or "[dim]—[/dim]", ", ".join(s.params) or "[dim]—[/dim]")
+    console.print(table)
+    console.print("[dim]show one: [bold]ronin skills show <name>[/bold] · "
+                  "run: [bold]ronin skills run <name> k=v …[/bold][/dim]")
+
+
+@skills_app.command("new")
+def skills_new(
+    name: str = typer.Argument(..., help="Short skill name, e.g. ship-release."),
+    steps: str = typer.Option(
+        None, "--steps", "-s",
+        help="The procedure. Use {placeholder} slots for the parts that vary. "
+             "Omit to read piped stdin.",
+    ),
+    description: str = typer.Option("", "--desc", "-d", help="One line: what this skill does."),
+    from_session: str = typer.Option(
+        None, "--from-session",
+        help="Learn the skill from a past session: use that session's transcript as the steps. "
+             "Pass a session id (see `ronin search`/`ronin replay --list`).",
+    ),
+    force: bool = typer.Option(False, "--force", help="Overwrite a skill with the same name."),
+) -> None:
+    """Create a reusable skill (a named, parameterized procedure).
+
+    Examples:
+      ronin skills new cut-release --steps "1. bump {file}\\n2. tag v{version}\\n3. push"
+      cat playbook.txt | ronin skills new deploy --desc "ship to prod"
+      ronin skills new fix-auth --from-session 20260617-101010-ab12cd
+    """
+    from .skills_store import extract_params, load_skill, normalize_name, save_skill
+
+    body = steps or ""
+    if from_session:
+        from .sessions import load_session
+        transcript = load_session(from_session)
+        if not transcript:
+            console.print(f"[red]✗[/red] no session [bold]{from_session}[/bold] found.")
+            raise typer.Exit(1)
+        body = "\n".join(transcript)
+    if not body and not sys.stdin.isatty():
+        try:
+            body = sys.stdin.read()
+        except Exception:  # noqa: BLE001
+            body = ""
+    if not body.strip():
+        console.print("[red]✗[/red] no steps given. Pass --steps, pipe stdin, or use --from-session.")
+        raise typer.Exit(2)
+
+    norm = normalize_name(name)
+    if load_skill(norm) is not None and not force:
+        console.print(f"[yellow]![/yellow] skill [bold]{norm}[/bold] already exists. Use --force to overwrite.")
+        raise typer.Exit(1)
+
+    skill = save_skill(norm, description, body, source=from_session or "cli", overwrite=True)
+    if skill is None:
+        console.print("[red]✗[/red] could not save (invalid name or empty steps).")
+        raise typer.Exit(2)
+    pinfo = f" Params: [#6b7089]{', '.join(skill.params)}[/#6b7089]." if skill.params else ""
+    console.print(f"[green]✓[/green] saved skill [bold]{skill.name}[/bold].{pinfo}")
+    console.print(f"[dim]run it: [bold]ronin skills run {skill.name}"
+                  f"{' ' + ' '.join(p + '=…' for p in skill.params) if skill.params else ''}[/bold][/dim]")
+
+
+@skills_app.command("list")
+def skills_list() -> None:
+    """List every saved skill (with its params)."""
+    _list_skills_table()
+
+
+@skills_app.command("show")
+def skills_show(
+    name: str = typer.Argument(..., help="Which skill to show."),
+) -> None:
+    """Show a skill's full steps and metadata."""
+    from .skills_store import load_skill
+    skill = load_skill(name)
+    if skill is None:
+        console.print(f"[red]✗[/red] no skill named [bold]{name}[/bold].")
+        raise typer.Exit(1)
+    from rich.panel import Panel
+    meta = []
+    if skill.description:
+        meta.append(f"[dim]{skill.description}[/dim]")
+    if skill.params:
+        meta.append(f"params: [#6b7089]{', '.join(skill.params)}[/#6b7089]")
+    head = "  ".join(meta)
+    body = (head + "\n\n" if head else "") + skill.steps
+    console.print(Panel(body, title=f"🛠  {skill.name}", border_style="#2dd4bf", padding=(1, 2)))
+
+
+@skills_app.command("run")
+def skills_run(
+    name: str = typer.Argument(..., help="Which skill to run."),
+    params: list[str] = typer.Argument(None, help="key=value params to fill the skill's {slots}."),
+) -> None:
+    """Render a skill: fill its {placeholder} slots with key=value params and
+    print the filled-in procedure. Missing params are reported, not blanked."""
+    from .skills_store import load_skill, parse_kv, render_skill
+    skill = load_skill(name)
+    if skill is None:
+        console.print(f"[red]✗[/red] no skill named [bold]{name}[/bold]. "
+                      f"See [bold]ronin skills list[/bold].")
+        raise typer.Exit(1)
+    kv = parse_kv(params or [])
+    rendered = render_skill(skill, kv)
+    from rich.panel import Panel
+    console.print(Panel(rendered.text, title=f"🛠  {skill.name}", border_style="#2dd4bf", padding=(1, 2)))
+    if rendered.missing:
+        console.print(f"[yellow]![/yellow] unfilled params: "
+                      f"[#6b7089]{', '.join(rendered.missing)}[/#6b7089]  "
+                      f"[dim](pass e.g. {rendered.missing[0]}=value)[/dim]")
+        raise typer.Exit(1)
+
+
+@skills_app.command("forget")
+def skills_forget(
+    name: str = typer.Argument(..., help="Which skill to delete."),
+) -> None:
+    """Delete a saved skill."""
+    from .skills_store import forget_skill
+    if forget_skill(name):
+        console.print(f"[green]✓[/green] forgot skill [bold]{name}[/bold].")
+    else:
+        console.print(f"[dim]no skill named [bold]{name}[/bold].[/dim]")
+        raise typer.Exit(1)
+
+
 @app.command()
 def panda(
     activity: str = typer.Argument(None, help="dancing | running | playing | sleeping (default: all)"),

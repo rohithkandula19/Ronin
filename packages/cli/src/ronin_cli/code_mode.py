@@ -1661,16 +1661,19 @@ def run_unified_session(
     from .vision_tools import build_vision_tools
     # NB: web tools (web_search/fetch_url) are now built into the code agent
     # itself (run_code_agent), so they're intentionally NOT added here again.
+    from .skills_store import build_skill_tools, skills_prompt_block
+
     extra = (media_tools + data_tools + mcp_tools + plugin_tools
              + build_background_tools(root) + build_checkpoint_tools(root)
              + build_vision_tools(config, root) + build_semantic_tools(config, root)
+             + build_skill_tools()
              + [build_task_tool(config, root),
                 build_parallel_task_tool(config, root),
                 build_isolated_task_tool(config, root),
                 build_remember_tool()])
-    # cross-session memory: what ronin remembers about the user (loaded into the
-    # system prompt; we no longer print a "🧠 remembered" banner at launch).
-    mem_block = memory_prompt_block()
+    # cross-session memory: what ronin remembers about the user, plus the skills
+    # (learned procedures) it can follow — both loaded into the system prompt.
+    mem_block = memory_prompt_block() + skills_prompt_block()
 
     resumed = " · resumed" if (continue_session and transcript) else ""
     _welcome(console, config, root, yolo,
