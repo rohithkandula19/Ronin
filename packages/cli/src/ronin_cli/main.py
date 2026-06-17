@@ -527,6 +527,67 @@ def dojo(
 
 
 @app.command()
+def orchestrate(
+    goal: str = typer.Argument(..., help="The goal to decompose into subagents."),
+    roster: Optional[str] = typer.Option(
+        None, "--roster", "-r",
+        help="Comma-separated provider[:model] specs assigned round-robin to "
+             "subtasks, e.g. 'anthropic,gemini,cerebras:gpt-oss-120b'. Omit to run "
+             "every subagent on your current provider.",
+    ),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root for the subagents."),
+    apply: bool = typer.Option(
+        False, "--apply", help="After synthesis, apply each edit subagent's isolated diff."),
+) -> None:
+    """🪖 Decompose ONE goal into a plan of subtasks, run each as its own subagent
+    (research subagents explore read-only; edit subagents change files isolated in
+    their own git worktree, in parallel where independent), then synthesize one
+    result. With --roster, each subagent runs on a different provider/model.
+
+    Complements consensus (same question, N models), dojo (same change, N models
+    compete), and swarm (fixed architect/implementer/reviewer): the orchestrator
+    runs DIFFERENT subtasks, each on its own backend, then fuses them.
+    """
+    from .orchestrator import parse_roster, render_result, run_orchestrator
+
+    config = load_config()
+    specs = parse_roster(roster)
+    if specs:
+        console.print(f"[dim]🪖 orchestrating with roster: {', '.join(specs)}…[/dim]")
+    else:
+        console.print(f"[dim]🪖 orchestrating on {config.provider}:{config.resolved_model()}…[/dim]")
+
+    def on_event(name: str, data: dict) -> None:
+        if name == "plan":
+            console.print(f"[dim]  planned {len(data['subtasks'])} subtask(s)[/dim]")
+        elif name == "level":
+            console.print(f"[dim]  level {data['index']}: {', '.join(data['ids'])}[/dim]")
+        elif name == "subtask_done":
+            mark = "[green]✓[/green]" if data["ok"] else "[red]✗[/red]"
+            console.print(f"  {mark} [cyan]{data['id']}[/cyan] [dim]{data['label']} ({data['kind']})[/dim]")
+
+    try:
+        with console.status("[dim] planning + running subagents…[/dim]", spinner="dots"):
+            result = run_orchestrator(config, goal, roster=specs, root=root, on_event=on_event)
+    except ValueError as e:
+        console.print(f"[yellow]{e}[/yellow]")
+        raise typer.Exit(2)
+
+    console.print()
+    render_result(console, result)
+
+    if apply and result.edits:
+        from .kaizen import _apply_diff
+        for r in result.edits:
+            if not Confirm.ask(f"[bold]apply diff from `{r.id}`?[/bold]", default=False):
+                console.print(f"[dim]skipped {r.id}[/dim]")
+                continue
+            ok = _apply_diff(Path(root).resolve(), r.diff)
+            console.print(f"[green]✓ applied {r.id}[/green]" if ok
+                          else f"[red]could not apply {r.id} cleanly[/red]")
+
+
+@app.command()
 def duel(
     against: str = typer.Option(
         ..., "--against", "-a",
