@@ -252,6 +252,13 @@ add it. Messages go through the read-only ask path only: no edits, no shell, no
 `--full-access`, and no arbitrary command path. See
 [docs/TELEGRAM.md](docs/TELEGRAM.md).
 
+From the same chat you can also set reminders, daily briefings, and page
+watches, handled on the bot's existing poll tick (no extra daemon). Examples:
+`remind me at 6pm to call mom`, `watch https://example.com for price`,
+`list watches`, `cancel watch 1`. A page watch fetches the url on a throttled
+interval, hashes the watched slice (the whole page, or only lines containing your
+keyword), and pings you when it changes.
+
 ## 30-second quickstart (no real credentials)
 
 ```bash
@@ -298,6 +305,7 @@ database_url = "postgres://readonly_user:...@host:5432/db"   # a read-only role
 | **`ronin review [--base main]`** | **AI code review of your diff: severity-tagged findings, read-only.** |
 | **`ronin fix "<command>"`** | **Autonomous fix-until-green: runs the command, edits + re-runs until it passes.** |
 | **`ronin book "<request>"`** | **Prepare-and-confirm a booking (flight, hotel, restaurant, ticket): researches options into a summary (option, price, link, details), optionally pre-fills a form in the browser up to the payment step, then STOPS. It never pays. You confirm and pay yourself. The browser is an optional extra (`pip install 'ronin-cli[browser]'`); without it you get search + a prepared summary + manual steps.** |
+| **`ronin research "<question>"`** | **Search the web and answer, with sources: runs the read-only agent with the keyless web tools (web_search + fetch_url). Degrades to a raw web search if no model is configured. Free, no key.** |
 | **`ronin consensus "<task>" -m a,b,c`** | **Multi-model panel: ask several models in parallel, then synthesize one cross-checked answer.** |
 | **`ronin orchestrate "<goal>" -r role=provider,...`** | **Decompose a goal into subtasks, run provider-agnostic sub-agents (parallel where independent), synthesize. `--write` isolates edits in git worktrees.** |
 | **`ronin bench -m a,b,c`** | **Eval-driven model bake-off: score models on the objective battery, recommend the cheapest that passes.** |

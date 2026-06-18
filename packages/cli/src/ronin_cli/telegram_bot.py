@@ -227,6 +227,9 @@ class TelegramBot:
     briefing_fn: Callable[[str], str] | None = None
     # injected httpx client (tests pass a mock); None = build one lazily.
     http: Any | None = None
+    # Optional: fetch(url) -> readable page text, for page watches. None wires the
+    # default (web_tools.fetch_url) lazily. Injected so watch tests stay offline.
+    fetch_fn: Callable[[str], str] | None = None
     _offset: int | None = None
 
     # ---- HTTP plumbing -------------------------------------------------
@@ -357,6 +360,12 @@ class TelegramBot:
         if self._handle_reminder(chat_id, text):
             return
 
+        # 3b) Page-watch requests ("watch <url> ...", "list watches", "cancel
+        #     watch N") are likewise cheap and deterministic; handle them here so
+        #     they never cost a model call. Non-watch messages fall through.
+        if self._handle_watch(chat_id, text):
+            return
+
         # 4) Allowed: run the SAME ask path and send the answer back. Before the
         #    agent starts, send a single "working..." status message and capture
         #    its id, then hand the agent a progress() that EDITS that one message
@@ -457,6 +466,98 @@ class TelegramBot:
                 return f"briefing (agent unavailable): {reminder.text}"
         return f"reminder: {reminder.text}"
 
+    # ---- page watches --------------------------------------------------
+
+    def _fetch(self, url: str) -> str:
+        """Fetch a page's readable text for a watch.
+
+        Uses the injected ``fetch_fn`` when present (tests pass a stub); otherwise
+        the keyless ``web_tools.fetch_url``, imported lazily so this module stays
+        light and offline until a watch actually fires.
+        """
+        if self.fetch_fn is not None:
+            return self.fetch_fn(url)
+        from .web_tools import fetch_url
+
+        return fetch_url(url)
+
+    def _handle_watch(self, chat_id: int, text: str) -> bool:
+        """If ``text`` is a page-watch request, act on it and return True.
+
+        Recognizes "watch <url> [for <keyword>]", "list watches", and "cancel
+        watch N". A non-watch message returns False so the caller falls through to
+        the normal agent path. Parsing is stdlib-only and lives in
+        ``page_watch.py``; it is imported lazily to keep this module light.
+        """
+        from . import page_watch as pw
+
+        parsed = pw.parse_watch(text)
+        if parsed is None or parsed.kind is None:
+            return False
+
+        if parsed.kind == "error":
+            self.send_message(chat_id, parsed.error or "give me a url to watch.")
+            return True
+
+        if parsed.kind == "list":
+            self.send_message(chat_id, pw.list_text(pw.list_watches(chat_id)))
+            return True
+
+        if parsed.kind == "cancel":
+            removed = pw.remove_watch(parsed.cancel_id or -1)
+            if removed:
+                self.send_message(chat_id, f"cancelled watch #{parsed.cancel_id}.")
+            else:
+                self.send_message(chat_id, f"no watch #{parsed.cancel_id} to cancel.")
+            return True
+
+        if parsed.kind == "add" and parsed.url:
+            watch = pw.add_watch(parsed.url, chat_id, keyword=parsed.keyword)
+            self.send_message(chat_id, pw.confirm_text(watch))
+            return True
+
+        return False
+
+    def fire_due_watches(self, now_epoch: float | None = None) -> int:
+        """Re-check every watch whose throttle window has elapsed and ping the
+        owner on a change. Returns the count of CHANGES sent. Called each poll
+        cycle, so no separate daemon is needed.
+
+        For each due watch we fetch the page, hash the watched slice, and compare
+        to the stored hash. On a change we message the owner and store the new
+        hash; the first successful check just records a baseline. Every watch's
+        check time is advanced regardless of outcome so a flaky fetch does not
+        make it re-check on every tick. Fetch/send errors never abort the loop.
+        """
+        from . import page_watch as pw
+
+        if now_epoch is None:
+            import time
+
+            now_epoch = time.time()
+
+        changed = 0
+        for watch in pw.due_watches(pw.load_watches(), now_epoch):
+            try:
+                result = pw.check_watch(watch, self._fetch)
+            except Exception:  # noqa: BLE001 - one bad check must not stop the rest
+                logger.warning("watch #%s check failed", watch.id, exc_info=True)
+                pw.update_watch(watch.id, last_hash=watch.last_hash, checked_at=now_epoch)
+                continue
+
+            if result.changed:
+                try:
+                    self.send_message(watch.chat_id, pw.change_text(watch))
+                    changed += 1
+                except Exception:  # noqa: BLE001 - a bad send must not stop the rest
+                    logger.warning("failed to send watch #%s alert", watch.id, exc_info=True)
+
+            # Record the new baseline only when the fetch produced a snapshot;
+            # otherwise keep the old hash so a transient failure is not a change.
+            new_hash = result.new_hash if result.fetched else watch.last_hash
+            pw.update_watch(watch.id, last_hash=new_hash, checked_at=now_epoch)
+        return changed
+
     def _send_status(self, chat_id: int) -> int | None:
         """Send the initial live-status message; return its id (None on failure).
 
@@ -541,10 +642,18 @@ class TelegramBot:
         updates = self._get_updates()
         for update in updates:
             self.handle_update(update)
+        # One due-checking pass per tick drives BOTH scheduled features: due
+        # reminders and due page watches. They share this single loop so there is
+        # never a second competing daemon. Each is guarded so one failing feature
+        # never stops the other or the message handling.
         try:
             self.fire_due_reminders()
         except Exception:  # noqa: BLE001 - reminders must never break the poll loop
             logger.warning("firing due reminders failed", exc_info=True)
+        try:
+            self.fire_due_watches()
+        except Exception:  # noqa: BLE001 - watches must never break the poll loop
+            logger.warning("firing due watches failed", exc_info=True)
         return len(updates)
 
     def run_forever(self, *, on_error_sleep: float = 3.0) -> None:

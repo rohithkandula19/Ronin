@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+**Web research and page watches** — both free and keyless, both offline-tested.
+
+### Added — web research
+- **`ronin research "<question>"`** — search the web and answer, with sources. Runs the read-only agent with the keyless web tools (`web_search` + `fetch_url`, DuckDuckGo HTML, no API key) so it searches, reads the most relevant pages, and answers. If no model is configured it degrades to a raw web search so you still get links. The agent run is injectable, so the command is unit-tested with no model and no network.
+
+### Added — page watches
+- **Watch a page from Telegram** — `watch <url>`, `watch <url> for <keyword>`, `list watches`, `cancel watch N`. Stored at `~/.ronin/watches.json`. The bot re-checks each watch on its existing poll tick (throttled, default every 15 minutes), hashes the watched slice (the whole readable page, or only lines containing the keyword), and pings you when it changes. The first check records a baseline (no false ping); a fetch failure keeps the old snapshot. Reminders and watches share ONE due-checking loop — no second daemon. Hashing, parsing, and the throttle are pure and unit-tested; the fetch and the Telegram send are injected so the tests are fully offline.
+
 ## [0.58.0] — 2026-06-04
 
 **Quality gates** — four objective, CI-friendly checks aimed at the code you're about to ship, in the same "outcome over LLM-judge" spirit as `eval`/`kaizen`. Each ships with a pure, unit-tested core. **1002 tests.**

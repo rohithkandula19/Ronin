@@ -3122,6 +3122,26 @@ def book(
     console.print("\n[bold #e0af68]ronin never pays. You confirm and pay yourself.[/bold #e0af68]")
 
 
+# ---------- research (search the web and answer) ----------
+
+@app.command()
+def research(
+    question: str = typer.Argument(..., help='What to look up, e.g. "who won the 2022 world cup".'),
+) -> None:
+    """🔎 Search the web and answer a question, with sources. Free, no key.
+
+    Runs the read-only agent with the keyless web tools (web_search + fetch_url):
+    it searches the web, reads the most relevant pages, and answers. If the agent
+    stack is unavailable it degrades to a raw web search so you still get links.
+    """
+    from .research import run_research
+
+    config = load_config()
+    root = Path.home()
+    answer = run_research(question, config=config, root=root)
+    console.print(answer)
+
+
 # ---------- uuid (generate / inspect) ----------
 
 @app.command()
