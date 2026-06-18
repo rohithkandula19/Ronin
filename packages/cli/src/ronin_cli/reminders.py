@@ -442,12 +442,15 @@ def _parse_at_time(low: str, now: datetime) -> datetime | None:
         # bare am/pm time without "at" (e.g. "every day 8am")
         m = re.search(r"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b", low)
     if m:
-        hour = int(m.group(1)) % 12
-        if m.group(3) == "pm":
-            hour += 12
+        raw_hour = int(m.group(1))
         minute = int(m.group(2) or 0)
-        if hour > 23 or minute > 59:
+        # Validate the RAW 12-hour value before normalizing. A 12-hour clock
+        # only has hours 1..12; the "% 12" normalization below would otherwise
+        # silently fold out-of-range values (25pm -> 13:00, 13am -> 01:00) into
+        # a valid-looking but wrong time instead of asking the user to rephrase.
+        if raw_hour < 1 or raw_hour > 12 or minute > 59:
             return None
+        hour = (raw_hour % 12) + (12 if m.group(3) == "pm" else 0)
         return _next_occurrence(now, hour, minute)
 
     # 24-hour: at 18:00, at 08:30 (require a colon so we don't grab "in 30").

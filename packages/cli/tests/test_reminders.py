@@ -202,6 +202,46 @@ def test_parse_unparseable_time_asks_to_rephrase() -> None:
     assert p.error and "rephrase" in p.error.lower() or "try" in p.error.lower()
 
 
+@pytest.mark.parametrize(
+    "phrase",
+    [
+        "remind me at 25pm to x",
+        "remind me at 13am to wake up",
+        "remind me at 99pm to x",
+        "remind me at 0am to x",
+        "remind me at 0pm to x",
+        "remind me at 6:99pm to x",
+    ],
+)
+def test_invalid_12h_clock_value_errors_not_silent_wrong_time(phrase: str) -> None:
+    # A 12-hour clock only has hours 1..12 and minutes 0..59. Out-of-range
+    # values like 25pm/13am must NOT be silently normalized into a valid-looking
+    # but wrong time (25pm -> 13:00); the user gets a rephrase hint instead.
+    p = rem.parse_reminder(phrase, now=NOW)
+    assert p.kind == "error"
+    assert p.error and "rephrase" in p.error.lower() or "try" in p.error.lower()
+
+
+@pytest.mark.parametrize(
+    "phrase,hour,minute",
+    [
+        ("remind me at 6pm to x", 18, 0),
+        ("remind me at 12am to x", 0, 0),
+        ("remind me at 12pm to x", 12, 0),
+        ("remind me at 8am to x", 8, 0),
+        ("remind me at 11:30pm to x", 23, 30),
+    ],
+)
+def test_valid_12h_clock_values_still_parse(phrase: str, hour: int, minute: int) -> None:
+    # The validation guard must not break the legal 1..12 am/pm cases.
+    p = rem.parse_reminder(phrase, now=NOW)
+    assert p.kind == "add"
+    expect = NOW.replace(hour=hour, minute=minute)
+    if expect.timestamp() <= NOW.timestamp():
+        expect = expect.replace(day=NOW.day + 1)
+    assert p.when_epoch == pytest.approx(expect.timestamp())
+
+
 def test_non_reminder_message_returns_none() -> None:
     assert rem.parse_reminder("what files are in my repo?", now=NOW) is None
     assert rem.parse_reminder("", now=NOW) is None
