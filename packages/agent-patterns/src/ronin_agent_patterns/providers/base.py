@@ -49,11 +49,15 @@ class StreamEvent(BaseModel):
     """One event from a provider's token stream.
 
     - ``type="text"``  → ``text`` carries a text delta (a chunk of the answer).
+    - ``type="reset"`` → discard any partial text already streamed this turn; a
+      retry (e.g. after a mid-stream rate-limit) is about to re-stream the answer
+      from the start, so the consumer must clear what it has shown so far to
+      avoid printing the answer twice.
     - ``type="done"``  → ``response`` carries the fully-assembled ``LLMResponse``
       (text + tool_calls + usage), which the agent loop uses to continue.
     """
 
-    type: Literal["text", "done"]
+    type: Literal["text", "reset", "done"]
     text: str = ""
     response: LLMResponse | None = None
 

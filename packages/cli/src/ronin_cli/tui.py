@@ -213,7 +213,8 @@ class RoninApp(App):
                 result = run_code_agent(
                     self.config, question, root=self.root, console=None, yolo=False,
                     history_prefix=prefix, extra_tools=extra, include_image_tool=False,
-                    on_text_cb=self._on_text, on_step_cb=self._on_step, gate_cb=self._gate,
+                    on_text_cb=self._on_text, on_reset_cb=self._on_reset,
+                    on_step_cb=self._on_step, gate_cb=self._gate,
                 )
             except Exception as exc:  # noqa: BLE001
                 self.call_from_thread(self._show_error, str(exc))
@@ -225,6 +226,11 @@ class RoninApp(App):
     # ---- bridges (called from the worker thread) ----
     def _on_text(self, delta: str) -> None:
         self.call_from_thread(self._stream_delta, delta)
+
+    def _on_reset(self) -> None:
+        # A retry is re-streaming the answer from the start (e.g. after a
+        # mid-stream rate-limit); drop the partial so it isn't shown twice.
+        self.call_from_thread(self._stream_reset)
 
     def _on_step(self, step) -> None:
         kind = getattr(step, "kind", None)
@@ -256,6 +262,10 @@ class RoninApp(App):
     # ---- UI updates (UI thread) ----
     def _stream_delta(self, delta: str) -> None:
         self._live += delta
+        self._render_live()
+
+    def _stream_reset(self) -> None:
+        self._live = ""
         self._render_live()
 
     def _trace_add(self, line: str) -> None:
