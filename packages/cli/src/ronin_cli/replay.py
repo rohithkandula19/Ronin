@@ -48,13 +48,19 @@ def session_to_markdown(turns: list[Turn], *, title: str = "ronin session") -> s
 
 def render_story(console, turns: list[Turn], *, max_chars: int = 1200) -> None:
     """Print the turns as a readable back-and-forth."""
+    from rich.markup import escape as _esc
+
     if not turns:
         console.print("[dim](empty session)[/dim]")
         return
     for i, t in enumerate(turns, 1):
-        body = t.text.strip()
-        if len(body) > max_chars:
-            body = body[:max_chars] + f"… [dim](+{len(body) - max_chars} chars)[/dim]"
+        raw = t.text.strip()
+        # Escape the raw body BEFORE appending the truncation suffix, which
+        # deliberately uses literal [dim]...[/dim] markup that must survive.
+        if len(raw) > max_chars:
+            body = _esc(raw[:max_chars]) + f"… [dim](+{len(raw) - max_chars} chars)[/dim]"
+        else:
+            body = _esc(raw)
         if t.role == "user":
             console.print(f"\n[bold #7aa2f7]▷ you[/bold #7aa2f7]  [dim]turn {(i + 1) // 2}[/dim]")
             console.print(f"  {body}")
