@@ -810,9 +810,23 @@ def run_code_agent(
     _fell_to = getattr(provider, "failed_over_to", None)
     if _fell_to and console is not None:
         console.print(f"[#7dcfff]⚡ failed over to {_fell_to}[/#7dcfff] [dim](primary was unavailable)[/dim]")
+
+    # Faithfulness-in-coding (Ronin's differentiator): a cheap, deterministic
+    # post-answer grounding check. Flag any symbol/path the answer CLAIMS that
+    # exists in nothing the agent read this turn (nor wrote, nor any file it
+    # named that is really on disk). The flag rides along as a short note on the
+    # output, so the Telegram bot and the console both surface it. ON by default
+    # for code mode; opt out with RONIN_GROUNDING_CHECK=0. No model/network call.
+    _output = result.output
+    try:
+        from .grounding_check import append_grounding_note, grounding_note
+        _note = grounding_note(_output, result.trace, root=root, config=config)
+        _output = append_grounding_note(_output, _note)
+    except Exception:  # noqa: BLE001 - the grounding check must never break a run
+        _output = result.output
     return CodeRunResult(
         success=result.success,
-        output=result.output,
+        output=_output,
         iterations=result.iterations,
         steps=result.trace,
         usage=result.usage,

@@ -115,6 +115,13 @@ class RoninConfig(BaseModel):
     #   "gate" — run it and, when the answer is ungrounded or the harness
     #            abstains, hold the answer / edit for confirmation.
     faithfulness: str = "off"  # off | warn | gate
+    # Post-answer grounding check for the coding agent (faithfulness-in-coding).
+    # After ``run_code_agent`` produces an answer, flag any symbol/path it claims
+    # that exists in nothing it read or wrote this turn - a likely hallucination.
+    # ON by default (Ronin's differentiator); cheap + deterministic, no model
+    # call. Set False here, or export RONIN_GROUNDING_CHECK=0 (env wins), to opt
+    # out.
+    grounding_check: bool = True
 
     anthropic_api_key: str | None = None
     openai_api_key: str | None = None  # legacy shared slot (openai/together/groq/…)
