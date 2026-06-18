@@ -3032,6 +3032,96 @@ def jwt(
     console.print("[yellow]signature not verified.[/yellow]")
 
 
+# ---------- book (research & prepare a booking; you confirm and pay) ----------
+
+def _book_default_search():
+    """The web_search function for ``ronin book``, or None when unavailable.
+
+    Imported lazily so a missing/odd web stack never breaks the command.
+    """
+    try:
+        from .web_tools import web_search
+    except Exception:  # noqa: BLE001
+        return None
+    return lambda q, n: web_search(q, max_results=n)
+
+
+def _book_browser_prefill(request, result):
+    """Drive the browser to pre-fill a booking form up to but NOT past payment.
+
+    Optional and lazy: returns False (no pre-fill) when the browser extra is not
+    installed. Every intended browser action is routed through the payment guard
+    first, so a pay/submit step can never reach the browser.
+    """
+    from .book import assert_not_payment
+    from .browser_tools import browse_navigate, browse_read, browser_tools_available
+
+    if not browser_tools_available():
+        return False
+    link = result.next_step_link
+    if not link:
+        return False
+    # Only ever navigate and read. We never click a pay/submit control. Guard
+    # the intent explicitly so the rule is enforced, not just implied.
+    assert_not_payment("navigate to booking page")
+    assert_not_payment("read booking page")
+    browse_navigate(link)
+    browse_read()
+    # We deliberately stop here: the user enters details and pays themselves.
+    return True
+
+
+@app.command()
+def book(
+    request: str = typer.Argument(..., help='What to book, e.g. "a flight SFO to JFK on Friday".'),
+    no_browser: bool = typer.Option(False, "--no-browser", help="Skip the browser; search + summary only."),
+    max_results: int = typer.Option(5, "--max", "-n", help="How many options to gather."),
+) -> None:
+    """🧳 Research and PREPARE a booking, then stop. You confirm and pay yourself.
+
+    Gathers options (option · price · link · details) via web search, optionally
+    pre-fills a form in the browser up to the payment step, and hands you a
+    summary plus the next-step link. It NEVER submits a payment or final
+    purchase. That is a hard rule. You always do the payment.
+    """
+    from .book import prepare_booking
+
+    search_fn = _book_default_search()
+    prefill_fn = None if no_browser else _book_browser_prefill
+
+    result = prepare_booking(
+        request,
+        search_fn=search_fn,
+        browser_prefill_fn=prefill_fn,
+        max_results=max_results,
+    )
+
+    console.print(f"[bold #7aa2f7]🧳 Prepared (not paid):[/bold #7aa2f7] {result.request}")
+    if result.options:
+        from rich.table import Table as _Table
+
+        table = _Table(box=box.SIMPLE, show_header=True, header_style="dim")
+        table.add_column("#", style="dim", width=2)
+        table.add_column("Option")
+        table.add_column("Price", style="#9ece6a")
+        table.add_column("Link", style="#7dcfff", overflow="fold")
+        for i, o in enumerate(result.options, 1):
+            table.add_row(str(i), o.option, o.price or "-", o.link or "-")
+        console.print(table)
+    else:
+        console.print("[yellow]No options gathered.[/yellow]")
+
+    if result.next_step_link:
+        console.print(f"\n[bold]Next step (you confirm and pay):[/bold] "
+                      f"[#7dcfff]{result.next_step_link}[/#7dcfff]")
+    console.print("\n[dim]Manual steps:[/dim]")
+    for step in result.manual_steps:
+        console.print(f"  [dim]·[/dim] {step}")
+    for note in result.notes:
+        console.print(f"[dim]note: {note}[/dim]")
+    console.print("\n[bold #e0af68]ronin never pays. You confirm and pay yourself.[/bold #e0af68]")
+
+
 # ---------- uuid (generate / inspect) ----------
 
 @app.command()

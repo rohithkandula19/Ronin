@@ -297,6 +297,7 @@ database_url = "postgres://readonly_user:...@host:5432/db"   # a read-only role
 | **`ronin investigate "<symptom>"`** | **Root-cause a problem across your business data AND your code.** |
 | **`ronin review [--base main]`** | **AI code review of your diff: severity-tagged findings, read-only.** |
 | **`ronin fix "<command>"`** | **Autonomous fix-until-green: runs the command, edits + re-runs until it passes.** |
+| **`ronin book "<request>"`** | **Prepare-and-confirm a booking (flight, hotel, restaurant, ticket): researches options into a summary (option, price, link, details), optionally pre-fills a form in the browser up to the payment step, then STOPS. It never pays. You confirm and pay yourself. The browser is an optional extra (`pip install 'ronin-cli[browser]'`); without it you get search + a prepared summary + manual steps.** |
 | **`ronin consensus "<task>" -m a,b,c`** | **Multi-model panel: ask several models in parallel, then synthesize one cross-checked answer.** |
 | **`ronin orchestrate "<goal>" -r role=provider,...`** | **Decompose a goal into subtasks, run provider-agnostic sub-agents (parallel where independent), synthesize. `--write` isolates edits in git worktrees.** |
 | **`ronin bench -m a,b,c`** | **Eval-driven model bake-off: score models on the objective battery, recommend the cheapest that passes.** |
@@ -334,6 +335,7 @@ ronin can write files and run commands, so safety is built into the core, not bo
 - **Read-only data integrations.** The Stripe / Linear / Slack / Notion / Postgres MCP templates are read-only by default; the recommended Postgres setup uses a read-only DB role.
 - **Secrets discipline.** API keys are user-supplied and stored only in local `.ronin/` (gitignored), never committed (the repo is public). PII (emails, SSNs, cards, keys) is redacted from traces before anything leaves your process.
 - **Offline guarantee.** `ronin --offline` forces a local brain and removes every network-touching tool, a hard guarantee for air-gapped / privacy-sensitive work.
+- **No automatic payments.** `ronin book` is prepare-and-confirm only. It researches options and can pre-fill a form up to the payment step, then stops and hands you a summary plus the link. It never submits a payment, purchase, or final order. This is enforced in code (a payment-action guard that refuses any pay/submit/checkout step) and stated here on purpose: you always do the payment yourself.
 
 ### Running ronin for others / at scale
 
