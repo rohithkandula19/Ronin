@@ -247,6 +247,23 @@ _REPHRASE = (
     "'remind me in 30 minutes to stretch', or 'remind me every day at 8am to journal'."
 )
 
+_UNSUPPORTED_REPEAT = (
+    "I can only repeat hourly, daily, or weekly. Try 'remind me every day at "
+    "9am to pay rent' or set a one-shot like 'remind me at 9am to pay rent'."
+)
+
+
+def _unsupported_every(sched: str) -> bool:
+    """True if the phrase asks to repeat 'every <word>' but <word> is not a
+    recurrence we support (e.g. month, weekday, year, fortnight, quarter).
+
+    Without this, an unsupported recurrence would silently fall through to a
+    one-shot: the user asked for a repeating reminder and got one that fires
+    once and never again, with no signal that the recurrence was dropped.
+    """
+    m = re.search(r"\bevery\s+([a-z]+)", sched.lower())
+    return bool(m) and _REPEAT_WORDS.get(m.group(1), "none") == "none"
+
 
 def parse_reminder(message: str, *, now: datetime | None = None) -> ParsedReminder | None:
     """Parse a message into a reminder intent, or None if it is not one.
@@ -315,6 +332,8 @@ def _parse_briefing(raw: str, now: datetime) -> ParsedReminder:
             kind="error",
             error="Briefings need a prompt. Try 'briefing every morning at 8am: summary of my day'.",
         )
+    if _unsupported_every(sched):
+        return ParsedReminder(kind="error", error=_UNSUPPORTED_REPEAT)
     when, repeat = _parse_when(sched, now)
     if when is None:
         return ParsedReminder(kind="error", error=_REPHRASE)
@@ -336,6 +355,8 @@ def _parse_remind(raw: str, now: datetime) -> ParsedReminder:
     m = re.search(r"(?:\bto\b|:)\s+", raw, flags=re.IGNORECASE)
     if m:
         sched = raw[: m.start()]
+    if _unsupported_every(sched):
+        return ParsedReminder(kind="error", error=_UNSUPPORTED_REPEAT)
     when, repeat = _parse_when(sched, now)
     if when is None:
         return ParsedReminder(kind="error", error=_REPHRASE)

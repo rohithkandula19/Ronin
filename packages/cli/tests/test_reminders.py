@@ -153,6 +153,32 @@ def test_parse_every_week_is_weekly() -> None:
     assert p.kind == "add" and p.repeat == "weekly"
 
 
+@pytest.mark.parametrize(
+    "phrase",
+    [
+        "remind me every month at 9am to pay rent",
+        "remind me every weekday at 9am to standup",
+        "remind me every year at 9am to celebrate",
+        "remind me every fortnight at 9am to water plants",
+        "remind me every quarter at 9am to review",
+    ],
+)
+def test_unsupported_recurrence_errors_not_silent_one_shot(phrase: str) -> None:
+    # "every <word>" we cannot repeat must NOT be downgraded to a one-shot:
+    # the user asked for a recurring reminder, so surface a clear error rather
+    # than storing something that fires once and never repeats.
+    p = rem.parse_reminder(phrase, now=NOW)
+    assert p.kind == "error"
+    assert p.repeat == "none"
+    assert "hourly" in p.error and "daily" in p.error and "weekly" in p.error
+
+
+def test_unsupported_recurrence_briefing_errors() -> None:
+    p = rem.parse_reminder("briefing every month at 9am: summary of my month", now=NOW)
+    assert p.kind == "error"
+    assert "hourly" in p.error and "weekly" in p.error
+
+
 # --------------------------------------------------------------------------
 # Parsing: list / cancel / unparseable.
 # --------------------------------------------------------------------------
