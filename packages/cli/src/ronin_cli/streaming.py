@@ -172,6 +172,32 @@ class LiveRenderer:
         self._buf += delta
         self._live.update(self._markdown())
 
+    def on_reset(self) -> None:
+        """A retry is about to re-stream the answer from the start (e.g. after a
+        mid-stream rate-limit). Drop the partial text we have shown so the answer
+        renders exactly once instead of being duplicated per retry attempt."""
+        if self._live is not None:
+            try:
+                # Clear the partial out of the live block, then close it so the
+                # retry opens a fresh one. ``transient=False`` keeps prior output,
+                # so we must blank the buffer before stopping.
+                self._buf = ""
+                self._live.update(self._markdown())
+                self._live.stop()
+            except Exception:  # noqa: BLE001
+                pass
+            self._live = None
+        self._buf = ""
+        self._avatar_shown = False  # the retry re-prints the avatar before its text
+        if not self._is_term():
+            # Plain path: move off the unterminated inline line so the retry's
+            # text starts clean (we cannot erase what was already piped).
+            if self._dirty:
+                self.console.print()
+                self._dirty = False
+        # Re-arm the thinking spinner while the retry waits out its backoff.
+        self.start()
+
     def on_step(self, step: Step) -> None:
         # The model's text is streamed via on_text; don't reprint it here.
         if step.kind in ("thought", "final"):

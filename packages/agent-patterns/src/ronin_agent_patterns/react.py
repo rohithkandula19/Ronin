@@ -17,6 +17,10 @@ OnStep = Callable[[Step], None]
 BeforeTool = Callable[[str, dict], "bool | str"]
 # Token-streaming hook: called with each text delta as the model generates it.
 OnText = Callable[[str], None]
+# Stream-reset hook: called when a retry is about to re-stream the answer from
+# the start (e.g. after a mid-stream rate-limit). The consumer must discard the
+# partial text it has shown so far, so the answer renders exactly once.
+OnReset = Callable[[], None]
 # Post-tool hook: (tool_name, arguments, result, is_error) -> None. Fires after
 # each tool runs — used for side-effects like auto-format/test hooks.
 AfterTool = Callable[[str, dict, str, bool], None]
@@ -71,6 +75,7 @@ class ReActAgent(BaseModel):
         on_step: OnStep | None = None,
         before_tool: BeforeTool | None = None,
         on_text: OnText | None = None,
+        on_reset: OnReset | None = None,
         after_tool: "AfterTool | None" = None,
         parallel_safe: "Callable[[str], bool] | None" = None,
     ) -> AgentResult:
@@ -120,6 +125,11 @@ class ReActAgent(BaseModel):
                 ):
                     if ev.type == "text" and ev.text:
                         on_text(ev.text)
+                    elif ev.type == "reset":
+                        # A retry is re-streaming from scratch; drop the partial
+                        # we already forwarded so the answer isn't shown twice.
+                        if on_reset is not None:
+                            on_reset()
                     elif ev.type == "done":
                         response = ev.response
                 assert response is not None, "stream ended without a 'done' event"

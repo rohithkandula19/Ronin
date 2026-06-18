@@ -557,6 +557,7 @@ def run_code_agent(
     # Headless callback overrides — when set (e.g. by the TUI), these replace the
     # console renderer/gate so the agent can be driven from another front-end.
     on_text_cb=None,
+    on_reset_cb=None,
     on_step_cb=None,
     gate_cb=None,
 ) -> CodeRunResult:
@@ -737,6 +738,7 @@ def run_code_agent(
     renderer = LiveRenderer(console) if console is not None else None
     on_step = on_step_cb or (renderer.on_step if renderer is not None else None)
     on_text = on_text_cb or (renderer.on_text if renderer is not None else None)
+    on_reset = on_reset_cb or (renderer.on_reset if renderer is not None else None)
 
     # user-defined hooks (auto-format/test after edits, etc.) from .ronin/hooks.json
     from .hooks import build_after_tool, load_hooks
@@ -772,7 +774,7 @@ def run_code_agent(
     try:
         result = agent.run(prompt, history=message_history or None,
                            on_step=on_step, before_tool=before_tool,
-                           on_text=on_text, after_tool=after_tool,
+                           on_text=on_text, on_reset=on_reset, after_tool=after_tool,
                            parallel_safe=lambda n: n in _PARALLEL_TOOLS)
     except KeyboardInterrupt:
         # Ctrl-C during a turn → stop THIS turn, keep the session alive.

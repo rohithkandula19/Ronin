@@ -113,8 +113,9 @@ def run_explain(
     renderer = LiveRenderer(console) if console is not None else None
     on_step = renderer.on_step if renderer is not None else None
     on_text = renderer.on_text if renderer is not None else None
+    on_reset = renderer.on_reset if renderer is not None else None
 
-    result = agent.run(ask, on_step=on_step, on_text=on_text)
+    result = agent.run(ask, on_step=on_step, on_text=on_text, on_reset=on_reset)
     if renderer is not None:
         renderer.finish()
 

@@ -230,6 +230,14 @@ class OpenAICompatProvider(LLMProvider):
         body = self._build_body(system, messages, tools, max_tokens)
         body["stream"] = True
 
+        # The accumulators below hold the *current* attempt only. A retry (after a
+        # transient status or a mid-stream drop) re-streams the whole answer from
+        # the start, so they are reset per attempt; otherwise the assembled text
+        # would grow by every prior attempt's partial. Just as important, any text
+        # already yielded to the consumer this attempt has been printed to the
+        # terminal, so before retrying we emit a ``reset`` event telling the
+        # consumer to clear that partial. Without it the user sees the answer
+        # duplicated once per retry.
         text_parts: list[str] = []
         # Tool-call deltas arrive piecemeal across chunks, keyed by index; we
         # accumulate id / name / argument-string fragments and assemble at the end.
@@ -238,62 +246,90 @@ class OpenAICompatProvider(LLMProvider):
         usage: dict[str, Any] = {}
         looped = False           # tripped when the model falls into a repetition loop
         _since_check = 0         # chars streamed since the last repetition probe
+        emitted = False          # is a partial answer currently shown to the user?
 
         with httpx.Client(timeout=self.timeout) as client:
             for attempt in range(self.max_retries + 1):
+                # Fresh accumulators for this attempt; a previous attempt's
+                # partial text must never leak into the final assembled answer.
+                text_parts, acc, usage = [], {}, {}
+                finish, looped, _since_check = "end_turn", False, 0
+
                 with client.stream("POST", self._url(), json=body, headers=self._headers()) as r:
                     # Retry transient statuses before we start consuming the body.
                     if r.status_code in _RETRY_STATUSES and attempt < self.max_retries:
                         r.read()  # drain so the connection can be reused
                         wait = _retry_wait(attempt, r.headers.get("retry-after"))
+                        # A partial from a *prior* attempt may still be on screen
+                        # (a 200 that streamed text, then a 429 on the reconnect);
+                        # clear it before the answer re-streams.
+                        if emitted:
+                            yield StreamEvent(type="reset")
+                            emitted = False
                         self._notify_retry(attempt + 1, wait, r.status_code)
                         time.sleep(wait)
                         continue
                     r.raise_for_status()
-                    for line in r.iter_lines():
-                        if not line or not line.startswith("data:"):
+                    try:
+                        for line in r.iter_lines():
+                            if not line or not line.startswith("data:"):
+                                continue
+                            payload = line[len("data:"):].strip()
+                            if payload == "[DONE]":
+                                break
+                            try:
+                                chunk = json.loads(payload)
+                            except json.JSONDecodeError:
+                                continue
+                            if chunk.get("usage"):
+                                usage = chunk["usage"]
+                            for choice in chunk.get("choices", []):
+                                delta = choice.get("delta") or {}
+                                if delta.get("content"):
+                                    text_parts.append(delta["content"])
+                                    emitted = True
+                                    yield StreamEvent(type="text", text=delta["content"])
+                                    # Stop early if the model has started looping.
+                                    _since_check += len(delta["content"])
+                                    if _since_check >= 1500:
+                                        _since_check = 0
+                                        from .repetition import looks_repetitive
+                                        if looks_repetitive("".join(text_parts)):
+                                            looped = True
+                                            finish = "stop"
+                                            yield StreamEvent(type="text",
+                                                              text="\n\n…(ronin stopped a runaway repetition loop)…")
+                                            break
+                                for tcd in delta.get("tool_calls") or []:
+                                    idx = tcd.get("index", 0)
+                                    slot = acc.setdefault(idx, {"id": "", "name": "", "args": "", "extra": None})
+                                    if tcd.get("id"):
+                                        slot["id"] = tcd["id"]
+                                    if tcd.get("extra_content"):
+                                        slot["extra"] = tcd["extra_content"]
+                                    fn = tcd.get("function") or {}
+                                    if fn.get("name"):
+                                        slot["name"] = fn["name"]
+                                    if fn.get("arguments"):
+                                        slot["args"] += fn["arguments"]
+                                if choice.get("finish_reason"):
+                                    finish = choice["finish_reason"]
+                            if looped:
+                                break  # stop reading the stream — the model is looping
+                    except httpx.HTTPError:
+                        # Connection dropped / reset mid-stream (free tiers do this
+                        # when they rate-limit you partway through). Retry the whole
+                        # request, emitting a reset first so the partial we already
+                        # streamed is cleared rather than duplicated by the retry.
+                        if attempt < self.max_retries:
+                            if emitted:
+                                yield StreamEvent(type="reset")
+                                emitted = False
+                            wait = _retry_wait(attempt, None)
+                            self._notify_retry(attempt + 1, wait, 0)
+                            time.sleep(wait)
                             continue
-                        payload = line[len("data:"):].strip()
-                        if payload == "[DONE]":
-                            break
-                        try:
-                            chunk = json.loads(payload)
-                        except json.JSONDecodeError:
-                            continue
-                        if chunk.get("usage"):
-                            usage = chunk["usage"]
-                        for choice in chunk.get("choices", []):
-                            delta = choice.get("delta") or {}
-                            if delta.get("content"):
-                                text_parts.append(delta["content"])
-                                yield StreamEvent(type="text", text=delta["content"])
-                                # Stop early if the model has started looping.
-                                _since_check += len(delta["content"])
-                                if _since_check >= 1500:
-                                    _since_check = 0
-                                    from .repetition import looks_repetitive
-                                    if looks_repetitive("".join(text_parts)):
-                                        looped = True
-                                        finish = "stop"
-                                        yield StreamEvent(type="text",
-                                                          text="\n\n…(ronin stopped a runaway repetition loop)…")
-                                        break
-                            for tcd in delta.get("tool_calls") or []:
-                                idx = tcd.get("index", 0)
-                                slot = acc.setdefault(idx, {"id": "", "name": "", "args": "", "extra": None})
-                                if tcd.get("id"):
-                                    slot["id"] = tcd["id"]
-                                if tcd.get("extra_content"):
-                                    slot["extra"] = tcd["extra_content"]
-                                fn = tcd.get("function") or {}
-                                if fn.get("name"):
-                                    slot["name"] = fn["name"]
-                                if fn.get("arguments"):
-                                    slot["args"] += fn["arguments"]
-                            if choice.get("finish_reason"):
-                                finish = choice["finish_reason"]
-                        if looped:
-                            break  # stop reading the stream — the model is looping
+                        raise
                 break  # streamed successfully; leave the retry loop
 
         tool_calls = [
