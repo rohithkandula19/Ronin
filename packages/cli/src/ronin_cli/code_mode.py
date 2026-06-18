@@ -391,6 +391,14 @@ def _render_diff(console: Console, diff: str, path: str | None = None) -> None:
             console.print(f"[dim]{line}[/dim]")
         return
 
+    # Collapse long writes/edits so a big new file does not flood the terminal:
+    # show a head, then a "... N more lines" summary (Claude-Code style).
+    MAX_DIFF_ROWS = 14
+    hidden = 0
+    if len(rows) > MAX_DIFF_ROWS + 2:
+        hidden = len(rows) - MAX_DIFF_ROWS
+        rows = rows[:MAX_DIFF_ROWS]
+
     from .theme import CODE_THEME
     syn = Syntax("", _lang_for(path), theme=CODE_THEME, background_color="default")
     width = min(console.width or 100, 120)
@@ -420,6 +428,10 @@ def _render_diff(console: Console, diff: str, path: str | None = None) -> None:
             console.print(row, style=f"on {add_bg if r['kind'] == 'add' else del_bg}")
         else:
             console.print(row)
+
+    if hidden:
+        console.print(Text(f"       ... {hidden} more lines (full file written on approve)",
+                           style="#3b4261"))
 
 
 def _selective_gate(
