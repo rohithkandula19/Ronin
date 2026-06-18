@@ -285,6 +285,7 @@ def _pt_read(console: Console, *, symbol: str, hint: str,
                 yield Completion(insert, start_position=start, display=display, display_meta="")
 
     style = Style.from_dict({
+        "border": ACCENT,
         "arrow": f"{ACCENT} bold",
         "placeholder": f"{MUTE} italic",
         "bottom-toolbar": f"noreverse bg:default {SOFT}",
@@ -297,11 +298,18 @@ def _pt_read(console: Console, *, symbol: str, hint: str,
         "scrollbar.button": f"bg:{MUTE}",
     })
 
-    # Minimal inline prompt: just "› " — no persistent box, so past turns read
-    # as clean "› your text" in the terminal's scrollback (Claude-Code-style
-    # flow, no rules or borders between turns). The boxed, pinned-input look
-    # lives in the full-screen TUI (`ronin --tui`).
-    message = [("class:arrow", f"{symbol} ")]
+    # Inline prompt by default (clean scrollback). RONIN_BOX=1 draws a
+    # Claude-Code-style bordered box around the input.
+    import os as _os
+    box_on = _os.environ.get("RONIN_BOX", "").strip().lower() in {"1", "true", "yes", "on"}
+    if box_on:
+        _bw = max(2, width - 2)
+        _top = "╭" + "─" * _bw + "╮"
+        message = [("class:border", _top + "\n"),
+                   ("class:border", "│ "),
+                   ("class:arrow", f"{symbol} ")]
+    else:
+        message = [("class:arrow", f"{symbol} ")]
 
     def bottom_toolbar():
         # A single transient hint line *below* the input — prompt_toolkit clears
@@ -316,12 +324,16 @@ def _pt_read(console: Console, *, symbol: str, hint: str,
         left = hint or ""
         right = (f"● {status}" if status else "")
         gap = max(1, width - 2 - _w(tag) - _w(left) - _w(right))
-        return [
+        rows = [
             ("class:bottom-toolbar", "  "),
             ("class:bottom-toolbar.mode", tag),
             ("class:bottom-toolbar", left + " " * gap),
             ("class:bottom-toolbar.status", right),
         ]
+        if box_on:
+            _bot = "╰" + "─" * max(2, width - 2) + "╯"
+            return [("class:border", _bot + "\n")] + rows
+        return rows
 
     ph = [("class:placeholder", placeholder)] if placeholder else None
 
@@ -361,6 +373,7 @@ def _pt_read(console: Console, *, symbol: str, hint: str,
         complete_while_typing=True,
         complete_in_thread=True,   # scan dirs off the UI thread → no typing lag
         auto_suggest=AutoSuggestFromHistory(),  # faint ghost suggestion you accept with right-arrow
+        rprompt=([("class:border", "│")] if box_on else None),
         bottom_toolbar=bottom_toolbar,
         style=style,
         reserve_space_for_menu=8,
