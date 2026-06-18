@@ -554,6 +554,7 @@ def run_code_agent(
     extra_system: str = "",
     include_image_tool: bool = True,
     base_system: str | None = None,
+    deny=None,
     # Headless callback overrides — when set (e.g. by the TUI), these replace the
     # console renderer/gate so the agent can be driven from another front-end.
     on_text_cb=None,
@@ -574,7 +575,7 @@ def run_code_agent(
     # Full-access mode lifts the filesystem sandbox (and auto-approve is set by
     # the session via yolo). Otherwise stay confined to the project root.
     _sandbox = not getattr(config, "full_access", False)
-    tools = build_code_tools(root, undo_stack=undo_stack, sandbox=_sandbox)
+    tools = build_code_tools(root, undo_stack=undo_stack, sandbox=_sandbox, deny=deny)
     if read_only:
         # plan mode: explore but never mutate
         tools = [t for t in tools if t.name in _READONLY_CODE_TOOLS]

@@ -8,16 +8,21 @@ from __future__ import annotations
 import pytest
 from typer.testing import CliRunner
 
+from pathlib import Path
+
 from ronin_cli.main import app
 from ronin_cli.telegram_bot import (
+    ENV_ROOT,
     MAX_MESSAGE_CHARS,
     REDACTED,
     TelegramBot,
     TelegramConfigError,
     _chunk_text,
     get_bot_token,
+    is_secret_path,
     parse_allowed_chat_ids,
     redact_token,
+    resolve_root,
 )
 
 runner = CliRunner()
@@ -332,3 +337,221 @@ def test_cli_getme_failure_redacts_token(monkeypatch: pytest.MonkeyPatch) -> Non
     assert "getMe failed" in r.stdout
     assert VALID_TOKEN not in r.stdout, "token must not be printed on getMe failure"
     assert REDACTED in r.stdout
+
+
+# ---------- read-only file agent: root resolution -------------------------
+
+def test_resolve_root_defaults_to_home() -> None:
+    assert resolve_root(env={}) == Path.home().resolve()
+
+
+def test_resolve_root_reads_env_and_expands(tmp_path: Path) -> None:
+    assert resolve_root(env={ENV_ROOT: str(tmp_path)}) == tmp_path.resolve()
+
+
+# ---------- secret-path guard ---------------------------------------------
+
+def test_is_secret_path_blocks_ssh_dir(tmp_path: Path) -> None:
+    # A file under ~/.ssh is protected, resolved against a fake home.
+    home = tmp_path
+    assert is_secret_path(home / ".ssh" / "id_rsa", home=home)
+    assert is_secret_path(home / ".ssh" / "known_hosts", home=home)
+
+
+def test_is_secret_path_blocks_other_secret_dirs(tmp_path: Path) -> None:
+    home = tmp_path
+    for rel in (".ronin/state.json", ".aws/credentials", ".gnupg/secring.gpg",
+                ".config/gh/hosts.yml", ".netrc"):
+        assert is_secret_path(home / rel, home=home), rel
+
+
+def test_is_secret_path_blocks_secret_filename_globs(tmp_path: Path) -> None:
+    home = tmp_path
+    proj = home / "projects" / "app"
+    for name in ("server.pem", "tls.key", "id_rsa", "id_ed25519", ".env",
+                 "prod.env", "credentials.json", "my_secret_token.txt"):
+        assert is_secret_path(proj / name, home=home), name
+
+
+def test_is_secret_path_blocks_nested_dotfile_secret_component(tmp_path: Path) -> None:
+    # A nested .ssh anywhere in the tree is refused, not just under home.
+    home = tmp_path
+    assert is_secret_path(home / "projects" / "x" / ".ssh" / "config", home=home)
+
+
+def test_is_secret_path_allows_ordinary_files(tmp_path: Path) -> None:
+    home = tmp_path
+    for rel in ("projects/app/README.md", "notes.txt", "src/main.py",
+                "envs.md", "key_takeaways.md"):
+        assert not is_secret_path(home / rel, home=home), rel
+
+
+def test_guard_takes_effect_on_read_file_tool(tmp_path: Path) -> None:
+    """The deny predicate wired into the read tools actually refuses a secret."""
+    from ronin_cli.code_tools import build_code_tools
+
+    home = tmp_path
+    (home / ".ssh").mkdir()
+    (home / ".ssh" / "id_rsa").write_text("PRIVATE KEY DATA")
+    (home / "notes.txt").write_text("hello world")
+
+    tools = {
+        t.name: t
+        for t in build_code_tools(home, deny=lambda p: is_secret_path(p, home=home))
+    }
+    # secret -> refused, contents never returned
+    out = tools["read_file"].handler(path=".ssh/id_rsa")
+    assert out == "refused: that path is protected"
+    assert "PRIVATE KEY DATA" not in out
+    # ordinary file -> still readable
+    assert tools["read_file"].handler(path="notes.txt") == "hello world"
+
+
+def test_guard_skips_secret_in_listing_and_search(tmp_path: Path) -> None:
+    from ronin_cli.code_tools import build_code_tools
+
+    home = tmp_path
+    (home / ".ssh").mkdir()
+    (home / ".ssh" / "id_rsa").write_text("SECRET=topsecret")
+    (home / "notes.txt").write_text("SECRET=public-note")
+
+    tools = {
+        t.name: t
+        for t in build_code_tools(home, deny=lambda p: is_secret_path(p, home=home))
+    }
+    listing = tools["list_files"].handler(directory=".")
+    assert not any("id_rsa" in entry for entry in listing)
+    assert any("notes.txt" in entry for entry in listing)
+
+    hits = tools["search_files"].handler(query="SECRET=")
+    assert all(".ssh" not in h["file"] and "id_rsa" not in h["file"] for h in hits)
+
+
+def test_build_code_tools_default_deny_is_noop(tmp_path: Path) -> None:
+    """No deny predicate => read tools behave exactly as before for everyone."""
+    from ronin_cli.code_tools import build_code_tools
+
+    (tmp_path / ".ssh").mkdir()
+    (tmp_path / ".ssh" / "id_rsa").write_text("KEYDATA")
+    tools = {t.name: t for t in build_code_tools(tmp_path)}
+    # Without a deny predicate the secret file is readable (unchanged behavior).
+    assert tools["read_file"].handler(path=".ssh/id_rsa") == "KEYDATA"
+
+
+# ---------- CLI wiring: read-only code agent, never write path ------------
+
+class _FakeRes:
+    def __init__(self, output: str = "", error: str | None = None) -> None:
+        self.output = output
+        self.error = error
+
+
+def test_cli_runs_read_only_code_agent_rooted_at_default_home(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An allowed message runs run_code_agent(read_only=True, root=home) and
+    sends its output back. No model/network: run_code_agent is mocked."""
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", VALID_TOKEN)
+    monkeypatch.setenv("TELEGRAM_ALLOWED_CHAT_IDS", "42")
+    monkeypatch.delenv(ENV_ROOT, raising=False)
+
+    calls: list[dict] = []
+
+    def fake_run_code_agent(config, task, **kwargs):
+        calls.append({"task": task, **kwargs})
+        return _FakeRes(output=f"saw: {task}")
+
+    monkeypatch.setattr("ronin_cli.code_mode.run_code_agent", fake_run_code_agent)
+
+    client = FakeClient(getupdates_result=[_update(42, "what is in my repo?")])
+
+    real_bot = TelegramBot
+
+    captured: dict = {}
+
+    def capture_bot(**kwargs):
+        kwargs["http"] = client
+        bot = real_bot(**kwargs)
+        captured["bot"] = bot
+        return bot
+
+    monkeypatch.setattr("ronin_cli.telegram_bot.TelegramBot", capture_bot)
+
+    r = runner.invoke(app, ["telegram", "--once"])
+    assert r.exit_code == 0, r.stdout
+
+    assert len(calls) == 1, "the read-only code agent must run exactly once"
+    call = calls[0]
+    assert call["read_only"] is True
+    assert call["root"] == Path.home().resolve()
+    assert call["console"] is None
+    assert call["include_image_tool"] is False
+    assert callable(call["deny"]), "the secret-path guard must be passed as deny"
+    assert call["max_iterations"] >= 1
+    # the output is sent back to the chat
+    sent = client.sent_messages()
+    assert sent and sent[0]["chat_id"] == 42
+    assert sent[0]["text"] == "saw: what is in my repo?"
+
+
+def test_cli_never_passes_write_path_to_code_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """run_code_agent is NEVER called with read_only False, and no extra_tools
+    or full-access write path is passed."""
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", VALID_TOKEN)
+    monkeypatch.setenv("TELEGRAM_ALLOWED_CHAT_IDS", "42")
+    monkeypatch.delenv(ENV_ROOT, raising=False)
+
+    calls: list[dict] = []
+
+    def fake_run_code_agent(config, task, **kwargs):
+        calls.append(kwargs)
+        return _FakeRes(output="ok")
+
+    monkeypatch.setattr("ronin_cli.code_mode.run_code_agent", fake_run_code_agent)
+
+    client = FakeClient(getupdates_result=[_update(42, "hi")])
+
+    def capture_bot(**kwargs):
+        kwargs["http"] = client
+        return TelegramBot(**kwargs)
+
+    monkeypatch.setattr("ronin_cli.telegram_bot.TelegramBot", capture_bot)
+
+    r = runner.invoke(app, ["telegram", "--once"])
+    assert r.exit_code == 0, r.stdout
+
+    assert calls, "the code agent should have been invoked"
+    for kwargs in calls:
+        assert kwargs.get("read_only") is True, "must always be read-only"
+        assert kwargs.get("read_only") is not False
+        assert "extra_tools" not in kwargs, "no extra/write tools may be passed"
+        # config.full_access stays at its default (False); the command never sets it.
+
+
+def test_cli_root_respects_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """RONIN_TELEGRAM_ROOT overrides the default home root."""
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", VALID_TOKEN)
+    monkeypatch.setenv("TELEGRAM_ALLOWED_CHAT_IDS", "42")
+    monkeypatch.setenv(ENV_ROOT, str(tmp_path))
+
+    calls: list[dict] = []
+
+    def fake_run_code_agent(config, task, **kwargs):
+        calls.append(kwargs)
+        return _FakeRes(output="ok")
+
+    monkeypatch.setattr("ronin_cli.code_mode.run_code_agent", fake_run_code_agent)
+
+    client = FakeClient(getupdates_result=[_update(42, "hi")])
+
+    def capture_bot(**kwargs):
+        kwargs["http"] = client
+        return TelegramBot(**kwargs)
+
+    monkeypatch.setattr("ronin_cli.telegram_bot.TelegramBot", capture_bot)
+
+    r = runner.invoke(app, ["telegram", "--once"])
+    assert r.exit_code == 0, r.stdout
+    assert calls and calls[0]["root"] == tmp_path.resolve()

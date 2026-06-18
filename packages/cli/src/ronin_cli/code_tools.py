@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import Callable
 
 from ronin_agent_patterns import Tool
 
@@ -131,7 +132,8 @@ def _resolve(root: Path, rel: str) -> Path:
 
 
 def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None,
-                     sandbox: bool = True) -> list[Tool]:
+                     sandbox: bool = True,
+                     deny: "Callable[[Path], bool] | None" = None) -> list[Tool]:
     """Build the coding tools rooted at ``root``.
 
     ``undo_stack``: optional list the write/edit tools push (path, prior_content
@@ -140,8 +142,20 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None,
     ``sandbox``: when True (default) paths are confined to ``root``; when False
     (full-access mode) absolute paths and paths outside root are allowed, and
     run_command gets a longer timeout + bigger output caps.
+    ``deny``: optional predicate ``deny(resolved_path) -> bool``. When it returns
+    True for a resolved path, the read tools (read_file/list_files/search_files/
+    glob) refuse or skip that path instead of returning its contents. Default
+    None leaves every tool's behavior unchanged.
     """
     root_path = Path(root).resolve()
+
+    def _denied(p: Path) -> bool:
+        if deny is None:
+            return False
+        try:
+            return bool(deny(p))
+        except Exception:  # noqa: BLE001 - a broken predicate must fail safe (skip)
+            return True
 
     def _resolve_path(rel: str) -> Path:
         """Resolve ``rel`` honoring the sandbox flag. In full-access mode an
@@ -170,6 +184,8 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None,
     # ---- read_file ----
     def read_file(path: str) -> str:
         target = _resolve_path(path)
+        if _denied(target):
+            return "refused: that path is protected"
         if not target.is_file():
             return f"ERROR: {path} is not a file"
         data = target.read_bytes()[:MAX_READ_BYTES]
@@ -192,6 +208,8 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None,
         for p in sorted(base.rglob(pattern)):
             if any(part in _SKIP_DIRS for part in p.parts):
                 continue
+            if _denied(p):  # skip protected paths so they never surface in a listing
+                continue
             # Directories are listed too (trailing "/") so the model can see the
             # project's shape — frontend/, backend/, … — not just a flat file dump.
             if p.is_dir():
@@ -211,6 +229,8 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None,
             if any(part in _SKIP_DIRS for part in p.parts):
                 continue
             if not p.is_file():
+                continue
+            if _denied(p):  # never grep into a protected file
                 continue
             try:
                 for n, line in enumerate(p.read_text(encoding="utf-8", errors="ignore").splitlines(), 1):
@@ -260,6 +280,8 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None,
         out: list[str] = []
         for p in sorted(base.glob(pattern)):
             if any(part in _SKIP_DIRS for part in p.parts):
+                continue
+            if _denied(p):  # skip protected paths so they never surface
                 continue
             if p.is_file() and not _is_junk_file(p):
                 out.append(_display(p))

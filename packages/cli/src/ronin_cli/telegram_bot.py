@@ -10,18 +10,24 @@ Why this shape:
 - ALLOWLISTED. It acts only on messages whose chat id is in an explicit
   allowlist. Any other chat is ignored. An empty allowlist runs the agent for
   nobody; it only replies with the chat's numeric id so the owner can add it.
-- READ-ONLY. It calls `run_ask`, the same path `ronin ask` uses. No edits, no
-  shell, no `--full-access`. A Telegram message cannot trigger a destructive
-  action. There is no shell / eval / exec path in this module.
+- READ-ONLY. It runs the SAME read-only code-agent path consensus uses
+  (`run_code_agent(..., read_only=True)`), so it can read and search files under
+  a configured root but has NO write / edit / shell tool. No `--full-access`. A
+  Telegram message cannot trigger a destructive action. There is no shell / eval
+  / exec path in this module.
+- SECRET-GUARDED. Reads of obviously sensitive paths (~/.ssh, ~/.aws, key/env
+  files, ...) are refused so a stray request cannot dump a secret into the chat.
 
 httpx is imported LAZILY inside function bodies so importing this module (and
 the core CLI) stays light and offline.
 """
 from __future__ import annotations
 
+import fnmatch
 import logging
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable
 
 logger = logging.getLogger("ronin.telegram")
@@ -38,6 +44,12 @@ DEFAULT_POLL_TIMEOUT = 30
 
 ENV_TOKEN = "TELEGRAM_BOT_TOKEN"
 ENV_ALLOWED = "TELEGRAM_ALLOWED_CHAT_IDS"
+# Directory the read-only file agent is rooted at. Defaults to the user's home.
+ENV_ROOT = "RONIN_TELEGRAM_ROOT"
+
+# Read-only agent: cap the number of tool-use iterations per message so a single
+# question cannot spin forever (and run up cost) over the file tools.
+DEFAULT_MAX_ITERATIONS = 24
 
 # What a redacted token looks like in any log or terminal line.
 REDACTED = "<redacted>"
@@ -112,6 +124,83 @@ def parse_allowed_chat_ids(
         except ValueError:
             logger.warning("ignoring non-integer chat id in %s: %r", ENV_ALLOWED, part)
     return sorted(ids)
+
+
+def resolve_root(env: dict[str, str] | None = None) -> Path:
+    """Resolve the directory the read-only file agent is rooted at.
+
+    Reads ``RONIN_TELEGRAM_ROOT`` from the environment; falls back to the user's
+    home directory. ``~`` is expanded and the path is resolved once at startup so
+    the bot always works against one fixed, absolute root.
+    """
+    source = env if env is not None else os.environ
+    raw = (source.get(ENV_ROOT) or "").strip()
+    base = Path(raw).expanduser() if raw else Path.home()
+    return base.resolve()
+
+
+# Path PREFIXES (directories) whose contents must never be read into a Telegram
+# chat. Anything inside one of these is refused. Stored relative to home and
+# resolved against the real home at call time.
+_SECRET_DIR_NAMES = (
+    ".ssh",
+    ".ronin",
+    ".aws",
+    ".gnupg",
+    ".netrc",  # also matched as a file below; harmless to list here too
+    os.path.join(".config", "gh"),
+)
+
+# A path COMPONENT named like one of these is treated as a secret directory no
+# matter where it sits in the tree (e.g. a nested ``.ssh`` under a project).
+_SECRET_COMPONENT_NAMES = {".ssh", ".ronin", ".aws", ".gnupg", ".gh"}
+
+# FILENAME globs that name a secret regardless of directory.
+_SECRET_FILE_GLOBS = (
+    "*.pem",
+    "*.key",
+    "*_rsa",
+    "id_*",
+    "*.env",
+    ".env",
+    ".netrc",
+    "credentials*",
+    "*secret*token*",
+)
+
+
+def is_secret_path(path: str | Path, *, home: Path | None = None) -> bool:
+    """Return True if ``path`` is an obviously sensitive location.
+
+    The guard is conservative on purpose: it refuses reads whose resolved path
+    is inside (or equal to) a known secret directory under home, has a path
+    component named like a dotfile-secret directory, or whose filename matches a
+    secret glob (keys, env files, credentials, tokens). Refusing is cheap; a
+    leaked secret in a chat transcript is not.
+    """
+    home_dir = (home or Path.home()).resolve()
+    try:
+        resolved = Path(path).expanduser().resolve()
+    except (OSError, RuntimeError, ValueError):
+        # If a path cannot even be resolved, refuse rather than guess.
+        return True
+
+    # 1) Inside or equal to a known secret directory under home.
+    for rel in _SECRET_DIR_NAMES:
+        secret = (home_dir / rel).resolve()
+        if resolved == secret or secret in resolved.parents:
+            return True
+
+    # 2) Any path component named like a dotfile-secret directory.
+    if any(part in _SECRET_COMPONENT_NAMES for part in resolved.parts):
+        return True
+
+    # 3) Filename matches a secret glob (case-insensitive).
+    name = resolved.name.lower()
+    if any(fnmatch.fnmatch(name, glob) for glob in _SECRET_FILE_GLOBS):
+        return True
+
+    return False
 
 
 @dataclass

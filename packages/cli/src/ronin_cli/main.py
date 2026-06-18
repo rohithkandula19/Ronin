@@ -5737,21 +5737,26 @@ def telegram(
     """Run Ronin from your phone over Telegram. Outbound-only and allowlisted.
 
     The bot long-polls api.telegram.org (no inbound port, works behind NAT) and,
-    for messages from an ALLOWED chat id, runs the SAME read-only / ask agent
-    path `ronin ask` uses, then replies with the answer. It never edits files or
-    runs shell commands from a Telegram message.
+    for messages from an ALLOWED chat id, runs a READ-ONLY file agent rooted at
+    RONIN_TELEGRAM_ROOT (default: your home dir), then replies with the answer.
+    It can read and search your files but never edits files or runs shell
+    commands. Reads of obviously sensitive paths (~/.ssh, key/env files, ...) are
+    refused.
 
     Set TELEGRAM_BOT_TOKEN (from @BotFather) and TELEGRAM_ALLOWED_CHAT_IDS
     (comma-separated chat ids). With an empty allowlist the bot answers nobody;
     it only tells a chat its numeric id so you can add it. See docs/TELEGRAM.md.
     """
     from .telegram_bot import (
+        DEFAULT_MAX_ITERATIONS,
         ENV_ALLOWED,
         TelegramBot,
         TelegramConfigError,
         get_bot_token,
+        is_secret_path,
         parse_allowed_chat_ids,
         redact_token,
+        resolve_root,
     )
 
     # 1) Token: fail closed (exit non-zero, never poll) if missing/malformed.
@@ -5772,10 +5777,31 @@ def telegram(
         if cid not in allowed:
             allowed.append(cid)
 
-    # 3) The agent is the read-only ask path — exactly what `ronin ask` runs.
+    # 3) Root the read-only file agent at RONIN_TELEGRAM_ROOT (default: home).
+    #    Resolved once here so every message runs against one fixed, absolute root.
+    root = resolve_root()
+
+    # 4) The agent is the SAME read-only code-agent path consensus uses: it can
+    #    read and search files under `root` but has NO write/edit/shell tool
+    #    (read_only=True). `deny=is_secret_path` makes the read tools refuse or
+    #    skip obviously sensitive paths so a stray request cannot dump a secret
+    #    into the Telegram history. run_code_agent is imported LAZILY so importing
+    #    this module stays light and offline.
     def answer_fn(message_text: str) -> str:
-        result = run_ask(config, message_text)
-        return result.output or "(no answer)"
+        from .code_mode import run_code_agent
+
+        res = run_code_agent(
+            config,
+            message_text,
+            root=root,
+            console=None,
+            yolo=True,
+            read_only=True,
+            include_image_tool=False,
+            max_iterations=DEFAULT_MAX_ITERATIONS,
+            deny=is_secret_path,
+        )
+        return res.output or res.error or "(no answer)"
 
     bot = TelegramBot(
         token=token,
@@ -5799,8 +5825,8 @@ def telegram(
     username = me.get("username", "?")
     console.print(f"[green]ok[/green] bot @{username} ready; allowed chats: {allowed}")
     console.print(
-        "[dim]Read-only/ask mode. I will not run edits or shell commands from "
-        "Telegram.[/dim]"
+        f"[dim]Read-only file access, rooted at {root}. I can read and search "
+        "your files but cannot edit or run commands.[/dim]"
     )
     if not allowed:
         console.print(

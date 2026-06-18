@@ -3,19 +3,50 @@
 Status: working feature with offline tests. It is a thin bridge you run yourself,
 not a hosted product. There is no server to deploy and no inbound port to open.
 
-`ronin telegram` lets you message a Telegram bot and get answers from the SAME
-read-only ask agent that `ronin ask` uses. The laptop dials OUT to Telegram and
-long-polls for messages, so it works behind NAT with no public hostname.
+`ronin telegram` lets you message a Telegram bot and get answers from a
+READ-ONLY file agent. It can read and search your files to answer questions about
+your projects, but it cannot edit files or run commands. The laptop dials OUT to
+Telegram and long-polls for messages, so it works behind NAT with no public
+hostname.
 
 ## How it works
 
 1. You make a bot with @BotFather and get a token.
 2. You run `ronin telegram` on the laptop. It calls getUpdates in a long-poll
    loop (outbound only).
-3. For a message from an allowed chat id, it runs `run_ask` (the read-only ask
-   path) on the message text and sends the answer back with sendMessage.
+3. For a message from an allowed chat id, it runs a read-only code agent
+   (`run_code_agent(..., read_only=True)`, the same path consensus uses) rooted
+   at a configured directory, then sends the answer back with sendMessage.
 
 The laptop opens no inbound port. The bot needs no public URL.
+
+## What it can see
+
+The bot answers with a read-only file agent, not a blind chat model.
+
+- Read-only file access. The agent gets the read tools only: `read_file`,
+  `list_files`, `search_files` (grep), and `glob`. It has NO write, edit, or
+  shell tool. It cannot change anything or run a command.
+- Rooted at a directory. The agent is confined to one root, set by the
+  `RONIN_TELEGRAM_ROOT` env var. Default is your home directory (`~`). The path
+  is resolved once at startup. Paths outside the root are refused.
+- Secret-path guard. Even inside the root, reads of obviously sensitive paths are
+  refused so a stray request cannot dump a secret into your Telegram history.
+  Blocked: anything under `~/.ssh`, `~/.ronin`, `~/.aws`, `~/.gnupg`,
+  `~/.config/gh`, `~/.netrc`; any path component named like a dotfile-secret
+  directory; and any filename matching `*.pem`, `*.key`, `*_rsa`, `id_*`,
+  `*.env`, `.env`, `credentials*`, or `*secret*token*`. A blocked read returns
+  `refused: that path is protected` instead of the contents.
+- Still no edits or commands. Read-only means read-only. There is no write/edit/
+  shell tool reachable from a message.
+- Still allowlisted. Only a chat id in the allowlist can drive the agent at all
+  (see below).
+
+To use a narrower root than your whole home directory:
+
+```bash
+export RONIN_TELEGRAM_ROOT="$HOME/projects"
+```
 
 ## Make a bot with @BotFather
 
@@ -55,7 +86,7 @@ On start it validates the token, calls getMe, and prints:
 
 ```
 ok bot @your_bot ready; allowed chats: [42, 777]
-Read-only/ask mode. I will not run edits or shell commands from Telegram.
+Read-only file access, rooted at /Users/you. I can read and search your files but cannot edit or run commands.
 ```
 
 ## Safety model
@@ -68,9 +99,15 @@ This is remote control of a laptop, so the boundary is the whole point.
   allowlist. Any other chat is ignored. An EMPTY allowlist runs the agent for
   nobody; the bot only replies with the chat's numeric id so you can add it
   (safe onboarding), and logs it.
-- Read-only / ask path only. Messages go through `run_ask`, the same path as
-  `ronin ask`. No auto-approved edits, no auto-run shell commands, no
+- Read-only file access only. Messages go through `run_code_agent(...,
+  read_only=True)`, the same read-only path consensus uses. The agent gets the
+  read tools (read/list/grep/glob) and NO write, edit, or shell tool. No
   `--full-access`. A Telegram message cannot trigger a destructive action.
+- Confined to a root. The agent only sees files under `RONIN_TELEGRAM_ROOT`
+  (default: your home dir). Paths outside it are refused.
+- Secret-path guard. Reads of obviously sensitive paths (`~/.ssh`, `~/.aws`,
+  `*.pem`, `*.key`, `id_*`, `*.env`, `credentials*`, ...) are refused, so a stray
+  request cannot leak a secret into your chat history. See "What it can see".
 - No arbitrary shell. There is no shell, eval, or exec path reachable from a
   message. The only outbound calls are to api.telegram.org.
 - Token never logged. The token is part of every request URL, and HTTP errors
