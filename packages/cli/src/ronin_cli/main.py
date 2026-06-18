@@ -5719,12 +5719,9 @@ app.add_typer(relay_app, name="relay")
 # ---------- telegram (control Ronin from your phone, outbound-only) ----------
 
 
-def _telegram_undo(root) -> str:
-    """Best-effort /undo for full mode: stash uncommitted changes in git repos
-    under `root` that are currently dirty, reverting the agent's recent edits
-    while keeping them recoverable via `git stash pop`. Bounded, skips heavy
-    dirs, never descends into a repo it already found."""
-    import subprocess
+def _telegram_git_repos(root) -> list:
+    """Bounded scan for git repos under root (skips heavy dirs, stops at a repo
+    boundary, caps total)."""
     from pathlib import Path
 
     base = Path(root)
@@ -5732,9 +5729,9 @@ def _telegram_undo(root) -> str:
         "node_modules", ".venv", "venv", "__pycache__", ".cache", "Library",
         ".Trash", ".npm", ".cargo", "go", "dist", "build", ".git",
     }
-    repos: list[Path] = []
+    repos: list = []
 
-    def walk(d: Path, depth: int) -> None:
+    def walk(d, depth: int) -> None:
         if depth > 4 or len(repos) > 200:
             return
         if (d / ".git").exists():
@@ -5749,24 +5746,78 @@ def _telegram_undo(root) -> str:
                 walk(e, depth + 1)
 
     walk(base, 0)
-    stashed: list[str] = []
-    for repo in repos:
+    return repos
+
+
+def _telegram_dirty_repos(root) -> list:
+    """Git repos under root that currently have uncommitted/untracked changes."""
+    import subprocess
+
+    out = []
+    for repo in _telegram_git_repos(root):
         try:
             st = subprocess.run(
                 ["git", "-C", str(repo), "status", "--porcelain"],
                 capture_output=True, text=True, timeout=20,
             )
             if st.returncode == 0 and st.stdout.strip():
-                r = subprocess.run(
-                    ["git", "-C", str(repo), "stash", "push", "-u",
-                     "-m", "ronin telegram undo"],
-                    capture_output=True, text=True, timeout=40,
-                )
-                if r.returncode == 0:
-                    stashed.append(str(repo))
-        except Exception:  # noqa: BLE001 - undo is best effort
+                out.append(repo)
+        except Exception:  # noqa: BLE001
             continue
+    return out
 
+
+def _telegram_changes_summary(root, *, max_chars: int = 2500) -> str:
+    """Show what changed: per dirty repo, a `git diff --stat` plus a truncated
+    diff, so the Telegram reply shows the actual edits (Claude-Code style)."""
+    import subprocess
+
+    parts = []
+    for repo in _telegram_dirty_repos(root):
+        try:
+            stat = subprocess.run(
+                ["git", "-C", str(repo), "diff", "--stat"],
+                capture_output=True, text=True, timeout=20,
+            ).stdout.strip()
+            porcelain = subprocess.run(
+                ["git", "-C", str(repo), "status", "--porcelain"],
+                capture_output=True, text=True, timeout=20,
+            ).stdout.strip()
+            diff = subprocess.run(
+                ["git", "-C", str(repo), "diff"],
+                capture_output=True, text=True, timeout=20,
+            ).stdout.strip()
+        except Exception:  # noqa: BLE001
+            continue
+        block = f"[{repo}]\n{stat or porcelain or '(changes)'}"
+        if diff:
+            block += "\n\n" + diff[:1500]
+        parts.append(block)
+    if not parts:
+        return ""
+    text = "\n\n".join(parts)
+    if len(text) > max_chars:
+        text = text[:max_chars] + "\n... (truncated; ask me to show the full diff)"
+    return text
+
+
+def _telegram_undo(root) -> str:
+    """Best-effort /undo: stash uncommitted changes in dirty git repos under root
+    so recent edits are reverted but recoverable via `git stash pop`."""
+    import subprocess
+
+    stashed: list[str] = []
+    for repo in _telegram_dirty_repos(root):
+        try:
+            r = subprocess.run(
+                ["git", "-C", str(repo), "stash", "push", "-u",
+                 "-m", "ronin telegram undo"],
+                capture_output=True, text=True, timeout=40,
+            )
+            if r.returncode == 0:
+                stashed.append(str(repo))
+        except Exception:  # noqa: BLE001
+            continue
     if not stashed:
         return "Nothing to undo: no uncommitted changes found under the root."
     body = "\n".join(f"- {p}" for p in stashed)
@@ -5853,6 +5904,14 @@ def telegram(
         in {"1", "true", "yes", "on"}
     )
 
+    edit_nudge = (
+        "You are operating over Telegram for the owner, who cannot see your screen. "
+        "ACTUALLY DO the task end to end: read the relevant files, make the edits, and "
+        "run any commands needed to verify it works (e.g. run the tests). Do not stop "
+        "early and do not just describe what you would do. When finished, give a short, "
+        "plain summary of exactly what you changed and what you ran."
+    )
+
     def answer_fn(message_text: str) -> str:
         from .code_mode import run_code_agent
 
@@ -5868,10 +5927,16 @@ def telegram(
             yolo=True,
             read_only=not edits_on,
             include_image_tool=False,
-            max_iterations=DEFAULT_MAX_ITERATIONS,
+            max_iterations=40 if edits_on else DEFAULT_MAX_ITERATIONS,
             deny=is_secret_path,
+            base_system=edit_nudge if edits_on else None,
         )
-        return res.output or res.error or "(no answer)"
+        out = res.output or res.error or "(no answer)"
+        if edits_on:
+            changes = _telegram_changes_summary(root)
+            if changes:
+                out = out + "\n\n=== what changed ===\n" + changes
+        return out
 
     bot = TelegramBot(
         token=token,
