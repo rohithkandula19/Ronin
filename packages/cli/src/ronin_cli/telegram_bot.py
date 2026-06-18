@@ -24,6 +24,7 @@ the core CLI) stays light and offline.
 from __future__ import annotations
 
 import fnmatch
+import inspect
 import logging
 import os
 from dataclasses import dataclass, field
@@ -213,8 +214,12 @@ class TelegramBot:
 
     token: str
     allowed_chat_ids: list[int] = field(default_factory=list)
-    # answer_fn(message_text) -> str. Defaults to None; wired by the CLI.
-    answer_fn: Callable[[str], str] | None = None
+    # answer_fn(message_text) -> str, OR answer_fn(message_text, progress) -> str
+    # where progress(text: str) -> None edits a live status message in place.
+    # The second arg is OPTIONAL: a one-arg answer_fn still works unchanged (the
+    # bot detects the arity and only passes progress when the callable accepts
+    # it). Defaults to None; wired by the CLI.
+    answer_fn: Callable[..., str] | None = None
     poll_timeout: int = DEFAULT_POLL_TIMEOUT
     # injected httpx client (tests pass a mock); None = build one lazily.
     http: Any | None = None
@@ -258,6 +263,39 @@ class TelegramBot:
         """Send text to a chat, chunked so no single call exceeds the cap."""
         for chunk in _chunk_text(text, MAX_MESSAGE_CHARS):
             self._call("sendMessage", {"chat_id": chat_id, "text": chunk})
+
+    def send_message_id(self, chat_id: int, text: str) -> int | None:
+        """Send a single (un-chunked) message and return its message_id.
+
+        Used for the live "working..." status message that progress() later edits
+        in place. Status text is short by construction, so we do not chunk it.
+        Returns None if Telegram does not hand back a message_id.
+        """
+        body = self._call(
+            "sendMessage",
+            {"chat_id": chat_id, "text": text[:MAX_MESSAGE_CHARS]},
+        )
+        result = body.get("result") or {}
+        mid = result.get("message_id")
+        return mid if isinstance(mid, int) else None
+
+    def edit_message_text(self, chat_id: int, message_id: int, text: str) -> None:
+        """Edit an existing message in place (Telegram editMessageText).
+
+        This is how live progress is shown: one status message is sent once, then
+        edited as work happens, instead of flooding the chat with a new message
+        per step. Telegram rejects an edit whose text is identical to the current
+        text (400 "message is not modified"); that is harmless here, so callers
+        coalesce and we let the caller decide when to edit.
+        """
+        self._call(
+            "editMessageText",
+            {
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "text": text[:MAX_MESSAGE_CHARS],
+            },
+        )
 
     def _get_updates(self) -> list[dict[str, Any]]:
         payload: dict[str, Any] = {"timeout": self.poll_timeout}
@@ -307,20 +345,86 @@ class TelegramBot:
             logger.info("ignoring message from non-allowed chat id %s", chat_id)
             return
 
-        # 3) Allowed: run the SAME read-only ask path and send the answer back.
+        # 3) Allowed: run the SAME ask path and send the answer back. Before the
+        #    agent starts, send a single "working..." status message and capture
+        #    its id, then hand the agent a progress() that EDITS that one message
+        #    in place. The work streams live instead of arriving as one blob.
         logger.info("answering allowed chat id %s", chat_id)
-        answer = self._answer(text)
+        status_id = self._send_status(chat_id)
+        progress = self._make_progress(chat_id, status_id)
+        answer = self._answer(text, progress)
         self.send_message(chat_id, answer)
 
-    def _answer(self, text: str) -> str:
+    def _send_status(self, chat_id: int) -> int | None:
+        """Send the initial live-status message; return its id (None on failure).
+
+        A failure here must not abort the answer: progress just becomes a no-op
+        and the final reply still goes out.
+        """
+        try:
+            return self.send_message_id(chat_id, "working...")
+        except Exception:  # noqa: BLE001 - status is best-effort, never fatal
+            logger.debug("could not send status message", exc_info=True)
+            return None
+
+    def _make_progress(self, chat_id: int, status_id: int | None) -> Callable[[str], None]:
+        """Return a progress(text) that edits the status message in place.
+
+        If we have no status message id (the send failed), progress is a no-op so
+        the agent path is unaffected. Edit failures are swallowed: a transient
+        editMessageText error (or an identical-text 400) must never crash the run
+        or the poll loop.
+        """
+        def progress(text: str) -> None:
+            if status_id is None or not text:
+                return
+            try:
+                self.edit_message_text(chat_id, status_id, text)
+            except Exception:  # noqa: BLE001 - progress is best-effort
+                logger.debug("progress edit failed", exc_info=True)
+
+        return progress
+
+    def _answer(self, text: str, progress: Callable[[str], None] | None = None) -> str:
         if self.answer_fn is None:
             # Defensive: should never happen via the CLI, which always wires it.
             return "the agent is not wired up on this host."
         try:
-            return self.answer_fn(text)
+            return self._call_answer_fn(text, progress)
         except Exception as exc:  # noqa: BLE001 - never crash the poll loop
             logger.exception("agent run failed")
             return f"sorry, the agent hit an error: {exc.__class__.__name__}"
+
+    def _call_answer_fn(self, text: str, progress: Callable[[str], None] | None) -> str:
+        """Invoke answer_fn, passing progress ONLY if it accepts a second arg.
+
+        An EXISTING one-arg answer_fn (every current test stub) is called as
+        answer_fn(text), unchanged. A two-arg answer_fn is called as
+        answer_fn(text, progress). Arity is detected via inspect.signature; if the
+        signature cannot be read (e.g. a C callable), we fall back to one-arg.
+        """
+        fn = self.answer_fn
+        if progress is None or not self._accepts_progress(fn):
+            return fn(text)
+        return fn(text, progress)
+
+    @staticmethod
+    def _accepts_progress(fn: Callable[..., str]) -> bool:
+        """True if fn can take a second positional arg (the progress callable)."""
+        try:
+            sig = inspect.signature(fn)
+        except (ValueError, TypeError):
+            return False
+        positional = 0
+        for param in sig.parameters.values():
+            if param.kind in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            ):
+                positional += 1
+            elif param.kind is inspect.Parameter.VAR_POSITIONAL:
+                return True
+        return positional >= 2
 
     # ---- poll loop -----------------------------------------------------
 

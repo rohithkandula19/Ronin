@@ -5998,6 +5998,85 @@ def _telegram_dirty_repos(root) -> list:
     return out
 
 
+# How often (seconds) the live status message may be edited. Telegram rate-limits
+# editMessageText; coalescing to ~1/s keeps us well clear while still feeling live.
+_TELEGRAM_PROGRESS_MIN_INTERVAL = 1.0
+
+
+def _telegram_step_line(step) -> str | None:
+    """Turn one agent Step into a short, human progress line, or None to skip.
+
+    We only surface tool calls (the visible "doing something" moments). A
+    tool_call step's content is {"name": <tool>, "input": <args>}. Examples:
+    "reading src/app.py", "editing main.py", "ran: pytest -q",
+    "searching for TODO". Unknown/uninteresting steps return None so the status
+    line is not churned by thoughts or tool results.
+    """
+    if getattr(step, "kind", None) != "tool_call":
+        return None
+    content = getattr(step, "content", None) or {}
+    if not isinstance(content, dict):
+        return None
+    name = content.get("name") or ""
+    args = content.get("input") or {}
+    if not isinstance(args, dict):
+        args = {}
+
+    def _short(value, limit: int = 80) -> str:
+        s = str(value).strip().replace("\n", " ")
+        return s if len(s) <= limit else s[: limit - 3] + "..."
+
+    if name == "read_file":
+        return f"reading {_short(args.get('path', ''))}"
+    if name in ("write_file", "edit_file", "multi_edit"):
+        return f"editing {_short(args.get('path', ''))}"
+    if name == "run_command":
+        return f"ran: {_short(args.get('command', ''))}"
+    if name == "search_files":
+        return f"searching for {_short(args.get('query', ''))}"
+    if name == "glob":
+        return f"globbing {_short(args.get('pattern', ''))}"
+    if name == "list_files":
+        return f"listing {_short(args.get('directory', '.'))}"
+    if name == "update_todos":
+        return "updating the plan"
+    target = args.get("path") or args.get("command") or args.get("query") or ""
+    return f"running {name} {_short(target)}".rstrip()
+
+
+def _telegram_step_progress(progress, *, _now=None):
+    """Build an on_step_cb that pushes throttled progress lines to `progress`.
+
+    Coalesces: it edits the status message at most once every
+    _TELEGRAM_PROGRESS_MIN_INTERVAL seconds (the FIRST step always shows so the
+    user sees immediate life). Each shown line is prefixed with a small spinner
+    frame so successive identical actions still visibly change (Telegram rejects
+    an edit to identical text). Returns a callable(step) -> None.
+    """
+    import time
+
+    now = _now or time.monotonic
+    state = {"last": 0.0, "tick": 0}
+
+    def on_step(step) -> None:
+        line = _telegram_step_line(step)
+        if not line:
+            return
+        t = now()
+        # First line shows immediately; afterwards throttle to the interval.
+        if state["last"] and (t - state["last"]) < _TELEGRAM_PROGRESS_MIN_INTERVAL:
+            return
+        state["last"] = t
+        frame = "|/-\\"[state["tick"] % 4]
+        state["tick"] += 1
+        try:
+            progress(f"{frame} {line}")
+        except Exception:  # noqa: BLE001 - progress is best-effort, never fatal
+            pass
+
+    return on_step
+
+
 def _telegram_changes_summary(root, *, max_chars: int = 2500) -> str:
     """Show what changed: per dirty repo, a `git diff --stat` plus a truncated
     diff, so the Telegram reply shows the actual edits (Claude-Code style)."""
@@ -6143,12 +6222,19 @@ def telegram(
         "plain summary of exactly what you changed and what you ran."
     )
 
-    def answer_fn(message_text: str) -> str:
+    def answer_fn(message_text: str, progress=None) -> str:
+        # `progress(text)` (optional, passed by the bot) edits a live status
+        # message in place so the work streams to the phone instead of arriving
+        # as one final blob. We turn each agent Step into a short human line and
+        # push it through progress(), THROTTLED so we never spam Telegram with an
+        # edit per step (Telegram rate-limits edits, and most steps are noise).
         from .code_mode import run_code_agent
 
         text = message_text.strip()
         if edits_on and text == "/undo":
             return _telegram_undo(root)
+
+        on_step_cb = _telegram_step_progress(progress) if progress else None
 
         res = run_code_agent(
             config,
@@ -6161,6 +6247,7 @@ def telegram(
             max_iterations=40 if edits_on else DEFAULT_MAX_ITERATIONS,
             deny=is_secret_path,
             base_system=edit_nudge if edits_on else None,
+            on_step_cb=on_step_cb,
         )
         out = res.output or res.error or "(no answer)"
         if edits_on:

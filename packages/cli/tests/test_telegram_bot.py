@@ -67,6 +67,16 @@ class FakeClient:
     def sent_messages(self) -> list[dict]:
         return [c["json"] for c in self.calls if c["url"].endswith("/sendMessage")]
 
+    def edited_messages(self) -> list[dict]:
+        return [c["json"] for c in self.calls if c["url"].endswith("/editMessageText")]
+
+
+# The bot sends a single "working..." status message before the agent runs and
+# edits it for progress. Tests that care about the FINAL answer filter the status
+# message out so the new live-progress behavior does not perturb their assertions.
+def _answer_messages(client: "FakeClient") -> list[dict]:
+    return [m for m in client.sent_messages() if m.get("text") != "working..."]
+
 
 def _update(chat_id: int, text: str, update_id: int = 100) -> dict:
     return {
@@ -120,10 +130,103 @@ def test_allowed_chat_runs_agent_and_sends_answer() -> None:
     bot.poll_once()
 
     assert invoked == ["hello ronin"], "agent should be invoked once with the text"
+    # A live-status "working..." message is sent first; the final answer follows.
+    answers = _answer_messages(client)
+    assert len(answers) == 1
+    assert answers[0]["chat_id"] == 42
+    assert answers[0]["text"] == "answer to: hello ronin"
+
+
+# ---------- live progress: streams via editMessageText, not a flood --------
+
+def test_two_arg_answer_fn_gets_progress_and_edits_status() -> None:
+    """A two-arg answer_fn receives progress(); calling it EDITS the single
+    status message in place (editMessageText), it does not send new messages."""
+    got_progress: list = []
+
+    def streaming_agent(text: str, progress) -> str:
+        got_progress.append(progress)
+        progress("| reading a.py")
+        progress("/ editing a.py")
+        return f"done: {text}"
+
+    client = FakeClient(getupdates_result=[_update(42, "do it")])
+    bot = TelegramBot(
+        token=VALID_TOKEN,
+        allowed_chat_ids=[42],
+        answer_fn=streaming_agent,
+        http=client,
+    )
+    bot.poll_once()
+
+    assert got_progress and callable(got_progress[0]), "progress must be passed"
+    # Exactly ONE status message ("working...") was sent; progress edited it.
     sent = client.sent_messages()
-    assert len(sent) == 1
-    assert sent[0]["chat_id"] == 42
-    assert sent[0]["text"] == "answer to: hello ronin"
+    status = [m for m in sent if m["text"] == "working..."]
+    assert len(status) == 1, "exactly one live-status message is sent"
+    # Two progress() calls -> two editMessageText calls (not new messages).
+    edits = client.edited_messages()
+    assert len(edits) == 2, "progress must EDIT in place, not flood new messages"
+    assert edits[0]["text"] == "| reading a.py"
+    assert edits[1]["text"] == "/ editing a.py"
+    assert all(e["message_id"] == 1 for e in edits), "edits target the status message"
+    # The final answer is still sent as a normal reply.
+    answers = _answer_messages(client)
+    assert answers[-1]["text"] == "done: do it"
+
+
+def test_one_arg_answer_fn_still_works_unchanged() -> None:
+    """An EXISTING one-arg answer_fn is called as answer_fn(text); no progress is
+    forced on it, and no editMessageText is attempted by the agent path."""
+    seen: list[str] = []
+
+    def legacy_agent(text: str) -> str:  # one positional arg, as before
+        seen.append(text)
+        return "legacy ok"
+
+    client = FakeClient(getupdates_result=[_update(42, "hello")])
+    bot = TelegramBot(
+        token=VALID_TOKEN,
+        allowed_chat_ids=[42],
+        answer_fn=legacy_agent,
+        http=client,
+    )
+    bot.poll_once()
+
+    assert seen == ["hello"], "one-arg answer_fn must still be invoked with the text"
+    # No progress was pushed, so no edits happened.
+    assert client.edited_messages() == []
+    assert _answer_messages(client)[-1]["text"] == "legacy ok"
+
+
+def test_progress_edit_failure_does_not_crash_answer() -> None:
+    """If editMessageText raises, progress swallows it and the answer still sends."""
+    class FlakyClient(FakeClient):
+        def post(self, url: str, json=None, **kwargs):  # noqa: A002
+            if url.endswith("/editMessageText"):
+                raise RuntimeError("telegram edit blew up")
+            return super().post(url, json=json, **kwargs)
+
+    def streaming_agent(text: str, progress) -> str:
+        progress("| working")  # this edit raises; must not propagate
+        return "still answered"
+
+    client = FlakyClient(getupdates_result=[_update(42, "go")])
+    bot = TelegramBot(
+        token=VALID_TOKEN,
+        allowed_chat_ids=[42],
+        answer_fn=streaming_agent,
+        http=client,
+    )
+    bot.poll_once()  # must not raise
+
+    assert _answer_messages(client)[-1]["text"] == "still answered"
+
+
+def test_accepts_progress_arity_detection() -> None:
+    assert TelegramBot._accepts_progress(lambda t, p: t) is True
+    assert TelegramBot._accepts_progress(lambda t: t) is False
+    assert TelegramBot._accepts_progress(lambda t, *a: t) is True
 
 
 # ---------- 2. non-allowed chat -> agent NOT invoked, no answer ------------
@@ -213,7 +316,7 @@ def test_long_answer_is_chunked() -> None:
     )
     bot.poll_once()
 
-    sent = client.sent_messages()
+    sent = _answer_messages(client)  # drop the "working..." status message
     assert len(sent) >= 3, "a >2x-cap answer must span multiple sendMessage calls"
     assert all(len(m["text"]) <= MAX_MESSAGE_CHARS for m in sent)
     # the reassembled text matches the original (newline-stripped chunking ok here)
@@ -488,10 +591,52 @@ def test_cli_runs_read_only_code_agent_rooted_at_default_home(
     assert call["include_image_tool"] is False
     assert callable(call["deny"]), "the secret-path guard must be passed as deny"
     assert call["max_iterations"] >= 1
-    # the output is sent back to the chat
-    sent = client.sent_messages()
-    assert sent and sent[0]["chat_id"] == 42
-    assert sent[0]["text"] == "saw: what is in my repo?"
+    # the output is sent back to the chat (after the "working..." status message)
+    answers = _answer_messages(client)
+    assert answers and answers[0]["chat_id"] == 42
+    assert answers[0]["text"] == "saw: what is in my repo?"
+    # an on_step_cb must be wired so progress streams as steps arrive
+    assert callable(call.get("on_step_cb")), "on_step_cb must be passed for live progress"
+
+
+def test_cli_streams_progress_via_edit_message_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End to end: the CLI answer_fn wires on_step_cb; a step emitted by
+    run_code_agent turns into a live editMessageText, and the final answer is a
+    normal reply. No model/network: run_code_agent is mocked and emits a step."""
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", VALID_TOKEN)
+    monkeypatch.setenv("TELEGRAM_ALLOWED_CHAT_IDS", "42")
+    monkeypatch.delenv(ENV_ROOT, raising=False)
+
+    class _Step:
+        def __init__(self, kind, content):
+            self.kind = kind
+            self.content = content
+
+    def fake_run_code_agent(config, task, **kwargs):
+        cb = kwargs.get("on_step_cb")
+        if cb is not None:
+            cb(_Step("tool_call", {"name": "read_file", "input": {"path": "x.py"}}))
+        return _FakeRes(output="all done")
+
+    monkeypatch.setattr("ronin_cli.code_mode.run_code_agent", fake_run_code_agent)
+
+    client = FakeClient(getupdates_result=[_update(42, "look at x.py")])
+
+    def capture_bot(**kwargs):
+        kwargs["http"] = client
+        return TelegramBot(**kwargs)
+
+    monkeypatch.setattr("ronin_cli.telegram_bot.TelegramBot", capture_bot)
+
+    r = runner.invoke(app, ["telegram", "--once"])
+    assert r.exit_code == 0, r.stdout
+
+    edits = client.edited_messages()
+    assert edits, "the step must have produced a live editMessageText"
+    assert "reading x.py" in edits[-1]["text"]
+    assert _answer_messages(client)[-1]["text"] == "all done"
 
 
 def test_cli_never_passes_write_path_to_code_agent(
@@ -528,6 +673,60 @@ def test_cli_never_passes_write_path_to_code_agent(
         assert kwargs.get("read_only") is not False
         assert "extra_tools" not in kwargs, "no extra/write tools may be passed"
         # config.full_access stays at its default (False); the command never sets it.
+
+
+# ---------- main.py: step -> human progress line + throttling --------------
+
+class _FakeStep:
+    """Minimal stand-in for ronin_agent_patterns Step (kind + content)."""
+    def __init__(self, kind: str, content) -> None:
+        self.kind = kind
+        self.content = content
+
+
+def test_step_line_maps_tool_calls_to_human_lines() -> None:
+    from ronin_cli.main import _telegram_step_line
+
+    line = _telegram_step_line(_FakeStep("tool_call", {"name": "read_file", "input": {"path": "src/app.py"}}))
+    assert line == "reading src/app.py"
+    assert _telegram_step_line(
+        _FakeStep("tool_call", {"name": "edit_file", "input": {"path": "main.py"}})
+    ) == "editing main.py"
+    assert _telegram_step_line(
+        _FakeStep("tool_call", {"name": "run_command", "input": {"command": "pytest -q"}})
+    ) == "ran: pytest -q"
+    assert _telegram_step_line(
+        _FakeStep("tool_call", {"name": "search_files", "input": {"query": "TODO"}})
+    ) == "searching for TODO"
+    # non tool_call steps (thoughts, results) are skipped
+    assert _telegram_step_line(_FakeStep("thought", "thinking...")) is None
+    assert _telegram_step_line(_FakeStep("tool_result", {"name": "read_file"})) is None
+
+
+def test_step_progress_calls_progress_as_steps_arrive_and_throttles() -> None:
+    """on_step_cb pushes a line on the first step, then coalesces by time so it
+    does not edit the status message on every single step."""
+    from ronin_cli.main import _telegram_step_progress
+
+    pushed: list[str] = []
+    clock = {"t": 100.0}
+    on_step = _telegram_step_progress(pushed.append, _now=lambda: clock["t"])
+
+    # first tool_call -> shown immediately
+    on_step(_FakeStep("tool_call", {"name": "read_file", "input": {"path": "a.py"}}))
+    # second within the same instant -> throttled away
+    on_step(_FakeStep("tool_call", {"name": "read_file", "input": {"path": "b.py"}}))
+    assert len(pushed) == 1, "rapid steps must be coalesced, not one edit per step"
+
+    # after the interval, the next step shows again
+    clock["t"] += 2.0
+    on_step(_FakeStep("tool_call", {"name": "edit_file", "input": {"path": "c.py"}}))
+    assert len(pushed) == 2
+    assert "reading a.py" in pushed[0]
+    assert "editing c.py" in pushed[1]
+    # non tool steps never push
+    on_step(_FakeStep("thought", "hmm"))
+    assert len(pushed) == 2
 
 
 def test_cli_root_respects_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
