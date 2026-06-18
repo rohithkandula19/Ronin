@@ -824,6 +824,20 @@ def run_code_agent(
         _output = append_grounding_note(_output, _note)
     except Exception:  # noqa: BLE001 - the grounding check must never break a run
         _output = result.output
+
+    # Self-verify: after an edit task (not read-only, and only when the agent
+    # actually changed code), detect + RUN this repo's test/verify command ONCE
+    # and append a VERIFICATION verdict so the agent does not claim success
+    # blindly. Reuses verify_cmd detection (pytest / npm test / cargo / ...).
+    # ON by default for edit tasks; opt out with RONIN_SELF_VERIFY=0. Bounded
+    # (one run, one timeout) and never raises - degrades to no note on any error.
+    try:
+        from .self_verify import append_verification_note, verification_note
+        _v_note = verification_note(result.trace, root=root, config=config,
+                                    read_only=read_only)
+        _output = append_verification_note(_output, _v_note)
+    except Exception:  # noqa: BLE001 - self-verify must never break a run
+        pass
     return CodeRunResult(
         success=result.success,
         output=_output,

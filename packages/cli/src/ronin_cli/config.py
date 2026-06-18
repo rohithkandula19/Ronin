@@ -122,6 +122,12 @@ class RoninConfig(BaseModel):
     # call. Set False here, or export RONIN_GROUNDING_CHECK=0 (env wins), to opt
     # out.
     grounding_check: bool = True
+    # Self-verify: after an edit task in code mode, detect this repo's test/verify
+    # command (reuse verify_cmd detection), RUN it once, and append a VERIFICATION
+    # verdict to the result so the agent does not claim success blindly. ON by
+    # default for edit tasks; set False here, or export RONIN_SELF_VERIFY=0 (env
+    # wins), to opt out. Read-only / plan runs have nothing to verify.
+    self_verify: bool = True
 
     anthropic_api_key: str | None = None
     openai_api_key: str | None = None  # legacy shared slot (openai/together/groq/…)
