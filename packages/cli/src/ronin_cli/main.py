@@ -5718,6 +5718,64 @@ app.add_typer(relay_app, name="relay")
 
 # ---------- telegram (control Ronin from your phone, outbound-only) ----------
 
+
+def _telegram_undo(root) -> str:
+    """Best-effort /undo for full mode: stash uncommitted changes in git repos
+    under `root` that are currently dirty, reverting the agent's recent edits
+    while keeping them recoverable via `git stash pop`. Bounded, skips heavy
+    dirs, never descends into a repo it already found."""
+    import subprocess
+    from pathlib import Path
+
+    base = Path(root)
+    skip = {
+        "node_modules", ".venv", "venv", "__pycache__", ".cache", "Library",
+        ".Trash", ".npm", ".cargo", "go", "dist", "build", ".git",
+    }
+    repos: list[Path] = []
+
+    def walk(d: Path, depth: int) -> None:
+        if depth > 4 or len(repos) > 200:
+            return
+        if (d / ".git").exists():
+            repos.append(d)
+            return
+        try:
+            entries = list(d.iterdir())
+        except OSError:
+            return
+        for e in entries:
+            if e.is_dir() and e.name not in skip and not e.name.startswith("."):
+                walk(e, depth + 1)
+
+    walk(base, 0)
+    stashed: list[str] = []
+    for repo in repos:
+        try:
+            st = subprocess.run(
+                ["git", "-C", str(repo), "status", "--porcelain"],
+                capture_output=True, text=True, timeout=20,
+            )
+            if st.returncode == 0 and st.stdout.strip():
+                r = subprocess.run(
+                    ["git", "-C", str(repo), "stash", "push", "-u",
+                     "-m", "ronin telegram undo"],
+                    capture_output=True, text=True, timeout=40,
+                )
+                if r.returncode == 0:
+                    stashed.append(str(repo))
+        except Exception:  # noqa: BLE001 - undo is best effort
+            continue
+
+    if not stashed:
+        return "Nothing to undo: no uncommitted changes found under the root."
+    body = "\n".join(f"- {p}" for p in stashed)
+    return (
+        "Reverted recent changes (stashed) in:\n" + body
+        + "\nRestore any of them with: git -C <repo> stash pop"
+    )
+
+
 @app.command()
 def telegram(
     allow: list[int] = typer.Option(
@@ -5787,8 +5845,20 @@ def telegram(
     #    skip obviously sensitive paths so a stray request cannot dump a secret
     #    into the Telegram history. run_code_agent is imported LAZILY so importing
     #    this module stays light and offline.
+    # Full mode (read + EDIT + run) is opt-in via RONIN_TELEGRAM_ALLOW_EDITS.
+    # Unset/false => read_only (the safe default). The allowlist + secret guard
+    # stay in force in both modes.
+    edits_on = (
+        os.environ.get("RONIN_TELEGRAM_ALLOW_EDITS", "").strip().lower()
+        in {"1", "true", "yes", "on"}
+    )
+
     def answer_fn(message_text: str) -> str:
         from .code_mode import run_code_agent
+
+        text = message_text.strip()
+        if edits_on and text == "/undo":
+            return _telegram_undo(root)
 
         res = run_code_agent(
             config,
@@ -5796,7 +5866,7 @@ def telegram(
             root=root,
             console=None,
             yolo=True,
-            read_only=True,
+            read_only=not edits_on,
             include_image_tool=False,
             max_iterations=DEFAULT_MAX_ITERATIONS,
             deny=is_secret_path,
@@ -5824,10 +5894,16 @@ def telegram(
 
     username = me.get("username", "?")
     console.print(f"[green]ok[/green] bot @{username} ready; allowed chats: {allowed}")
-    console.print(
-        f"[dim]Read-only file access, rooted at {root}. I can read and search "
-        "your files but cannot edit or run commands.[/dim]"
-    )
+    if edits_on:
+        console.print(
+            f"[yellow]FULL mode[/yellow]: I can read, EDIT, and RUN commands in {root}. "
+            "Send /undo to revert recent changes (stashed). Secret files stay blocked."
+        )
+    else:
+        console.print(
+            f"[dim]Read-only file access, rooted at {root}. I can read and search "
+            "your files but cannot edit or run commands.[/dim]"
+        )
     if not allowed:
         console.print(
             "[yellow]![/yellow] allowlist is empty: I will not run the agent for "
