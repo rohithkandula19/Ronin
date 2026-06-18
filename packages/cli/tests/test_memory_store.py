@@ -61,6 +61,103 @@ def test_forget_all(home: Path) -> None:
     assert memory_store.load_memories() == []
 
 
+# ---------- recall / forget / list / auto-recall ----------
+
+def test_list_memories(home: Path) -> None:
+    memory_store.add_memory("User's name is Rohith")
+    memory_store.add_memory("Prefers Python")
+    assert memory_store.list_memories() == ["User's name is Rohith", "Prefers Python"]
+
+
+def test_remember_then_recall(home: Path) -> None:
+    memory_store.add_memory("User's name is Rohith")
+    memory_store.add_memory("User deploys with Docker on Fly.io")
+    memory_store.add_memory("User likes black coffee")
+    hits = memory_store.recall("what is my name")
+    assert hits and "Rohith" in hits[0]
+    # an irrelevant query returns nothing
+    assert memory_store.recall("kubernetes helm charts") == []
+    # empty query is safe
+    assert memory_store.recall("") == []
+
+
+def test_recall_ranks_relevant_above_irrelevant(home: Path) -> None:
+    memory_store.add_memory("User deploys with Docker and Fly.io")
+    memory_store.add_memory("User likes black coffee")
+    hits = memory_store.recall("how do I deploy with docker")
+    assert hits[0] == "User deploys with Docker and Fly.io"
+    assert "coffee" not in " ".join(hits)
+
+
+def test_forget_targeted(home: Path) -> None:
+    memory_store.add_memory("User uses Groq")
+    memory_store.add_memory("User uses OpenRouter")
+    memory_store.add_memory("User's name is Rohith")
+    assert memory_store.forget("groq") == 1  # case-insensitive substring
+    texts = memory_store.list_memories()
+    assert "User uses Groq" not in texts
+    assert "User uses OpenRouter" in texts and "User's name is Rohith" in texts
+    # blank match removes nothing
+    assert memory_store.forget("   ") == 0
+    # no match removes nothing
+    assert memory_store.forget("nonexistent") == 0
+
+
+def test_relevant_prompt_block_injects_relevant_only(home: Path) -> None:
+    memory_store.add_memory("User's name is Rohith")
+    memory_store.add_memory("User prefers Python and pytest")
+    memory_store.add_memory("User likes black coffee")
+    block = memory_store.relevant_prompt_block("write me some python tests")
+    assert "Python" in block
+    assert "already know about the user" in block
+    # irrelevant facts are not injected
+    assert "coffee" not in block
+
+
+def test_relevant_prompt_block_empty_when_nothing_relevant(home: Path) -> None:
+    memory_store.add_memory("User likes black coffee")
+    assert memory_store.relevant_prompt_block("kubernetes networking") == ""
+    # no memories at all → empty
+    memory_store.forget_all()
+    assert memory_store.relevant_prompt_block("anything") == ""
+
+
+def test_relevant_prompt_block_is_bounded(home: Path) -> None:
+    # many matching facts, but the block is capped by K and by char budget
+    for i in range(40):
+        memory_store.add_memory(f"User cares about python topic number {i}")
+    block = memory_store.relevant_prompt_block("python", k=6, max_chars=400)
+    fact_lines = [ln for ln in block.splitlines() if ln.startswith("- ")]
+    assert 0 < len(fact_lines) <= 6
+    assert len(block) <= 400 + 200  # header + capped body, comfortably bounded
+
+
+def test_recall_and_forget_tools(home: Path) -> None:
+    memory_store.add_memory("User uses Groq")
+    rtool = memory_store.build_recall_tool()
+    assert rtool.name == "recall_memory"
+    assert "Groq" in rtool.handler(query="what model provider do I use")
+    assert "Nothing" in rtool.handler(query="favorite pizza topping")
+
+    ftool = memory_store.build_forget_tool()
+    assert ftool.name == "forget_memory"
+    msg = ftool.handler(match="groq")
+    assert "Forgot 1" in msg
+    assert memory_store.list_memories() == []
+
+
+# ---------- CLI: recall / targeted forget ----------
+
+def test_cli_memory_recall_and_forget(home: Path) -> None:
+    runner.invoke(app, ["memory", "--add", "User uses Groq"])
+    runner.invoke(app, ["memory", "--add", "User prefers Python"])
+    r = runner.invoke(app, ["memory", "--recall", "what language do I prefer"])
+    assert r.exit_code == 0 and "Python" in r.stdout
+    r = runner.invoke(app, ["memory", "--forget", "groq"])
+    assert r.exit_code == 0 and "forgot 1" in r.stdout
+    assert "User uses Groq" not in [t for t in memory_store.list_memories()]
+
+
 # ---------- CLI ----------
 
 def test_cli_memory_add_list_clear(home: Path) -> None:

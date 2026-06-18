@@ -5228,6 +5228,8 @@ def update(
 @app.command()
 def memory(
     add: str = typer.Option(None, "--add", help="Add a fact to long-term memory."),
+    recall_query: str = typer.Option(None, "--recall", help="Show the facts most relevant to a query."),
+    forget_match: str = typer.Option(None, "--forget", help="Forget facts matching a phrase."),
     clear: bool = typer.Option(False, "--clear", help="Forget everything."),
 ) -> None:
     """Show (or edit) what ronin remembers about you across sessions.
@@ -5236,11 +5238,24 @@ def memory(
     these facts in every future session. The agent also saves facts itself via
     its `remember` tool when you share durable info.
     """
-    from .memory_store import add_memory, forget_all, load_memories
+    from .memory_store import add_memory, forget, forget_all, load_memories, recall
 
     if clear:
         n = forget_all()
         console.print(f"[green]✓[/green] forgot {n} memory item(s).")
+        return
+    if forget_match:
+        n = forget(forget_match)
+        console.print(f"[green]✓[/green] forgot {n} memory item(s) matching {forget_match!r}."
+                      if n else f"[dim]nothing matched {forget_match!r}[/dim]")
+        return
+    if recall_query:
+        hits = recall(recall_query)
+        if not hits:
+            console.print(f"[dim]nothing relevant to {recall_query!r}[/dim]")
+        else:
+            for f in hits:
+                console.print(f"[#2dd4bf]•[/#2dd4bf] {f}")
         return
     if add:
         ok = add_memory(add)
@@ -6249,12 +6264,40 @@ def telegram(
         # push it through progress(), THROTTLED so we never spam Telegram with an
         # edit per step (Telegram rate-limits edits, and most steps are noise).
         from .code_mode import run_code_agent
+        from .memory_store import (
+            build_forget_tool,
+            build_recall_tool,
+            build_remember_tool,
+            relevant_prompt_block,
+        )
 
         text = message_text.strip()
         if edits_on and text == "/undo":
             return _telegram_undo(root)
 
         on_step_cb = _telegram_step_progress(progress) if progress else None
+
+        # AUTO-RECALL: load the durable facts relevant to THIS message and inject
+        # them into the system prompt so the agent already knows the user (name,
+        # stack, repos, preferences) and stops re-asking. Bounded (top-K + capped).
+        # Memory failures must never break a reply.
+        try:
+            mem_block = relevant_prompt_block(message_text)
+        except Exception:  # noqa: BLE001 - memory is best-effort, never fatal
+            mem_block = ""
+
+        # Only the EDIT mode (read_only False) gets the remember/recall/forget
+        # tools, so the agent can update memory while it works. The default
+        # read-only path passes NO extra_tools at all (a write-safety invariant the
+        # bridge tests enforce); auto-recall still applies there via extra_system,
+        # and explicit memory commands are handled deterministically by the bot.
+        extra: dict = {}
+        if edits_on:
+            try:
+                extra["extra_tools"] = [
+                    build_remember_tool(), build_recall_tool(), build_forget_tool()]
+            except Exception:  # noqa: BLE001 - best-effort
+                pass
 
         res = run_code_agent(
             config,
@@ -6267,7 +6310,9 @@ def telegram(
             max_iterations=40 if edits_on else DEFAULT_MAX_ITERATIONS,
             deny=is_secret_path,
             base_system=edit_nudge if edits_on else None,
+            extra_system=mem_block,
             on_step_cb=on_step_cb,
+            **extra,
         )
         out = res.output or res.error or "(no answer)"
         if edits_on:
@@ -6280,7 +6325,14 @@ def telegram(
         # A daily briefing runs its prompt through the SAME read-only agent at
         # fire time and sends the result. Read-only and secret-guarded, exactly
         # like a normal message; no progress streaming (it fires unattended).
+        # AUTO-RECALL applies here too so a briefing reflects what we know.
         from .code_mode import run_code_agent
+        from .memory_store import relevant_prompt_block
+
+        try:
+            mem_block = relevant_prompt_block(prompt)
+        except Exception:  # noqa: BLE001 - memory is best-effort, never fatal
+            mem_block = ""
 
         res = run_code_agent(
             config,
@@ -6292,6 +6344,7 @@ def telegram(
             include_image_tool=False,
             max_iterations=DEFAULT_MAX_ITERATIONS,
             deny=is_secret_path,
+            extra_system=mem_block,
         )
         return res.output or res.error or "(no answer)"
 

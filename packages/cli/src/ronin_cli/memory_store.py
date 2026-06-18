@@ -20,6 +20,9 @@ from ronin_agent_patterns import Tool
 
 _MAX_STORED = 300
 _INJECT_RECENT = 40
+_RECALL_K = 8                 # top-K relevant facts returned by recall()
+_AUTO_RECALL_K = 6            # top-K relevant facts auto-injected per turn
+_AUTO_RECALL_CHARS = 1200     # hard cap on the auto-recall block size
 
 
 def _memory_path() -> Path:
@@ -69,6 +72,80 @@ def forget_all() -> int:
     return n
 
 
+def list_memories() -> list[str]:
+    """Just the fact strings, newest last. Thin wrapper over load_memories()."""
+    return [m.get("text", "") for m in load_memories() if m.get("text")]
+
+
+# --------------------------------------------------------------------------- #
+# Relevance: recall(query) and targeted forget(match)
+# --------------------------------------------------------------------------- #
+# Very common words carry no signal for matching a fact to a query. Dropping them
+# stops "what do I use" from matching every fact that contains "do" or "i".
+_STOPWORDS = frozenset(
+    "a an the and or of to in on for with my me i you your is are am be do does "
+    "did how what when where who why which that this it its at as by from".split()
+)
+
+
+def _stem(word: str) -> str:
+    """Crudest possible stemmer: strip a few common English suffixes so 'uses',
+    'using', and 'used' all collapse to 'us...'-ish roots and match 'use'. Good
+    enough for keyword recall; no nltk, no data files."""
+    for suf in ("ing", "ed", "es", "s"):
+        if len(word) > len(suf) + 2 and word.endswith(suf):
+            return word[: -len(suf)]
+    return word
+
+
+def _stems(words) -> set[str]:
+    return {_stem(w) for w in words if w not in _STOPWORDS and len(w) > 1}
+
+
+def _score(query_terms: list[str], text: str) -> float:
+    """Relevance of one fact to a query. Jaccard over STEMMED, stop-word-filtered
+    word sets, plus a small overlap-count nudge so a fact that shares more query
+    words ranks higher. Pure, dependency-free."""
+    qset = _stems(query_terms)
+    words = _stems((text or "").lower().split())
+    if not qset or not words:
+        return 0.0
+    overlap = qset & words
+    if not overlap:
+        return 0.0
+    jaccard = len(overlap) / len(qset | words)
+    return jaccard + 0.01 * len(overlap)
+
+
+def recall(query: str, k: int = _RECALL_K) -> list[str]:
+    """The facts most relevant to ``query``, best first. Stemmed keyword/Jaccard
+    match; zero-overlap facts are dropped. Returns [] when nothing is relevant or
+    the query is empty. No network, no model."""
+    from .recall import tokenize
+
+    terms = tokenize(query)
+    if not terms:
+        return []
+    scored = [(text, _score(terms, text)) for text in list_memories()]
+    hits = [(t, s) for t, s in scored if s > 0]
+    hits.sort(key=lambda ts: ts[1], reverse=True)
+    return [t for t, _ in hits[:k]]
+
+
+def forget(match: str) -> int:
+    """Drop every stored fact that contains ``match`` (case-insensitive
+    substring). Returns the number removed. A blank match removes nothing."""
+    match = " ".join((match or "").split()).strip().lower()
+    if not match:
+        return 0
+    memories = load_memories()
+    kept = [m for m in memories if match not in m.get("text", "").lower()]
+    removed = len(memories) - len(kept)
+    if removed:
+        _save(kept)
+    return removed
+
+
 def memory_prompt_block(limit: int = _INJECT_RECENT) -> str:
     """The '## What you remember about the user' block for the system prompt."""
     memories = load_memories()
@@ -80,6 +157,37 @@ def memory_prompt_block(limit: int = _INJECT_RECENT) -> str:
         "\n\n## What you remember about the user (from past sessions)\n"
         "Use these durable facts when relevant; don't repeat them back unprompted.\n"
         f"{lines}"
+    )
+
+
+def relevant_prompt_block(query: str, *, k: int = _AUTO_RECALL_K,
+                          max_chars: int = _AUTO_RECALL_CHARS) -> str:
+    """Auto-recall: the facts most relevant to ``query``, as a system-prompt block.
+
+    Used at the START of an agent turn so the agent walks in already knowing the
+    relevant things about the user (name, stack, repos, preferences) instead of
+    re-asking. Bounded by design: at most ``k`` facts and ``max_chars`` total, so
+    it never bloats the prompt. Returns '' when nothing is relevant, so a fresh
+    or off-topic message adds zero context. No network, no model.
+    """
+    facts = recall(query, k=k)
+    if not facts:
+        return ""
+    lines: list[str] = []
+    used = 0
+    for fact in facts:
+        line = f"- {fact}"
+        if used + len(line) + 1 > max_chars:
+            break
+        lines.append(line)
+        used += len(line) + 1
+    if not lines:
+        return ""
+    return (
+        "\n\n## What you already know about the user (relevant to this request)\n"
+        "Use these durable facts so you don't re-ask what you already know; "
+        "don't repeat them back unprompted.\n"
+        + "\n".join(lines)
     )
 
 
@@ -153,4 +261,52 @@ def build_remember_tool() -> Tool:
             "required": ["fact"],
         },
         handler=remember,
+    )
+
+
+def build_recall_tool() -> Tool:
+    """A tool the agent calls to look up what it already knows about the user."""
+
+    def recall_tool(query: str) -> str:
+        facts = recall(query, k=_RECALL_K)
+        if not facts:
+            return f"Nothing in long-term memory about {query!r}."
+        return "What I remember about the user:\n" + "\n".join(f"- {f}" for f in facts)
+
+    return Tool(
+        name="recall_memory",
+        description=(
+            "Search long-term memory for durable facts about the user relevant to a "
+            "query (their name, stack, repos, preferences). Use this before asking the "
+            "user something you may already know. Returns the most relevant stored facts."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {"query": {"type": "string", "description": "What to look up."}},
+            "required": ["query"],
+        },
+        handler=recall_tool,
+    )
+
+
+def build_forget_tool() -> Tool:
+    """A tool the agent calls to drop stored facts the user asks it to forget."""
+
+    def forget_tool(match: str) -> str:
+        n = forget(match)
+        return f"Forgot {n} memory item(s) matching {match!r}." if n else f"Nothing stored matched {match!r}."
+
+    return Tool(
+        name="forget_memory",
+        description=(
+            "Remove durable facts from long-term memory that match a phrase "
+            "(case-insensitive substring). Use when the user says to forget something "
+            "about them. Returns how many facts were removed."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {"match": {"type": "string", "description": "Phrase to match facts to remove."}},
+            "required": ["match"],
+        },
+        handler=forget_tool,
     )

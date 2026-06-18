@@ -366,6 +366,14 @@ class TelegramBot:
         if self._handle_watch(chat_id, text):
             return
 
+        # 3c) Explicit long-term-memory commands ("remember that I ...", "forget
+        #     that ...", "what do you remember") are deterministic too: act on
+        #     ~/.ronin/memory.json directly and confirm, no model call. Anything
+        #     else falls through to the agent (which still gets AUTO-RECALL of the
+        #     relevant facts via answer_fn).
+        if self._handle_memory(chat_id, text):
+            return
+
         # 4) Allowed: run the SAME ask path and send the answer back. Before the
         #    agent starts, send a single "working..." status message and capture
         #    its id, then hand the agent a progress() that EDITS that one message
@@ -514,6 +522,50 @@ class TelegramBot:
         if parsed.kind == "add" and parsed.url:
             watch = pw.add_watch(parsed.url, chat_id, keyword=parsed.keyword)
             self.send_message(chat_id, pw.confirm_text(watch))
+            return True
+
+        return False
+
+    # ---- long-term user memory ----------------------------------------
+
+    def _handle_memory(self, chat_id: int, text: str) -> bool:
+        """If ``text`` is an explicit memory command, act on it and return True.
+
+        Recognizes "remember that I ...", "forget that ...", and "what do you
+        remember". These hit ~/.ronin/memory.json directly via ``memory_store``
+        and confirm back, so they never cost a model call. A non-memory message
+        returns False and falls through to the agent. Parsing is stdlib-only and
+        lives in ``user_memory_ops.py``; imported lazily to keep this module light.
+        """
+        from . import memory_store as mem
+        from .user_memory_ops import parse_memory_op
+
+        op = parse_memory_op(text)
+        if op is None:
+            return False
+
+        if op.kind == "list":
+            facts = mem.list_memories()
+            if not facts:
+                self.send_message(chat_id, "i don't remember anything about you yet.")
+            else:
+                body = "\n".join(f"- {f}" for f in facts)
+                self.send_message(chat_id, f"here's what i remember about you:\n{body}")
+            return True
+
+        if op.kind == "remember":
+            if mem.add_memory(op.payload):
+                self.send_message(chat_id, f"got it, i'll remember: {op.payload}")
+            else:
+                self.send_message(chat_id, "i already had that one remembered.")
+            return True
+
+        if op.kind == "forget":
+            n = mem.forget(op.payload)
+            if n:
+                self.send_message(chat_id, f"forgot {n} thing(s) matching '{op.payload}'.")
+            else:
+                self.send_message(chat_id, f"nothing remembered matched '{op.payload}'.")
             return True
 
         return False
