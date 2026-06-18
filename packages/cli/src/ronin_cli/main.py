@@ -109,6 +109,22 @@ def _root(
         full_access = False
 
     import sys
+
+    # `--tui` is an explicit request for the full-screen app and must launch even
+    # when stdout is not a plain tty (terminal multiplexers, IDE terminals, and
+    # some launch shims wrap or pipe stdout). Previously the non-interactive guard
+    # below printed help and returned FIRST, so `ronin --tui` exited instantly back
+    # to the shell whenever stdout was not a tty. The TUI only needs a readable
+    # keyboard (stdin); Textual itself degrades gracefully if the terminal is
+    # truly unusable. So dispatch the TUI here, before the help fallback.
+    if tui and not no_tui and sys.stdin.isatty():
+        config = load_config()
+        if not _ensure_tui_auth(config):
+            return
+        from .tui import run_tui
+        run_tui(config=config, root=str(Path(".")))
+        return
+
     # Non-interactive (pipe/test) → just show help and exit, cleanly (no banner).
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         console.print(ctx.get_help())
@@ -175,16 +191,11 @@ def _root(
 
     root = Path(".")
 
-    # Default: the minimal, Claude-Code-style INLINE REPL — output flows in the
-    # terminal's normal scrollback under a tiny logo and a bordered input box (no
-    # full-screen takeover, no side panes). `ronin --tui` opts into the
-    # full-screen Textual app (panes + live trace + approval modal) for those who
-    # want it.
-    if tui and not no_tui:
-        from .tui import run_tui
-        run_tui(config=config, root=str(root))
-        return
-
+    # The full-screen `ronin --tui` app is dispatched at the top of this callback
+    # (before the non-tty help fallback) so it launches even when stdout is wrapped
+    # or piped. The default below is the minimal, Claude-Code-style INLINE REPL —
+    # output flows in the terminal's normal scrollback under a tiny logo and a
+    # bordered input box (no full-screen takeover, no side panes).
     from .code_mode import run_code_session, run_unified_session
 
     if _is_code_project(root):
@@ -196,6 +207,27 @@ def _root(
     # Outside a code repo = one assistant that does everything: talk, generate
     # media, query data, write/run code when asked.
     run_unified_session(config, root=root, console=console, yolo=full_access)
+
+
+def _ensure_tui_auth(config: RoninConfig) -> bool:
+    """Make sure the TUI has a usable provider before it takes over the screen.
+
+    Returns True if we can launch. When no provider is configured we run the same
+    guided onboard picker the REPL uses; if the user skips it, we print the setup
+    hint and return False so the caller bails cleanly instead of opening an
+    unusable full-screen app."""
+    if config.has_provider_auth():
+        return True
+    from .onboard import onboard
+    picked = onboard(console, config)
+    if picked is not None and picked.has_provider_auth():
+        config.__dict__.update(picked.__dict__)
+        return True
+    from .theme import ACCENT
+    console.print(f"\n[bold {ACCENT}]ʕ•ᴥ•ʔ  ronin[/bold {ACCENT}]\n")
+    console.print("[dim]Set up any time with [bold]ronin init[/bold], then run "
+                  "[bold]ronin --tui[/bold] again.[/dim]")
+    return False
 
 
 def _is_code_project(path: Path) -> bool:
