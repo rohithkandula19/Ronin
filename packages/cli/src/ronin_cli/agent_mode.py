@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from rich.console import Console
+from rich.markup import escape as _esc
 from rich.panel import Panel
 
 from ronin_agent_patterns import ReActAgent, Step, Tool
@@ -69,14 +70,17 @@ def _narrate(console: Console) -> Callable[[Step], None]:
         tag = icon.get(step.kind, "·")
         content = step.content
         if step.kind == "tool_call" and isinstance(content, dict):
-            console.print(f"{tag} [cyan]{content.get('name')}[/cyan]([dim]{content.get('input')}[/dim])")
+            # escape: tool name/input carry arbitrary text (a grep pattern like
+            # `[a-z]+_id`, a Next.js `app/[slug].tsx` path, JSON) whose [brackets]
+            # would otherwise be silently eaten or crash Rich's markup parser.
+            console.print(f"{tag} [cyan]{_esc(str(content.get('name')))}[/cyan]([dim]{_esc(str(content.get('input')))}[/dim])")
         elif step.kind == "tool_result" and isinstance(content, dict):
             preview = str(content.get("result", ""))[:160]
-            console.print(f"{tag} [dim]{preview}[/dim]")
+            console.print(f"{tag} [dim]{_esc(preview)}[/dim]")
         elif step.kind == "final":
             return  # printed separately by the caller in a panel
         else:
-            console.print(f"{tag} [dim]{str(content)[:200]}[/dim]")
+            console.print(f"{tag} [dim]{_esc(str(content)[:200])}[/dim]")
 
     return on_step
 

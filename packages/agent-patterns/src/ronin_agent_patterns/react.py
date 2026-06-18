@@ -102,7 +102,12 @@ class ReActAgent(BaseModel):
         def emit(step: Step) -> None:
             trace.append(step)
             if on_step is not None:
-                on_step(step)
+                # A buggy or markup-crashing renderer must never abort the run:
+                # narration is cosmetic, so swallow its errors and keep going.
+                try:
+                    on_step(step)
+                except Exception:
+                    pass
 
         # Seed with any prior conversation, then append this turn's user message.
         messages: list[Message] = list(history) if history else []
