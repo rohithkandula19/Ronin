@@ -2407,6 +2407,42 @@ def usages(
                    read_only=True, include_image_tool=False, max_iterations=12)
 
 
+# ---------- browse (optional web computer-use via Playwright) ----------
+
+@app.command()
+def browse(
+    task: str = typer.Argument(..., help="What to do on the web, e.g. 'open example.com and read it'."),
+    root: Path = typer.Option(Path("."), "--root", help="Project root (for screenshots)."),
+) -> None:
+    """Drive a real web browser to do a task — free, no vision model needed.
+
+    Optional extra. Reads pages from the DOM / accessibility tree, so it works
+    without a vision model. Enable it once with:
+      pip install 'ronin-cli[browser]' && playwright install chromium
+    """
+    from .browser_tools import browser_tools_available, install_hint
+
+    if not browser_tools_available():
+        console.print("[yellow]browser tools not installed.[/yellow]")
+        console.print(f"[dim]{install_hint()}[/dim]")
+        raise typer.Exit(2)
+
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print("[yellow]browse needs a provider[/yellow] — run [bold]ronin login[/bold].")
+        raise typer.Exit(2)
+
+    from .browser_tools import browse_close
+    from .code_mode import run_code_agent
+
+    console.print("\n[#6b7089]driving the browser…[/#6b7089]\n")
+    try:
+        run_code_agent(config, task, root=root, console=console,
+                       include_image_tool=False, max_iterations=20)
+    finally:
+        browse_close()  # always release the browser
+
+
 # ---------- watch (re-run on save) ----------
 
 @app.command()

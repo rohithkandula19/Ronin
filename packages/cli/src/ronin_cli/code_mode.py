@@ -588,6 +588,12 @@ def run_code_agent(
     # Offline mode strips them below (NETWORK_TOOLS).
     from .web_tools import build_web_tools
     tools = tools + build_web_tools()
+    # Optional web computer-use (Playwright). build_browser_tools() returns []
+    # when Playwright is not installed, so this never breaks the toolbelt; the
+    # extra simply stays absent until `pip install 'ronin-cli[browser]'`.
+    # These touch the network, so offline mode strips them below (NETWORK_TOOLS).
+    from .browser_tools import build_browser_tools
+    tools = tools + build_browser_tools()
     # Git awareness (status/diff/log): read-only, so available in plan mode too.
     # Mutating git stays in the gated /commit & /pr commands, not here.
     from .git_tools import build_git_tools

@@ -18,6 +18,9 @@ from .config import RoninConfig
 # Tools that touch the network — removed from the toolbelt in offline mode.
 NETWORK_TOOLS: frozenset[str] = frozenset({
     "web_search", "fetch_url", "generate_image",
+    # Optional Playwright browser tools (web computer-use) also egress.
+    "browse_navigate", "browse_click", "browse_type",
+    "browse_read", "browse_screenshot",
 })
 
 # Hosts that count as "on this machine".
