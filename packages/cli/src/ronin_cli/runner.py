@@ -23,6 +23,30 @@ from .demo_brain import demo_answer
 from .tools import build_tools
 
 
+# Cerebras serves several models on ONE key. When the active model rate-limits,
+# the cheapest, zero-cost way to keep going is to retry the SAME request on a
+# sibling model on the SAME key: no other provider and no new key needed. This
+# maps each Cerebras model to its sibling so failover is automatic by default.
+CEREBRAS_SIBLINGS: dict[str, str] = {
+    "zai-glm-4.7": "gpt-oss-120b",
+    "gpt-oss-120b": "zai-glm-4.7",
+}
+
+
+def default_failover_specs(config: RoninConfig) -> list[dict[str, str]]:
+    """The automatic same-key fallback chain for a config that set none.
+
+    For Cerebras this is the sibling model on the same key (zai-glm-4.7 <->
+    gpt-oss-120b), so a rate-limit on one model instantly retries on the other
+    for free. Returns ``[]`` for any provider without a known free sibling, so
+    behaviour is unchanged everywhere else."""
+    if config.provider == "cerebras":
+        sibling = CEREBRAS_SIBLINGS.get(config.resolved_model())
+        if sibling:
+            return [{"provider": "cerebras", "model": sibling}]
+    return []
+
+
 SYSTEM_PROMPT_TEMPLATE = """You are ronin — a CLI agent that helps a startup founder query their own data.
 You have read-only tools for the configured services. You do NOT have write access; refuse politely
 if asked to mutate state.
@@ -155,14 +179,18 @@ def build_provider(config: RoninConfig) -> LLMProvider:
         from .offline import apply_offline
         config = apply_offline(config)
     primary = build_single_provider(config)
-    if not config.failover:
+    # Explicit failover wins; otherwise fall back to the automatic same-key chain
+    # (e.g. Cerebras zai-glm-4.7 <-> gpt-oss-120b) so a rate-limit never stalls a
+    # turn even when nothing was configured.
+    specs = config.failover or default_failover_specs(config)
+    if not specs:
         return primary
 
     from ronin_agent_patterns import FailoverProvider
 
     providers: list[LLMProvider] = [primary]
     labels: list[str] = [f"{config.provider}:{config.resolved_model()}"]
-    for spec in config.failover:
+    for spec in specs:
         sub = config_for_spec(config, spec)
         providers.append(build_single_provider(sub))
         labels.append(f"{sub.provider}:{sub.resolved_model()}")

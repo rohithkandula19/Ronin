@@ -2017,11 +2017,16 @@ def failover(
     off: bool = typer.Option(False, "--off", help="Turn failover off."),
     scope: str = typer.Option("user", "--scope", help="Where to save: 'user' or 'project'."),
 ) -> None:
-    """🔁 Cross-provider failover — when your provider rate-limits or errors, ronin
-    instantly continues on the next instead of waiting out a ~60s backoff.
+    """🔁 Failover: when your provider rate-limits or errors, ronin instantly
+    continues on the next instead of waiting out a ~60s backoff.
+
+    On Cerebras this works out of the box with no extra key: a rate-limit on one
+    model retries the same request on its sibling on the same key (zai-glm-4.7
+    <-> gpt-oss-120b). Set an explicit cross-provider chain to override it.
 
     Example:  ronin failover groq,gemini   (Cerebras → Groq → Gemini)
     Non-last providers fail FAST (one quick retry) so a 429 hops onward.
+    Run with no argument to see the active chain (including the automatic one).
     """
     from .config import save_config
     cfg = load_config()
@@ -2034,6 +2039,18 @@ def failover(
         if cfg.failover:
             chain = " → ".join([cfg.provider] + [f.get("provider", "?") for f in cfg.failover])
             console.print(f"[#6b7089]failover:[/#6b7089] [bold]{chain}[/bold]")
+            return
+        # No explicit chain: show the automatic same-key fallback if one applies
+        # (e.g. Cerebras retries the request on its sibling model on the same key).
+        from .runner import default_failover_specs
+        auto = default_failover_specs(cfg)
+        if auto:
+            chain = " → ".join(
+                [f"{cfg.provider}:{cfg.resolved_model()}"]
+                + [f"{cfg.provider}:{s['model']}" for s in auto]
+            )
+            console.print(f"[#6b7089]failover (automatic, same key):[/#6b7089] [bold]{chain}[/bold]\n"
+                          "[dim]a rate-limit on one model instantly retries on the other for free.[/dim]")
         else:
             console.print("[dim]failover off — set it with [bold]ronin failover groq,gemini[/bold].[/dim]")
         return
