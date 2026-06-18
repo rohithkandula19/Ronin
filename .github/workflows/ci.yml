@@ -51,6 +51,7 @@ jobs:
             packages/hardening \
             packages/mcp-servers \
             packages/cli \
+            packages/relay \
             apps/demo \
             apps/api \
             -q
@@ -63,3 +64,5 @@ jobs:
           uv --project "$GITHUB_WORKSPACE" run ronin doctor
           uv --project "$GITHUB_WORKSPACE" run ronin version
           uv --project "$GITHUB_WORKSPACE" run ronin update --check
+          uv --project "$GITHUB_WORKSPACE" run ronin relay --help
+          uv --project "$GITHUB_WORKSPACE" run ronin relay connect --help

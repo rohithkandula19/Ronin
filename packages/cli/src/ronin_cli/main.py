@@ -5705,5 +5705,16 @@ def faithfulness_check(
             raise typer.Exit(code)
 
 
+# ---------- relay (remote access via a self-hosted relay) ----------
+
+# The relay command group lives in its own module. Importing it pulls in only
+# typer/rich; the heavy relay deps (fastapi, uvicorn, websockets) are imported
+# lazily inside each subcommand body, so the core CLI import stays light and
+# offline. `python -m ronin_relay` keeps working unchanged.
+from .relay import relay_app
+
+app.add_typer(relay_app, name="relay")
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()

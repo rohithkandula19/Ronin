@@ -206,6 +206,31 @@ curl -s http://127.0.0.1:8765/ui/runs      # recent runs (JSON)
 For a screenshot, open `http://127.0.0.1:8765/` in a browser after running
 `ronin ui`.
 
+## Remote access (relay)
+
+Status: working scaffold with tests. Not deployed, no users. Run it yourself if
+you want to reach your own local gateway from a phone.
+
+`ronin relay` lets a phone send a task to your local Ronin gateway without
+opening an inbound port on the laptop. A relay server you own runs on a VM
+(`ronin relay serve`); a connector on the laptop dials OUTBOUND to it and holds
+the connection open (`ronin relay connect`). The relay forwards a phone request
+down that websocket; the connector makes ONE local call to its single
+configured target and ships the reply back. The laptop opens no inbound port.
+
+```bash
+ronin relay serve --port 8000                     # on a VM you own (needs RONIN_RELAY_TOKEN)
+ronin relay connect \                             # on the laptop, dials OUT
+  --relay wss://relay.example.com/connect \
+  --target http://127.0.0.1:8000/webhooks/agent \
+  --token "$RONIN_RELAY_TOKEN"
+```
+
+Security model (preserved exactly): outbound-only connector, a single fixed
+target URL (no shell, no eval, no arbitrary host), and a mandatory shared token
+that fails closed if missing or too short. See [docs/RELAY.md](docs/RELAY.md)
+and `packages/relay/`.
+
 ## 30-second quickstart (no real credentials)
 
 ```bash
@@ -391,6 +416,7 @@ Ronin/
 │   ├── memory/               # 3-layer memory
 │   ├── mcp-servers/          # read-only service integrations (MCP)
 │   ├── hardening/            # injection / allowlist / approval / validation
+│   ├── relay/                # remote access: outbound-only connector + relay
 │   └── deployment-templates/ # docker-compose, modal, vercel, railway
 ├── apps/
 │   ├── demo/                 # AgentLab - interactive playground
