@@ -4844,8 +4844,134 @@ def triage(
 
 @app.command()
 def version() -> None:
-    """Print the ronin version."""
-    console.print(f"ronin {__version__}")
+    """Print the ronin version.
+
+    For a git checkout this also shows the short commit sha and branch, e.g.
+    "ronin 0.59.0 (a1b2c3d, main)". For a wheel/pip install it prints just the
+    version. Git context is computed at runtime and git errors are swallowed.
+    """
+    from .selfupdate import version_line
+
+    console.print(version_line())
+
+
+# ---------- update ----------
+
+@app.command()
+def update(
+    check: bool = typer.Option(
+        False, "--check",
+        help="Only report whether updates are available; do not change anything.",
+    ),
+    force: bool = typer.Option(
+        False, "--force",
+        help="Update even when there are uncommitted local changes (they are reset).",
+    ),
+) -> None:
+    """Update this ronin install in place from origin/main.
+
+    Works only for a git checkout. It fetches origin, hard-resets to
+    origin/main, and re-runs `uv sync`. Use --check to see if there is anything
+    to pull without touching the working tree.
+    """
+    import subprocess
+
+    from .selfupdate import find_repo_root, git_branch, git_short_sha, version_line
+
+    root = find_repo_root()
+    if root is None:
+        console.print(
+            "[yellow]This ronin install is not a git checkout, so `ronin update` "
+            "cannot self-update it.[/yellow]\n"
+            "You likely installed from a wheel (pip/uv/pipx). To get the latest "
+            "version, reinstall the package, e.g.:\n"
+            "  [cyan]uv tool upgrade ronin-cli[/cyan]   or   [cyan]pipx upgrade ronin-cli[/cyan]\n"
+            "Or clone the repo and install from source:\n"
+            "  [cyan]git clone https://github.com/rohithkandula19/Ronin.git[/cyan]"
+        )
+        raise typer.Exit(code=0)
+
+    def _run(args: list[str], *, capture: bool = False) -> subprocess.CompletedProcess:
+        """Run git/uv. Streams to the terminal unless capture is requested."""
+        return subprocess.run(
+            args,
+            capture_output=capture,
+            text=True,
+        )
+
+    # Fetch first — needed by both --check and a real update.
+    console.print(f"[dim]fetching origin in {root} ...[/dim]")
+    fetched = _run(["git", "-C", str(root), "fetch", "origin"])
+    if fetched.returncode != 0:
+        console.print("[red]git fetch failed.[/red]")
+        raise typer.Exit(code=1)
+
+    local = git_short_sha(root)
+    remote_full = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "origin/main"],
+        capture_output=True, text=True,
+    )
+    if remote_full.returncode != 0:
+        console.print("[red]could not resolve origin/main.[/red]")
+        raise typer.Exit(code=1)
+    remote_short = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--short", "origin/main"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    local_full = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+
+    up_to_date = local_full == remote_full.stdout.strip()
+
+    if check:
+        if up_to_date:
+            console.print(f"[green]up to date[/green] ({local} on {git_branch(root)}).")
+        else:
+            console.print(
+                f"[yellow]update available[/yellow]: {local} -> {remote_short} "
+                f"(origin/main). Run [cyan]ronin update[/cyan] to apply."
+            )
+        # --check never mutates the working tree.
+        raise typer.Exit(code=0)
+
+    if up_to_date:
+        console.print(f"[green]already up to date[/green] ({local} on {git_branch(root)}).")
+        raise typer.Exit(code=0)
+
+    # Refuse to clobber uncommitted work unless --force.
+    dirty = subprocess.run(
+        ["git", "-C", str(root), "status", "--porcelain"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    if dirty and not force:
+        console.print(
+            "[red]aborting:[/red] you have uncommitted local changes.\n"
+            "Commit or stash them, or re-run with [cyan]--force[/cyan] to discard them."
+        )
+        raise typer.Exit(code=1)
+
+    old_sha = local
+
+    console.print(f"[dim]resetting {root} to origin/main ...[/dim]")
+    reset = _run(["git", "-C", str(root), "reset", "--hard", "origin/main"])
+    if reset.returncode != 0:
+        console.print("[red]git reset --hard origin/main failed.[/red]")
+        raise typer.Exit(code=1)
+
+    console.print("[dim]running uv sync ...[/dim]")
+    synced = _run(["uv", "sync", "--project", str(root), "--all-packages"])
+    if synced.returncode != 0:
+        console.print(
+            "[red]uv sync failed.[/red] The checkout was updated but dependencies "
+            "may be out of date. Re-run [cyan]uv sync --all-packages[/cyan] in the repo."
+        )
+        raise typer.Exit(code=1)
+
+    new_sha = git_short_sha(root)
+    console.print(f"[green]updated[/green]: {old_sha} -> {new_sha}")
+    console.print(version_line())
 
 
 @app.command()

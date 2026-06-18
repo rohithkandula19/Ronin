@@ -62,3 +62,4 @@ jobs:
           uv --project "$GITHUB_WORKSPACE" run ronin tools
           uv --project "$GITHUB_WORKSPACE" run ronin doctor
           uv --project "$GITHUB_WORKSPACE" run ronin version
+          uv --project "$GITHUB_WORKSPACE" run ronin update --check

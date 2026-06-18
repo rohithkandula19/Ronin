@@ -130,6 +130,25 @@ Pin a tag: append `-s -- --ref v0.58.0`. PyPI publish is wired (`.github/workflo
 
 For Postgres support after install: `(cd ~/.local/share/ronin && uv pip install psycopg2-binary)`.
 
+## Updating
+
+If you installed from a git checkout, update in place with one command:
+
+```bash
+ronin update            # fetch origin, reset to origin/main, re-run uv sync
+ronin update --check    # report whether an update is available, change nothing
+```
+
+`ronin update` aborts if you have uncommitted local changes; pass `--force` to
+discard them. Manual fallback:
+
+```bash
+cd ~/ronin && git fetch origin && git reset --hard origin/main && uv sync --all-packages
+```
+
+`ronin version` shows the running version plus the checkout's short sha and
+branch, e.g. `ronin 0.59.0 (a1b2c3d, main)`.
+
 ## More surfaces
 
 ronin is one agent with several focused entry points beyond `code`:

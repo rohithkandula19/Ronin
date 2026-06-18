@@ -1,6 +1,6 @@
 [project]
 name = "ronin"
-version = "0.58.0"
+version = "0.59.0"
 description = "ronin — a masterless, terminal-native Claude agent: a Claude-Code-style coding agent on a provider-agnostic agent framework with evals, memory, hardening, and MCP integrations."
 readme = "README.md"
 license = { text = "MIT" }
