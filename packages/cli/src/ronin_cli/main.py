@@ -5716,5 +5716,103 @@ from .relay import relay_app
 app.add_typer(relay_app, name="relay")
 
 
+# ---------- telegram (control Ronin from your phone, outbound-only) ----------
+
+@app.command()
+def telegram(
+    allow: list[int] = typer.Option(
+        None, "--allow",
+        help="Append a chat id to the allowlist for THIS run (repeatable). "
+             "Merged with TELEGRAM_ALLOWED_CHAT_IDS and the config field.",
+    ),
+    once: bool = typer.Option(
+        False, "--once",
+        help="Do a single getUpdates poll and exit (useful for testing).",
+    ),
+    poll_timeout: int = typer.Option(
+        30, "--poll-timeout",
+        help="Long-poll timeout in seconds passed to getUpdates.",
+    ),
+) -> None:
+    """Run Ronin from your phone over Telegram. Outbound-only and allowlisted.
+
+    The bot long-polls api.telegram.org (no inbound port, works behind NAT) and,
+    for messages from an ALLOWED chat id, runs the SAME read-only / ask agent
+    path `ronin ask` uses, then replies with the answer. It never edits files or
+    runs shell commands from a Telegram message.
+
+    Set TELEGRAM_BOT_TOKEN (from @BotFather) and TELEGRAM_ALLOWED_CHAT_IDS
+    (comma-separated chat ids). With an empty allowlist the bot answers nobody;
+    it only tells a chat its numeric id so you can add it. See docs/TELEGRAM.md.
+    """
+    from .telegram_bot import (
+        ENV_ALLOWED,
+        TelegramBot,
+        TelegramConfigError,
+        get_bot_token,
+        parse_allowed_chat_ids,
+    )
+
+    # 1) Token: fail closed (exit non-zero, never poll) if missing/malformed.
+    try:
+        token = get_bot_token()
+    except TelegramConfigError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+
+    config = load_config()
+
+    # 2) Allowlist: config field + env var + repeatable --allow flag.
+    allowed = parse_allowed_chat_ids(
+        os.environ.get(ENV_ALLOWED),
+        config_ids=list(config.telegram_allowed_chat_ids or []),
+    )
+    for cid in (allow or []):
+        if cid not in allowed:
+            allowed.append(cid)
+
+    # 3) The agent is the read-only ask path — exactly what `ronin ask` runs.
+    def answer_fn(message_text: str) -> str:
+        result = run_ask(config, message_text)
+        return result.output or "(no answer)"
+
+    bot = TelegramBot(
+        token=token,
+        allowed_chat_ids=allowed,
+        answer_fn=answer_fn,
+        poll_timeout=poll_timeout,
+    )
+
+    # 4) getMe at startup so the user sees the bot is reachable.
+    try:
+        me = bot.get_me()
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]x[/red] could not reach Telegram (getMe failed): {exc}")
+        raise typer.Exit(1)
+
+    username = me.get("username", "?")
+    console.print(f"[green]ok[/green] bot @{username} ready; allowed chats: {allowed}")
+    console.print(
+        "[dim]Read-only/ask mode. I will not run edits or shell commands from "
+        "Telegram.[/dim]"
+    )
+    if not allowed:
+        console.print(
+            "[yellow]![/yellow] allowlist is empty: I will not run the agent for "
+            f"anyone. Message the bot and it replies with your chat id; add it to "
+            f"{ENV_ALLOWED} to enable me."
+        )
+
+    if once:
+        bot.poll_once()
+        return
+
+    console.print("[dim]polling… press Ctrl+C to stop[/dim]")
+    try:
+        bot.run_forever()
+    except KeyboardInterrupt:
+        console.print("\n[dim]stopped[/dim]")
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()

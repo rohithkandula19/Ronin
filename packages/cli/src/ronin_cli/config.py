@@ -130,6 +130,13 @@ class RoninConfig(BaseModel):
     notion_token: str | None = None
     database_url: str | None = None
 
+    # Telegram bridge (`ronin telegram`): chat ids allowed to drive the read-only
+    # ask agent from a phone. Empty list = nobody is allowed to run the agent; the
+    # bot only replies with a chat's numeric id so the owner can add it (safe
+    # onboarding). The env var TELEGRAM_ALLOWED_CHAT_IDS (comma-separated ints)
+    # is merged on top of this at load time.
+    telegram_allowed_chat_ids: list[int] = Field(default_factory=list)
+
     extra: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="before")

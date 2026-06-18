@@ -231,6 +231,27 @@ target URL (no shell, no eval, no arbitrary host), and a mandatory shared token
 that fails closed if missing or too short. See [docs/RELAY.md](docs/RELAY.md)
 and `packages/relay/`.
 
+## Use Ronin from your phone (Telegram)
+
+`ronin telegram` lets you message a Telegram bot and get answers from the SAME
+read-only ask agent that `ronin ask` uses. The laptop dials OUT to Telegram and
+long-polls for messages, so it works behind NAT with no inbound port and no
+public hostname.
+
+```bash
+export TELEGRAM_BOT_TOKEN="123456789:AA..."   # from @BotFather
+export TELEGRAM_ALLOWED_CHAT_IDS="42,777"     # chat ids allowed to run the agent
+ronin telegram                                # long-poll forever; Ctrl+C to stop
+```
+
+Safety model: the token is required and the command fails closed (exits
+non-zero, never polls) if it is missing or malformed. The agent runs only for a
+chat id in the explicit allowlist; any other chat is ignored. An EMPTY allowlist
+runs the agent for nobody and the bot only replies with your chat id so you can
+add it. Messages go through the read-only ask path only: no edits, no shell, no
+`--full-access`, and no arbitrary command path. See
+[docs/TELEGRAM.md](docs/TELEGRAM.md).
+
 ## 30-second quickstart (no real credentials)
 
 ```bash

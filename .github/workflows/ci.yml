@@ -66,3 +66,4 @@ jobs:
           uv --project "$GITHUB_WORKSPACE" run ronin update --check
           uv --project "$GITHUB_WORKSPACE" run ronin relay --help
           uv --project "$GITHUB_WORKSPACE" run ronin relay connect --help
+          uv --project "$GITHUB_WORKSPACE" run ronin telegram --help
