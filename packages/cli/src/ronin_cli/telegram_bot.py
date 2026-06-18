@@ -221,6 +221,10 @@ class TelegramBot:
     # it). Defaults to None; wired by the CLI.
     answer_fn: Callable[..., str] | None = None
     poll_timeout: int = DEFAULT_POLL_TIMEOUT
+    # Optional: run a daily-briefing prompt through the agent at fire time and
+    # return its result. briefing_fn(prompt) -> str. None disables briefings
+    # (they just send their prompt text as a plain reminder instead).
+    briefing_fn: Callable[[str], str] | None = None
     # injected httpx client (tests pass a mock); None = build one lazily.
     http: Any | None = None
     _offset: int | None = None
@@ -345,7 +349,15 @@ class TelegramBot:
             logger.info("ignoring message from non-allowed chat id %s", chat_id)
             return
 
-        # 3) Allowed: run the SAME ask path and send the answer back. Before the
+        # 3) Reminder requests are handled HERE, before the agent runs. A message
+        #    like "remind me at 6pm to ...", "list reminders", or "cancel
+        #    reminder 3" is cheap, deterministic, and must not cost a model call.
+        #    If the message is not a reminder, this returns False and we fall
+        #    through to the agent path unchanged.
+        if self._handle_reminder(chat_id, text):
+            return
+
+        # 4) Allowed: run the SAME ask path and send the answer back. Before the
         #    agent starts, send a single "working..." status message and capture
         #    its id, then hand the agent a progress() that EDITS that one message
         #    in place. The work streams live instead of arriving as one blob.
@@ -354,6 +366,96 @@ class TelegramBot:
         progress = self._make_progress(chat_id, status_id)
         answer = self._answer(text, progress)
         self.send_message(chat_id, answer)
+
+    # ---- reminders -----------------------------------------------------
+
+    def _handle_reminder(self, chat_id: int, text: str) -> bool:
+        """If ``text`` is a reminder request, act on it and return True.
+
+        Recognizes "remind me ...", "briefing every ...", "list reminders", and
+        "cancel reminder N". A non-reminder message returns False so the caller
+        falls through to the normal agent path. Parsing is stdlib-only and lives
+        in ``reminders.py``; it is imported lazily to keep this module light.
+        """
+        from . import reminders as rem
+
+        parsed = rem.parse_reminder(text)
+        if parsed is None or parsed.kind is None:
+            return False
+
+        if parsed.kind == "error":
+            self.send_message(chat_id, parsed.error or "sorry, please rephrase that.")
+            return True
+
+        if parsed.kind == "list":
+            self.send_message(chat_id, rem.list_text(rem.list_reminders(chat_id)))
+            return True
+
+        if parsed.kind == "cancel":
+            removed = rem.remove_reminder(parsed.cancel_id or -1)
+            if removed:
+                self.send_message(chat_id, f"cancelled reminder #{parsed.cancel_id}.")
+            else:
+                self.send_message(chat_id, f"no reminder #{parsed.cancel_id} to cancel.")
+            return True
+
+        if parsed.kind == "add" and parsed.when_epoch is not None:
+            reminder = rem.add_reminder(
+                parsed.when_epoch,
+                parsed.text,
+                chat_id,
+                repeat=parsed.repeat,
+                is_briefing=parsed.is_briefing,
+            )
+            self.send_message(chat_id, rem.confirm_text(reminder))
+            return True
+
+        return False
+
+    def fire_due_reminders(self, now_epoch: float | None = None) -> int:
+        """Send every reminder due at ``now_epoch`` and advance it. Returns the
+        count fired. Called each poll cycle, so no separate daemon is needed.
+
+        A briefing reminder runs its text through ``briefing_fn`` (the read-only
+        agent) and sends the RESULT. A plain reminder just sends its text. A
+        recurring reminder is rescheduled to its next slot; a one-shot is marked
+        done. Send/agent errors never abort the loop or the reschedule.
+        """
+        from . import reminders as rem
+
+        if now_epoch is None:
+            import time
+
+            now_epoch = time.time()
+
+        fired = 0
+        for reminder in rem.due_reminders(rem.load_reminders(), now_epoch):
+            try:
+                body = self._reminder_body(reminder)
+                self.send_message(reminder.chat_id, body)
+                fired += 1
+            except Exception:  # noqa: BLE001 - one bad send must not stop the rest
+                logger.warning("failed to send reminder #%s", reminder.id, exc_info=True)
+            # Advance regardless of send outcome so a flaky send does not make a
+            # reminder fire forever on every tick.
+            rem.mark_fired(reminder.id, now_epoch)
+        return fired
+
+    def _reminder_body(self, reminder: Any) -> str:
+        """Render what to send for a due reminder.
+
+        A briefing runs its prompt through the agent (read-only) and returns the
+        result; a plain reminder just returns its text. If a briefing has no
+        agent wired (or the agent errors), it degrades to sending the prompt.
+        """
+        if getattr(reminder, "is_briefing", False) and self.briefing_fn is not None:
+            try:
+                result = self.briefing_fn(reminder.text)
+                return f"briefing: {reminder.text}\n\n{result}"
+            except Exception:  # noqa: BLE001 - never crash the poll loop on a briefing
+                logger.warning("briefing agent failed for #%s", reminder.id, exc_info=True)
+                return f"briefing (agent unavailable): {reminder.text}"
+        return f"reminder: {reminder.text}"
 
     def _send_status(self, chat_id: int) -> int | None:
         """Send the initial live-status message; return its id (None on failure).
@@ -429,10 +531,20 @@ class TelegramBot:
     # ---- poll loop -----------------------------------------------------
 
     def poll_once(self) -> int:
-        """One getUpdates cycle. Returns the number of updates handled."""
+        """One getUpdates cycle. Returns the number of updates handled.
+
+        Each cycle also fires any DUE reminders. The bot is already polling, so
+        this needs no separate daemon: the same tick that reads messages also
+        pushes scheduled reminders. A reminder failure is swallowed so it never
+        stops message handling.
+        """
         updates = self._get_updates()
         for update in updates:
             self.handle_update(update)
+        try:
+            self.fire_due_reminders()
+        except Exception:  # noqa: BLE001 - reminders must never break the poll loop
+            logger.warning("firing due reminders failed", exc_info=True)
         return len(updates)
 
     def run_forever(self, *, on_error_sleep: float = 3.0) -> None:

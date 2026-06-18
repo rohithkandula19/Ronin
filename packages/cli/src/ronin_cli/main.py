@@ -6256,10 +6256,30 @@ def telegram(
                 out = out + "\n\n=== what changed ===\n" + changes
         return out
 
+    def briefing_fn(prompt: str) -> str:
+        # A daily briefing runs its prompt through the SAME read-only agent at
+        # fire time and sends the result. Read-only and secret-guarded, exactly
+        # like a normal message; no progress streaming (it fires unattended).
+        from .code_mode import run_code_agent
+
+        res = run_code_agent(
+            config,
+            prompt,
+            root=root,
+            console=None,
+            yolo=True,
+            read_only=True,
+            include_image_tool=False,
+            max_iterations=DEFAULT_MAX_ITERATIONS,
+            deny=is_secret_path,
+        )
+        return res.output or res.error or "(no answer)"
+
     bot = TelegramBot(
         token=token,
         allowed_chat_ids=allowed,
         answer_fn=answer_fn,
+        briefing_fn=briefing_fn,
         poll_timeout=poll_timeout,
     )
 
