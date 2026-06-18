@@ -231,15 +231,17 @@ def _apply_diff(root: Path, diff: str) -> bool:
 
 
 def _print_diff(console: Console, diff: str, max_lines: int = 120) -> None:
+    from rich.markup import escape as _esc
     for i, line in enumerate(diff.splitlines()):
         if i >= max_lines:
             console.print(f"  [dim]… (diff truncated, {len(diff.splitlines())} lines)[/dim]")
             break
+        safe = _esc(line)
         if line.startswith("+") and not line.startswith("+++"):
-            console.print(f"  [green]{line}[/green]")
+            console.print(f"  [green]{safe}[/green]")
         elif line.startswith("-") and not line.startswith("---"):
-            console.print(f"  [red]{line}[/red]")
+            console.print(f"  [red]{safe}[/red]")
         elif line.startswith("@@"):
-            console.print(f"  [cyan]{line}[/cyan]")
+            console.print(f"  [cyan]{safe}[/cyan]")
         else:
-            console.print(f"  [dim]{line}[/dim]")
+            console.print(f"  [dim]{safe}[/dim]")
