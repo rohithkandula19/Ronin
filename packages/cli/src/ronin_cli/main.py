@@ -2570,6 +2570,94 @@ def verify(
     raise typer.Exit(1)
 
 
+# ---------- auto (supervised autonomy: checkpoint + test-gate + stall-stop) ----------
+
+@app.command()
+def auto(
+    task: list[str] = typer.Argument(..., help="The task to work, in plain words."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+    steps: int = typer.Option(6, "--steps", help="Hard ceiling on agent steps."),
+    max_failures: int = typer.Option(
+        2, "--max-failures", help="Stop after this many failing test gates in a row."),
+    stall_after: int = typer.Option(
+        2, "--stall-after", help="Stop after this many steps with no working-tree change."),
+    max_iterations: int = typer.Option(
+        25, "--max-iterations", help="Agent tool-call budget per step."),
+) -> None:
+    """Supervised autonomy - work a longer task unattended, with guardrails.
+
+    This is NOT blind overnight magic. ronin runs the coding agent step by step
+    and bounds it: every step is CHECKPOINTED (revertible with `ronin rewind`),
+    the repo's own tests are run as a GATE after each change (stop after N
+    failing gates in a row), and the loop STALL-STOPS if the tree stops changing.
+    At the end it reports what it did, what passed/failed, and how to revert.
+
+    Honest limits: the agent can still make a wrong-but-passing change, and the
+    gate is only as good as your tests. Review the result; revert with the
+    printed checkpoint ids if you don't like it.
+    """
+    from .auto import run_auto_loop
+    from .checkpoint import create_checkpoint
+    from .code_mode import run_code_agent
+    from .worktree import is_git_repo
+
+    goal = " ".join(task)
+    config = load_config()
+    if not config.has_provider_auth():
+        console.print("[yellow]ronin auto needs a provider key[/yellow] - run [bold]ronin login[/bold].")
+        raise typer.Exit(2)
+
+    git = is_git_repo(root)
+    if not git:
+        console.print("[yellow]not a git repo[/yellow] - running without checkpoints. "
+                      "changes will NOT be auto-revertible; review by hand.")
+
+    console.print(f"[#7aa2f7]ronin auto[/#7aa2f7] [dim]supervised autonomy[/dim] "
+                  f"[bold]{goal[:80]}[/bold]")
+    console.print(f"[dim]rails: <={steps} steps, stop after {max_failures} failing "
+                  f"gates in a row, stall-stop after {stall_after} idle steps[/dim]")
+
+    def _agent(prompt: str) -> None:
+        run_code_agent(config, prompt, root=root, console=console, yolo=True,
+                       max_iterations=max_iterations)
+
+    def _checkpoint(r, label: str):
+        return create_checkpoint(r, label).id
+
+    def _on_step(step) -> None:
+        if step.verdict is not None and step.verdict.ran:
+            mark = "[green]green[/green]" if step.verdict.passed else "[#f7768e]red[/#f7768e]"
+            gate = f" gate {mark} [dim]{step.verdict.summary}[/dim]"
+        elif step.changed:
+            gate = " [dim](no tests detected)[/dim]"
+        else:
+            gate = " [dim](no change)[/dim]"
+        cp = f" cp#{step.checkpoint_id}" if step.checkpoint_id is not None else ""
+        console.print(f"[#6b7089]step {step.n}[/#6b7089]{cp}{gate}")
+        if step.note:
+            console.print(f"  [yellow]{step.note}[/yellow]")
+
+    report = run_auto_loop(
+        root, goal, _agent,
+        max_steps=steps, max_consecutive_failures=max_failures, stall_after=stall_after,
+        checkpoint_fn=(_checkpoint if git else None), on_step=_on_step,
+    )
+    report.is_git = git
+
+    # final report: what it did, what passed/failed, how to revert
+    console.print(f"\n[bold]ronin auto report[/bold] [dim]- {report.stopped_reason}[/dim]")
+    console.print(f"  steps run: {len(report.steps)}")
+    if report.final_passed is True:
+        console.print("  tests: [green]passing[/green]")
+    elif report.final_passed is False:
+        console.print("  tests: [#f7768e]failing[/#f7768e]")
+    else:
+        console.print("  tests: [dim]not run (no test command detected)[/dim]")
+    console.print(f"  revert: [dim]{report.revert_hint()}[/dim]")
+
+    raise typer.Exit(0 if report.final_passed is not False else 1)
+
+
 # ---------- grep (search code by intent) ----------
 
 @app.command()
