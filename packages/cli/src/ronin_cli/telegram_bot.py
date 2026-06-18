@@ -39,6 +39,24 @@ DEFAULT_POLL_TIMEOUT = 30
 ENV_TOKEN = "TELEGRAM_BOT_TOKEN"
 ENV_ALLOWED = "TELEGRAM_ALLOWED_CHAT_IDS"
 
+# What a redacted token looks like in any log or terminal line.
+REDACTED = "<redacted>"
+
+
+def redact_token(message: str, token: str) -> str:
+    """Return ``message`` with every occurrence of ``token`` masked.
+
+    The bot token is embedded in every request URL (``/bot<token>/<method>``).
+    httpx error strings (e.g. on a 429/401/5xx) include that full URL, so the
+    token can land in logs or on the terminal. SECURITY.md scopes token leakage
+    via logs or error output as in scope, so we scrub the token before anything
+    is logged or printed. Empty/short tokens are left alone (nothing to hide and
+    we must not blank out unrelated text).
+    """
+    if not token or not message:
+        return message
+    return message.replace(token, REDACTED)
+
 
 class TelegramConfigError(ValueError):
     """Raised when required Telegram config is missing or malformed."""
@@ -127,6 +145,10 @@ class TelegramBot:
 
     def _url(self, method: str) -> str:
         return f"{API_BASE}/bot{self.token}/{method}"
+
+    def _redact(self, message: str) -> str:
+        """Mask this bot's token in any string before it is logged or printed."""
+        return redact_token(message, self.token)
 
     def _call(self, method: str, payload: dict[str, Any]) -> dict[str, Any]:
         client = self._client()
@@ -231,10 +253,20 @@ class TelegramBot:
             except KeyboardInterrupt:
                 raise
             except httpx.HTTPError as exc:
-                logger.warning("telegram poll error: %s; backing off %.1fs", exc, on_error_sleep)
+                # httpx errors embed the request URL, which carries the token.
+                # Redact before logging so a 429/401/5xx never leaks the secret.
+                logger.warning(
+                    "telegram poll error: %s; backing off %.1fs",
+                    self._redact(str(exc)),
+                    on_error_sleep,
+                )
                 _sleep(on_error_sleep)
             except Exception as exc:  # noqa: BLE001 - keep polling on odd errors
-                logger.warning("unexpected poll error: %s; backing off %.1fs", exc, on_error_sleep)
+                logger.warning(
+                    "unexpected poll error: %s; backing off %.1fs",
+                    self._redact(str(exc)),
+                    on_error_sleep,
+                )
                 _sleep(on_error_sleep)
 
 

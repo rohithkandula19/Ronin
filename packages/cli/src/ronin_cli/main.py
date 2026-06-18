@@ -5751,6 +5751,7 @@ def telegram(
         TelegramConfigError,
         get_bot_token,
         parse_allowed_chat_ids,
+        redact_token,
     )
 
     # 1) Token: fail closed (exit non-zero, never poll) if missing/malformed.
@@ -5787,7 +5788,12 @@ def telegram(
     try:
         me = bot.get_me()
     except Exception as exc:  # noqa: BLE001
-        console.print(f"[red]x[/red] could not reach Telegram (getMe failed): {exc}")
+        # httpx errors embed the request URL, which carries the token. Redact it
+        # so a startup getMe failure does not print the secret to the terminal.
+        console.print(
+            "[red]x[/red] could not reach Telegram (getMe failed): "
+            f"{redact_token(str(exc), token)}"
+        )
         raise typer.Exit(1)
 
     username = me.get("username", "?")

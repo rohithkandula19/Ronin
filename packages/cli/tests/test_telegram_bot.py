@@ -11,11 +11,13 @@ from typer.testing import CliRunner
 from ronin_cli.main import app
 from ronin_cli.telegram_bot import (
     MAX_MESSAGE_CHARS,
+    REDACTED,
     TelegramBot,
     TelegramConfigError,
     _chunk_text,
     get_bot_token,
     parse_allowed_chat_ids,
+    redact_token,
 )
 
 runner = CliRunner()
@@ -242,3 +244,91 @@ def test_get_me_returns_username() -> None:
     bot = TelegramBot(token=VALID_TOKEN, http=client)
     me = bot.get_me()
     assert me["username"] == "ronin_test_bot"
+
+
+# ---------- token never leaks via logs or error output ---------------------
+
+def test_redact_token_masks_token_in_message() -> None:
+    url = f"https://api.telegram.org/bot{VALID_TOKEN}/getUpdates"
+    msg = f"Client error '429 Too Many Requests' for url '{url}'"
+    out = redact_token(msg, VALID_TOKEN)
+    assert VALID_TOKEN not in out
+    assert REDACTED in out
+
+
+def test_redact_token_noops_on_empty_token() -> None:
+    # An empty/unknown token must not blank out unrelated text.
+    msg = "some error with no token"
+    assert redact_token(msg, "") == msg
+
+
+def test_run_forever_redacts_token_in_poll_error_log(
+    monkeypatch: pytest.MonkeyPatch, caplog
+) -> None:
+    """An httpx error during polling must be logged with the token redacted.
+
+    The real httpx.HTTPStatusError str() contains the full request URL, which
+    embeds the token. We assert the bot scrubs it before logging.
+    """
+    import httpx
+
+    url = f"https://api.telegram.org/bot{VALID_TOKEN}/getUpdates"
+    request = httpx.Request("POST", url)
+    response = httpx.Response(429, request=request)
+
+    # Sanity: the raw exception string really does carry the token.
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError as raw:
+        assert VALID_TOKEN in str(raw)
+
+    class RaisingClient:
+        def post(self, url: str, json=None, **kwargs):  # noqa: A002
+            req = httpx.Request("POST", url)
+            resp = httpx.Response(429, request=req)
+            resp.raise_for_status()  # raises HTTPStatusError carrying the token
+
+    # Make run_forever do exactly one error iteration, then stop the loop.
+    sleeps: list[float] = []
+
+    def fake_sleep(_seconds: float) -> None:
+        sleeps.append(_seconds)
+        raise KeyboardInterrupt  # break out of the while True after one error
+
+    monkeypatch.setattr("ronin_cli.telegram_bot._sleep", fake_sleep)
+
+    bot = TelegramBot(token=VALID_TOKEN, allowed_chat_ids=[42], http=RaisingClient())
+
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="ronin.telegram"):
+        with pytest.raises(KeyboardInterrupt):
+            bot.run_forever()
+
+    joined = "\n".join(r.getMessage() for r in caplog.records)
+    assert joined, "expected a warning log for the poll error"
+    assert VALID_TOKEN not in joined, "token must not appear in poll error logs"
+    assert REDACTED in joined
+
+
+def test_cli_getme_failure_redacts_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A startup getMe failure must not print the token to the terminal."""
+    import httpx
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", VALID_TOKEN)
+
+    def failing_get_me(self):
+        url = f"https://api.telegram.org/bot{self.token}/getMe"
+        req = httpx.Request("POST", url)
+        resp = httpx.Response(401, request=req)
+        resp.raise_for_status()
+
+    monkeypatch.setattr(
+        "ronin_cli.telegram_bot.TelegramBot.get_me", failing_get_me
+    )
+
+    r = runner.invoke(app, ["telegram", "--once"])
+    assert r.exit_code != 0
+    assert "getMe failed" in r.stdout
+    assert VALID_TOKEN not in r.stdout, "token must not be printed on getMe failure"
+    assert REDACTED in r.stdout

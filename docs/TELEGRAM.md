@@ -73,6 +73,10 @@ This is remote control of a laptop, so the boundary is the whole point.
   `--full-access`. A Telegram message cannot trigger a destructive action.
 - No arbitrary shell. There is no shell, eval, or exec path reachable from a
   message. The only outbound calls are to api.telegram.org.
+- Token never logged. The token is part of every request URL, and HTTP errors
+  (a 429/401/5xx) carry that URL. The bridge masks the token as `<redacted>`
+  before any error is logged or printed, so a rate limit or auth failure does
+  not leak the secret to logs or the terminal.
 
 ## Notes
 
