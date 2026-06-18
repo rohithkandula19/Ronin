@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Callable
+from typing import Callable, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -284,6 +284,11 @@ class ReActAgent(BaseModel):
                 f"{len(result):,} chars. Narrow the query or read a specific "
                 "file/section to see more.]")
 
+    # Marker that begins a compaction summary message. Recognised on later passes
+    # so an existing summary folds through instead of nesting, and so callers can
+    # spot it in the history.
+    COMPACTION_PREFIX: ClassVar[str] = "[earlier context summarized:"
+
     def _maybe_compact(self, messages: list[Message], emit) -> None:
         """Keep the running history under the context budget.
 
@@ -292,14 +297,16 @@ class ReActAgent(BaseModel):
         1. **Truncate** the *content* of old ``tool`` messages in place (file
            dumps, command output) — reclaims the bulk of the tokens without
            removing any message, so assistant↔tool_call_id pairing is intact.
-        2. **Evict** whole oldest turn-groups when truncation isn't enough.
-           Persisted cross-turn history accumulates user/assistant text and
-           tool-call *arguments* that tool-truncation can't reclaim; without a
-           cap a very long session would grow past the window and wedge (every
-           later turn re-sends the oversized history and re-fails). A group
-           starts at a ``user`` message, so dropping from the front at a user
-           boundary never orphans a ``tool`` result. The most recent group (the
-           current turn) is always kept.
+        2. **Summarize-and-evict** whole oldest turn-groups when truncation
+           isn't enough. The evicted groups are replaced by ONE concise summary
+           message ("[earlier context summarized: ...]") so the agent keeps the
+           thread (task, files touched, tools used, decisions) but frees the
+           space the raw turns occupied. The summary is deterministic and cheap
+           by default; no model call, so tests stay offline. A group starts at a
+           ``user`` message, so cutting at a user boundary never orphans a
+           ``tool`` result, and the summary itself is a ``user`` message so the
+           history still begins at a valid conversation start. The most recent
+           group (the current turn) is always kept intact.
 
         The last ``compact_keep_recent`` messages are left untouched in stage 1
         so the model keeps full recent context.
@@ -329,21 +336,107 @@ class ReActAgent(BaseModel):
                 m.content = m.content[:200] + marker
                 compacted += 1
 
-        # Stage 2: still over budget after truncating tool output → evict oldest
-        # complete turn-groups (everything before the 2nd user message) until we
-        # fit or only the current turn remains.
-        evicted = 0
-        while est_tokens() > threshold:
-            user_idx = [i for i, m in enumerate(messages) if m.role == "user"]
-            if len(user_idx) <= 1:
-                break  # never drop the most recent turn-group
-            del messages[: user_idx[1]]
-            evicted += 1
+        # Stage 2: still over budget after truncating tool output, so fold the
+        # oldest complete turn-groups (everything before the 2nd user message)
+        # into a single summary message. We accumulate the evicted groups, then
+        # write ONE summary in their place. The agent keeps continuity (task,
+        # files touched, tools, last result) without the raw bulk. The summary is
+        # itself counted toward the budget, so we keep evicting until the history
+        # (summary included) fits or only the current turn remains.
+        #
+        # An existing summary at the front is folded into the next eviction (its
+        # facts carry through via ``carried_task``), so repeated compactions stay
+        # a single summary rather than nesting.
+        evicted_groups: list[list[Message]] = []
 
+        def _summary_tokens() -> int:
+            if not evicted_groups:
+                return 0
+            return len(self._summarize_groups(evicted_groups).content) // 4
+
+        while est_tokens() + _summary_tokens() > threshold:
+            user_idx = [i for i, m in enumerate(messages) if m.role == "user"]
+            # Stop when only the current turn-group remains (and any leading
+            # summary we already placed). Folding more would drop the live turn.
+            non_summary_users = [
+                i for i in user_idx
+                if not (messages[i].content or "").startswith(self.COMPACTION_PREFIX)
+            ]
+            if len(non_summary_users) <= 1:
+                break
+            # Cut everything before the 2nd real user message: that span is one or
+            # more complete oldest groups (plus any prior summary at the front).
+            cut = non_summary_users[1]
+            evicted_groups.append([m.model_copy() for m in messages[:cut]])
+            del messages[:cut]
+
+        evicted = len(evicted_groups)
+        if evicted:
+            messages.insert(0, self._summarize_groups(evicted_groups))
         if compacted or evicted:
             note = []
             if compacted:
                 note.append(f"truncated {compacted} old tool result(s)")
             if evicted:
-                note.append(f"dropped {evicted} oldest turn(s)")
+                note.append(f"summarized {evicted} oldest turn(s)")
             emit(Step(kind="thought", content=f"[context compacted: {', '.join(note)}]"))
+
+    def _summarize_groups(self, groups: list[list[Message]]) -> Message:
+        """Deterministically fold evicted turn-groups into one summary Message.
+
+        Cheap and offline by default: no model call. Captures the original task,
+        the user asks, files touched, tools used, and the last assistant answer.
+        These are the facts the agent needs to stay coherent after the raw turns
+        are gone. A model-based summary could be slotted in here behind a flag, but
+        the default path must never hit the network so tests stay offline.
+        """
+        user_asks: list[str] = []
+        files: list[str] = []
+        tools_used: list[str] = []
+        last_answer = ""
+        # Pull the previous summary's task line through so the original task is
+        # never lost across repeated compactions.
+        carried_task = ""
+        for group in groups:
+            for m in group:
+                if m.role == "user":
+                    text = (m.content or "").strip()
+                    if text.startswith(self.COMPACTION_PREFIX):
+                        carried_task = text  # an earlier summary, fold it through
+                    elif text:
+                        user_asks.append(text)
+                elif m.role == "assistant":
+                    if m.content and m.content.strip():
+                        last_answer = m.content.strip()
+                    for tc in (m.tool_calls or []):
+                        tools_used.append(tc.name)
+                        for key in ("path", "file_path", "filename", "file"):
+                            val = (tc.arguments or {}).get(key)
+                            if isinstance(val, str) and val:
+                                files.append(val)
+                                break
+
+        def _digest(items: list[str], limit: int) -> list[str]:
+            seen: list[str] = []
+            for it in items:
+                if it not in seen:
+                    seen.append(it)
+            return seen[:limit]
+
+        parts: list[str] = []
+        if carried_task:
+            # Strip the wrapper so we don't nest "[earlier context summarized: ..."
+            inner = carried_task[len(self.COMPACTION_PREFIX):].strip().rstrip("]").strip()
+            if inner:
+                parts.append(inner)
+        if user_asks:
+            asks = _digest(user_asks, 4)
+            parts.append("asks: " + " | ".join(a[:200] for a in asks))
+        if files:
+            parts.append("files touched: " + ", ".join(_digest(files, 10)))
+        if tools_used:
+            parts.append("tools used: " + ", ".join(_digest(tools_used, 10)))
+        if last_answer:
+            parts.append("last result: " + last_answer[:300])
+        body = "; ".join(parts) if parts else "older steps elided"
+        return Message(role="user", content=f"{self.COMPACTION_PREFIX} {body}]")

@@ -114,3 +114,97 @@ def test_eviction_preserves_pairing_and_keeps_current_turn() -> None:
     sent = provider.calls[0]["messages"]
     assert sent[0]["role"] == "user"                 # valid conversation start
     assert sent[-1]["content"] == "current"          # current turn survives
+
+
+def test_compaction_writes_a_summary_marker_and_shrinks_history() -> None:
+    """Folding old turns must (a) leave a single '[earlier context summarized: ...]'
+    message, (b) shrink the history the provider is handed, and (c) still complete."""
+    from ronin_agent_patterns import Message
+
+    history: list[Message] = []
+    for i in range(8):
+        history.append(Message(role="user", content=f"please do step {i}"))
+        history.append(Message(
+            role="assistant", content="",
+            tool_calls=[ToolCall(id=f"w{i}", name="write_file",
+                                 arguments={"path": f"mod_{i}.py", "content": "Q" * 3000})],
+        ))
+        history.append(Message(role="tool", tool_call_id=f"w{i}", name="write_file", content="ok"))
+        history.append(Message(role="assistant", content=f"finished step {i}"))
+
+    provider = FakeProvider(responses=[LLMResponse(text="all done", stop_reason="end_turn")])
+    agent = ReActAgent(system="x", provider=provider, compact_after_tokens=2000, compact_keep_recent=4)
+    result = agent.run("wrap up", history=history)
+
+    assert result.success
+    assert result.output == "all done"
+
+    sent = provider.calls[0]["messages"]
+    # History shrank: 8*4 + 1 = 33 messages went in; far fewer come out.
+    assert len(sent) < 33
+    # Exactly one summary marker, at the front, carrying digest facts.
+    summaries = [m for m in sent if str(m["content"]).startswith("[earlier context summarized:")]
+    assert len(summaries) == 1
+    assert sent[0]["content"].startswith("[earlier context summarized:")
+    body = summaries[0]["content"]
+    assert "files touched" in body and "mod_0.py" in body  # files survive the fold
+    assert "write_file" in body                            # tools used survive
+    # Current turn always kept intact at the tail.
+    assert sent[-1]["content"] == "wrap up"
+    # A summary message is a valid user-role conversation start.
+    assert sent[0]["role"] == "user"
+
+
+def test_repeated_compaction_stays_one_summary_and_keeps_task() -> None:
+    """Across two compactions, an existing summary folds through (no nesting) and
+    the original task's facts are carried forward, not lost."""
+    from ronin_agent_patterns import ReActAgent as _RA
+
+    agent = _RA(system="x", provider=FakeProvider(responses=[]),
+                compact_after_tokens=500, compact_keep_recent=2)
+
+    from ronin_agent_patterns import Message
+    # First fold: a couple of old groups -> one summary.
+    g1 = [
+        [Message(role="user", content="ORIGINAL TASK build the parser"),
+         Message(role="assistant", content="",
+                 tool_calls=[ToolCall(id="a", name="write_file", arguments={"path": "parser.py"})]),
+         Message(role="tool", tool_call_id="a", name="write_file", content="ok")],
+    ]
+    summary1 = agent._summarize_groups(g1)
+    assert summary1.content.startswith("[earlier context summarized:")
+    assert "parser.py" in summary1.content
+    assert "build the parser" in summary1.content
+
+    # Second fold: the prior summary plus a new group -> still ONE summary, and
+    # the original task line carries through.
+    g2 = [
+        [summary1,
+         Message(role="user", content="now add tests"),
+         Message(role="assistant", content="",
+                 tool_calls=[ToolCall(id="b", name="write_file", arguments={"path": "test_parser.py"})]),
+         Message(role="tool", tool_call_id="b", name="write_file", content="ok")],
+    ]
+    summary2 = agent._summarize_groups(g2)
+    # Not nested: the prefix appears exactly once.
+    assert summary2.content.count("[earlier context summarized:") == 1
+    # Both the carried original task and the newer work are present.
+    assert "build the parser" in summary2.content
+    assert "test_parser.py" in summary2.content
+
+
+def test_short_run_history_is_untouched() -> None:
+    """A short run under the threshold passes the history through verbatim, with
+    no summary marker injected."""
+    provider = FakeProvider(responses=[
+        LLMResponse(text="", tool_calls=[ToolCall(id="t1", name="dump", arguments={})], stop_reason="tool_use"),
+        LLMResponse(text="done", stop_reason="end_turn"),
+    ])
+    agent = ReActAgent(system="x", tools=[_big_result_tool()], provider=provider,
+                       max_iterations=4, compact_after_tokens=1_000_000, compact_keep_recent=2)
+    result = agent.run("dump once")
+    assert result.success
+    # No summary marker anywhere in what the provider saw.
+    for call in provider.calls:
+        assert not any(str(m["content"]).startswith("[earlier context summarized:") for m in call["messages"])
+    assert not any("context compacted" in str(s.content) for s in result.trace)
