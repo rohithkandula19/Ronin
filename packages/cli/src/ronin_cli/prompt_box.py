@@ -265,8 +265,9 @@ def _pt_read(console: Console, *, symbol: str, hint: str,
              placeholder: str, status: str, root: Path | str = ".") -> str:
     global _pt_session
     from prompt_toolkit import PromptSession
+    from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
     from prompt_toolkit.completion import Completer, Completion
-    from prompt_toolkit.history import InMemoryHistory
+    from prompt_toolkit.history import FileHistory, InMemoryHistory
     from prompt_toolkit.styles import Style
 
     width = max(24, console.width)
@@ -325,7 +326,13 @@ def _pt_read(console: Console, *, symbol: str, hint: str,
     ph = [("class:placeholder", placeholder)] if placeholder else None
 
     if _pt_session is None:
-        _pt_session = PromptSession(history=InMemoryHistory())
+        try:
+            _hist_path = Path.home() / ".ronin" / "repl_history"
+            _hist_path.parent.mkdir(parents=True, exist_ok=True)
+            _history = FileHistory(str(_hist_path))
+        except Exception:  # noqa: BLE001 - persistent history is best effort
+            _history = InMemoryHistory()
+        _pt_session = PromptSession(history=_history)
 
     # honour the /vim toggle for this (and every subsequent) read
     try:
@@ -353,6 +360,7 @@ def _pt_read(console: Console, *, symbol: str, hint: str,
         completer=_ReplCompleter(),
         complete_while_typing=True,
         complete_in_thread=True,   # scan dirs off the UI thread → no typing lag
+        auto_suggest=AutoSuggestFromHistory(),  # faint ghost suggestion you accept with right-arrow
         bottom_toolbar=bottom_toolbar,
         style=style,
         reserve_space_for_menu=8,
