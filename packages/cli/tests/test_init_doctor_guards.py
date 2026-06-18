@@ -17,6 +17,10 @@ runner = CliRunner()
 
 def test_init_rejects_yes_as_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
+    # Isolate the user-global config dir so a real ~/.config/ronin/config.toml on
+    # the dev machine doesn't trigger the interactive "overwrite?" guard.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr("ronin_cli.config.USER_DIR", tmp_path / "userconfig")
     # answers: provider=groq, model="yes" (bogus), key=gsk_x, then 5 empty service prompts
     r = runner.invoke(app, ["init"], input="groq\nyes\ngsk_testkey\n\n\n\n\n\n")
     assert r.exit_code == 0, r.stdout
@@ -30,6 +34,9 @@ def test_init_rejects_yes_as_model(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 
 def test_init_keeps_valid_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
+    # Isolate the user-global config dir (see test_init_rejects_yes_as_model).
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr("ronin_cli.config.USER_DIR", tmp_path / "userconfig")
     r = runner.invoke(app, ["init"], input="groq\nllama-3.1-8b-instant\ngsk_testkey\n\n\n\n\n\n")
     assert r.exit_code == 0, r.stdout
     monkeypatch.chdir(tmp_path)
