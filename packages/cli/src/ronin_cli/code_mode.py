@@ -502,8 +502,8 @@ def _selective_gate(
             if _w:
                 console.print(_w)
 
-        console.print("    [yellow]approve?[/yellow] [grey50][y]es · [a]lways · "
-                      "[n]o · or type why not[/grey50] ", end="")
+        console.print("    [yellow]approve?[/yellow] [grey50]\\[y]es · \\[a]lways · "
+                      "\\[n]o · or type why not[/grey50] ", end="")
         # Pause the type-ahead reader so its background thread doesn't steal the
         # approval keystroke (which would hang the prompt and replay 'y' as a turn).
         from .input_queue import pause_capture
