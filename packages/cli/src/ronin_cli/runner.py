@@ -59,6 +59,24 @@ Configured services: {services}.
 """
 
 
+def _error_body_message(e: Exception) -> str:
+    """Best-effort extraction of the provider's error message from the response
+    body (``{"error": {"message": ...}}`` or a list of those). Empty on any
+    failure (streamed / empty / non-JSON bodies)."""
+    resp = getattr(e, "response", None)
+    if resp is None:
+        return ""
+    try:
+        body = resp.json()
+    except Exception:  # noqa: BLE001 — streamed/empty/non-JSON bodies
+        return ""
+    if isinstance(body, dict):
+        return str((body.get("error") or {}).get("message") or "")
+    if isinstance(body, list) and body and isinstance(body[0], dict):
+        return str((body[0].get("error") or {}).get("message") or "")
+    return ""
+
+
 def _friendly_provider_error(e: Exception, config: RoninConfig) -> str:
     """Turn a provider/network exception into a clean, actionable message
     (no traceback). Recognises auth failures and connection problems."""
@@ -66,6 +84,9 @@ def _friendly_provider_error(e: Exception, config: RoninConfig) -> str:
     key_env = "ANTHROPIC_API_KEY" if provider == "anthropic" else "OPENAI_API_KEY"
     status = getattr(getattr(e, "response", None), "status_code", None)
     name = e.__class__.__name__
+    # The provider's own message often names the cause (e.g. an invalid model);
+    # used to make 400/422 model rejections actionable, not just 404s.
+    body_msg = _error_body_message(e)
 
     if status in (401, 403):
         return (
@@ -77,35 +98,27 @@ def _friendly_provider_error(e: Exception, config: RoninConfig) -> str:
         )
     if status == 429:
         # Surface the provider's actual reason (e.g. "free-models-per-day").
-        detail = ""
-        resp = getattr(e, "response", None)
-        if resp is not None:
-            try:
-                body = resp.json()
-                if isinstance(body, dict):
-                    detail = str((body.get("error") or {}).get("message") or "")
-            except Exception:  # noqa: BLE001 - streamed/empty bodies
-                detail = ""
-        detail = f" [dim]({detail[:160]})[/dim]" if detail else ""
+        detail = f" [dim]({body_msg[:160]})[/dim]" if body_msg else ""
         return (
             f"[red]✗ {provider} rate-limited the request (429).[/red]{detail}\n"
             f"[dim]Free tiers cap usage per-minute and per-day. Wait and retry, or switch to a "
             f"provider with a separate free quota — in-session: [bold]/login gemini[/bold] or "
             f"[bold]/login groq[/bold].[/dim]"
         )
+    if status == 404 or (status in (400, 422) and "model" in (str(e) + " " + body_msg).lower()):
+        # Almost always an invalid / retired model id — the #1 free-user trap,
+        # since free model ids rotate. Point them straight at the live list.
+        model = config.resolved_model()
+        why = f" [dim]({body_msg[:140]})[/dim]" if body_msg else ""
+        return (
+            f"[red]✗ {provider} rejected the model '{model}' (HTTP {status}).[/red]{why} "
+            f"It's likely invalid or retired (free model ids rotate).\n"
+            f"[dim]Fix: run [bold]ronin models[/bold] (or [bold]/models[/bold] in a session) to list "
+            f"valid ids, then pick one with [bold]ronin set-key --model <id>[/bold] "
+            f"(or [bold]/model <id>[/bold]). Verify with [bold]ronin doctor --check[/bold].[/dim]"
+        )
     if status is not None:
-        detail = ""
-        resp = getattr(e, "response", None)
-        if resp is not None:
-            try:
-                body = resp.json()
-                if isinstance(body, dict):
-                    detail = str((body.get("error") or {}).get("message") or "")
-                elif isinstance(body, list) and body:
-                    detail = str((body[0].get("error") or {}).get("message") or "")
-            except Exception:  # noqa: BLE001
-                detail = ""
-        detail = f"\n[dim]{detail[:240]}[/dim]" if detail else ""
+        detail = f"\n[dim]{body_msg[:240]}[/dim]" if body_msg else ""
         return (f"[red]✗ {provider} returned HTTP {status}.[/red] "
                 f"[dim]Check your config / model name.[/dim]{detail}")
     if name in ("ConnectError", "ConnectTimeout", "ReadTimeout", "TimeoutException"):

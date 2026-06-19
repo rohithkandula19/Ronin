@@ -52,19 +52,35 @@ def migrate_legacy_dirs() -> None:
             pass
 
 
+# Default model per provider. NOTE on the FREE providers (groq, gemini,
+# cerebras, openrouter, plus local ollama): provider catalogues rotate — free
+# model ids get added, renamed, and retired on their own schedule, so a default
+# that is live today can 404 in a few months. Each default below is chosen to be
+# a *currently-valid, free, tool-calling* model, but if one ever stops existing
+# the fix is the same: run `ronin models` to list what the provider serves live,
+# then `ronin set-key --model <id>` (or `/model <id>` in a session) to pick one.
+# `ronin doctor --check` validates the configured model against the live list.
 PROVIDER_PRESETS: dict[str, dict[str, str]] = {
     "anthropic": {"model": "claude-sonnet-4-6", "base_url": ""},
     "ollama": {"model": "llama3.1", "base_url": "http://localhost:11434/v1"},
     "openai": {"model": "gpt-4o-mini", "base_url": "https://api.openai.com/v1"},
     "together": {"model": "meta-llama/Llama-3.3-70B-Instruct-Turbo", "base_url": "https://api.together.xyz/v1"},
-    "groq": {"model": "llama-3.3-70b-versatile", "base_url": "https://api.groq.com/openai/v1"},
+    # Groq free tier. gpt-oss-20b is fast + supports tool-calling and is Groq's
+    # recommended successor to the now-deprecated llama-3.3-70b-versatile
+    # (EOL 2026-08-16). `ronin models` lists live ids.
+    "groq": {"model": "openai/gpt-oss-20b", "base_url": "https://api.groq.com/openai/v1"},
     "fireworks": {"model": "accounts/fireworks/models/llama-v3p3-70b-instruct", "base_url": "https://api.fireworks.ai/inference/v1"},
     # Free tiers, no credit card — a real quality bump over llama at $0:
-    "gemini": {"model": "gemini-flash-latest", "base_url": "https://generativelanguage.googleapis.com/v1beta/openai"},
+    # Gemini: pin the stable flash (not the floating `-latest` alias, which can
+    # point at preview builds). 2.0-flash was retired 2026-06-01; Pro isn't free.
+    "gemini": {"model": "gemini-2.5-flash", "base_url": "https://generativelanguage.googleapis.com/v1beta/openai"},
+    # Cerebras: gpt-oss-120b is live + free and pairs with the automatic same-key
+    # sibling failover (zai-glm-4.7) in runner.py. `ronin models` lists live ids.
     "cerebras": {"model": "gpt-oss-120b", "base_url": "https://api.cerebras.ai/v1"},
-    # OpenRouter: one key, many models. Default is a strong free, tool-calling
-    # model; override with `--model` (e.g. qwen/qwen3-coder:free).
-    "openrouter": {"model": "deepseek/deepseek-v4-flash:free", "base_url": "https://openrouter.ai/api/v1"},
+    # OpenRouter: one key, many models. qwen3-coder:free is the most reliably-up
+    # free tool-calling model (the deepseek `:free` endpoints flap to "no
+    # endpoints"). Override with `--model` (run `ronin models` for live `:free` ids).
+    "openrouter": {"model": "qwen/qwen3-coder:free", "base_url": "https://openrouter.ai/api/v1"},
 }
 
 

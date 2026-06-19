@@ -7,8 +7,8 @@ import pytest
 from typer.testing import CliRunner
 
 from ronin_cli import main as cli_main
-from ronin_cli.config import RoninConfig
-from ronin_cli.main import _provider_live_check, app, load_config
+from ronin_cli.config import PROVIDER_PRESETS, RoninConfig
+from ronin_cli.main import _LiveCheck, _provider_live_check, app, load_config
 
 runner = CliRunner()
 
@@ -29,7 +29,8 @@ def test_init_rejects_yes_as_model(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     monkeypatch.chdir(tmp_path)
     cfg = load_config()
     assert cfg.provider == "groq"
-    assert cfg.model == "llama-3.3-70b-versatile"   # fell back to default, NOT "yes"
+    # Fell back to the provider's preset default, NOT the bogus "yes".
+    assert cfg.model == PROVIDER_PRESETS["groq"]["model"]
 
 
 def test_init_keeps_valid_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -55,8 +56,11 @@ def test_live_check_invalid_key(monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = RoninConfig(provider="groq", model="llama-3.3-70b-versatile", openai_api_key="bad")
     import urllib.error
     with patch("urllib.request.urlopen", side_effect=urllib.error.HTTPError("u", 401, "no", {}, None)):
-        msg = _provider_live_check(cfg)
-    assert "invalid key" in msg and "401" in msg
+        res = _provider_live_check(cfg)
+    # An auth failure short-circuits before the completion probe.
+    assert not res.ok
+    assert "invalid key" in res.status and "401" in res.status
+    assert "set-key" in res.remedy.lower() or "key" in res.remedy.lower()
 
 
 def test_live_check_model_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -67,9 +71,13 @@ def test_live_check_model_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
         def __exit__(self, *a): return False
         def read(self): return b'{"data":[{"id":"llama-3.3-70b-versatile"},{"id":"llama-3.1-8b-instant"}]}'
 
+    # Model 'yes' isn't in the live list → short-circuits before the probe and
+    # points the user at `ronin models`.
     with patch("urllib.request.urlopen", return_value=_Resp()):
-        msg = _provider_live_check(cfg)
-    assert "model 'yes' not found" in msg
+        res = _provider_live_check(cfg)
+    assert not res.ok
+    assert "'yes'" in res.status and "not served" in res.status
+    assert "ronin models" in res.remedy
 
 
 def test_live_check_ok(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -80,21 +88,51 @@ def test_live_check_ok(monkeypatch: pytest.MonkeyPatch) -> None:
         def __exit__(self, *a): return False
         def read(self): return b'{"data":[{"id":"llama-3.3-70b-versatile"}]}'
 
-    with patch("urllib.request.urlopen", return_value=_Resp()):
-        msg = _provider_live_check(cfg)
-    assert "ok" in msg.lower() and "valid" in msg
+    # Model is in the live list AND the end-to-end completion probe succeeds.
+    with patch("urllib.request.urlopen", return_value=_Resp()), \
+         patch.object(cli_main, "_tiny_completion_probe", return_value=(True, None)):
+        res = _provider_live_check(cfg)
+    assert res.ok
+    assert "ok" in res.status.lower() and "valid" in res.status
+
+
+def test_live_check_invalid_model_via_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    """If the models list doesn't expose the id (empty list) but the real probe
+    404s, doctor still flags the model and points at `ronin models`."""
+    cfg = RoninConfig(provider="groq", model="bogus-model", openai_api_key="gsk_ok")
+
+    class _Resp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return b'{"data":[]}'  # provider didn't list models
+
+    class _Err(Exception):
+        def __init__(self) -> None:
+            super().__init__("model not found")
+            self.response = type("R", (), {"status_code": 404})()
+
+    with patch("urllib.request.urlopen", return_value=_Resp()), \
+         patch.object(cli_main, "_tiny_completion_probe", return_value=(False, _Err())):
+        res = _provider_live_check(cfg)
+    assert not res.ok
+    assert "404" in res.status and "invalid" in res.status
+    assert "ronin models" in res.remedy
 
 
 def test_live_check_no_key() -> None:
     cfg = RoninConfig(provider="groq", model="x")  # no key
-    assert "no key" in _provider_live_check(cfg).lower()
+    res = _provider_live_check(cfg)
+    assert not res.ok
+    assert "no key" in res.status.lower()
+    assert res.remedy  # tells the user how to set one
 
 
 def test_doctor_check_flag_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
     runner.invoke(app, ["init", "--demo", "-y"])
-    with patch.object(cli_main, "_provider_live_check", return_value="[green]ok[/green]"):
+    fake = _LiveCheck(status="[green]ok[/green]", ok=True)
+    with patch.object(cli_main, "_provider_live_check", return_value=fake):
         r = runner.invoke(app, ["doctor", "--check"])
     assert r.exit_code == 0
     assert "live check" in r.stdout

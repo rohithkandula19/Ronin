@@ -720,32 +720,40 @@ def tools() -> None:
 
 # ---------- doctor ----------
 
-def _provider_live_check(config: RoninConfig) -> str:
-    """Ping the provider's models endpoint to verify the key actually works and
-    the configured model exists. Returns a Rich-markup status string."""
+from dataclasses import dataclass as _dataclass
+
+
+@_dataclass
+class _LiveCheck:
+    """Result of the end-to-end provider validation. ``status`` is one row in the
+    doctor table; ``remedy`` (if any) is the exact fix printed underneath."""
+    status: str
+    remedy: str = ""
+    ok: bool = False
+
+
+def _live_models_probe(config: RoninConfig) -> tuple[str | None, list[str]]:
+    """Hit the provider's models-list endpoint (the cheap reachability + auth
+    probe). Returns ``(error_code, model_ids)`` where ``error_code`` is one of
+    ``"auth"`` (401/403), ``"http:<code>"``, ``"unreachable:<Name>"``, or ``None``
+    on success. ``model_ids`` is the live id list (empty if the provider doesn't
+    expose one — Anthropic, or a 200 with no ``data``)."""
     import urllib.error
     import urllib.request
 
     provider = config.provider
-    model = config.resolved_model()
     if provider == "anthropic":
         url = "https://api.anthropic.com/v1/models"
-        key = config.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY")
-        if not key:
-            return "[red]no key set[/red]"
-        headers = {"x-api-key": key, "anthropic-version": "2023-06-01"}
+        headers = {"x-api-key": config.key_for("anthropic") or "", "anthropic-version": "2023-06-01"}
     elif provider == "ollama":
         base = config.resolved_base_url() or "http://localhost:11434/v1"
         url = f"{base.rstrip('/')}/models"
         headers = {}
-        key = None
     else:
         base = config.resolved_base_url() or "https://api.openai.com/v1"
         url = f"{base.rstrip('/')}/models"
-        key = config.openai_api_key or os.environ.get("OPENAI_API_KEY")
-        if not key:
-            return "[red]no key set[/red]"
-        headers = {"Authorization": f"Bearer {key}"}
+        key = config.key_for(provider)
+        headers = {"Authorization": f"Bearer {key}"} if key else {}
 
     # A non-Python User-Agent: Groq (and other WAF-fronted APIs) 403 the default
     # "Python-urllib" agent, which would make this check lie about a valid key.
@@ -753,30 +761,138 @@ def _provider_live_check(config: RoninConfig) -> str:
 
     try:
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
+        with urllib.request.urlopen(req, timeout=8) as resp:  # noqa: S310
             import json as _json
             data = _json.loads(resp.read())
     except urllib.error.HTTPError as e:
         if e.code in (401, 403):
-            return f"[red]invalid key ({e.code})[/red]"
-        return f"[red]HTTP {e.code}[/red]"
-    except Exception as e:  # noqa: BLE001
-        return f"[red]unreachable[/red] [dim]({e.__class__.__name__})[/dim]"
+            return "auth", []
+        return f"http:{e.code}", []
+    except Exception as e:  # noqa: BLE001 — network / DNS / timeout / refused
+        return f"unreachable:{e.__class__.__name__}", []
 
-    ids = [m.get("id") for m in (data.get("data") or []) if isinstance(m, dict)]
+    ids = [m.get("id") for m in (data.get("data") or []) if isinstance(m, dict) and m.get("id")]
+    return None, ids
+
+
+def _tiny_completion_probe(config: RoninConfig) -> tuple[bool, Exception | None]:
+    """Send a 1-token real completion through ronin's own provider layer (no
+    vendor SDK). This is the true end-to-end check: it proves the configured
+    *model* actually answers, catching invalid-model 404s the models list can
+    miss (e.g. an alias the list endpoint doesn't surface). Returns
+    ``(ok, error)``."""
+    from ronin_agent_patterns import Message
+    from .runner import build_single_provider
+
+    provider = build_single_provider(config)
+    # Keep retries to zero so a rate-limit/error fails fast instead of sitting in
+    # the ~60s backoff — doctor must stay snappy.
+    if hasattr(provider, "max_retries"):
+        provider.max_retries = 0
+    if hasattr(provider, "timeout"):
+        provider.timeout = 12.0
+    try:
+        provider.complete(
+            system="",
+            messages=[Message(role="user", content="ping")],
+            tools=[],
+            max_tokens=1,
+        )
+        return True, None
+    except Exception as e:  # noqa: BLE001 — surfaced as a remedy by the caller
+        return False, e
+
+
+def _provider_live_check(config: RoninConfig) -> _LiveCheck:
+    """End-to-end validation of the configured provider with a crisp PASS/FAIL
+    and the exact remedy on failure. Order: key present? → endpoint reachable +
+    auth (models list) → does the configured model actually answer (tiny real
+    completion)? Fast (short timeouts, 1-token probe) and never crashes — runs
+    cleanly even with no key configured."""
+    provider = config.provider
+    model = config.resolved_model()
+    key_env = "ANTHROPIC_API_KEY" if provider == "anthropic" else "OPENAI_API_KEY"
+
+    # Step 0: key present? (ollama is local — no key needed.)
+    if provider != "ollama" and not config.key_for(provider):
+        return _LiveCheck(
+            status="[red]no key configured[/red]",
+            remedy=(f"[dim]Fix: set a key — [bold]ronin set-key[/bold] (or [bold]/login {provider}[/bold] "
+                    f"in a session, or [bold]export {key_env}=...[/bold]).[/dim]"),
+        )
+
+    # Step 1: endpoint reachable + key accepted (cheap models-list probe).
+    err, ids = _live_models_probe(config)
+    if err == "auth":
+        return _LiveCheck(
+            status="[red]invalid key (401/403)[/red]",
+            remedy=(f"[dim]Fix: that key was rejected — set a valid one with [bold]ronin set-key[/bold] "
+                    f"(or [bold]export {key_env}=...[/bold]).[/dim]"),
+        )
+    if err and err.startswith("unreachable"):
+        name = err.split(":", 1)[1]
+        hint = ("Is the Ollama server running? Start it with [bold]ollama serve[/bold]."
+                if provider == "ollama"
+                else "Check your network or the base_url in your config.")
+        return _LiveCheck(
+            status=f"[red]endpoint unreachable[/red] [dim]({name})[/dim]",
+            remedy=f"[dim]Fix: {hint}[/dim]",
+        )
+    # A non-auth HTTP error on the *list* endpoint isn't fatal — some providers
+    # don't expose /models. Fall through to the real completion probe, which is
+    # the authoritative end-to-end signal.
+
+    # Step 1b: if we got a live id list and the configured model isn't in it,
+    # that's the most common free-user 404 — point them straight at `ronin models`.
     if ids and model not in ids:
-        return f"[green]key ok[/green] · [red]model '{model}' not found[/red] [dim](try: {', '.join(ids[:3])}…)[/dim]"
-    return "[green]ok — key + model valid[/green]"
+        sample = ", ".join(ids[:3])
+        return _LiveCheck(
+            status=f"[red]model '{model}' not served by {provider}[/red]",
+            remedy=(f"[dim]Fix: run [bold]ronin models[/bold] to list valid ids, then "
+                    f"[bold]ronin set-key --model <id>[/bold] (e.g. {sample}). "
+                    f"Free model ids rotate often.[/dim]"),
+        )
+
+    # Step 2: the real end-to-end probe — does this model actually answer?
+    ok, error = _tiny_completion_probe(config)
+    if ok:
+        return _LiveCheck(status="[green]ok — key + endpoint + model all valid[/green]", ok=True)
+
+    # Map the completion failure to an actionable remedy.
+    status_code = getattr(getattr(error, "response", None), "status_code", None)
+    if status_code == 404 or (status_code in (400, 422) and "model" in str(error).lower()):
+        return _LiveCheck(
+            status=f"[red]model '{model}' invalid (HTTP {status_code})[/red]",
+            remedy=("[dim]Fix: run [bold]ronin models[/bold] to see valid ids, then "
+                    "[bold]ronin set-key --model <id>[/bold]. Free model ids rotate often.[/dim]"),
+        )
+    if status_code in (401, 403):
+        return _LiveCheck(
+            status=f"[red]invalid key ({status_code})[/red]",
+            remedy=f"[dim]Fix: set a valid key — [bold]ronin set-key[/bold] (or export {key_env}=...).[/dim]",
+        )
+    if status_code == 429:
+        return _LiveCheck(
+            status="[red]rate-limited (429)[/red]",
+            remedy=("[dim]The key + model are fine — the free tier is just throttling. Wait and retry, "
+                    "or switch quota: [bold]ronin set-key --provider gemini[/bold] (or groq).[/dim]"),
+        )
+    name = error.__class__.__name__ if error else "error"
+    return _LiveCheck(
+        status=f"[red]probe failed[/red] [dim]({name})[/dim]",
+        remedy=f"[dim]{str(error)[:160]}[/dim]" if error else "",
+    )
 
 
 @app.command()
 def doctor(
-    check: bool = typer.Option(False, "--check", help="Ping the provider to verify the key + model actually work (network)."),
+    check: bool = typer.Option(False, "--check", help="Ping the provider to verify the key + model actually work end-to-end (network)."),
 ) -> None:
     """Health check: config location, provider auth, configured services.
 
-    Add --check to make a live call that confirms the key is valid and the
-    configured model exists (instead of just checking a key is present)."""
+    Add --check to live-validate the configured provider end-to-end — key
+    present? endpoint reachable? does the configured model actually answer? — and
+    print the exact fix on any failure (set a key, run `ronin models`, etc.)."""
     config = load_config()
     path = find_config_path()
 
@@ -795,13 +911,18 @@ def doctor(
         f"{config.provider} key",
         "[green]present[/green]" if config.has_provider_auth() else "[red]missing[/red]",
     )
+    live: _LiveCheck | None = None
     if check:
-        table.add_row("live check", _provider_live_check(config))
+        with console.status("[dim]live-checking provider…[/dim]", spinner="dots"):
+            live = _provider_live_check(config)
+        table.add_row("live check", live.status)
     services = config.configured_services()
     table.add_row("services", ", ".join(services) if services else "[red]none[/red]")
     table.add_row("ronin version", __version__)
 
     console.print(table)
+    if live is not None and live.remedy and not live.ok:
+        console.print(live.remedy)
     if not check:
         console.print("[dim]tip: run [bold]ronin doctor --check[/bold] to verify the key + model actually work.[/dim]")
 
