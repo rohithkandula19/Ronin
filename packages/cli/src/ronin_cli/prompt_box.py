@@ -301,7 +301,7 @@ def _pt_read(console: Console, *, symbol: str, hint: str,
     # Inline prompt by default (clean scrollback). RONIN_BOX=1 draws a
     # Claude-Code-style bordered box around the input.
     import os as _os
-    box_on = _os.environ.get("RONIN_BOX", "").strip().lower() in {"1", "true", "yes", "on"}
+    box_on = _os.environ.get("RONIN_BOX", "1").strip().lower() not in {"0", "false", "no", "off"}
     if box_on:
         _bw = max(2, width - 2)
         _top = "╭" + "─" * _bw + "╮"
