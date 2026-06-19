@@ -346,11 +346,6 @@ def _pt_read(console: Console, *, symbol: str, hint: str,
         elif mode == "plan":
             tag = "plan · "
         right = f"{tag}{status}".strip(" ·")
-        if box_on:
-            # Status sits just inside the right side bar, closing the card's edge.
-            # The trailing ``│`` lands on the last column, aligned under the top ``╮``.
-            return [("class:bottom-toolbar.status", (right + " ") if right else ""),
-                    ("class:border", "│")]
         return [("class:bottom-toolbar.status", right)] if right else []
 
     ph = [("class:placeholder", placeholder)] if placeholder else None
@@ -407,8 +402,13 @@ def _pt_read(console: Console, *, symbol: str, hint: str,
     # The box was erased on submit (erase_when_done); re-print the input as a flat
     # ``› your text`` line so scrollback reads like Claude Code's clean history.
     if text.strip():
-        from rich.markup import escape as _esc
-        console.print(f" [bold {ACCENT}]{symbol}[/bold {ACCENT}] {_esc(text)}")
+        # Full-width highlighted bar (light bg, dark bold text) so your typed
+        # messages stand out from replies - Claude-Code-style user-message.
+        from rich.text import Text as _Text
+        _w = console.width or 80
+        _bar = _Text(f" {symbol} {text}", style="#16181d bold")
+        _bar.pad_right(max(0, _w - _bar.cell_len))
+        console.print(_bar, style="on #cdd2db")
     return text
 
 
