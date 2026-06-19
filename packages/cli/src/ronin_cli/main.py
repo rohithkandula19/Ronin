@@ -6549,6 +6549,20 @@ def xp(
         console.print(f"  [#9ece6a]🏅 {a['name']}[/#9ece6a] — [dim]{a['desc']}[/dim]")
 
 
+# ---------- index · scalable repo context for big codebases ----------
+@app.command()
+def index(
+    query: Optional[str] = typer.Option(None, "--query", "-q", help="Preview the bounded context a task would front-load."),
+    budget: int = typer.Option(8000, "--budget", help="Token budget for the --query preview."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root to index."),
+) -> None:
+    """Build/refresh a persistent, incremental repo index (.ronin/index.db) so the
+    coding agent can pull the *right* files within a token budget on large repos —
+    no more blowing the context window. `--query` previews what it would load."""
+    from .repo_index import index as _repo_index
+    _repo_index(root=root, query=query, budget=budget)
+
+
 # ---------- stats · usage dashboard (sessions, tokens, streaks, heatmap) ----------
 @app.command()
 def stats() -> None:

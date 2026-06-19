@@ -1,0 +1,78 @@
+{
+  "name": "ronin",
+  "displayName": "Ronin",
+  "description": "Drive the ronin coding agent from VS Code — run coding tasks and ask about the codebase against a locally-running `ronin serve`.",
+  "version": "0.1.0",
+  "publisher": "ronin",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rohithkandula19/Ronin",
+    "directory": "editors/vscode"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "ronin",
+    "agent",
+    "ai",
+    "coding-agent",
+    "claude"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "ronin.code",
+        "title": "Ronin: Run a coding task",
+        "category": "Ronin"
+      },
+      {
+        "command": "ronin.ask",
+        "title": "Ronin: Ask about the codebase",
+        "category": "Ronin"
+      }
+    ],
+    "configuration": {
+      "title": "Ronin",
+      "properties": {
+        "ronin.serveUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:8000",
+          "markdownDescription": "Base URL of a locally-running `ronin serve` instance. The extension POSTs to `<serveUrl>/ask`.",
+          "scope": "machine-overridable"
+        },
+        "ronin.token": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Optional bearer token. `ronin serve` itself is unauthenticated on localhost, but if you front it with a reverse proxy that requires auth, this value is sent as `Authorization: Bearer <token>`. Leave blank for a plain local `ronin serve`.",
+          "scope": "machine-overridable"
+        },
+        "ronin.requestTimeoutMs": {
+          "type": "number",
+          "default": 600000,
+          "markdownDescription": "How long (in milliseconds) to wait for `ronin serve` to answer before giving up. Coding tasks can take a while; the default is 10 minutes.",
+          "scope": "machine-overridable"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.3"
+  }
+}

@@ -57,6 +57,11 @@ postgres = ["psycopg2-binary>=2.9"]
 # lazily, mocked in tests. Enable with:
 #   pip install 'ronin-cli[browser]' && playwright install chromium
 browser = ["playwright>=1.40,<2"]
+# Optional HTTP API mode (`ronin serve`, `ronin dashboard`). NOT a core
+# dependency: the serve command guards `uvicorn` at runtime, and `ronin_cli.server`
+# imports `fastapi` at module top. Enable with:
+#   pip install 'ronin-cli[server]'
+server = ["fastapi>=0.110", "uvicorn[standard]>=0.30"]
 
 [dependency-groups]
 dev = [

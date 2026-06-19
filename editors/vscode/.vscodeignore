@@ -1,0 +1,10 @@
+# Source & build config — only ./out (compiled JS) ships in the .vsix.
+.vscode/**
+.gitignore
+src/**
+**/*.ts
+**/*.map
+tsconfig.json
+node_modules/**
+.vscodeignore
+**/.DS_Store

@@ -315,6 +315,21 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None,
     _out_cap, _err_cap = (40000, 20000) if not sandbox else (8000, 4000)
 
     def run_command(command: str) -> str:
+        # Opt-in sandboxed execution: set RONIN_BACKEND=docker:<container> or
+        # ssh:<user@host[:port]> to run the agent's shell INSIDE an isolated
+        # backend instead of on the host. Unset/"local" → unchanged behaviour;
+        # any backend error falls back to local so a turn never dies here.
+        import os as _os
+        _bspec = _os.environ.get("RONIN_BACKEND")
+        if _bspec and _bspec.strip().lower() != "local":
+            try:
+                from .backends import parse_backend, run_in_backend
+                code, out_s, err_s = run_in_backend(
+                    command, parse_backend(_bspec), cwd=str(root_path), timeout=_timeout)
+                return (f"exit={code}\n--- stdout ---\n{(out_s or '')[:_out_cap]}\n"
+                        f"--- stderr ---\n{(err_s or '')[:_err_cap]}")
+            except Exception:  # noqa: BLE001 - fall back to local execution
+                pass
         proc = subprocess.run(
             command,
             shell=True,
