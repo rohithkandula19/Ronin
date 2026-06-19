@@ -376,7 +376,7 @@ def _pt_read(console: Console, *, symbol: str, hint: str,
         rprompt=([("class:border", "│")] if box_on else None),
         bottom_toolbar=bottom_toolbar,
         style=style,
-        reserve_space_for_menu=8,
+        reserve_space_for_menu=(0 if box_on else 8),
         key_bindings=kb,
     )
 
