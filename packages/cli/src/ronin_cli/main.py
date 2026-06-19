@@ -6795,5 +6795,45 @@ def skill_search(query: str = typer.Argument("", help="Search the registry (blan
         console.print(f"  [bold]{m['name']}[/bold] [dim]{m.get('summary', '')}[/dim]")
 
 
+# ---------- bg · fire-and-forget background agents ----------
+@app.command(name="bg")
+def bg_cmd(
+    task: list[str] = typer.Argument(None, help="Task to run in the background (quote multi-word)."),
+    code: bool = typer.Option(False, "--code", help="Run the coding agent (read-only/plan; never auto-applies) instead of read-only ask."),
+    list_: bool = typer.Option(False, "--list", help="Show a status table of background tasks."),
+    result: str = typer.Option(None, "--result", help="Print the finished result for a task id."),
+    cancel: str = typer.Option(None, "--cancel", help="Cancel a running task by id."),
+) -> None:
+    """🌙 Fire a long task into the background and get notified when it's done.
+    Background runs default to READ-ONLY; --code plans/reads but never auto-edits."""
+    from . import background as bg
+
+    if list_:
+        console.print(bg.summarize_tasks(bg.list_tasks()))
+        return
+    if result:
+        rec = bg.get_task(result)
+        if rec is None:
+            console.print(f"[#f7768e]no background task {result!r}[/#f7768e]")
+            raise typer.Exit(1)
+        if rec["status"] not in ("done", "failed", "cancelled"):
+            console.print(f"[dim]{result} is {rec['status']} — not finished yet (see `ronin bg --list`).[/dim]")
+            return
+        console.print(rec.get("result") or rec.get("error") or "(no output)")
+        return
+    if cancel:
+        ok = bg.cancel_task(cancel)
+        console.print(f"[green]✓ cancelled[/green] {cancel}" if ok else f"[#f7768e]no background task {cancel!r}[/#f7768e]")
+        raise typer.Exit(0 if ok else 1)
+
+    text = " ".join(task) if task else ""
+    if not text.strip():
+        console.print('[red]✗[/red] give me a task, e.g. [cyan]ronin bg "refactor the auth module"[/cyan]')
+        raise typer.Exit(2)
+    tid = bg.start_task(text, root=".", kind="code" if code else "ask")
+    console.print(f"[green]✓ started[/green] background task [cyan]{tid}[/cyan] [dim]({'code/plan' if code else 'ask'})[/dim]")
+    console.print(f"   [dim]status: [bold]ronin bg --list[/bold] · result: [bold]ronin bg --result {tid}[/bold][/dim]")
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()
