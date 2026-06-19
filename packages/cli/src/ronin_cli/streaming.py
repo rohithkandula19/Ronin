@@ -86,8 +86,9 @@ class LiveRenderer:
     """Streams assistant text (as live Markdown on a TTY) and renders tool steps
     as they happen, with a soft 'thinking…' spinner before the first token."""
 
-    def __init__(self, console: Console) -> None:
+    def __init__(self, console: Console, model: str = "") -> None:
         self.console = console
+        self.model = model           # shown as a dim badge next to the answer bullet
         self.streamed_text = False   # any assistant text streamed this run?
         self._status = None          # the thinking spinner (Rich Status)
         self._avatar_shown = False
@@ -170,7 +171,8 @@ class LiveRenderer:
         if not self._is_term():
             # deterministic plain streaming for pipes/tests
             if not self._avatar_shown:
-                self.console.print(BULLET)
+                self.console.print(
+                    f"{BULLET} [dim]{_short(self.model)}[/dim]" if self.model else BULLET)
                 self._avatar_shown = True
             self.console.print(delta, end="", markup=False, highlight=False, soft_wrap=True)
             self._dirty = True
@@ -178,7 +180,8 @@ class LiveRenderer:
 
         if self._live is None:
             if not self._avatar_shown:
-                self.console.print(BULLET)
+                self.console.print(
+                    f"{BULLET} [dim]{_short(self.model)}[/dim]" if self.model else BULLET)
                 self._avatar_shown = True
             from rich.live import Live
             self._buf = ""

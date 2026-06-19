@@ -754,7 +754,7 @@ def run_code_agent(
     # Stream the model's reasoning + summary live (the Claude-Code feel) when we
     # have a console; fall back to the step-narrator for non-interactive runs.
     # Headless callbacks (the TUI) take precedence over the console renderer.
-    renderer = LiveRenderer(console) if console is not None else None
+    renderer = LiveRenderer(console, model=config.resolved_model()) if console is not None else None
     on_step = on_step_cb or (renderer.on_step if renderer is not None else None)
     on_text = on_text_cb or (renderer.on_text if renderer is not None else None)
     on_reset = on_reset_cb or (renderer.on_reset if renderer is not None else None)
