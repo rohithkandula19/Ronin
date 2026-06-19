@@ -6430,5 +6430,48 @@ def telegram(
         console.print("\n[dim]stopped[/dim]")
 
 
+@app.command()
+def play(
+    game: str = typer.Argument(
+        "", help="Game key to launch directly (e.g. 2048, snake, ttt). Omit for the menu."),
+) -> None:
+    """Take a break — play a free terminal game in ronin's arcade. 🎮"""
+    from .games import GAMES, find
+    from .picker import Choice, ask_choice
+    from .theme import gradient_text
+
+    # Jump straight into a game by key: `ronin play snake`.
+    if game:
+        g = find(game)
+        if g is None:
+            keys = ", ".join(sorted(x.key for x in GAMES))
+            console.print(f"[yellow]No game called[/yellow] '{game}'.\n"
+                          f"[dim]Available:[/dim] {keys}\n"
+                          f"[dim]or run[/dim] [bold]ronin play[/bold] [dim]for the menu.[/dim]")
+            raise typer.Exit(1)
+        g.play(console)
+        return
+
+    # Otherwise: pick from the menu, play, and return to the menu until you quit.
+    console.print()
+    console.print(gradient_text("  🐼  ronin arcade"))
+    console.print(f"  [dim]{len(GAMES)} free games · pick one to play[/dim]")
+    while True:
+        choices = [Choice(label=f"{g.emoji}  {g.name}", value=g.key, description=g.desc)
+                   for g in GAMES]
+        choices.append(Choice(label="🚪  Quit", value="__quit__"))
+        pick = ask_choice("Pick a game:", choices, console=console)
+        if not pick or pick == "__quit__":
+            console.print("  [dim]gg — come back soon! 🐼[/dim]")
+            return
+        g = find(pick)
+        if g is not None:
+            try:
+                g.play(console)
+            except (EOFError, KeyboardInterrupt):
+                console.print("\n  [dim]back to the menu…[/dim]")
+            console.print()
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()
