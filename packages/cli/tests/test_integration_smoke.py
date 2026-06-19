@@ -530,9 +530,12 @@ class TestVault:
 
         home = tmp_path / ".ronin"
         home.mkdir()
-        # a config file with a plaintext OpenAI-style key — the audit's whole point
+        # A key-SHAPED fixture built at runtime so no literal sk-… string ever sits
+        # in committed source (GitHub secret-scanning flags any committed sk- token,
+        # even an obviously fake one). This is not a real key.
+        fake_key = "sk-" + "x" * 40
         (home / "config.toml").write_text(
-            'api_key = "sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd"\n',
+            f'api_key = "{fake_key}"\n',
             encoding="utf-8",
         )
         # a harmless cache file with no secret

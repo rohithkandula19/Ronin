@@ -183,10 +183,12 @@ def _make_fake_home(root: Path) -> Path:
     ronin = root / ".ronin"
     (ronin / "sessions").mkdir(parents=True)
     (ronin / "runs").mkdir(parents=True)
-    # A planted fake API key sitting unencrypted in config.toml.
+    # A planted fake API key sitting unencrypted in config.toml. Built at runtime
+    # so no literal sk-… token is committed (GitHub flags even obviously-fake ones).
+    planted = "sk-" + "F" * 36 + "abcd"
     (ronin / "config.toml").write_text(
         "provider = 'anthropic'\n"
-        "anthropic_api_key = 'sk-FAKEFAKEFAKEFAKEFAKEFAKE1234567890abcd'\n"
+        f"anthropic_api_key = '{planted}'\n"
     )
     (ronin / "memory.json").write_text(json.dumps({"memories": [{"text": "uses Groq"}]}))
     (ronin / "sessions" / "code-2026.json").write_text(
@@ -209,8 +211,8 @@ def test_audit_flags_planted_plaintext_key(tmp_path: Path) -> None:
 
     # The audit must NEVER carry the secret value anywhere in its output.
     blob = json.dumps(findings)
-    assert "sk-FAKEFAKEFAKEFAKEFAKEFAKE1234567890abcd" not in blob
-    assert "FAKEFAKE" not in blob
+    assert ("sk-" + "F" * 36 + "abcd") not in blob
+    assert "FFFFFFFF" not in blob
 
 
 def test_audit_classifies_kinds(tmp_path: Path) -> None:
@@ -268,7 +270,7 @@ def test_render_privacy_never_prints_secret_value(tmp_path: Path) -> None:
 
     assert "ronin privacy" in out
     assert "AT RISK" in out                  # verdict surfaced
-    assert "sk-FAKEFAKEFAKEFAKEFAKEFAKE1234567890abcd" not in out
+    assert ("sk-" + "F" * 36 + "abcd") not in out
     assert "FAKEFAKE" not in out             # value never rendered
 
 
