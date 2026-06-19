@@ -174,6 +174,39 @@ def test_regexgolf_solves_and_invalid_safe() -> None:
     assert solves("[", ["x"], []) is False                   # invalid regex → False, not a crash
 
 
+def test_llm_plumbing_degrades_safely() -> None:
+    # complete() must never raise and returns "" on any error.
+    from ronin_cli.games import _llm
+    ok, reason = _llm.available()
+    assert isinstance(ok, bool) and isinstance(reason, str)
+
+
+def test_mindreader_helpers() -> None:
+    from ronin_cli.games.mindreader import is_guess, parse_answer
+    assert parse_answer("Y") == "yes"
+    assert parse_answer("nope") == "no"
+    assert parse_answer("") == "quit"
+    assert is_guess("GUESS: a cat") == (True, "a cat")
+    assert is_guess("Is it alive?") == (False, "")
+
+
+def test_adventure_setting_picker() -> None:
+    from ronin_cli.games.adventure import SETTINGS, pick_setting
+    assert len(SETTINGS) >= 5
+    assert pick_setting("", random.Random(1)) in SETTINGS
+    assert pick_setting("a pirate cove", random.Random(1)) == "a pirate cove"
+
+
+def test_trivia_parser_is_robust() -> None:
+    from ronin_cli.games.trivia import check, parse_question
+    sample = ('```json\n{"question":"2+2?","options":{"A":"3","B":"4","C":"5","D":"6"},'
+              '"answer":"B","fact":"math"}\n```')
+    q = parse_question(sample)
+    assert q is not None
+    assert check(q, "b") is True and check(q, "A") is False
+    assert parse_question("not json at all") is None
+
+
 def test_every_game_has_a_pure_function_module_that_imports() -> None:
     # Importing the package already imported all game modules; assert each GAME
     # object round-trips through find() by its own key.

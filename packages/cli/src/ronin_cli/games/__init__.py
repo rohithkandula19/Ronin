@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from ._engine import GameMeta
 from . import (
+    adventure,
     battleship,
     bigo,
     blackjack,
@@ -16,6 +17,7 @@ from . import (
     hangman,
     mastermind,
     memory,
+    mindreader,
     minesweeper,
     number_guess,
     pig,
@@ -28,6 +30,7 @@ from . import (
     sudoku,
     tetris,
     tictactoe,
+    trivia,
     twenty48,
     typing,
     wordle,
@@ -35,6 +38,7 @@ from . import (
 
 GAMES: list[GameMeta] = sorted(
     (
+        adventure.GAME,
         battleship.GAME,
         bigo.GAME,
         blackjack.GAME,
@@ -43,6 +47,7 @@ GAMES: list[GameMeta] = sorted(
         hangman.GAME,
         mastermind.GAME,
         memory.GAME,
+        mindreader.GAME,
         minesweeper.GAME,
         number_guess.GAME,
         pig.GAME,
@@ -55,6 +60,7 @@ GAMES: list[GameMeta] = sorted(
         sudoku.GAME,
         tetris.GAME,
         tictactoe.GAME,
+        trivia.GAME,
         twenty48.GAME,
         typing.GAME,
         wordle.GAME,

@@ -3,9 +3,9 @@
 > **A masterless, terminal-native Claude agent.** ronin is a **Claude-Code-style AI coding agent**, it reads, edits, and runs your code from the terminal, built on a **provider-agnostic agent framework** with first-class evals, memory, security hardening, and MCP tool integrations. Plug in Claude for top quality, or run it **free** on Gemini / Cerebras / Groq / Ollama.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-v0.58.0-blue)](CHANGELOG.md)
+[![Status](https://img.shields.io/badge/status-v0.59.0-blue)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-1898%20passing-brightgreen.svg)](#-whats-under-the-hood)
+[![Tests](https://img.shields.io/badge/tests-2232%20passing-brightgreen.svg)](#-whats-under-the-hood)
 [![Providers](https://img.shields.io/badge/providers-Claude%20·%20Gemini%20·%20Cerebras%20·%20Groq%20·%20OpenRouter%20·%20Ollama%20·%20OpenAI-d4a373)](#-supported-providers)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
@@ -36,7 +36,7 @@ Regenerate the walkthrough anytime with [`vhs`](https://github.com/charmbracelet
 
 **One front door:** type **`ronin`** and you get a single agent that reads, writes, and runs code (every edit and shell command gated behind a diff preview and your approval, reads run freely), generates images/video/speech, and queries your connected data, all in one conversation, in plain language. It's **provider-agnostic**: the same agent runs on Claude or on free open models.
 
-It's also a **reference implementation for building agents the right way**. The CLI is a thin wrapper over seven independently-usable packages: agent patterns, evals, memory, hardening, and MCP integrations, backed by **1,898 tests** that run offline in CI. (`ronin code` is the focused coding agent; `ronin chat` is the talk/media surface, both available when you want a single-purpose mode.)
+It's also a **reference implementation for building agents the right way**. The CLI is a thin wrapper over seven independently-usable packages: agent patterns, evals, memory, hardening, and MCP integrations, backed by **2,232 tests** that run offline in CI. (`ronin code` is the focused coding agent; `ronin chat` is the talk/media surface, both available when you want a single-purpose mode.)
 
 ## 🛠 `ronin code` · the coding agent (Claude-Code shaped)
 
@@ -126,7 +126,7 @@ Plus, on the coding agent itself:
 curl -sSL https://raw.githubusercontent.com/rohithkandula19/Ronin/main/install.sh | bash
 ```
 
-Pin a tag: append `-s -- --ref v0.58.0`. PyPI publish is wired (`.github/workflows/release.yml`) and lands `pip install ronin-cli` once `PYPI_TOKEN` is set as a repo secret.
+Pin a tag: append `-s -- --ref v0.59.0`. PyPI publish is wired (`.github/workflows/release.yml`) and lands `pip install ronin-cli` once `PYPI_TOKEN` is set as a repo secret.
 
 For Postgres support after install: `(cd ~/.local/share/ronin && uv pip install psycopg2-binary)`.
 
@@ -164,6 +164,23 @@ ronin explain packages/cli                                       # explain a mod
 ronin eval --model gpt-oss-120b                                  # objective score, any provider
 ronin image "a red panda hacking at night, neon, flat vector"    # free, no API key
 ```
+
+## 🎮 `ronin play` · the arcade
+
+A break room built into the terminal. **`ronin play`** opens a picker menu (arrow keys, teal highlight); **`ronin play <game>`** jumps straight in. **26 games, all free**, in four flavours:
+
+- **⚡ Real-time, arrow-key controls** — full-screen, in-place render via a shared raw-mode engine (`games/_realtime.py`): 🐍 Snake (start-on-keypress, no cheap deaths) · 🔢 2048 · 🟦 Tetris (7-bag, ghost piece, line-clear scoring) · 💣 Minesweeper · ⭕ Tic-Tac-Toe (unbeatable minimax) · 🔴 Connect Four · 🧠 Memory Match.
+- **🃏 Classics with real depth**: Blackjack (betting / double / 3:2) · Pandle (Wordle with a live on-screen keyboard) · Hangman · Rock-Paper-Scissors · Pig · Simon · Word Scramble · Sudoku (unique-solution generator) · Mastermind · Battleship (hunt/target AI) · Reversi · Typing Test · Number Guess.
+- **🐼 ronin-flavoured** — coder games no other arcade ships: 🐛 Bug Hunt (spot the planted bug) · 📈 Big-O Guess · 🧩 Regex Golf.
+- **🔮 AI-powered — and, true to ronin, provider-neutral**: they run on **whatever backend you've configured** (Cerebras / Groq / Gemini / Claude / Ollama), routed through ronin's *own* model layer — not a hardcoded vendor SDK. 🔮 **Mind Reader** (think of anything; the panda guesses it in 20 questions) · 🗺️ **AI Adventure** (a living text dungeon, the panda is your DM) · 🎓 **AI Trivia** (endless generated questions). No model configured? They show a friendly nudge and the other 23 still play fully offline.
+
+```bash
+ronin play                 # the arcade menu
+ronin play tetris          # jump straight into a game
+ronin play mindreader      # the AI reads your mind (runs on your configured model)
+```
+
+Every game keeps its rules in **pure, unit-tested functions** split from the terminal I/O, and the whole roster is smoke-driven in CI (26/26, zero crashes). The selection menu is a reusable Claude-Code-style picker (`picker.py`) — the same widget is ready to back an `ask_user` clarifying-question tool for the agent.
 
 ## ronin ui · the web dashboard
 
@@ -298,6 +315,7 @@ database_url = "postgres://readonly_user:...@host:5432/db"   # a read-only role
 | **`ronin`** | **The unified agent: talk, code, generate media, query data in one conversation.** |
 | **`ronin code [task]`** | **Coding agent: streaming, plan tracker, project memory, 30 slash commands.** |
 | `ronin chat` | Talk/media REPL with short-term memory. |
+| **`ronin play [game]`** | **The arcade: 26 free terminal games — real-time (Snake / Tetris / 2048 / …), classics, ronin-flavoured (Bug Hunt / Big-O / Regex Golf), and provider-neutral AI games (Mind Reader / AI Adventure / AI Trivia).** |
 | `ronin init [--demo]` | Create a config file (interactive or demo). |
 | **`ronin eval [--model X]`** | **Score agent quality on objective tasks, works on any provider (no LLM judge).** |
 | **`ronin explain <path>`** | **Explain a codebase: prose + Mermaid diagram + optional voice.** |
@@ -354,7 +372,7 @@ ronin is MIT-licensed and meant to be picked up by other people. A few notes if 
 - **`--yolo` / auto-accept bypasses the approval gate** and lets the model run shell commands unattended. Only use it in a sandbox or CI you trust: interactive use keeps every mutation gated.
 - **Parallel sub-agents cost real tokens.** `parallel_task` / `isolated_task` / `consensus` / `bench` fan out *N* model runs at once; concurrency is capped (3–4 workers) but spend scales with the number of tasks/models: budget accordingly.
 - **`isolated_task` needs a git repo** (worktrees are a git feature) and returns diffs for review rather than auto-merging: parallel changes stay reviewable.
-- **Pin the installer** for reproducibility: `curl … | bash -s -- --ref v0.58.0`.
+- **Pin the installer** for reproducibility: `curl … | bash -s -- --ref v0.59.0`.
 
 ## 🧱 What's under the hood
 
@@ -367,10 +385,10 @@ ronin is MIT-licensed and meant to be picked up by other people. A few notes if 
 | `memory` | Short-term (rolling summary), long-term (pluggable vector store), user preferences | 11 |
 | `hardening` | Prompt-injection scanner, faithfulness/grounding harness, tool allowlist, approval gates, output validator, token budgets, tracing | 60 |
 | `mcp-servers` | Read-only Postgres, Stripe, Linear, Slack, Notion, Tavily, GitHub templates | 67 |
-| `cli` | The `ronin` binary: agent loop, MCP client, web tools, subagents, eval, media | 1396 |
+| `cli` | The `ronin` binary: agent loop, MCP client, web tools, subagents, eval, media, the **26-game arcade** (`ronin play`) | 1882 |
 | `deployment-templates` | Docker Compose, Modal, Vercel, Railway | - |
 
-**1,898 tests** across all packages (incl. the demo/API apps), green on every push (see CI). A `FakeProvider` makes them deterministic, offline, and free: no API calls in CI.
+**2,232 tests** across all packages (incl. the demo/API apps), green on every push (see CI). A `FakeProvider` makes them deterministic, offline, and free: no API calls in CI.
 
 ## Use the modules without the CLI
 
