@@ -107,11 +107,23 @@ class LiveRenderer:
             return
         try:
             import random
+            import time as _time
 
             from rich.text import Text
             verb = random.choice(self._THINKING)
+            start_t = _time.monotonic()
+
+            class _ThinkingLine:
+                # Re-rendered every spinner frame, so the clock ticks live
+                # (Claude-Code-style "forging... (12s . esc to interrupt)").
+                def __rich_console__(self, console, options):
+                    secs = _time.monotonic() - start_t
+                    line = Text(f" {verb}... ", style=SOFT)
+                    line.append(f"({secs:.0f}s · esc to interrupt)", style="dim")
+                    yield line
+
             self._status = self.console.status(
-                Text(f" {verb}…", style=SOFT), spinner="dots", spinner_style=ACCENT)
+                _ThinkingLine(), spinner="dots", spinner_style=ACCENT)
             self._status.start()
         except Exception:  # noqa: BLE001
             self._status = None
