@@ -303,11 +303,10 @@ def _pt_read(console: Console, *, symbol: str, hint: str,
     import os as _os
     box_on = _os.environ.get("RONIN_BOX", "1").strip().lower() not in {"0", "false", "no", "off"}
     if box_on:
-        # Claude-Code style: a plain horizontal rule above the input, the input
-        # itself, and a matching rule below (in the bottom toolbar). No corners,
-        # no vertical bars - just two clean lines framing the prompt.
-        _top = "─" * width
-        message = [("class:border", _top + "\n"),
+        # Claude-Code's input frame: a single thin rule above the prompt, then the
+        # ``›`` arrow — no corners, no side bars. Clean and minimal (the faint hint
+        # line below the input is CC's pinned-bottom behaviour; see Option 3).
+        message = [("class:border", "─" * width + "\n"),
                    ("class:arrow", f"{symbol} ")]
     else:
         message = [("class:arrow", f"{symbol} ")]
@@ -347,6 +346,11 @@ def _pt_read(console: Console, *, symbol: str, hint: str,
         elif mode == "plan":
             tag = "plan · "
         right = f"{tag}{status}".strip(" ·")
+        if box_on:
+            # Status sits just inside the right side bar, closing the card's edge.
+            # The trailing ``│`` lands on the last column, aligned under the top ``╮``.
+            return [("class:bottom-toolbar.status", (right + " ") if right else ""),
+                    ("class:border", "│")]
         return [("class:bottom-toolbar.status", right)] if right else []
 
     ph = [("class:placeholder", placeholder)] if placeholder else None

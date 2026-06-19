@@ -64,8 +64,9 @@ _PLACEHOLDERS = [
 
 
 def _placeholder() -> str:
-    import random
-    return random.choice(_PLACEHOLDERS)
+    # No ghost placeholder — a clean, empty input box (the `_PLACEHOLDERS` list is
+    # kept in case we want to bring the rotating suggestions back).
+    return ""
 
 
 def _greeting() -> str:
@@ -333,21 +334,31 @@ def _fmt_tokens(n: int) -> str:
     return f"{n / 1000:.1f}k" if n >= 1000 else str(n)
 
 
+# Past-tense, samurai-panda-flavoured verbs for the retrospective footer line
+# (Claude-Code's ``✻ Cogitated for 1m 35s`` look, ronin-styled).
+_DONE_VERBS = ("Forged", "Sharpened", "Pondered", "Tracked", "Schemed",
+               "Reasoned", "Hunted", "Plotted", "Weighed", "Cogitated")
+
+
 def _status_line(config: RoninConfig, result: "CodeRunResult", elapsed: float,
                  ledger: "object | None" = None, budget: float | None = None) -> str:
-    """A subtle per-turn footer: provider · model · ↑in ↓out · time, plus a
-    Cost-Router savings line (routing) or a spend-vs-budget line (budget)."""
+    """A subtle per-turn footer in Claude-Code's retrospective style —
+    ``✻ <verb> for <time> · ↑in ↓out · provider model`` — plus a Cost-Router
+    savings line (routing) or a spend-vs-budget line (budget)."""
+    import random
+
     u = result.usage or {}
     inp, out = u.get("input_tokens", 0), u.get("output_tokens", 0)
     cached = u.get("cache_read_input_tokens", 0)
-    bits = [f"{config.provider} · {config.resolved_model()}"]
+    verb = random.choice(_DONE_VERBS)
+    bits = [f"{verb} for {elapsed:.1f}s"]
     if inp or out:
         tok = f"↑{_fmt_tokens(inp)} ↓{_fmt_tokens(out)}"
         if cached:
             tok += f" ⚡{_fmt_tokens(cached)} cached"
         bits.append(tok)
-    bits.append(f"{elapsed:.1f}s")
-    line = "  [#6b7089]" + "  ·  ".join(bits) + "[/#6b7089]"
+    bits.append(f"{config.provider} {config.resolved_model()}")
+    line = "  [#2dd4bf]✻[/#2dd4bf] [#6b7089]" + "  ·  ".join(bits) + "[/#6b7089]"
     if ledger is not None and getattr(ledger, "turns", 0) > 0:
         if budget:
             over = ledger.spent >= budget
@@ -1472,7 +1483,7 @@ def run_code_session(
                     pass
                 user = read_prompt(
                     console,
-                    hint="/ commands · @ files · ⇧⭾ mode · ⌃c stop · /q quit",
+                    hint="/help for commands",
                     placeholder=_placeholder(),
                     status=_status,
                     root=root,
@@ -1789,7 +1800,7 @@ def run_unified_session(
                     pass
                 user = read_prompt(
                     console,
-                    hint="/ commands · @ files · ⇧⭾ mode · ⌃c stop · /q quit",
+                    hint="/help for commands",
                     placeholder=_placeholder(),
                     status=_status,
                     root=root,
