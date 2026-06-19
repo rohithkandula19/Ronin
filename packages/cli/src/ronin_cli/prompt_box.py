@@ -406,9 +406,9 @@ def _pt_read(console: Console, *, symbol: str, hint: str,
         # messages stand out from replies - Claude-Code-style user-message.
         from rich.text import Text as _Text
         _w = console.width or 80
-        _bar = _Text(f" {symbol} {text}", style="#16181d bold")
+        _bar = _Text(f" {symbol} {text}", style="#16181d bold on #cdd2db")
         _bar.pad_right(max(0, _w - _bar.cell_len))
-        console.print(_bar, style="on #cdd2db")
+        console.print(_bar)
     return text
 
 
