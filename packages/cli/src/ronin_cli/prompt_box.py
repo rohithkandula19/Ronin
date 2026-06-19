@@ -336,6 +336,19 @@ def _pt_read(console: Console, *, symbol: str, hint: str,
             return [("class:border", _bot + "\n")] + rows
         return rows
 
+    def _rprompt():
+        # Mode chip + context gauge, right-aligned ON the input line. No pinned
+        # bottom toolbar means prompt_toolkit does not fill the screen below the
+        # input, so there is no gap (the input hugs the last turn).
+        mode = current_mode()
+        tag = ""
+        if mode == "auto-accept":
+            tag = "auto-accept · "
+        elif mode == "plan":
+            tag = "plan · "
+        right = f"{tag}{status}".strip(" ·")
+        return [("class:bottom-toolbar.status", right)] if right else []
+
     ph = [("class:placeholder", placeholder)] if placeholder else None
 
     if _pt_session is None:
@@ -382,8 +395,7 @@ def _pt_read(console: Console, *, symbol: str, hint: str,
         complete_while_typing=True,
         complete_in_thread=True,   # scan dirs off the UI thread → no typing lag
         auto_suggest=AutoSuggestFromHistory(),  # faint ghost suggestion you accept with right-arrow
-        rprompt=None,
-        bottom_toolbar=bottom_toolbar,
+        rprompt=_rprompt,
         style=style,
         reserve_space_for_menu=(0 if box_on else 8),
         key_bindings=kb,
