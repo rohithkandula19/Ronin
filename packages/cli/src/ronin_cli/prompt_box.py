@@ -303,10 +303,11 @@ def _pt_read(console: Console, *, symbol: str, hint: str,
     import os as _os
     box_on = _os.environ.get("RONIN_BOX", "1").strip().lower() not in {"0", "false", "no", "off"}
     if box_on:
-        _bw = max(2, width - 2)
-        _top = "╭" + "─" * _bw + "╮"
+        # Claude-Code style: a plain horizontal rule above the input, the input
+        # itself, and a matching rule below (in the bottom toolbar). No corners,
+        # no vertical bars - just two clean lines framing the prompt.
+        _top = "─" * width
         message = [("class:border", _top + "\n"),
-                   ("class:border", "│ "),
                    ("class:arrow", f"{symbol} ")]
     else:
         message = [("class:arrow", f"{symbol} ")]
@@ -331,7 +332,7 @@ def _pt_read(console: Console, *, symbol: str, hint: str,
             ("class:bottom-toolbar.status", right),
         ]
         if box_on:
-            _bot = "╰" + "─" * max(2, width - 2) + "╯"
+            _bot = "─" * width
             return [("class:border", _bot + "\n")] + rows
         return rows
 
@@ -345,6 +346,14 @@ def _pt_read(console: Console, *, symbol: str, hint: str,
         except Exception:  # noqa: BLE001 - persistent history is best effort
             _history = InMemoryHistory()
         _pt_session = PromptSession(history=_history)
+
+    # Collapse the boxed input on submit so scrollback stays clean — we echo a
+    # plain ``› your text`` line below instead (Claude-Code-style history, where
+    # past turns read as flat lines and only the *active* input wears the box).
+    try:
+        _pt_session.app.erase_when_done = True
+    except Exception:  # noqa: BLE001
+        pass
 
     # honour the /vim toggle for this (and every subsequent) read
     try:
@@ -366,19 +375,25 @@ def _pt_read(console: Console, *, symbol: str, hint: str,
     except Exception:  # noqa: BLE001
         kb = None
 
-    return _pt_session.prompt(
+    text = _pt_session.prompt(
         message,
         placeholder=ph,
         completer=_ReplCompleter(),
         complete_while_typing=True,
         complete_in_thread=True,   # scan dirs off the UI thread → no typing lag
         auto_suggest=AutoSuggestFromHistory(),  # faint ghost suggestion you accept with right-arrow
-        rprompt=([("class:border", "│")] if box_on else None),
+        rprompt=None,
         bottom_toolbar=bottom_toolbar,
         style=style,
         reserve_space_for_menu=(0 if box_on else 8),
         key_bindings=kb,
     )
+    # The box was erased on submit (erase_when_done); re-print the input as a flat
+    # ``› your text`` line so scrollback reads like Claude Code's clean history.
+    if text.strip():
+        from rich.markup import escape as _esc
+        console.print(f" [bold {ACCENT}]{symbol}[/bold {ACCENT}] {_esc(text)}")
+    return text
 
 
 def _w(text: str) -> int:
