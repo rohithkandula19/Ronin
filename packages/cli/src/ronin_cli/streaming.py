@@ -32,8 +32,13 @@ _BR_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
 
 
 def _normalize_markdown(text: str) -> str:
-    """Make LLM markdown render cleanly under rich: HTML `<br>` → newline."""
-    return _BR_RE.sub("\n", text)
+    """Make LLM markdown render cleanly under rich: HTML <br> -> newline, and
+    close an unterminated ``` fence so mid-stream renders stay stable (headers
+    and lists stop "popping" while a code block is still open)."""
+    text = _BR_RE.sub("\n", text)
+    if text.count("```") % 2 == 1:
+        text = text + "\n```"
+    return text
 
 
 def _summarize_result(result) -> str:
@@ -182,7 +187,14 @@ class LiveRenderer:
                               transient=False)
             self._live.start()
         self._buf += delta
-        self._live.update(self._markdown())
+        # Throttle the whole-buffer re-parse to ~10/s so a long answer does not
+        # rebuild its entire Markdown on every token (O(n^2) -> smooth). The
+        # final, complete render always happens in _end_text.
+        import time as _t
+        _now = _t.monotonic()
+        if _now - getattr(self, "_last_render", 0.0) >= 0.1 or len(delta) >= 160:
+            self._live.update(self._markdown())
+            self._last_render = _now
 
     def on_reset(self) -> None:
         """A retry is about to re-stream the answer from the start (e.g. after a
