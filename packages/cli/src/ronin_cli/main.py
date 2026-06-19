@@ -6549,6 +6549,15 @@ def xp(
         console.print(f"  [#9ece6a]🏅 {a['name']}[/#9ece6a] — [dim]{a['desc']}[/dim]")
 
 
+# ---------- stats · usage dashboard (sessions, tokens, streaks, heatmap) ----------
+@app.command()
+def stats() -> None:
+    """📊 Your ronin at a glance — sessions, tokens, active-day streaks, peak hour,
+    favorite model, and an activity heatmap. Read-only; counts only, never content."""
+    from .stats import run as run_stats
+    run_stats(console)
+
+
 # ---------- do · universal action engine (grounded + approved, never pays) ----------
 @app.command()
 def do(
