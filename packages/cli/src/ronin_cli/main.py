@@ -6549,5 +6549,93 @@ def xp(
         console.print(f"  [#9ece6a]🏅 {a['name']}[/#9ece6a] — [dim]{a['desc']}[/dim]")
 
 
+# ---------- privacy / vault · data safety (encryption at rest + audit) ----------
+@app.command()
+def privacy() -> None:
+    """🔐 Audit what ronin stores locally and what's protected — read-only, and it
+    never prints secret VALUES, only whether each is encrypted/redacted. The
+    "your data is safe" command."""
+    from .vault import audit, default_home_paths, render_privacy
+    render_privacy(console, audit(default_home_paths()))
+
+
+vault_app = typer.Typer(help="🔒 Encrypt ronin's local data at rest (passphrase-derived, per-file key).")
+app.add_typer(vault_app, name="vault")
+
+
+def _vault_salt(path: str) -> bytes:
+    import hashlib
+    import os as _os
+    return hashlib.sha256(_os.path.abspath(path).encode()).digest()[:16]
+
+
+@vault_app.command("lock")
+def vault_lock(
+    path: str = typer.Argument(..., help="File to encrypt in place."),
+    passphrase: str = typer.Option(..., prompt=True, hide_input=True),
+) -> None:
+    """Encrypt a file at rest."""
+    from .vault import derive_key, lock_file
+    lock_file(path, derive_key(passphrase, _vault_salt(path)))
+    console.print(f"[green]🔒 locked {path}[/green]")
+
+
+@vault_app.command("unlock")
+def vault_unlock(
+    path: str = typer.Argument(..., help="File to decrypt in place."),
+    passphrase: str = typer.Option(..., prompt=True, hide_input=True),
+) -> None:
+    """Decrypt a vault-locked file (wrong passphrase is rejected; the file is left untouched)."""
+    from .vault import InvalidToken, derive_key, unlock_file
+    try:
+        unlock_file(path, derive_key(passphrase, _vault_salt(path)))
+        console.print(f"[green]🔓 unlocked {path}[/green]")
+    except InvalidToken:
+        console.print("[red]wrong passphrase or tampered file — left untouched[/red]")
+        raise typer.Exit(1)
+
+
+# ---------- gateway · safe multi-channel (allowlist + pairing, read-only) ----------
+try:  # optional — never let a gateway import break the whole CLI
+    from .gateway import gateway_app as _gateway_app
+    app.add_typer(_gateway_app, name="gateway")
+except Exception:  # noqa: BLE001
+    pass
+
+
+# ---------- skill registry · shareable prompt-template skills (no code execution) ----------
+skill_app = typer.Typer(help="📦 Publish / install / search shareable skills — templates only, no code runs.")
+app.add_typer(skill_app, name="skill")
+
+
+@skill_app.command("publish")
+def skill_publish(name: str = typer.Argument(..., help="The repo-local skill (/<name>) to publish.")) -> None:
+    """Package a repo-local skill into the shared registry (safety-validated; templates only)."""
+    from .skill_registry import publish
+    res = publish(name, root=Path("."))
+    console.print(f"[green]📦 published {res['name']}[/green] [dim]{res.get('summary', '')}[/dim]")
+
+
+@skill_app.command("install")
+def skill_install(name: str = typer.Argument(..., help="Skill name to install from the registry.")) -> None:
+    """Install a skill (validated BEFORE it lands — refuses anything that smuggles executable payloads)."""
+    from .skill_registry import install
+    path = install(name, root=Path("."))
+    console.print(f"[green]📦 installed → {path}[/green] [dim](run it as /{name})[/dim]")
+
+
+@skill_app.command("search")
+def skill_search(query: str = typer.Argument("", help="Search the registry (blank lists all).")) -> None:
+    """Search shareable skills by name / summary / author."""
+    from .skill_registry import search
+    hits = search(query)
+    if not hits:
+        console.print("[dim]no skills found[/dim]")
+        return
+    for b in hits:
+        m = getattr(b, "manifest", b)
+        console.print(f"  [bold]{m['name']}[/bold] [dim]{m.get('summary', '')}[/dim]")
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()
