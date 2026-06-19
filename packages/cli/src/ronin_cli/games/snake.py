@@ -88,160 +88,102 @@ def _spawn_food(snake: list[tuple[int, int]]) -> tuple[int, int]:
     return random.choice(free) if free else (0, 0)
 
 
+# Raw ANSI colours (we bypass Rich while in raw-mode full-screen).
+_C_HEAD = "\x1b[1;38;2;158;206;106m"   # bright green
+_C_BODY = "\x1b[38;2;110;160;90m"      # dim green
+_C_FOOD = "\x1b[38;2;247;118;142m"     # rose
+_C_DIM = "\x1b[38;2;107;112;137m"      # mute
+_C_ACCENT = "\x1b[1;38;2;45;212;191m"  # teal
+_RESET = "\x1b[0m"
+
+
+def _frame(snake: list[tuple[int, int]], food, score: int, *,
+           over: bool, started: bool) -> str:
+    body = set(snake[1:])
+    head = snake[0]
+    lines = [f"  {_C_ACCENT}🐍 Snake{_RESET}   {_C_DIM}score {score}{_RESET}", ""]
+    lines.append("  +" + "-" * WIDTH + "+")
+    for y in range(HEIGHT):
+        row = ["  |"]
+        for x in range(WIDTH):
+            cell = (x, y)
+            if cell == head:
+                row.append(f"{_C_HEAD}@{_RESET}")
+            elif cell in body:
+                row.append(f"{_C_BODY}o{_RESET}")
+            elif cell == food:
+                row.append(f"{_C_FOOD}*{_RESET}")
+            else:
+                row.append(" ")
+        row.append("|")
+        lines.append("".join(row))
+    lines.append("  +" + "-" * WIDTH + "+")
+    lines.append("")
+    if over:
+        lines.append(f"  {_C_FOOD}game over{_RESET} {_C_DIM}— press any key{_RESET}")
+    elif not started:
+        lines.append(f"  {_C_DIM}press an arrow key to start · q quits{_RESET}")
+    else:
+        lines.append(f"  {_C_DIM}arrows steer · q quits{_RESET}")
+    return "\n".join(lines)
+
+
 def _play(console: Console) -> None:
     header(console, GAME)
-    console.print(f"  [{MUTE}]arrow keys to steer   q to quit[/{MUTE}]")
-    console.print()
+    from . import _realtime as rt
 
-    # Mutable game state shared with the prompt_toolkit callbacks.
-    start = (WIDTH // 2, HEIGHT // 2)
-    state: dict[str, object] = {
-        "snake": [start, (start[0] - 1, start[1]), (start[0] - 2, start[1])],
-        "direction": "right",
-        "pending": "right",
-        "food": None,
-        "score": 0,
-        "over": False,
-        "quit": False,
-    }
-    state["food"] = _spawn_food(state["snake"])  # type: ignore[arg-type]
-
-    def step() -> None:
-        if state["over"] or state["quit"]:
-            return
-        direction = state["pending"]
-        state["direction"] = direction
-        snake: list[tuple[int, int]] = state["snake"]  # type: ignore[assignment]
-        head = next_head(snake[0], direction)  # type: ignore[arg-type]
-
-        # The tail cell about to vacate isn't a collision unless we grow.
-        will_eat = head == state["food"]
-        body = snake if will_eat else snake[:-1]
-        if collides(head, body, WIDTH, HEIGHT):
-            state["over"] = True
-            return
-
-        snake.insert(0, head)
-        if will_eat:
-            state["score"] = int(state["score"]) + 1  # type: ignore[arg-type]
-            state["food"] = _spawn_food(snake)
-        else:
-            snake.pop()
-
-    try:
-        from prompt_toolkit.application import Application
-        from prompt_toolkit.key_binding import KeyBindings
-        from prompt_toolkit.layout import Layout
-        from prompt_toolkit.layout.containers import Window
-        from prompt_toolkit.layout.controls import FormattedTextControl
-
-        def render() -> str:
-            snake: list[tuple[int, int]] = state["snake"]  # type: ignore[assignment]
-            body = set(snake[1:])
-            head = snake[0]
-            food = state["food"]
-            lines = ["  Snake  —  score %d" % int(state["score"]), ""]  # type: ignore[arg-type]
-            top = "  +" + "-" * WIDTH + "+"
-            lines.append(top)
-            for y in range(HEIGHT):
-                row = ["  |"]
-                for x in range(WIDTH):
-                    cell = (x, y)
-                    if cell == head:
-                        row.append("@")
-                    elif cell in body:
-                        row.append("o")
-                    elif cell == food:
-                        row.append("*")
-                    else:
-                        row.append(" ")
-                row.append("|")
-                lines.append("".join(row))
-            lines.append(top)
-            lines.append("")
-            if state["over"]:
-                lines.append("  game over — press q")
-            else:
-                lines.append("  arrows steer · q quits")
-            return "\n".join(lines)
-
-        kb = KeyBindings()
-
-        def _steer(new_dir: str) -> None:
-            # Ignore reversals into yourself.
-            if new_dir != _OPPOSITE.get(str(state["direction"])):
-                state["pending"] = new_dir
-
-        @kb.add("up")
-        def _(event) -> None:
-            _steer("up")
-
-        @kb.add("down")
-        def _(event) -> None:
-            _steer("down")
-
-        @kb.add("left")
-        def _(event) -> None:
-            _steer("left")
-
-        @kb.add("right")
-        def _(event) -> None:
-            _steer("right")
-
-        @kb.add("q")
-        @kb.add("c-c")
-        def _(event) -> None:
-            state["quit"] = True
-            event.app.exit()
-
-        control = FormattedTextControl(text=render)
-        window = Window(content=control, always_hide_cursor=True)
-        app: "Application" = Application(
-            layout=Layout(window),
-            key_bindings=kb,
-            full_screen=False,
-            refresh_interval=TICK,
-        )
-
-        async def ticker() -> None:
-            import asyncio
-
-            while True:
-                await asyncio.sleep(TICK)
-                if state["quit"]:
-                    return
-                if not state["over"]:
-                    step()
-                    app.invalidate()
-
-        async def run() -> None:
-            task = app.create_background_task(ticker())
-            try:
-                await app.run_async()
-            finally:
-                task.cancel()
-
-        import asyncio
-
-        asyncio.run(run())
-
-    except Exception:
-        console.print(
-            f"  [{WARN}]snake needs a real terminal — "
-            f"try running it directly in your shell 🐍[/{WARN}]"
-        )
-        console.print()
+    if not rt.is_interactive():
+        console.print(f"  [{WARN}]Snake needs a real terminal — run it directly "
+                      f"in your shell 🐍[/{WARN}]\n")
         return
 
-    score = int(state["score"])  # type: ignore[arg-type]
-    if state["over"]:
-        console.print(
-            f"  [bold {ERROR}]game over[/bold {ERROR}] "
-            f"[{MUTE}]final score {score}[/{MUTE}]"
-        )
+    start = (WIDTH // 2, HEIGHT // 2)
+    snake = [start, (start[0] - 1, start[1]), (start[0] - 2, start[1])]
+    direction = "right"
+    food = _spawn_food(snake)
+    score = 0
+    started = False   # the snake holds still until the first arrow → no cheap deaths
+    over = False
+    quit_now = False
+
+    rt.enter_fullscreen()
+    try:
+        with rt.raw_mode():
+            while True:
+                rt.draw(_frame(snake, food, score, over=over, started=started))
+                if over:
+                    rt.read_key()   # any key dismisses the game-over screen
+                    break
+                key = rt.poll_key(TICK)
+                if key in ("q", "esc"):
+                    quit_now = True
+                    break
+                if key in _DELTAS:
+                    if key != _OPPOSITE.get(direction):
+                        direction = key
+                    started = True
+                if not started:
+                    continue
+                head = next_head(snake[0], direction)
+                will_eat = head == food
+                body = snake if will_eat else snake[:-1]
+                if collides(head, body, WIDTH, HEIGHT):
+                    over = True
+                    continue
+                snake.insert(0, head)
+                if will_eat:
+                    score += 1
+                    food = _spawn_food(snake)
+                else:
+                    snake.pop()
+    finally:
+        rt.exit_fullscreen()
+
+    if quit_now:
+        console.print(f"  [{MUTE}]bye — score {score}[/{MUTE}]\n")
     else:
-        console.print(f"  [{MUTE}]bye — score {score}[/{MUTE}]")
-    console.print()
+        console.print(f"  [bold {ERROR}]game over[/bold {ERROR}] "
+                      f"[{MUTE}]final score {score}[/{MUTE}]\n")
 
 
 GAME = GameMeta(

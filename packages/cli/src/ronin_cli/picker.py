@@ -111,9 +111,17 @@ def ask_choice(question: str, options, *, multi: bool = False,
             "dialog": "bg:default",
             "dialog frame.label": f"bg:default {ACCENT} bold",
             "dialog.body": "bg:default",
-            "radio-checked": ACCENT,
-            "checkbox-checked": ACCENT,
-            "button.focused": f"bg:{ACCENT} #1a1a1a",
+            # The row the cursor is ON (moves with up/down) — must be clearly
+            # visible, else arrowing looks like nothing happens. Teal background.
+            "radio-selected": f"bg:{ACCENT} #10241f bold",
+            "checkbox-selected": f"bg:{ACCENT} #10241f bold",
+            # The chosen item's mark/text (the (*) / [x]).
+            "radio-checked": f"{ACCENT} bold",
+            "checkbox-checked": f"{ACCENT} bold",
+            "button.focused": f"bg:{ACCENT} #10241f bold",
+            "frame.border": MUTE,
+            "scrollbar.background": "bg:default",
+            "scrollbar.button": f"bg:{ACCENT}",
         })
         values = [(c.val(), f"{c.label}" + (f"  —  {c.description}" if c.description else ""))
                   for c in choices]

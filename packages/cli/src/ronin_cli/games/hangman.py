@@ -1,7 +1,12 @@
-"""Hangman — guess the word before the panda is fully drawn.
+"""Hangman — guess the word before the gallows is fully drawn.
 
-The rules live in pure functions (``reveal``, ``is_won``, ``GALLOWS``) so they
-can be unit-tested without a terminal; ``_play`` wires them to a Rich console.
+A real game of hangman: words are drawn from four categories (animals, coding,
+food, countries) and the category is shown as a hint. Each wrong guess advances
+a 7-stage ASCII gallows; a row of already-guessed letters and a row of filling
+blanks keep the player oriented.
+
+The rules live in pure functions (``reveal``, ``is_won``) so they can be
+unit-tested without a terminal; ``_play`` wires them to a Rich console.
 """
 from __future__ import annotations
 
@@ -11,138 +16,209 @@ from rich.console import Console
 
 from ._engine import GameMeta, ask_line, header
 
-WORDS = [
-    "python", "ronin", "panda", "kernel", "buffer", "cursor", "lambda",
-    "syntax", "binary", "vector", "thread", "socket", "module", "branch",
-    "commit", "docker", "tensor", "pixel", "cipher", "schema",
-    "otter", "lemur", "gecko", "raven", "tiger", "koala", "moose",
-    "heron", "viper", "lynx",
-]
+# --- palette --------------------------------------------------------------
+TEAL = "#2dd4bf"
+GOOD = "#9ece6a"
+WARN = "#e0af68"
+ERROR = "#f7768e"
+SKY = "#7dd3fc"
+MUTE = "#6b7089"
+
+# --- words by category ----------------------------------------------------
+# 60+ words total. Multi-word entries use spaces; only letters are guessed.
+CATEGORIES: dict[str, list[str]] = {
+    "animals": [
+        "otter", "lemur", "gecko", "raven", "tiger", "koala", "moose",
+        "heron", "viper", "lynx", "panda", "falcon", "iguana", "walrus",
+        "badger", "ocelot", "mantis", "narwhal",
+    ],
+    "coding": [
+        "python", "ronin", "kernel", "buffer", "cursor", "lambda", "syntax",
+        "binary", "vector", "thread", "socket", "module", "branch", "commit",
+        "docker", "tensor", "pixel", "cipher", "schema", "compiler",
+        "variable", "function", "recursion",
+    ],
+    "food": [
+        "ramen", "mango", "waffle", "pickle", "noodle", "cheese", "pretzel",
+        "avocado", "biscuit", "pancake", "burrito", "dumpling", "espresso",
+        "tiramisu", "macaron", "gnocchi", "falafel", "wasabi",
+    ],
+    "countries": [
+        "japan", "brazil", "kenya", "norway", "canada", "mexico", "iceland",
+        "morocco", "vietnam", "belgium", "ecuador", "denmark", "portugal",
+        "thailand", "tanzania", "australia", "argentina", "switzerland",
+    ],
+}
 
 MAX_WRONG = 6
 
 # Progressive ASCII gallows; index == number of wrong guesses (0..MAX_WRONG).
+# 7 distinct stages: empty gallows → head → torso → one arm → both arms →
+# one leg → both legs (full figure).
 GALLOWS = [
     r"""
-  +---+
-  |   |
-      |
-      |
-      |
-      |
-=========""",
+   +----+
+   |    |
+        |
+        |
+        |
+        |
+  ==========""",
     r"""
-  +---+
-  |   |
-  O   |
-      |
-      |
-      |
-=========""",
+   +----+
+   |    |
+   O    |
+        |
+        |
+        |
+  ==========""",
     r"""
-  +---+
-  |   |
-  O   |
-  |   |
-      |
-      |
-=========""",
+   +----+
+   |    |
+   O    |
+   |    |
+   |    |
+        |
+  ==========""",
     r"""
-  +---+
-  |   |
-  O   |
- /|   |
-      |
-      |
-=========""",
+   +----+
+   |    |
+   O    |
+  /|    |
+   |    |
+        |
+  ==========""",
     r"""
-  +---+
-  |   |
-  O   |
- /|\  |
-      |
-      |
-=========""",
+   +----+
+   |    |
+   O    |
+  /|\   |
+   |    |
+        |
+  ==========""",
     r"""
-  +---+
-  |   |
-  O   |
- /|\  |
- /    |
-      |
-=========""",
+   +----+
+   |    |
+   O    |
+  /|\   |
+   |    |
+  /     |
+  ==========""",
     r"""
-  +---+
-  |   |
-  O   |
- /|\  |
- / \  |
-      |
-=========""",
+   +----+
+   |    |
+   O    |
+  /|\   |
+   |    |
+  / \   |
+  ==========""",
 ]
 
 
 def reveal(word: str, guessed: set[str]) -> str:
     """Render the word with guessed letters shown, others as ``_``.
 
+    Spaces in multi-word answers are kept as spaces.
     e.g. ``reveal("code", {"c", "d"}) == "c _ d _"``.
     """
-    return " ".join(ch if ch in guessed else "_" for ch in word)
+    return " ".join(
+        " " if ch == " " else (ch if ch in guessed else "_") for ch in word
+    )
 
 
 def is_won(word: str, guessed: set[str]) -> bool:
-    """True when every letter of ``word`` has been guessed."""
-    return all(ch in guessed for ch in word)
+    """True when every (non-space) letter of ``word`` has been guessed."""
+    return all(ch == " " or ch in guessed for ch in word)
+
+
+# --- rendering helpers ----------------------------------------------------
+ALPHABET = "abcdefghijklmnopqrstuvwxyz"
+
+
+def _alphabet_row(word: str, guessed: set[str]) -> str:
+    """A row of a-z, dimming used letters and coloring hits/misses."""
+    cells = []
+    for ch in ALPHABET:
+        if ch not in guessed:
+            cells.append(f"[{MUTE}]{ch}[/{MUTE}]")
+        elif ch in word:
+            cells.append(f"[{GOOD}]{ch}[/{GOOD}]")
+        else:
+            cells.append(f"[{ERROR}]{ch}[/{ERROR}]")
+    return " ".join(cells)
+
+
+def _draw(console: Console, word: str, guessed: set[str], category: str,
+          wrong: int) -> None:
+    remaining = MAX_WRONG - wrong
+    misses = sorted(g for g in guessed if g not in word)
+    miss_str = ("  ".join(f"[{ERROR}]{m}[/{ERROR}]" for m in misses)
+                if misses else f"[{MUTE}]none[/{MUTE}]")
+
+    console.print(f"[{MUTE}]{GALLOWS[wrong]}[/{MUTE}]")
+    console.print()
+    console.print(f"  [{SKY}]category[/{SKY}]  [bold {TEAL}]{category}[/bold {TEAL}]")
+    console.print(f"  [bold {GOOD}]{reveal(word, guessed)}[/bold {GOOD}]")
+    console.print()
+    console.print(f"  [{MUTE}]{_alphabet_row(word, guessed)}[/{MUTE}]")
+    console.print(
+        f"  [{SKY}]misses left: {remaining}[/{SKY}]"
+        f"    [{WARN}]wrong:[/{WARN}] {miss_str}"
+    )
+    console.print()
 
 
 def _play(console: Console) -> None:
     header(console, GAME)
-    word = random.choice(WORDS)
+    category = random.choice(list(CATEGORIES))
+    word = random.choice(CATEGORIES[category])
     guessed: set[str] = set()
     wrong = 0
-    console.print("  [#6b7089]Guess the word, one letter at a time. (q to quit)[/#6b7089]\n")
+
+    console.print(
+        f"  [{MUTE}]Guess the word one letter at a time. "
+        f"Category is your hint. (q to quit)[/{MUTE}]"
+    )
 
     while True:
-        console.print(f"[#6b7089]{GALLOWS[wrong]}[/#6b7089]")
-        console.print(f"\n  [bold #2dd4bf]{reveal(word, guessed)}[/bold #2dd4bf]")
-        remaining = MAX_WRONG - wrong
-        missed = sorted(g for g in guessed if g not in word)
-        miss_str = (" ".join(missed)) if missed else "none"
-        console.print(
-            f"  [#7dd3fc]misses left: {remaining}[/#7dd3fc]   "
-            f"[#e0af68]wrong: {miss_str}[/#e0af68]\n"
-        )
+        _draw(console, word, guessed, category, wrong)
 
         raw = ask_line(console, "letter:").lower()
         if raw in ("q", "quit", ""):
-            console.print(f"\n  [#6b7089]The word was '{word}'. Later![/#6b7089]")
+            console.print(f"\n  [{MUTE}]The word was '{word}'. Later![/{MUTE}]\n")
             return
         if len(raw) != 1 or not ("a" <= raw <= "z"):
-            console.print("  [#f7768e]single a-z letter only[/#f7768e]\n")
+            console.print(f"  [{ERROR}]single a-z letter only[/{ERROR}]\n")
             continue
         if raw in guessed:
-            console.print(f"  [#e0af68]already tried '{raw}'[/#e0af68]\n")
+            console.print(f"  [{WARN}]you already tried '{raw}' — pick another[/{WARN}]\n")
             continue
 
         guessed.add(raw)
         if raw in word:
             if is_won(word, guessed):
-                console.print(f"\n  [bold #9ece6a]🎯 You got it: {word}![/bold #9ece6a]")
+                _draw(console, word, guessed, category, wrong)
+                console.print(
+                    f"  [bold {GOOD}]🎉 You got it: {word.upper()}![/bold {GOOD}]\n"
+                )
                 return
-            console.print(f"  [#9ece6a]✓ '{raw}' is in the word[/#9ece6a]\n")
+            console.print(f"  [{GOOD}]✓ '{raw}' is in the word[/{GOOD}]\n")
         else:
             wrong += 1
             if wrong >= MAX_WRONG:
-                console.print(f"[#6b7089]{GALLOWS[wrong]}[/#6b7089]")
-                console.print(f"\n  [bold #f7768e]💀 The panda is drawn. The word was '{word}'.[/bold #f7768e]")
+                console.print(f"[{MUTE}]{GALLOWS[MAX_WRONG]}[/{MUTE}]")
+                console.print(
+                    f"\n  [bold {ERROR}]💀 Game over. The word was "
+                    f"'{word.upper()}'.[/bold {ERROR}]\n"
+                )
                 return
-            console.print(f"  [#f7768e]✗ no '{raw}'[/#f7768e]\n")
+            console.print(f"  [{ERROR}]✗ no '{raw}'[/{ERROR}]\n")
 
 
 GAME = GameMeta(
     key="hangman",
     name="Hangman",
     emoji="🎯",
-    desc="guess the word before the panda is drawn",
+    desc="guess the word before the gallows is drawn",
     play=_play,
 )
