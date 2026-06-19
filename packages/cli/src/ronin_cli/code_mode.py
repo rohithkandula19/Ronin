@@ -1451,11 +1451,30 @@ def run_code_session(
             console.print(f"[dim]▸ running queued message ›[/dim] {user}")
         else:
             try:
+                # Bottom-right gauge: provider + how much context window is left
+                # (ticks down as the conversation grows, Claude-Code-style).
+                _status = config.provider
+                try:
+                    _used = 0
+                    for _m in (message_history or []):
+                        if not isinstance(_m, dict):
+                            continue
+                        _c = _m.get("content", "")
+                        if isinstance(_c, str):
+                            _used += _estimate_tokens(_c)
+                        elif isinstance(_c, list):
+                            for _p in _c:
+                                if isinstance(_p, dict):
+                                    _used += _estimate_tokens(_p.get("text", ""))
+                    _left = max(0, 100 - int(_used * 100 / 128000))
+                    _status = f"{config.provider} · {_left}% ctx"
+                except Exception:  # noqa: BLE001
+                    pass
                 user = read_prompt(
                     console,
                     hint="/ commands · @ files · ⇧⭾ mode · ⌃c stop · /q quit",
                     placeholder=_placeholder(),
-                    status=config.provider,
+                    status=_status,
                     root=root,
                 ).strip()
             except (EOFError, KeyboardInterrupt):
@@ -1749,11 +1768,30 @@ def run_unified_session(
             console.print(f"[dim]▸ running queued message ›[/dim] {user}")
         else:
             try:
+                # Bottom-right gauge: provider + how much context window is left
+                # (ticks down as the conversation grows, Claude-Code-style).
+                _status = config.provider
+                try:
+                    _used = 0
+                    for _m in (message_history or []):
+                        if not isinstance(_m, dict):
+                            continue
+                        _c = _m.get("content", "")
+                        if isinstance(_c, str):
+                            _used += _estimate_tokens(_c)
+                        elif isinstance(_c, list):
+                            for _p in _c:
+                                if isinstance(_p, dict):
+                                    _used += _estimate_tokens(_p.get("text", ""))
+                    _left = max(0, 100 - int(_used * 100 / 128000))
+                    _status = f"{config.provider} · {_left}% ctx"
+                except Exception:  # noqa: BLE001
+                    pass
                 user = read_prompt(
                     console,
                     hint="/ commands · @ files · ⇧⭾ mode · ⌃c stop · /q quit",
                     placeholder=_placeholder(),
-                    status=config.provider,
+                    status=_status,
                     root=root,
                 ).strip()
             except (EOFError, KeyboardInterrupt):
