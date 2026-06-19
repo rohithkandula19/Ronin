@@ -6549,6 +6549,20 @@ def xp(
         console.print(f"  [#9ece6a]🏅 {a['name']}[/#9ece6a] — [dim]{a['desc']}[/dim]")
 
 
+# ---------- do · universal action engine (grounded + approved, never pays) ----------
+@app.command()
+def do(
+    task: list[str] = typer.Argument(
+        ..., help="A real-world task: 'order me a pizza', 'book a flight to NYC', 'reserve a table for 2'."),
+) -> None:
+    """Take on a real-world task — research it (faithfulness-GROUNDED so it never
+    invents an option or price), plan it, and carry it out step by step with YOUR
+    approval on every move. ronin never pays: it drives the task up to the checkout
+    line, then stops and hands you the final confirm. Do-anything, but safe."""
+    from .act import run as _act
+    _act(load_config(), " ".join(task), console=console)
+
+
 # ---------- privacy / vault · data safety (encryption at rest + audit) ----------
 @app.command()
 def privacy() -> None:
