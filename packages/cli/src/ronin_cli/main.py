@@ -620,6 +620,9 @@ def kaizen(
         False, "--yes", "-y", help="Auto-apply if the fitness gate passes (no prompt)."),
     duel: Optional[str] = typer.Option(
         None, "--duel", help="Have a RIVAL provider[:model] red-team the proven diff before you approve it."),
+    continuous: bool = typer.Option(
+        False, "--continuous", help="Run one cycle HEADLESS and open a PR for the proven fix (no working-tree "
+        "changes). Pair with `ronin schedule` to self-improve nightly."),
 ) -> None:
     """改善 — ronin sharpens its own blade. Finds a weakness, drafts a fix in an
     isolated git worktree, and PROVES it against the test suite before showing
@@ -628,10 +631,24 @@ def kaizen(
     Point it at a free provider (`/login cerebras`) and it improves code for $0.
     Something a single-vendor agent structurally won't let you do: an agent that
     edits its own source, with objective eval-proof it worked.
+
+    `--continuous` runs one cycle unattended and opens a PR for the proven fix —
+    schedule it (`ronin schedule add nightly-kaizen …`) for an agent that
+    measurably improves itself over time, with eval proof, for $0.
     """
     from .kaizen import run_kaizen
 
     config = load_config()
+    if continuous:
+        from .kaizen_loop import run_continuous
+        res = run_continuous(config, console=console, root=Path("."))
+        if res.get("pr_url"):
+            console.print(f"[green]改 opened PR → {res['pr_url']}[/green]")
+        elif res.get("branch"):
+            console.print(f"[green]改 proven fix on branch [bold]{res['branch']}[/bold][/green]")
+        else:
+            console.print(f"[yellow]改 {res.get('summary') or res.get('note') or 'no improvement this cycle'}[/yellow]")
+        return
     duel_spec = None
     if duel:
         from .consensus import parse_model_spec
@@ -1091,6 +1108,13 @@ def plugin_remove(
 
 mcp_app = typer.Typer(help="Connect MCP servers (Anthropic's tool protocol) — their tools join the agent.")
 app.add_typer(mcp_app, name="mcp")
+
+
+@mcp_app.command("serve", help="Run ronin ITSELF as a stdio MCP server — exposes read-only ronin "
+                               "tools (ask / consensus / research) so any MCP client can call ronin.")
+def mcp_serve() -> None:
+    from .mcp_server import serve
+    serve()
 
 
 @mcp_app.command("list", help="List configured MCP servers and their tools.")
@@ -6471,6 +6495,58 @@ def play(
             except (EOFError, KeyboardInterrupt):
                 console.print("\n  [dim]back to the menu…[/dim]")
             console.print()
+
+
+@app.command()
+def route(
+    task: list[str] = typer.Argument(..., help="The task to run on the auto-chosen blade."),
+) -> None:
+    """Cost-aware auto-router: classify the task, pick the **cheapest blade that
+    clears the learned reliability bar** for that task class, run it, and report the
+    savings vs the strong baseline. Frontier quality where it matters, $0 elsewhere —
+    and it learns which blade is good enough per task type as you use it."""
+    from .route import route as _route
+    _route(load_config(), " ".join(task), console=console)
+
+
+@app.command()
+def swebench(
+    models: str = typer.Option(
+        ..., "--models", "-m",
+        help="Comma-separated provider[:model] specs, e.g. 'anthropic,gemini,cerebras,ollama:llama3.1'."),
+) -> None:
+    """SWE-bench-style **objective** coding eval: each model fixes bundled bug 'issues';
+    every fix is graded by *running the test* (exit code, no LLM judge), then ranked on a
+    pass-rate / cost / time leaderboard. Local proxy — real SWE-bench needs Docker."""
+    from .swebench import run as run_swebench
+    run_swebench([s.strip() for s in models.split(",") if s.strip()], console=console)
+
+
+@app.command()
+def profile() -> None:
+    """Your coding profile: XP, level, daily streak, and unlocked achievements —
+    earned for real actions (tests passing, bugs fixed, commits, PRs)."""
+    from .gamify import render_profile
+    render_profile(console)
+
+
+@app.command()
+def xp(
+    event: str = typer.Argument(..., help="The action to award XP for: test_passed, bug_fixed, commit, pr_opened, …"),
+    n: int = typer.Option(1, "--n", help="How many of this event to record."),
+) -> None:
+    """Award XP for a coding action and show what changed (level-ups, streak, new badges).
+    Hooks call this automatically; also handy to log a win by hand."""
+    from .gamify import record
+    res = record(event, n=n)
+    line = f"[#2dd4bf]✦ +{res['xp_gained']} XP[/#2dd4bf] · [bold]LV {res['level']}[/bold] {res['title']}"
+    if res.get("streak"):
+        line += f" · [#e0af68]🔥 {res['streak']}d[/#e0af68]"
+    console.print(line)
+    if res.get("leveled_up"):
+        console.print(f"  [#9ece6a]⬆ level up![/#9ece6a]")
+    for a in res.get("unlocked", []):
+        console.print(f"  [#9ece6a]🏅 {a['name']}[/#9ece6a] — [dim]{a['desc']}[/dim]")
 
 
 if __name__ == "__main__":  # pragma: no cover
