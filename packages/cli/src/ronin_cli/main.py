@@ -6835,5 +6835,51 @@ def bg_cmd(
     console.print(f"   [dim]status: [bold]ronin bg --list[/bold] · result: [bold]ronin bg --result {tid}[/bold][/dim]")
 
 
+# ---------- checkpoint / undo · snapshot the repo, roll back a messy session ----------
+@app.command()
+def checkpoint(
+    label: list[str] = typer.Argument(None, help="Optional short label for the snapshot."),
+    list_: bool = typer.Option(False, "--list", "-l", help="List saved checkpoints instead of creating one."),
+) -> None:
+    """📸 Snapshot the repo so you can `ronin undo` back to it. Non-destructive."""
+    from .checkpoints import create_checkpoint, list_checkpoints, summarize_checkpoints
+    root = Path.cwd()
+    if list_:
+        console.print(summarize_checkpoints([c.to_meta() for c in list_checkpoints(root)]))
+        return
+    cp = create_checkpoint(root, " ".join(label) if label else None)
+    console.print(f"[green]✓[/green] checkpoint [bold]{cp.id}[/bold] [dim]({cp.files} file(s), {cp.kind})[/dim] — "
+                  f"roll back with [bold]ronin undo {cp.id}[/bold]")
+
+
+@app.command()
+def undo(
+    checkpoint_id: str = typer.Argument(None, help="Checkpoint id to restore (default: the most recent)."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+) -> None:
+    """⏪ Roll the repo back to a checkpoint (most recent if no id). Reversible —
+    the current state is snapshotted first, and untracked files are never deleted."""
+    from .checkpoints import list_checkpoints, most_recent, restore_checkpoint
+    root = Path.cwd()
+    records = [c.to_meta() for c in list_checkpoints(root)]
+    target = next((r for r in records if r["id"] == checkpoint_id), None) if checkpoint_id else most_recent(records)
+    if target is None:
+        console.print("[yellow]no checkpoints to undo[/yellow] — run [bold]ronin checkpoint[/bold] first.")
+        raise typer.Exit(1)
+    console.print(f"about to restore [bold]{target['id']}[/bold] [dim]({target.get('label', '')})[/dim]; "
+                  "files created since are removed. [dim](current state is snapshotted first)[/dim]")
+    if not yes:
+        console.print("  [yellow]undo?[/yellow] [grey50]y / N[/grey50] ", end="")
+        try:
+            if input().strip().lower() not in ("y", "yes"):
+                console.print("[dim]aborted[/dim]")
+                raise typer.Exit(0)
+        except (EOFError, KeyboardInterrupt):
+            console.print("[dim]aborted[/dim]")
+            raise typer.Exit(0)
+    res = restore_checkpoint(root, target["id"])
+    console.print(f"[green]✓[/green] {res.message}" if res.ok else f"[red]✗[/red] {res.message}")
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()
