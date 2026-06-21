@@ -6979,5 +6979,37 @@ def local(
     run_local(console, model=model)
 
 
+# ---------- finetune · train ronin's own brain from your sessions ----------
+finetune_app = typer.Typer(help="🧠 Fine-tune an open coding model on YOUR ronin sessions, then serve it locally via Ollama. (Training runs on a rented GPU.)")
+app.add_typer(finetune_app, name="finetune")
+
+
+@finetune_app.command("collect")
+def finetune_collect(
+    root: Path = typer.Option(Path("."), "--root", help="Repo whose .ronin/sessions to mine."),
+) -> None:
+    """Mine your archived sessions into a PII-scrubbed training dataset (~/.ronin/finetune/dataset.jsonl)."""
+    from .finetune import run_collect
+    run_collect(console, root=root)
+
+
+@finetune_app.command("script")
+def finetune_script(
+    base_model: str = typer.Option("unsloth/Qwen2.5-Coder-7B-bnb-4bit", "--base-model", help="Open coder to fine-tune."),
+) -> None:
+    """Emit a runnable QLoRA train.py + a rent-a-GPU README (Colab/Modal/RunPod). ronin can't train locally — needs a GPU."""
+    from .finetune import run_script
+    run_script(console, base_model=base_model)
+
+
+@finetune_app.command("serve")
+def finetune_serve(
+    gguf: Path = typer.Argument(..., help="Path to the fine-tuned .gguf from training."),
+) -> None:
+    """Write the Ollama Modelfile for a fine-tuned GGUF + the `ollama create` / `ronin local` steps to serve it."""
+    from .finetune import run_serve
+    run_serve(console, gguf)
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()
