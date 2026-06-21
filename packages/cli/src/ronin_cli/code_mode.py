@@ -1515,13 +1515,31 @@ def run_code_session(
                     _status = f"{config.provider} · {_left}% ctx"
                 except Exception:  # noqa: BLE001
                     pass
-                user = read_prompt(
-                    console,
-                    hint="/help for commands",
-                    placeholder=_placeholder(),
-                    status=_status,
-                    root=root,
-                ).strip()
+                import os as _os_pin
+                if _os_pin.environ.get("RONIN_PINNED", "").strip().lower() in {"1", "true", "yes", "on"}:
+                    try:  # opt-in pinned-bottom input bar; falls back on ANY error
+                        from pathlib import Path as _PinPath
+
+                        from .prompt_pinned import pinned_prompt
+                        user = pinned_prompt(
+                            "› ", model=config.resolved_model(), ctx_pct=_left,
+                            cwd=str(_PinPath(root).resolve()),
+                        ).strip()
+                    except (EOFError, KeyboardInterrupt):
+                        raise
+                    except Exception:  # noqa: BLE001 - never let the pinned bar break the REPL
+                        user = read_prompt(
+                            console, hint="/help for commands",
+                            placeholder=_placeholder(), status=_status, root=root,
+                        ).strip()
+                else:
+                    user = read_prompt(
+                        console,
+                        hint="/help for commands",
+                        placeholder=_placeholder(),
+                        status=_status,
+                        root=root,
+                    ).strip()
             except (EOFError, KeyboardInterrupt):
                 console.print("\n[dim]bye[/dim]")
                 return
@@ -1832,13 +1850,31 @@ def run_unified_session(
                     _status = f"{config.provider} · {_left}% ctx"
                 except Exception:  # noqa: BLE001
                     pass
-                user = read_prompt(
-                    console,
-                    hint="/help for commands",
-                    placeholder=_placeholder(),
-                    status=_status,
-                    root=root,
-                ).strip()
+                import os as _os_pin
+                if _os_pin.environ.get("RONIN_PINNED", "").strip().lower() in {"1", "true", "yes", "on"}:
+                    try:  # opt-in pinned-bottom input bar; falls back on ANY error
+                        from pathlib import Path as _PinPath
+
+                        from .prompt_pinned import pinned_prompt
+                        user = pinned_prompt(
+                            "› ", model=config.resolved_model(), ctx_pct=_left,
+                            cwd=str(_PinPath(root).resolve()),
+                        ).strip()
+                    except (EOFError, KeyboardInterrupt):
+                        raise
+                    except Exception:  # noqa: BLE001 - never let the pinned bar break the REPL
+                        user = read_prompt(
+                            console, hint="/help for commands",
+                            placeholder=_placeholder(), status=_status, root=root,
+                        ).strip()
+                else:
+                    user = read_prompt(
+                        console,
+                        hint="/help for commands",
+                        placeholder=_placeholder(),
+                        status=_status,
+                        root=root,
+                    ).strip()
             except (EOFError, KeyboardInterrupt):
                 console.print("\n[dim]bye[/dim]")
                 return
