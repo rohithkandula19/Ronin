@@ -702,8 +702,24 @@ def run_code_agent(
     # history. Once history exists, the agent already carries what it read forward.
     if (console is not None and getattr(config, "auto_context", False)
             and not getattr(config, "fast", False) and not message_history):
-        from .context_engine import relevant_context
-        _ctx = relevant_context(task, root)
+        _ctx = ""
+        # Scalable path: if the user built a repo index (`ronin index`), pull a
+        # BUDGETED, ranked set of files from the persistent index — context stays
+        # bounded even on a huge monorepo. Falls back to the in-memory map when
+        # there's no index, so default behaviour is unchanged.
+        try:
+            from .repo_index import index_db_path, query_index
+            _db = index_db_path(root)
+            if _db.exists():
+                _paths = query_index(task, _db, token_budget=8000)
+                if _paths:
+                    _ctx = ("## Relevant code (ronin repo index)\n"
+                            + "\n".join(f"- {p}" for p in _paths))
+        except Exception:  # noqa: BLE001 - index is best-effort; never break a run
+            _ctx = ""
+        if not _ctx:
+            from .context_engine import relevant_context
+            _ctx = relevant_context(task, root)
         if _ctx:
             system += "\n\n" + _ctx
             console.print("[dim]📎 added relevant files to context[/dim]")
