@@ -22,9 +22,17 @@ $ ronin "explain @main.py and add tests"   # @-mention files inline
 
 ## 🎬 Demo
 
-The animated panda mascot, the command surface, and live MCP wiring, in one shot:
+Usage dashboard → gamified profile → the 31-game arcade, in one shot:
 
-![ronin demo](docs/demo/ronin.gif)
+![ronin demo](assets/ronin-demo.gif)
+
+Runs **free**: configured on Cerebras's free tier, answering a real question for **$0**:
+
+![ronin runs free](assets/ronin-free.gif)
+
+The animated panda mascot, the command surface, and live MCP wiring:
+
+![ronin mascot](docs/demo/ronin.gif)
 
 `ronin image "a red panda samurai, neon, flat vector"`: **free, no API key**, generated and shown right in your terminal:
 
