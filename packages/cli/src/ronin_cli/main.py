@@ -6967,5 +6967,17 @@ def pr_draft_cmd(
     render_pr(title, body, console)
 
 
+# ---------- local · run ronin on a fully local open model (zero API key) ----------
+@app.command()
+def local(
+    model: str = typer.Option(None, "--model", help="Ollama model tag (default: sized to your RAM, e.g. qwen2.5-coder:7b)."),
+) -> None:
+    """🏠 Run ronin on a FULLY LOCAL open-source model — ZERO API key. Detects/guides
+    Ollama, pulls a coding model sized to your RAM, wires it up, and verifies it
+    answers locally. Nothing leaves your machine. The answer to 'why an API for everything'."""
+    from .local_setup import run as run_local
+    run_local(console, model=model)
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()
