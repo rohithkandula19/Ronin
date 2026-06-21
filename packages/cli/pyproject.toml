@@ -62,6 +62,14 @@ browser = ["playwright>=1.40,<2"]
 # imports `fastapi` at module top. Enable with:
 #   pip install 'ronin-cli[server]'
 server = ["fastapi>=0.110", "uvicorn[standard]>=0.30"]
+# Optional fully-local, KEYLESS brain — run a small open coder model IN-PROCESS,
+# no API key and no Ollama daemon. NOT a core dependency: EmbeddedProvider imports
+# the engine lazily. mlx-lm on Apple Silicon (Metal, zero-build); llama-cpp-python
+# elsewhere. Enable with:  pip install 'ronin-cli[local]'
+local = [
+    "mlx-lm>=0.20; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "llama-cpp-python>=0.2; not (sys_platform == 'darwin' and platform_machine == 'arm64')",
+]
 
 [dependency-groups]
 dev = [
