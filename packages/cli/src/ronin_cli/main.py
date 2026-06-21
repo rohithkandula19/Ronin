@@ -6941,5 +6941,31 @@ def todo_scan(
     render_todos(items, console)
 
 
+# ---------- pr-draft · draft a PR title + body from the branch diff ----------
+@app.command("pr-draft")
+def pr_draft_cmd(
+    base: str = typer.Option("main", "--base", help="Base branch to compare against."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
+) -> None:
+    """🔀 Draft a clean PR title + body from this branch's changes vs --base, grounded
+    in the actual diff (via ronin's provider layer). Heuristic fallback with no auth."""
+    from .pr_draft import collect_branch_changes, draft, render_pr
+    changes = collect_branch_changes(root, base=base)
+    if changes["error"]:
+        console.print(f"[red]{changes['error']}.[/red]")
+        raise typer.Exit(1)
+    if changes["branch"] in ("main", "master"):
+        console.print(f"[yellow]you're on '{changes['branch']}' — make a feature branch first.[/yellow]")
+        raise typer.Exit(1)
+    if not changes["commits"]:
+        console.print(f"[yellow]no commits on '{changes['branch']}' vs '{base}'.[/yellow]")
+        raise typer.Exit(1)
+    console.print(f"[#7aa2f7]🔀 {changes['branch']} → {base} ({len(changes['commits'])} commit(s))[/#7aa2f7]")
+    config = load_config()
+    with console.status("[dim] drafting pull request…[/dim]", spinner="dots"):
+        title, body = draft(config, root, base=base)
+    render_pr(title, body, console)
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()
