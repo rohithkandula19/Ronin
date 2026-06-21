@@ -2938,6 +2938,11 @@ def commit(
     if r.returncode == 0:
         short = _git(["rev-parse", "--short", "HEAD"]).stdout.strip()
         console.print(f"[green]✓ committed[/green] [bold]{short}[/bold]")
+        try:  # auto-earn XP for a real unit of progress (best-effort, never blocks)
+            from .gamify import record
+            record("commit")
+        except Exception:  # noqa: BLE001
+            pass
     else:
         console.print(f"[red]commit failed:[/red] {(r.stderr or r.stdout).strip()[:300]}")
         raise typer.Exit(1)
@@ -6595,6 +6600,11 @@ def play(
                           f"[dim]or run[/dim] [bold]ronin play[/bold] [dim]for the menu.[/dim]")
             raise typer.Exit(1)
         g.play(console)
+        try:
+            from .gamify import record
+            record("game_played")
+        except Exception:  # noqa: BLE001
+            pass
         return
 
     # Otherwise: pick from the menu, play, and return to the menu until you quit.
@@ -6615,6 +6625,12 @@ def play(
                 g.play(console)
             except (EOFError, KeyboardInterrupt):
                 console.print("\n  [dim]back to the menu…[/dim]")
+            else:
+                try:
+                    from .gamify import record
+                    record("game_played")
+                except Exception:  # noqa: BLE001
+                    pass
             console.print()
 
 
