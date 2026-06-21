@@ -6926,5 +6926,20 @@ def loc(
     run_loc(root=str(root), console=console)
 
 
+# ---------- todo-scan · TODO/FIXME/HACK comment board ----------
+@app.command("todo-scan")
+def todo_scan(
+    kind: str = typer.Option(None, "--kind", help="Only this marker: fixme|bug|todo|xxx|hack."),
+    root: Path = typer.Option(Path("."), "--root", help="Repo root to scan."),
+) -> None:
+    """🗒  Scan the codebase for TODO/FIXME/HACK/XXX/BUG comments — prioritized
+    (FIXME/BUG first) and grouped by kind."""
+    from .todo_scan import render_todos, scan_repo
+    items = scan_repo(root)
+    if kind:
+        items = [it for it in items if it["kind"] == kind.upper()]
+    render_todos(items, console)
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()
