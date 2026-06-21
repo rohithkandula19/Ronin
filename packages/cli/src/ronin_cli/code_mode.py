@@ -496,6 +496,24 @@ def _selective_gate(
                 old, new = args.get("old_string", ""), args.get("new_string", "")
                 after = before.replace(old, new, 1) if old in before else before
             _after_content = after
+            # Opt-in hunk-by-hunk review for whole-file writes (RONIN_HUNK_REVIEW):
+            # approve/reject each chunk like `git add -p`. tc.arguments is the SAME
+            # object the executor runs, so rewriting args["content"] makes the handler
+            # apply exactly the approved subset. write_file only — edit_file derives
+            # from old/new strings, so it falls through to the normal whole-edit gate.
+            import os as _os
+            if (_os.environ.get("RONIN_HUNK_REVIEW") and name == "write_file"
+                    and after and before != after):
+                from .hunk_review import review as _hunk_review
+                from .input_queue import pause_capture
+                with pause_capture():
+                    _reviewed = _hunk_review(before, after, console=console)
+                args["content"] = _reviewed          # → executor writes exactly this
+                from .secret_guard import secret_warning
+                _w = secret_warning(_reviewed)
+                if _w:
+                    console.print(_w)
+                return True                           # the per-hunk y/n WAS the approval
             _render_diff(console, unified_diff(rel, before, after), path=rel)
         elif name == "run_command":
             # escape: a command with [brackets] (globs, JSX routes) must not be
