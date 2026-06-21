@@ -2210,6 +2210,10 @@ browser = [
 postgres = [
     { name = "psycopg2-binary" },
 ]
+server = [
+    { name = "fastapi" },
+    { name = "uvicorn", extra = ["standard"] },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -2221,6 +2225,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic", specifier = ">=0.100,<1.0" },
+    { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.110" },
     { name = "playwright", marker = "extra == 'browser'", specifier = ">=1.40,<2" },
     { name = "prompt-toolkit", specifier = ">=3.0,<4" },
     { name = "psycopg2-binary", marker = "extra == 'postgres'", specifier = ">=2.9" },
@@ -2234,8 +2239,9 @@ requires-dist = [
     { name = "textual", specifier = ">=8.0,<9" },
     { name = "tomli-w", specifier = ">=1.0,<2" },
     { name = "typer", specifier = ">=0.12,<1" },
+    { name = "uvicorn", extras = ["standard"], marker = "extra == 'server'", specifier = ">=0.30" },
 ]
-provides-extras = ["postgres", "browser"]
+provides-extras = ["postgres", "browser", "server"]
 
 [package.metadata.requires-dev]
 dev = [
