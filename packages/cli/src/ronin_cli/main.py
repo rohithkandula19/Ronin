@@ -6971,10 +6971,15 @@ def pr_draft_cmd(
 @app.command()
 def local(
     model: str = typer.Option(None, "--model", help="Ollama model tag (default: sized to your RAM, e.g. qwen2.5-coder:7b)."),
+    embedded: bool = typer.Option(False, "--embedded", help="Run on the IN-PROCESS embedded model — no Ollama, no key (pip install 'ronin-cli[local]')."),
 ) -> None:
-    """🏠 Run ronin on a FULLY LOCAL open-source model — ZERO API key. Detects/guides
-    Ollama, pulls a coding model sized to your RAM, wires it up, and verifies it
-    answers locally. Nothing leaves your machine. The answer to 'why an API for everything'."""
+    """🏠 Run ronin on a FULLY LOCAL open-source model — ZERO API key. Default uses
+    Ollama; --embedded runs the model IN-PROCESS (no Ollama daemon at all). Nothing
+    leaves your machine. The answer to 'why an API for everything'."""
+    if embedded:
+        from .local_setup import run_embedded
+        run_embedded(console)
+        return
     from .local_setup import run as run_local
     run_local(console, model=model)
 

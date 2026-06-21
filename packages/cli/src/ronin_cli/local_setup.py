@@ -281,6 +281,128 @@ def apply_local_config(model: str, *, scope: str = "user") -> "object":
     return save_config(cfg, scope=scope)
 
 
+# --------------------------------------------------------------------------- #
+# EMBEDDED on-ramp — `ronin local --embedded`: a KEYLESS, in-process model with
+# NO Ollama and NO server. Reuses the SAME save_config seam apply_local_config
+# uses (provider='local'); the heavy engine lives in embedded_provider.py and is
+# imported lazily so this module stays importable without the `[local]` extra.
+# --------------------------------------------------------------------------- #
+def embedded_available() -> tuple[bool, str]:
+    """Is an in-process inference engine importable WITHOUT loading it? PURE-ish:
+    uses ``importlib.util.find_spec`` so nothing heavy (mlx/llama_cpp) is imported.
+
+    Returns ``(ok, detail)``:
+      * ``(True, "mlx_lm")`` / ``(True, "llama_cpp")`` — the engine name that's present
+        (mlx-lm preferred when both are installed).
+      * ``(False, <install hint>)`` — neither is installed; ``detail`` is the exact
+        ``pip install`` line to run (the umbrella ``ronin-cli[local]`` extra).
+    """
+    import importlib.util
+
+    for module, name in (("mlx_lm", "mlx_lm"), ("llama_cpp", "llama_cpp")):
+        try:
+            if importlib.util.find_spec(module) is not None:
+                return True, name
+        except (ImportError, ValueError):
+            # A broken/namespace package can raise; treat as "not importable".
+            continue
+
+    from .embedded_provider import install_hint
+
+    return False, install_hint()
+
+
+def apply_embedded_config(model: str = "", *, scope: str = "user") -> "object":
+    """Persist a KEYLESS embedded-model config via ronin's EXISTING save path — the
+    SAME ``load_config`` → mutate → ``save_config`` seam as :func:`apply_local_config`.
+
+        provider = "local"
+        model    = <model>   ("" → EmbeddedProvider auto-picks by RAM on first use)
+        base_url = ""        (in-process; no endpoint)
+
+    Loading the current config first means service keys + other settings survive.
+    ``scope`` defaults to "user" so ``--embedded`` makes the machine keyless
+    everywhere. Returns the written path (from ``save_config``).
+    """
+    from .config import load_config, save_config
+
+    cfg = load_config()
+    cfg.demo_mode = False
+    cfg.provider = "local"
+    cfg.model = model or None  # empty → let EmbeddedProvider auto-pick by RAM
+    cfg.base_url = ""          # in-process: no endpoint
+    return save_config(cfg, scope=scope)
+
+
+def run_embedded(console: "Console") -> None:
+    """Make ronin run on its KEYLESS in-process embedded model — no Ollama, no key,
+    no server. Never crashes:
+
+    1. If no in-process engine is installed, print the exact ``pip install
+       'ronin-cli[local]'`` step (mlx-lm is zero-build on Apple Silicon) and stop
+       gracefully — no traceback.
+    2. Pick the embedded model sized to the machine's RAM (auto by engine).
+    3. Persist ``provider='local'`` + model via ronin's ``save_config`` seam.
+    4. Print the success banner.
+    """
+    from . import embedded_provider as E
+
+    # Step 1 — engine present? If not, instruct + stop gracefully.
+    ok, detail = embedded_available()
+    if not ok:
+        from rich.markup import escape
+        from rich.panel import Panel
+
+        # Escape so rich renders the literal "[local]" extra (its [...] is markup).
+        console.print(Panel.fit(
+            "ronin can run on a KEYLESS [bold]in-process[/bold] model — "
+            "[bold]no Ollama, no server, no API key[/bold]. It just needs the optional "
+            "embedded engine.\n\n"
+            "[bold]1.[/bold] Install the engine:\n"
+            "  [bold]pip install 'ronin-cli\\[local]'[/bold]\n"
+            "  [dim](mlx-lm on Apple Silicon is zero-build — pure wheels, no C++/CMake;\n"
+            "   llama-cpp-python elsewhere.)[/dim]\n\n"
+            "[bold]2.[/bold] Re-run:\n"
+            "  [bold]ronin local --embedded[/bold]\n\n"
+            f"[dim]install hint: {escape(detail)}[/dim]",
+            title="Get ronin running embedded (keyless)", border_style="cyan",
+        ))
+        return
+
+    # Step 2 — pick the embedded model sized to this machine's RAM.
+    engine = E.select_engine()
+    ram_gb = detect_ram_gb()
+    chosen = E.recommend_embedded_model(ram_gb, engine)
+    ram_note = f"{ram_gb} GB RAM" if ram_gb > 0 else "RAM unknown"
+    console.print(
+        f"[dim]engine[/dim] [bold]{detail}[/bold]  [dim]·[/dim]  "
+        f"[dim]detected {ram_note} → picking[/dim] [bold]{chosen}[/bold]"
+    )
+
+    # Step 3 — persist provider='local' + model via ronin's existing save path.
+    try:
+        path = apply_embedded_config(chosen)
+        console.print(f"[green]✓[/green] wrote embedded config → [cyan]{path}[/cyan]")
+    except Exception as e:  # noqa: BLE001 — never crash on a config write hiccup
+        console.print(f"[red]✗ couldn't save config:[/red] [dim]{e}[/dim]")
+        return
+
+    # Step 4 — success banner.
+    from rich.panel import Panel
+
+    console.print(Panel.fit(
+        "ronin now runs on a LOCAL in-process model — no API key, no Ollama 🐼\n"
+        "[dim](weights download on first use; smaller/weaker than cloud, but free + "
+        "private + offline)[/dim]\n\n"
+        f"[dim]provider[/dim] local  [dim]·[/dim]  [dim]model[/dim] {chosen}  "
+        f"[dim]·[/dim]  [dim]engine[/dim] {detail}\n\n"
+        "Try it:\n"
+        "  [bold]ronin code[/bold] [cyan]\"add a hello-world endpoint\"[/cyan]\n"
+        "[dim](the first turn downloads the weights — one-time, then it's instant)[/dim]",
+        title="Embedded & keyless", border_style="green",
+    ))
+
+
 def verify_local_completion(model: str) -> tuple[bool, Exception | None]:
     """Send a tiny real completion through ronin's OWN provider layer against the
     local model — the same end-to-end seam ``doctor --check`` uses
