@@ -2336,21 +2336,39 @@ def scan(
     quiet: bool = typer.Option(False, "--quiet", help="No output; just the exit code (for hooks)."),
     root: Path = typer.Option(Path("."), "--root", help="Directory to scan."),
 ) -> None:
-    """🔍 Scan for committed secrets. Exits non-zero if any are found — wire it
-    into a pre-commit hook with [bold]ronin hook install[/bold].
+    """🔍 Scan the repo for leaked secrets (API keys, tokens, private keys) and
+    report each as [bold]file:line + kind[/bold] — the secret value is NEVER
+    printed, only a masked hint. Exits non-zero if any are found, so it can also
+    back a pre-commit hook ([bold]ronin hook install[/bold]).
     """
-    from .scan import scan_staged, scan_tree
+    from .secret_scan import find_secrets, render_findings, scan_repo
 
-    findings = scan_staged(root) if staged else scan_tree(root)
-    if not findings:
-        if not quiet:
-            console.print("[green]✓ no secrets found[/green]")
-        return
+    if staged:
+        # Line-level scan of just the files staged for commit. Reuse the staged-
+        # file resolver from the hook helper, then run the rich per-line scanner.
+        from .scan import load_ignore, is_ignored, staged_files
+        root_path = root.resolve()
+        ignore = load_ignore(root_path)
+        findings: list[dict] = []
+        for rel in staged_files(root_path):
+            if ignore and is_ignored(rel, ignore):
+                continue
+            p = root_path / rel
+            if not p.is_file():
+                continue
+            try:
+                text = p.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            findings.extend(find_secrets(text, rel))
+        findings.sort(key=lambda f: (f["path"], f["line"]))
+    else:
+        findings = scan_repo(root)
+
     if not quiet:
-        console.print(f"[bold #f7768e]✗ {len(findings)} file(s) with possible secrets:[/bold #f7768e]")
-        for f in findings:
-            console.print(f"  [red]{f.path}[/red] [dim]({', '.join(f.labels)})[/dim]")
-    raise typer.Exit(1)
+        render_findings(findings, console)
+    if findings:
+        raise typer.Exit(1)
 
 
 hook_app = typer.Typer(help="Manage ronin's git pre-commit secret-scan hook.")
