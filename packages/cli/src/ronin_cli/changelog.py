@@ -94,3 +94,37 @@ def render_changelog(subjects: list[str], *, version: str = "Unreleased",
 def _fmt(c: Commit) -> str:
     scope = f"**{c.scope}:** " if c.scope else ""
     return f"{scope}{c.subject}"
+
+
+def collect_commits(root, *, since: str | None = None) -> list[dict]:
+    """Read commit subjects from ``git log`` and parse each one. Impure.
+
+    ``since`` is a tag/ref to start from (exclusive): ``<since>..HEAD``. When
+    None, defaults to the most recent tag (``git describe --tags --abbrev=0``);
+    if there is no tag either, the whole history is used. Returns a list of
+    ``{"hash", "subject", "type", "scope", "breaking"}`` dicts (newest first),
+    or an empty list outside a repo / with no commits. Merge commits are skipped.
+    """
+    from .git_helper import _git
+
+    if _git(root, "rev-parse", "--is-inside-work-tree").returncode != 0:
+        return []
+    if since is None:
+        since = _git(root, "describe", "--tags", "--abbrev=0").stdout.strip() or None
+    rng = f"{since}..HEAD" if since else "HEAD"
+    # %H<TAB>%s — full hash and subject, one commit per line, no merges.
+    out = _git(root, "log", rng, "--pretty=%H%x09%s", "--no-merges").stdout
+    commits: list[dict] = []
+    for line in out.splitlines():
+        if not line.strip():
+            continue
+        sha, _, subject = line.partition("\t")
+        c = parse_commit(subject)
+        commits.append({
+            "hash": sha.strip(),
+            "subject": c.subject,
+            "type": c.type,
+            "scope": c.scope,
+            "breaking": c.breaking,
+        })
+    return commits
