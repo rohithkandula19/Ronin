@@ -152,7 +152,7 @@ function renderReply(kind: 'task' | 'ask', question: string, reply: AskResponse)
   out.show(true);
 }
 
-async function showServeHelp(err: ServeUnreachableError): Promise<void> {
+async function showServeHelp(_err: ServeUnreachableError): Promise<void> {
   const url = config().get<string>('serveUrl') ?? 'http://127.0.0.1:8000';
   const pick = await vscode.window.showErrorMessage(
     `Ronin couldn't reach \`ronin serve\` at ${url}. Start it with \`ronin serve\` in a terminal, then try again.`,
