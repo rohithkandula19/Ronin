@@ -6915,5 +6915,16 @@ def undo(
     console.print(f"[green]✓[/green] {res.message}" if res.ok else f"[red]✗[/red] {res.message}")
 
 
+# ---------- loc · code-stats dashboard ----------
+@app.command()
+def loc(
+    root: Path = typer.Option(Path("."), "--root", help="Project root to scan."),
+) -> None:
+    """📐 Code-stats dashboard: lines of code by language, file counts, the biggest
+    files, and comment ratio. Read-only; skips vendored/generated dirs."""
+    from .loc import run as run_loc
+    run_loc(root=str(root), console=console)
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()
