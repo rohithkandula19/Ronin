@@ -21,6 +21,8 @@ def test_every_preset_has_a_nonempty_model() -> None:
     """No preset may ship an empty/missing default model — that would 400/404 on
     the very first call before the user could do anything."""
     for name, preset in PROVIDER_PRESETS.items():
+        if name == "local":
+            continue  # embedded in-process provider auto-selects its model by RAM
         model = preset.get("model")
         assert isinstance(model, str) and model.strip(), f"{name} preset has no model"
 
@@ -30,8 +32,9 @@ def test_every_preset_has_a_base_url_except_anthropic() -> None:
     Anthropic is the one exception: it uses the native SDK, not a base_url."""
     for name, preset in PROVIDER_PRESETS.items():
         base = preset.get("base_url", "")
-        if name == "anthropic":
-            assert base == "", "anthropic uses the native SDK and should have no base_url"
+        if name in ("anthropic", "local"):
+            # anthropic = native SDK; local = in-process embedded model — no endpoint.
+            assert base == "", f"{name} has no endpoint and should have no base_url"
         else:
             assert isinstance(base, str) and base.strip(), f"{name} preset has no base_url"
             assert base.startswith("http"), f"{name} base_url is not a URL: {base!r}"
@@ -79,6 +82,15 @@ def test_ollama_is_local_and_needs_no_key() -> None:
     cfg = RoninConfig(provider="ollama")
     assert "localhost" in (cfg.resolved_base_url() or "")
     assert cfg.has_provider_auth() is True  # local server, no key needed
+
+
+def test_local_provider_is_keyless_and_in_process() -> None:
+    """The 'local' embedded provider runs the model IN-PROCESS — no key, no
+    endpoint. has_provider_auth must be True with nothing configured."""
+    cfg = RoninConfig(provider="local")
+    assert cfg.has_provider_auth() is True
+    assert cfg.key_for() is None
+    assert cfg.resolved_base_url() in (None, "")
 
 
 def test_unknown_provider_falls_back_without_crashing() -> None:

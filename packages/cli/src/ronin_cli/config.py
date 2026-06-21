@@ -63,6 +63,7 @@ def migrate_legacy_dirs() -> None:
 PROVIDER_PRESETS: dict[str, dict[str, str]] = {
     "anthropic": {"model": "claude-sonnet-4-6", "base_url": ""},
     "ollama": {"model": "llama3.1", "base_url": "http://localhost:11434/v1"},
+    "local": {"model": "", "base_url": ""},  # embedded in-process model; EmbeddedProvider auto-picks by RAM — no key, no daemon
     "openai": {"model": "gpt-4o-mini", "base_url": "https://api.openai.com/v1"},
     "together": {"model": "meta-llama/Llama-3.3-70B-Instruct-Turbo", "base_url": "https://api.together.xyz/v1"},
     # Groq free tier. gpt-oss-20b is fast + supports tool-calling and is Groq's
@@ -228,7 +229,7 @@ class RoninConfig(BaseModel):
             return self.provider_keys[provider]
         if provider == "anthropic":
             return self.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY")
-        if provider == "ollama":
+        if provider in ("ollama", "local"):
             return None  # local, no key
         return self.openai_api_key or os.environ.get("OPENAI_API_KEY")
 
@@ -246,8 +247,8 @@ class RoninConfig(BaseModel):
         """Returns True iff the chosen provider has the credentials it needs."""
         if self.demo_mode:
             return True
-        if self.provider == "ollama":
-            return True  # local server, no auth
+        if self.provider in ("ollama", "local"):
+            return True  # local, no auth
         return bool(self.key_for())
 
     # Backward-compat alias used by older code paths.

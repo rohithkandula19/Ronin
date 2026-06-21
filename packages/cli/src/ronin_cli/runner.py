@@ -155,6 +155,12 @@ def build_single_provider(config: RoninConfig) -> LLMProvider:
     if config.provider == "anthropic":
         return AnthropicProvider(model=model, api_key=config.key_for("anthropic"))
 
+    if config.provider == "local":
+        # Embedded in-process model — no API key, no daemon. Engine (mlx-lm /
+        # llama-cpp-python) is imported lazily inside the provider.
+        from .embedded_provider import EmbeddedProvider
+        return EmbeddedProvider(model=model)
+
     api_key = config.key_for(config.provider)
     if config.provider == "ollama" and not api_key:
         api_key = "ollama"  # local; placeholder header
@@ -235,7 +241,7 @@ def attach_retry_notifier(provider: LLMProvider, console) -> None:
 
 
 def _has_real_provider_key(config: RoninConfig) -> bool:
-    if config.provider == "ollama":
+    if config.provider in ("ollama", "local"):
         return True
     return bool(config.key_for())
 
