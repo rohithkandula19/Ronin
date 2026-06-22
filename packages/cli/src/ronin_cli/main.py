@@ -918,11 +918,15 @@ def doctor(
     table.add_row("model", config.resolved_model())
     if config.resolved_base_url():
         table.add_row("base_url", config.resolved_base_url() or "")
-    # Static check only confirms a key is *present* — say so honestly.
-    table.add_row(
-        f"{config.provider} key",
-        "[green]present[/green]" if config.has_provider_auth() else "[red]missing[/red]",
-    )
+    # Static check only confirms a key is *present* — say so honestly. The local
+    # providers (local = in-process, ollama = local server) need no key at all.
+    if config.provider in ("local", "ollama"):
+        table.add_row(f"{config.provider} key", "[green]not needed — runs without a key[/green]")
+    else:
+        table.add_row(
+            f"{config.provider} key",
+            "[green]present[/green]" if config.has_provider_auth() else "[red]missing[/red]",
+        )
     live: _LiveCheck | None = None
     if check:
         with console.status("[dim]live-checking provider…[/dim]", spinner="dots"):
