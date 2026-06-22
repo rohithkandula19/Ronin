@@ -86,6 +86,10 @@ def _root(
         help="Snappier turns: ship only the core coding tools (smaller per-call "
              "payload → less latency + fewer rate-limit hits). Trades breadth for speed.",
     ),
+    effort: str = typer.Option(
+        None, "--effort",
+        help="Reasoning budget: low|medium|high|xhigh — maps to each provider's native knob.",
+    ),
     faithfulness: str = typer.Option(
         None, "--faithfulness",
         help="Faithfulness edit guard: score every proposed write/edit against the "
@@ -178,6 +182,14 @@ def _root(
     if fast:
         config = config.model_copy(update={"fast": True})
         console.print("[#6b7089]⚡ fast mode — core tools only, snappier turns[/#6b7089]")
+    if isinstance(effort, str) and effort.strip():
+        from ronin_agent_patterns import describe_effort, normalize_effort
+        _eff = normalize_effort(effort)
+        if _eff is not None:
+            config = config.model_copy(update={"effort": _eff})
+            console.print(f"[#6b7089]🧠 effort [bold]{_eff}[/bold] — {describe_effort(_eff)}[/#6b7089]")
+        else:
+            console.print(f"[#e0af68]unknown --effort {effort!r}; use low|medium|high|xhigh[/#e0af68]")
     if isinstance(faithfulness, str) and faithfulness.strip():
         _fmode = faithfulness.strip().lower()
         if _fmode in ("off", "warn", "gate"):

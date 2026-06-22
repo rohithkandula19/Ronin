@@ -100,6 +100,12 @@ class OpenAICompatProvider(LLMProvider):
     # The CLI uses it to tell the user "rate-limited — retrying in Ns" instead of
     # appearing frozen during the (up to ~60s) backoff.
     on_retry: Any | None = None
+    # Reasoning budget ("low"|"medium"|"high"|"xhigh"). None → no merge, so the
+    # request body is byte-for-byte unchanged (the default). ``effort_provider``
+    # names which provider's knob to emit: only "openai" gets a reasoning_effort
+    # field; every other OpenAI-compatible backend (groq/ollama/gemini/…) gets {}.
+    effort: str | None = None
+    effort_provider: str = "openai"
 
     def _notify_retry(self, attempt: int, wait: float, status: int) -> None:
         if self.on_retry is not None:
@@ -132,6 +138,12 @@ class OpenAICompatProvider(LLMProvider):
                 }
                 for t in tools
             ]
+        # Reasoning budget: merges ``reasoning_effort`` when an effort level is set
+        # AND this is an OpenAI reasoning endpoint; otherwise a no-op empty merge,
+        # so the default request body is unchanged. Covers complete() and stream().
+        if self.effort:
+            from ..effort import effort_to_params
+            body.update(effort_to_params(self.effort_provider, self.effort))
         return body
 
     def _headers(self) -> dict[str, str]:

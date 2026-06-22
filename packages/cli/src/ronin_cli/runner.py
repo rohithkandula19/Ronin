@@ -153,7 +153,9 @@ def build_single_provider(config: RoninConfig) -> LLMProvider:
     base_url = config.resolved_base_url()
 
     if config.provider == "anthropic":
-        return AnthropicProvider(model=model, api_key=config.key_for("anthropic"))
+        return AnthropicProvider(
+            model=model, api_key=config.key_for("anthropic"), effort=config.effort
+        )
 
     if config.provider == "local":
         # Embedded in-process model — no API key, no daemon. Engine (mlx-lm /
@@ -168,6 +170,8 @@ def build_single_provider(config: RoninConfig) -> LLMProvider:
         model=model,
         base_url=base_url or "https://api.openai.com/v1",
         api_key=api_key,
+        effort=config.effort,
+        effort_provider=config.provider,
     )
 
 

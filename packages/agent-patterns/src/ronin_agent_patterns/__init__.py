@@ -11,6 +11,12 @@ Five patterns shipped:
 Plus shared types (``Tool``, ``AgentResult``, ``Step``) and providers
 (``AnthropicProvider``, ``OpenAICompatProvider``, ``OllamaProvider``, ``FakeProvider``).
 """
+from .effort import (
+    EFFORT_LEVELS,
+    describe_effort,
+    effort_to_params,
+    normalize_effort,
+)
 from .orchestrator import (
     OrchestrationPlan,
     OrchestrationResult,
@@ -41,6 +47,10 @@ __all__ = [
     "AgentResult",
     "AnthropicProvider",
     "Critique",
+    "EFFORT_LEVELS",
+    "describe_effort",
+    "effort_to_params",
+    "normalize_effort",
     "FailoverProvider",
     "FakeProvider",
     "LLMProvider",

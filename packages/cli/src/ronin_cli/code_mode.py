@@ -1155,6 +1155,7 @@ SLASH_COMMANDS: dict[str, str] = {
     "models": "list the models available for the current provider",
     "route": "smart routing: /route <fast-model> <strong-model> (or /route off)",
     "verify": "self-verify mode: /verify on|off — after edits, the agent checks + fixes its own work",
+    "effort": "reasoning budget: /effort low|medium|high|xhigh (or off) — maps to the provider's native knob",
     "voice": "speak your request: /voice [seconds] — records the mic and transcribes it",
     "memory": "show loaded project memory (RONIN.md / CLAUDE.md / AGENTS.md)",
     "init": "scaffold a RONIN.md project-memory file",
@@ -1181,7 +1182,7 @@ SLASH_COMMANDS: dict[str, str] = {
 
 # /help, grouped into sections for a calm, scannable layout.
 _HELP_GROUPS: list[tuple[str, list[str]]] = [
-    ("🧠  provider & model", ["login", "model", "models", "route", "router", "cost"]),
+    ("🧠  provider & model", ["login", "model", "models", "route", "router", "effort", "cost"]),
     ("✏️  editing & git", ["undo", "diff", "commit", "pr"]),
     ("📁  context & memory", ["memory", "init", "context", "compact", "resume", "clear"]),
     ("🔧  tools & agents", ["tools", "mcp", "integrations", "agents", "verify", "voice"]),

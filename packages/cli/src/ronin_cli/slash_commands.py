@@ -158,6 +158,35 @@ def _slash_verify(ctx: SlashCtx) -> str:
     return "handled"
 
 
+def _slash_effort(ctx: SlashCtx) -> str:
+    # Set the reasoning budget for this session: /effort low|medium|high|xhigh.
+    # With no arg, shows the current level. Maps to each provider's native knob.
+    from ronin_agent_patterns import describe_effort, normalize_effort
+
+    from .config import save_config
+    parts, console, config = ctx.parts, ctx.console, ctx.config
+    if len(parts) < 2:
+        cur = config.effort or "off"
+        suffix = f" — {describe_effort(config.effort)}" if config.effort else ""
+        console.print(f"  [dim]effort is [bold]{cur}[/bold]{suffix} · set with "
+                      "[bold]/effort low|medium|high|xhigh[/bold] (or off)[/dim]")
+        return "handled"
+    arg = parts[1].strip().lower()
+    if arg in ("off", "none"):
+        config.effort = None
+        save_config(config)
+        console.print("  [green]✓[/green] effort [bold]off[/bold] — default reasoning, request unchanged.")
+        return "handled"
+    level = normalize_effort(arg)
+    if level is None:
+        console.print(f"  [#e0af68]unknown effort {parts[1]!r}; use low|medium|high|xhigh[/#e0af68]")
+        return "handled"
+    config.effort = level
+    save_config(config)
+    console.print(f"  [green]✓[/green] effort [bold]{level}[/bold] — {describe_effort(level)}")
+    return "handled"
+
+
 def _slash_route(ctx: SlashCtx) -> str:
     from .config import save_config
     parts, console, config = ctx.parts, ctx.console, ctx.config
@@ -589,6 +618,7 @@ SLASH_DISPATCH: dict[str, Callable[[SlashCtx], str]] = {
     "pr": _slash_pr,
     "model": _slash_model,
     "verify": _slash_verify,
+    "effort": _slash_effort,
     "route": _slash_route,
     "models": _slash_models,
     "memory": _slash_memory,

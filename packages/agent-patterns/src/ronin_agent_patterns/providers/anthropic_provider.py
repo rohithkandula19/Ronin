@@ -109,6 +109,9 @@ class AnthropicProvider(LLMProvider):
     # Prompt caching is on by default — it's a pure win (same output, up to ~90%
     # cheaper + faster on the cached prefix). Set False to opt out.
     cache_prompt: bool = True
+    # Reasoning budget ("low"|"medium"|"high"|"xhigh"). None → extended thinking
+    # is left off and the request body is byte-for-byte unchanged (the default).
+    effort: str | None = None
 
     def _client(self) -> anthropic.Anthropic:
         return anthropic.Anthropic(api_key=self.api_key) if self.api_key else anthropic.Anthropic()
@@ -145,6 +148,12 @@ class AnthropicProvider(LLMProvider):
             kwargs["system"] = [
                 {"type": "text", "text": system, "cache_control": _EPHEMERAL}
             ]
+        # Reasoning budget: merges a ``thinking`` block when an effort level is set
+        # (medium/high/xhigh). None or "low" → no merge, so the default request is
+        # unchanged. Covers both complete() and stream() since both route here.
+        if self.effort:
+            from ..effort import effort_to_params
+            kwargs.update(effort_to_params("anthropic", self.effort))
         return kwargs
 
     def complete(

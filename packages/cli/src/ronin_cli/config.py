@@ -108,6 +108,11 @@ class RoninConfig(BaseModel):
     # Fast mode: ship only the core coding tools (smaller per-call payload →
     # snappier turns + fewer rate-limit hits). Trades breadth for speed.
     fast: bool = False
+    # Reasoning budget: low|medium|high|xhigh, mapped to each provider's native
+    # knob (Anthropic extended-thinking budget / OpenAI reasoning_effort). None →
+    # the request body is unchanged (the default). The save_config None-filter
+    # drops it from the TOML when unset.
+    effort: str | None = None
     # Cross-provider failover: ordered fallbacks tried (after the primary) when a
     # provider rate-limits or errors mid-turn. Each entry is a partial provider
     # spec: {provider, model?, base_url?, api_key?}. Empty → no failover.
