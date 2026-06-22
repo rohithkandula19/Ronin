@@ -362,6 +362,12 @@ class EmbeddedProvider(LLMProvider):
         else:
             text, usage = self._generate_llama_cpp(chat, n)
 
+        # Small local models can emit ChatML control tokens verbatim — strip them
+        # so callers (and the UI) get clean text.
+        for _tok in ("<|im_end|>", "<|im_start|>", "<|endoftext|>"):
+            text = text.replace(_tok, "")
+        text = text.strip()
+
         return LLMResponse(
             text=text,
             tool_calls=[],          # small local models: no structured tool calls
