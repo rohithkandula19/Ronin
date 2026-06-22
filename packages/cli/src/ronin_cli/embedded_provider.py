@@ -121,28 +121,29 @@ def select_engine(
 #   * MLX  → mlx-community 4-bit safetensors repos (Apple-Silicon-only).
 #   * GGUF → Qwen first-party q4_k_m GGUF repos (cross-platform).
 # LICENSE NOTE: 1.5B / 7B / 14B are Apache-2.0 (safe to auto-fetch). The 3B size is
-# Qwen RESEARCH (non-commercial) — deliberately NOT in this ladder, so 8GB routes
-# to 1.5B and 16GB to 7B, skipping 3B entirely.
+# Qwen RESEARCH (non-commercial) — deliberately NOT in this ladder, skipping 3B
+# entirely. Tiers are CONSERVATIVE for an EMBEDDED (in-process) brain, where ronin
+# and the model share RAM: a 7B-4bit needs ~6-7GB resident, so it's gated to >=16GB
+# (an 8GB Mac runs the 1.5B — the 7B would swap/OOM there).
 #
 #     detected RAM (GB)   MLX repo                                         GGUF repo
 #     ----------------    ------------------------------------------       --------------------------------
-#     < 8                 mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit   Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF
-#     8  ..< 16           mlx-community/Qwen2.5-Coder-7B-Instruct-4bit     Qwen/Qwen2.5-Coder-7B-Instruct-GGUF
-#     16 ..< 32           mlx-community/Qwen2.5-Coder-14B-Instruct-4bit    Qwen/Qwen2.5-Coder-14B-Instruct-GGUF
+#     < 16                mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit   Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF
+#     16 ..< 32           mlx-community/Qwen2.5-Coder-7B-Instruct-4bit     Qwen/Qwen2.5-Coder-7B-Instruct-GGUF
 #     >= 32               mlx-community/Qwen2.5-Coder-14B-Instruct-4bit    Qwen/Qwen2.5-Coder-14B-Instruct-GGUF
 #
 # (We cap the embedded default at 14B even on big boxes — a 32B in-process model is
 # heavy to load and the quality jump rarely justifies the RAM for an *embedded*
 # brain; users who want bigger can still point ronin at Ollama via `ronin local`.)
 _MLX_RAM_TABLE: tuple[tuple[int, str], ...] = (
-    (8, "mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit"),
-    (16, "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit"),
+    (16, "mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit"),
+    (32, "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit"),
 )
 _MLX_LARGEST = "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit"
 
 _GGUF_RAM_TABLE: tuple[tuple[int, str], ...] = (
-    (8, "Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF"),
-    (16, "Qwen/Qwen2.5-Coder-7B-Instruct-GGUF"),
+    (16, "Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF"),
+    (32, "Qwen/Qwen2.5-Coder-7B-Instruct-GGUF"),
 )
 _GGUF_LARGEST = "Qwen/Qwen2.5-Coder-14B-Instruct-GGUF"
 
@@ -159,7 +160,7 @@ def recommend_embedded_model(ram_gb: int, engine: Engine) -> str:
     """Pick the HuggingFace repo id for the embedded model on a machine with
     ``ram_gb`` GB of RAM, for the chosen ``engine``. PURE — no I/O.
 
-        <8 → 1.5B · <16 → 7B · else → 14B  (4-bit / q4_k_m quant)
+        <16 → 1.5B · <32 → 7B · else → 14B  (4-bit / q4_k_m quant)
 
     Non-positive / unknown RAM falls back to the smallest model (safe default for an
     unreadable machine). The returned id is what the engine auto-downloads on first

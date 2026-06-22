@@ -43,15 +43,19 @@ def test_select_engine_cross_platform() -> None:
 def test_recommend_mlx_low_ram() -> None:
     assert E.recommend_embedded_model(4, "mlx") == "mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit"
     assert E.recommend_embedded_model(7, "mlx") == "mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit"
+    # 8GB Macs MUST get the 1.5B — a 7B-4bit (~6-7GB resident) would swap/OOM. (regression)
+    assert E.recommend_embedded_model(8, "mlx") == "mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit"
+    assert E.recommend_embedded_model(15, "mlx") == "mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit"
 
 
 def test_recommend_mlx_mid_ram() -> None:
-    assert E.recommend_embedded_model(8, "mlx") == "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit"
-    assert E.recommend_embedded_model(15, "mlx") == "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit"
+    # 7B is gated to >=16GB for an in-process brain.
+    assert E.recommend_embedded_model(16, "mlx") == "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit"
+    assert E.recommend_embedded_model(31, "mlx") == "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit"
 
 
 def test_recommend_mlx_high_ram() -> None:
-    assert E.recommend_embedded_model(16, "mlx") == "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit"
+    assert E.recommend_embedded_model(32, "mlx") == "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit"
     assert E.recommend_embedded_model(64, "mlx") == "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit"
 
 
@@ -66,8 +70,9 @@ def test_recommend_mlx_unknown_ram_safe_default() -> None:
 # --------------------------------------------------------------------------- #
 def test_recommend_gguf_ladder() -> None:
     assert E.recommend_embedded_model(4, "llama_cpp") == "Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF"
-    assert E.recommend_embedded_model(8, "llama_cpp") == "Qwen/Qwen2.5-Coder-7B-Instruct-GGUF"
-    assert E.recommend_embedded_model(16, "llama_cpp") == "Qwen/Qwen2.5-Coder-14B-Instruct-GGUF"
+    assert E.recommend_embedded_model(8, "llama_cpp") == "Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF"
+    assert E.recommend_embedded_model(16, "llama_cpp") == "Qwen/Qwen2.5-Coder-7B-Instruct-GGUF"
+    assert E.recommend_embedded_model(32, "llama_cpp") == "Qwen/Qwen2.5-Coder-14B-Instruct-GGUF"
     assert E.recommend_embedded_model(0, "llama_cpp") == "Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF"
 
 
