@@ -68,7 +68,7 @@ server = ["fastapi>=0.110", "uvicorn[standard]>=0.30"]
 # elsewhere. Enable with:  pip install 'ronin-cli[local]'
 local = [
     "mlx-lm>=0.20; sys_platform == 'darwin' and platform_machine == 'arm64'",
-    "llama-cpp-python>=0.2; not (sys_platform == 'darwin' and platform_machine == 'arm64')",
+    "llama-cpp-python>=0.2; sys_platform != 'darwin' or platform_machine != 'arm64'",
 ]
 
 [dependency-groups]
