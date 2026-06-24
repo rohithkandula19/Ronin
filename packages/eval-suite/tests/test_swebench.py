@@ -12,6 +12,7 @@ from ronin_eval_suite import (
     SWEBenchResult,
     SWEBenchTask,
     TaskEvaluation,
+    compare_swebench,
     is_resolved,
     oracle_runner,
     render_swebench_markdown,
@@ -245,6 +246,42 @@ def test_oracle_runner_returns_gold_patch_and_resolves_under_a_faithful_evaluato
 
 def test_oracle_runner_empty_when_no_gold_patch():
     assert oracle_runner(_task(patch=None)) == ""
+
+
+def _report(resolved_by_id: dict[str, bool], rate: float) -> SWEBenchReport:
+    return SWEBenchReport(
+        results=[
+            SWEBenchResult(instance_id=i, resolved=r, patch_generated=True)
+            for i, r in resolved_by_id.items()
+        ],
+        summary={"resolved_rate": rate},
+    )
+
+
+def test_compare_classifies_each_common_instance():
+    base = _report({"a": True, "b": False, "c": True, "d": False}, 0.5)
+    cand = _report({"a": True, "b": True, "c": False, "d": False}, 0.5)
+    cmp = compare_swebench(base, cand)
+    assert cmp.newly_resolved == ["b"]
+    assert cmp.newly_broken == ["c"]
+    assert cmp.still_resolved == ["a"]
+    assert cmp.still_unresolved == ["d"]
+    assert cmp.has_regression is True
+    assert cmp.rate_delta == 0.0
+
+
+def test_compare_ignores_instances_not_in_both_runs():
+    base = _report({"a": True, "b": True}, 1.0)
+    cand = _report({"a": True}, 1.0)  # partial run — 'b' absent
+    cmp = compare_swebench(base, cand)
+    assert cmp.still_resolved == ["a"]
+    assert "b" not in (cmp.newly_broken + cmp.still_resolved + cmp.still_unresolved)
+    assert cmp.has_regression is False
+
+
+def test_compare_rate_delta():
+    cmp = compare_swebench(_report({"a": True}, 0.30), _report({"a": True}, 0.42))
+    assert cmp.rate_delta == 0.12
 
 
 def test_render_markdown_has_headline_and_one_row_per_status():

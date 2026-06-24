@@ -247,6 +247,54 @@ class SWEBenchHarness(BaseModel):
         )
 
 
+class SWEBenchComparison(BaseModel):
+    """Diff of two runs: which instances changed resolution status."""
+
+    newly_resolved: list[str] = Field(default_factory=list)  # unresolved -> resolved
+    newly_broken: list[str] = Field(default_factory=list)  # resolved -> unresolved (regression)
+    still_resolved: list[str] = Field(default_factory=list)
+    still_unresolved: list[str] = Field(default_factory=list)
+    baseline_rate: float = 0.0
+    candidate_rate: float = 0.0
+
+    @property
+    def has_regression(self) -> bool:
+        return bool(self.newly_broken)
+
+    @property
+    def rate_delta(self) -> float:
+        return round(self.candidate_rate - self.baseline_rate, 4)
+
+
+def compare_swebench(baseline: SWEBenchReport, candidate: SWEBenchReport) -> SWEBenchComparison:
+    """Compare two reports by per-instance resolution.
+
+    Only instances present in **both** runs are classified, so a partial
+    candidate run can't masquerade as a regression. ``has_regression`` is true
+    iff any instance went resolved -> unresolved — wire it into CI to block
+    quality drops.
+    """
+    base = {r.instance_id: r.resolved for r in baseline.results}
+    cand = {r.instance_id: r.resolved for r in candidate.results}
+    common = base.keys() & cand.keys()
+
+    cmp = SWEBenchComparison(
+        baseline_rate=baseline.summary.get("resolved_rate", 0.0),
+        candidate_rate=candidate.summary.get("resolved_rate", 0.0),
+    )
+    for iid in sorted(common):
+        b, c = base[iid], cand[iid]
+        if c and not b:
+            cmp.newly_resolved.append(iid)
+        elif b and not c:
+            cmp.newly_broken.append(iid)
+        elif b and c:
+            cmp.still_resolved.append(iid)
+        else:
+            cmp.still_unresolved.append(iid)
+    return cmp
+
+
 def oracle_runner(task: SWEBenchTask) -> str:
     """A ``patch_runner`` that returns each task's **gold** patch.
 
