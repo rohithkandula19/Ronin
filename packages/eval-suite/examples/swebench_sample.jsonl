@@ -1,0 +1,5 @@
+# Illustrative SWE-bench task format (synthetic, not real instances).
+# FAIL_TO_PASS / PASS_TO_PASS may be JSON arrays or JSON-encoded strings — both load.
+# Run with:  csk-eval swebench swebench_sample.jsonl --predictions preds.jsonl --repo-root /path/to/checkout
+{"instance_id": "acme__widget-101", "repo": "acme/widget", "base_commit": "0000000000000000000000000000000000000000", "problem_statement": "Widget.area() returns perimeter for squares. Fix it to return side*side.", "FAIL_TO_PASS": ["tests/test_widget.py::test_square_area"], "PASS_TO_PASS": ["tests/test_widget.py::test_rectangle_area", "tests/test_widget.py::test_repr"], "version": "1.2"}
+{"instance_id": "acme__widget-102", "repo": "acme/widget", "base_commit": "0000000000000000000000000000000000000000", "problem_statement": "parse_color crashes on 3-digit hex (#abc). Support the short form.", "FAIL_TO_PASS": "[\"tests/test_color.py::test_short_hex\"]", "PASS_TO_PASS": "[\"tests/test_color.py::test_long_hex\"]", "version": "1.2"}
