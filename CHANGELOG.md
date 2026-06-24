@@ -6,6 +6,10 @@ All notable changes to this project will be documented here. Format follows [Kee
 
 **Web research and page watches** — both free and keyless, both offline-tested.
 
+### Added — SWE-bench harness (eval-suite)
+- **Execution-based coding eval** alongside the LLM-as-judge suite. A task is *resolved* iff every `FAIL_TO_PASS` test passes and every `PASS_TO_PASS` test still passes after the agent's patch. `SWEBenchHarness` is execution-agnostic — plug in a `patch_runner` (your agent) and an `evaluator`; `make_local_git_evaluator` is a Docker-free reference over a local checkout. `SWEBenchDataset` loads the official JSONL (UPPER_SNAKE aliases + JSON-string test lists), with `.subset()`/`.repos()` for smoke and per-repo runs.
+- **CLI** — `csk-eval swebench <tasks> --predictions <preds> --repo-root <path>` scores a standard predictions file and writes a JSON (and optional `--markdown`) report; `csk-eval swebench-compare <a> <b>` exits non-zero on any resolved→unresolved regression. `oracle_runner` self-validates the environment with gold patches; `compare_swebench`/`render_swebench_markdown` diff and present runs. Harness needs no API key, Docker, or network — 38 offline tests.
+
 ### Added — web research
 - **`ronin research "<question>"`** — search the web and answer, with sources. Runs the read-only agent with the keyless web tools (`web_search` + `fetch_url`, DuckDuckGo HTML, no API key) so it searches, reads the most relevant pages, and answers. If no model is configured it degrades to a raw web search so you still get links. The agent run is injectable, so the command is unit-tested with no model and no network.
 
