@@ -357,12 +357,15 @@ def oracle_runner(task: SWEBenchTask) -> str:
     return task.patch or ""
 
 
-def render_swebench_markdown(report: SWEBenchReport) -> str:
+def render_swebench_markdown(
+    report: SWEBenchReport, *, include_repo_breakdown: bool = False
+) -> str:
     """Render a report as a Markdown summary + per-instance table.
 
     Designed to paste directly into a PR comment or README. The headline line
     is the resolved rate; the table lists each instance with its FAIL_TO_PASS /
-    PASS_TO_PASS tallies and a status glyph.
+    PASS_TO_PASS tallies and a status glyph. With ``include_repo_breakdown`` a
+    per-repo resolved-rate table (via :meth:`SWEBenchReport.by_repo`) is appended.
     """
     s = report.summary or {}
     total = int(s.get("total", len(report.results)))
@@ -391,6 +394,17 @@ def render_swebench_markdown(report: SWEBenchReport) -> str:
             f"| {r.pass_to_pass_passed}/{r.pass_to_pass_total} "
             f"| {note} |"
         )
+
+    if include_repo_breakdown:
+        breakdown = report.by_repo()
+        if breakdown:
+            lines += ["", "### By repo", "", "| Repo | Resolved | Rate |", "| --- | --- | --- |"]
+            for repo, stats in breakdown.items():
+                lines.append(
+                    f"| `{repo}` | {int(stats['resolved'])}/{int(stats['total'])} "
+                    f"| {stats['resolved_rate']:.1%} |"
+                )
+
     return "\n".join(lines) + "\n"
 
 
