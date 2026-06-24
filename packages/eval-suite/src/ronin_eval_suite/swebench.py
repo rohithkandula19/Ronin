@@ -247,6 +247,17 @@ class SWEBenchHarness(BaseModel):
         )
 
 
+def oracle_runner(task: SWEBenchTask) -> str:
+    """A ``patch_runner`` that returns each task's **gold** patch.
+
+    Feed this to :class:`SWEBenchHarness` to sanity-check your evaluator and
+    environment: gold patches *should* resolve their tasks. A gold patch that
+    fails to resolve points at the harness/environment, not the agent. Tasks
+    with no gold ``patch`` yield an empty string (counted as no-patch).
+    """
+    return task.patch or ""
+
+
 def render_swebench_markdown(report: SWEBenchReport) -> str:
     """Render a report as a Markdown summary + per-instance table.
 

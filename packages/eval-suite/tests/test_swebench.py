@@ -13,6 +13,7 @@ from ronin_eval_suite import (
     SWEBenchTask,
     TaskEvaluation,
     is_resolved,
+    oracle_runner,
     render_swebench_markdown,
 )
 from ronin_eval_suite.swebench import _parse_pytest_results
@@ -225,6 +226,25 @@ def test_parse_pytest_results_buckets_passed_failed_and_errors():
     ev = _parse_pytest_results(stdout, wanted)
     assert ev.passed_tests == ["tests/test_x.py::test_existing"]
     assert set(ev.failed_tests) == {"tests/test_x.py::test_new", "tests/test_x.py::test_collide"}
+
+
+def test_oracle_runner_returns_gold_patch_and_resolves_under_a_faithful_evaluator():
+    task = _task(patch="diff --git a/fix b/fix\n+gold\n")
+    assert oracle_runner(task) == task.patch
+
+    # an evaluator that actually applies the gold patch should resolve the task
+    def evaluator(t, patch):
+        assert patch == t.patch  # the gold patch reached the evaluator
+        return TaskEvaluation(passed_tests=t.fail_to_pass + t.pass_to_pass)
+
+    report = SWEBenchHarness(patch_runner=oracle_runner, evaluator=evaluator).run(
+        SWEBenchDataset([task])
+    )
+    assert report.results[0].resolved is True
+
+
+def test_oracle_runner_empty_when_no_gold_patch():
+    assert oracle_runner(_task(patch=None)) == ""
 
 
 def test_render_markdown_has_headline_and_one_row_per_status():
