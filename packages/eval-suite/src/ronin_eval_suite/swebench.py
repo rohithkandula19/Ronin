@@ -195,6 +195,31 @@ class SWEBenchReport(BaseModel):
             "errored": float(errored),
         }
 
+    def by_repo(self) -> dict[str, dict[str, float]]:
+        """Per-repo ``{resolved, total, resolved_rate}``, keyed by the repo prefix.
+
+        SWE-bench instance ids are ``owner__repo-<number>``; the key is the part
+        before the final ``-`` (e.g. ``django__django``). Repos are returned in
+        descending resolved-rate order so the weakest repos surface last.
+        """
+        buckets: dict[str, list[SWEBenchResult]] = {}
+        for r in self.results:
+            key = r.instance_id.rsplit("-", 1)[0] or r.instance_id
+            buckets.setdefault(key, []).append(r)
+
+        out: dict[str, dict[str, float]] = {}
+        for key, rs in buckets.items():
+            total = len(rs)
+            resolved = sum(1 for r in rs if r.resolved)
+            out[key] = {
+                "resolved": float(resolved),
+                "total": float(total),
+                "resolved_rate": round(resolved / total, 4) if total else 0.0,
+            }
+        return dict(
+            sorted(out.items(), key=lambda kv: (-kv[1]["resolved_rate"], kv[0]))
+        )
+
 
 def _count(passed: set[str], required: list[str]) -> int:
     return sum(1 for t in required if t in passed)

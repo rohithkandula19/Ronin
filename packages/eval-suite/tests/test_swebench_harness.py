@@ -346,3 +346,18 @@ def test_parse_pytest_results_omits_uncategorized_tests():
     ev = _parse_pytest_results("PASSED a::b", ["a::b", "a::missing"])
     assert ev.passed_tests == ["a::b"]
     assert "a::missing" not in ev.passed_tests
+
+
+def test_by_repo_groups_and_orders_by_resolved_rate():
+    report = SWEBenchReport(
+        results=[
+            SWEBenchResult(instance_id="django__django-1", resolved=True, patch_generated=True),
+            SWEBenchResult(instance_id="django__django-2", resolved=False, patch_generated=True),
+            SWEBenchResult(instance_id="flask__flask-9", resolved=True, patch_generated=True),
+        ]
+    )
+    breakdown = report.by_repo()
+    assert breakdown["flask__flask"] == {"resolved": 1.0, "total": 1.0, "resolved_rate": 1.0}
+    assert breakdown["django__django"] == {"resolved": 1.0, "total": 2.0, "resolved_rate": 0.5}
+    # ordered by descending resolved_rate -> flask (1.0) before django (0.5)
+    assert list(breakdown) == ["flask__flask", "django__django"]
