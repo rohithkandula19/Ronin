@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 
 from ronin_eval_suite import cli
-from ronin_eval_suite.swebench import TaskEvaluation
+from ronin_eval_suite.swebench import SWEBenchReport, SWEBenchResult, TaskEvaluation
 
 
 def _write_tasks(path):
@@ -99,3 +99,38 @@ def test_swebench_cmd_scores_predictions_and_writes_report(tmp_path, monkeypatch
     printed = capsys.readouterr().out
     assert "Resolved 1/2" in printed
     assert "50.0%" in printed
+
+
+def _write_report(path, resolved_by_id, rate):
+    rep = SWEBenchReport(
+        results=[
+            SWEBenchResult(instance_id=i, resolved=r, patch_generated=True)
+            for i, r in resolved_by_id.items()
+        ],
+        summary={"resolved_rate": rate},
+    )
+    path.write_text(rep.model_dump_json(), encoding="utf-8")
+
+
+def test_swebench_compare_exits_nonzero_on_regression(tmp_path, capsys):
+    base = tmp_path / "base.json"
+    cand = tmp_path / "cand.json"
+    _write_report(base, {"a": True, "b": True}, 1.0)
+    _write_report(cand, {"a": True, "b": False}, 0.5)  # 'b' regressed
+
+    rc = cli.main(["swebench-compare", str(base), str(cand)])
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "100.0% -> 50.0%" in out
+    assert "-1 broken" in out
+
+
+def test_swebench_compare_exits_zero_without_regression(tmp_path, capsys):
+    base = tmp_path / "base.json"
+    cand = tmp_path / "cand.json"
+    _write_report(base, {"a": False, "b": True}, 0.5)
+    _write_report(cand, {"a": True, "b": True}, 1.0)  # only improvements
+
+    rc = cli.main(["swebench-compare", str(base), str(cand)])
+    assert rc == 0
+    assert "+1 resolved" in capsys.readouterr().out

@@ -5,6 +5,7 @@ Wired as ``csk-eval`` via ``[project.scripts]``. Subcommands:
     csk-eval run <dataset.jsonl> --judge <model> --target <model> [--out report.html]
     csk-eval drift <baseline.json> <candidate.json> [--threshold 0.5]
     csk-eval swebench <tasks.jsonl> --predictions <preds.jsonl> --repo-root <path>
+    csk-eval swebench-compare <baseline.json> <candidate.json>
 """
 from __future__ import annotations
 
@@ -20,7 +21,9 @@ from .suite import DEFAULT_JUDGE_MODEL, DEFAULT_TARGET_MODEL, EvalSuite
 from .swebench import (
     SWEBenchDataset,
     SWEBenchHarness,
+    SWEBenchReport,
     SWEBenchTask,
+    compare_swebench,
     make_local_git_evaluator,
     render_swebench_markdown,
 )
@@ -89,6 +92,19 @@ def _cmd_swebench(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_swebench_compare(args: argparse.Namespace) -> int:
+    baseline = SWEBenchReport.model_validate_json(Path(args.baseline).read_text(encoding="utf-8"))
+    candidate = SWEBenchReport.model_validate_json(Path(args.candidate).read_text(encoding="utf-8"))
+    cmp = compare_swebench(baseline, candidate)
+    print(json.dumps(cmp.model_dump(), indent=2))
+    print(
+        f"rate {cmp.baseline_rate:.1%} -> {cmp.candidate_rate:.1%} "
+        f"({cmp.rate_delta:+.1%})  ·  +{len(cmp.newly_resolved)} resolved  "
+        f"-{len(cmp.newly_broken)} broken"
+    )
+    return 1 if cmp.has_regression else 0
+
+
 def _cmd_drift(args: argparse.Namespace) -> int:
     baseline = RunReport.model_validate_json(Path(args.baseline).read_text(encoding="utf-8"))
     candidate = RunReport.model_validate_json(Path(args.candidate).read_text(encoding="utf-8"))
@@ -134,6 +150,13 @@ def main(argv: list[str] | None = None) -> int:
     p_swe.add_argument("--json-out", dest="json_out", default="swebench-report.json")
     p_swe.add_argument("--markdown", default=None, help="Optional Markdown results table path.")
     p_swe.set_defaults(func=_cmd_swebench)
+
+    p_swe_cmp = sub.add_parser(
+        "swebench-compare", help="Compare two SWE-bench reports; exit 1 on regression."
+    )
+    p_swe_cmp.add_argument("baseline")
+    p_swe_cmp.add_argument("candidate")
+    p_swe_cmp.set_defaults(func=_cmd_swebench_compare)
 
     p_drift = sub.add_parser("drift", help="Compare two run reports.")
     p_drift.add_argument("baseline")
