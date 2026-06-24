@@ -171,3 +171,40 @@ def test_swebench_compare_exits_zero_without_regression(tmp_path, capsys):
     rc = cli.main(["swebench-compare", str(base), str(cand)])
     assert rc == 0
     assert "+1 resolved" in capsys.readouterr().out
+
+
+def test_swebench_by_repo_prints_breakdown(tmp_path, monkeypatch, capsys):
+    tasks = tmp_path / "tasks.jsonl"
+    _write_tasks(tasks)  # demo__pkg-1, demo__pkg-2
+    preds = tmp_path / "preds.jsonl"
+    preds.write_text(
+        "\n".join(
+            [
+                json.dumps({"instance_id": "demo__pkg-1", "model_patch": "diff\n"}),
+                json.dumps({"instance_id": "demo__pkg-2", "model_patch": "diff\n"}),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    # resolve pkg-1, fail pkg-2 (empty passed set)
+    def factory(root, **kw):
+        def evaluate(task, patch):
+            if task.instance_id == "demo__pkg-1":
+                return TaskEvaluation(passed_tests=task.fail_to_pass + task.pass_to_pass)
+            return TaskEvaluation(failed_tests=task.fail_to_pass)
+        return evaluate
+
+    monkeypatch.setattr(cli, "make_local_git_evaluator", factory)
+    rc = cli.main(
+        [
+            "swebench", str(tasks),
+            "--predictions", str(preds),
+            "--repo-root", str(tmp_path),
+            "--by-repo",
+            "--json-out", str(tmp_path / "r.json"),
+        ]
+    )
+    assert rc == 0
+    out = capsys.readouterr().out
+    # both instances share the demo__pkg repo prefix -> 1/2 resolved
+    assert "demo__pkg: 1/2 (50.0%)" in out

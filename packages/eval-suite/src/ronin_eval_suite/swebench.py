@@ -195,6 +195,31 @@ class SWEBenchReport(BaseModel):
             "errored": float(errored),
         }
 
+    def by_repo(self) -> dict[str, dict[str, float]]:
+        """Per-repo ``{resolved, total, resolved_rate}``, keyed by the repo prefix.
+
+        SWE-bench instance ids are ``owner__repo-<number>``; the key is the part
+        before the final ``-`` (e.g. ``django__django``). Repos are returned in
+        descending resolved-rate order so the weakest repos surface last.
+        """
+        buckets: dict[str, list[SWEBenchResult]] = {}
+        for r in self.results:
+            key = r.instance_id.rsplit("-", 1)[0] or r.instance_id
+            buckets.setdefault(key, []).append(r)
+
+        out: dict[str, dict[str, float]] = {}
+        for key, rs in buckets.items():
+            total = len(rs)
+            resolved = sum(1 for r in rs if r.resolved)
+            out[key] = {
+                "resolved": float(resolved),
+                "total": float(total),
+                "resolved_rate": round(resolved / total, 4) if total else 0.0,
+            }
+        return dict(
+            sorted(out.items(), key=lambda kv: (-kv[1]["resolved_rate"], kv[0]))
+        )
+
 
 def _count(passed: set[str], required: list[str]) -> int:
     return sum(1 for t in required if t in passed)
@@ -321,6 +346,46 @@ def compare_swebench(baseline: SWEBenchReport, candidate: SWEBenchReport) -> SWE
     return cmp
 
 
+def generate_predictions(
+    dataset: SWEBenchDataset,
+    patch_runner: Callable[[SWEBenchTask], str],
+    *,
+    model: str = "",
+) -> list[dict[str, str]]:
+    """Run ``patch_runner`` over a dataset and collect SWE-bench prediction rows.
+
+    Returns one ``{instance_id, model_patch, model_name_or_path}`` dict per task
+    — the standard prediction schema. This is the *generate* half of SWE-bench's
+    two-phase flow; pair it with :func:`write_predictions` to persist, then score
+    the file later (decoupling slow patch generation from evaluation). A runner
+    that raises on a task yields an empty patch for it, never aborting the batch.
+    """
+    rows: list[dict[str, str]] = []
+    for task in dataset:
+        try:
+            patch = patch_runner(task)
+        except Exception:  # noqa: BLE001 — one task must not abort generation
+            patch = ""
+        rows.append(
+            {
+                "instance_id": task.instance_id,
+                "model_patch": patch or "",
+                "model_name_or_path": model,
+            }
+        )
+    return rows
+
+
+def write_predictions(
+    path: str | Path, predictions: list[dict[str, str]]
+) -> None:
+    """Write prediction rows as JSONL (the format ``csk-eval swebench`` reads)."""
+    Path(path).write_text(
+        "\n".join(json.dumps(row) for row in predictions) + "\n",
+        encoding="utf-8",
+    )
+
+
 def oracle_runner(task: SWEBenchTask) -> str:
     """A ``patch_runner`` that returns each task's **gold** patch.
 
@@ -332,12 +397,15 @@ def oracle_runner(task: SWEBenchTask) -> str:
     return task.patch or ""
 
 
-def render_swebench_markdown(report: SWEBenchReport) -> str:
+def render_swebench_markdown(
+    report: SWEBenchReport, *, include_repo_breakdown: bool = False
+) -> str:
     """Render a report as a Markdown summary + per-instance table.
 
     Designed to paste directly into a PR comment or README. The headline line
     is the resolved rate; the table lists each instance with its FAIL_TO_PASS /
-    PASS_TO_PASS tallies and a status glyph.
+    PASS_TO_PASS tallies and a status glyph. With ``include_repo_breakdown`` a
+    per-repo resolved-rate table (via :meth:`SWEBenchReport.by_repo`) is appended.
     """
     s = report.summary or {}
     total = int(s.get("total", len(report.results)))
@@ -366,6 +434,17 @@ def render_swebench_markdown(report: SWEBenchReport) -> str:
             f"| {r.pass_to_pass_passed}/{r.pass_to_pass_total} "
             f"| {note} |"
         )
+
+    if include_repo_breakdown:
+        breakdown = report.by_repo()
+        if breakdown:
+            lines += ["", "### By repo", "", "| Repo | Resolved | Rate |", "| --- | --- | --- |"]
+            for repo, stats in breakdown.items():
+                lines.append(
+                    f"| `{repo}` | {int(stats['resolved'])}/{int(stats['total'])} "
+                    f"| {stats['resolved_rate']:.1%} |"
+                )
+
     return "\n".join(lines) + "\n"
 
 

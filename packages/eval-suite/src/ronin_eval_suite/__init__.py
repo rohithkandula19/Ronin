@@ -29,10 +29,12 @@ from .swebench import (
     SWEBenchTask,
     TaskEvaluation,
     compare_swebench,
+    generate_predictions,
     is_resolved,
     make_local_git_evaluator,
     oracle_runner,
     render_swebench_markdown,
+    write_predictions,
 )
 from .types import EvalCase, EvalScore, RunReport, Rubric
 
@@ -53,10 +55,12 @@ __all__ = [
     "TaskEvaluation",
     "compare_swebench",
     "detect_drift",
+    "generate_predictions",
     "is_resolved",
     "judge_one",
     "make_local_git_evaluator",
     "oracle_runner",
     "render_html_report",
     "render_swebench_markdown",
+    "write_predictions",
 ]

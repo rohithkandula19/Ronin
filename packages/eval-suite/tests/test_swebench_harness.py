@@ -346,3 +346,59 @@ def test_parse_pytest_results_omits_uncategorized_tests():
     ev = _parse_pytest_results("PASSED a::b", ["a::b", "a::missing"])
     assert ev.passed_tests == ["a::b"]
     assert "a::missing" not in ev.passed_tests
+
+
+def test_by_repo_groups_and_orders_by_resolved_rate():
+    report = SWEBenchReport(
+        results=[
+            SWEBenchResult(instance_id="django__django-1", resolved=True, patch_generated=True),
+            SWEBenchResult(instance_id="django__django-2", resolved=False, patch_generated=True),
+            SWEBenchResult(instance_id="flask__flask-9", resolved=True, patch_generated=True),
+        ]
+    )
+    breakdown = report.by_repo()
+    assert breakdown["flask__flask"] == {"resolved": 1.0, "total": 1.0, "resolved_rate": 1.0}
+    assert breakdown["django__django"] == {"resolved": 1.0, "total": 2.0, "resolved_rate": 0.5}
+    # ordered by descending resolved_rate -> flask (1.0) before django (0.5)
+    assert list(breakdown) == ["flask__flask", "django__django"]
+
+
+def test_render_markdown_repo_breakdown_section_optional():
+    report = SWEBenchReport(
+        results=[
+            SWEBenchResult(instance_id="django__django-1", resolved=True, patch_generated=True),
+            SWEBenchResult(instance_id="flask__flask-9", resolved=False, patch_generated=True),
+        ]
+    )
+    report.compute_summary()
+
+    assert "### By repo" not in render_swebench_markdown(report)
+
+    md = render_swebench_markdown(report, include_repo_breakdown=True)
+    assert "### By repo" in md
+    assert "| `django__django` | 1/1 | 100.0% |" in md
+    assert "| `flask__flask` | 0/1 | 0.0% |" in md
+
+
+def test_generate_and_write_predictions_round_trip(tmp_path):
+    from ronin_eval_suite import generate_predictions, write_predictions
+    from ronin_eval_suite import cli
+
+    ds = SWEBenchDataset([_task("r__p-1"), _task("r__p-2")])
+
+    def runner(t):
+        if t.instance_id == "r__p-2":
+            raise RuntimeError("agent crashed")  # must not abort the batch
+        return "diff --git a b\n+fix\n"
+
+    rows = generate_predictions(ds, runner, model="ronin-x")
+    assert [r["instance_id"] for r in rows] == ["r__p-1", "r__p-2"]
+    assert rows[0]["model_patch"] == "diff --git a b\n+fix\n"
+    assert rows[1]["model_patch"] == ""  # crashed task -> empty patch
+    assert rows[0]["model_name_or_path"] == "ronin-x"
+
+    out = tmp_path / "preds.jsonl"
+    write_predictions(out, rows)
+    # the file the CLI reads round-trips back to the same patches
+    loaded = cli._load_predictions(out)
+    assert loaded == {"r__p-1": "diff --git a b\n+fix\n", "r__p-2": ""}

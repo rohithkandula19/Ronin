@@ -87,13 +87,19 @@ def _cmd_swebench(args: argparse.Namespace) -> int:
     report = harness.run(dataset)
     Path(args.json_out).write_text(report.model_dump_json(indent=2), encoding="utf-8")
     if args.markdown:
-        Path(args.markdown).write_text(render_swebench_markdown(report), encoding="utf-8")
+        Path(args.markdown).write_text(
+            render_swebench_markdown(report, include_repo_breakdown=args.by_repo),
+            encoding="utf-8",
+        )
     s = report.summary
     print(
         f"Resolved {int(s['resolved'])}/{int(s['total'])} "
         f"({s['resolved_rate']:.1%})  ·  patches: {int(s['patch_generated'])}  ·  "
         f"errored: {int(s['errored'])}"
     )
+    if args.by_repo:
+        for repo, st in report.by_repo().items():
+            print(f"  {repo}: {int(st['resolved'])}/{int(st['total'])} ({st['resolved_rate']:.1%})")
     print(f"JSON: {args.json_out}" + (f"  Markdown: {args.markdown}" if args.markdown else ""))
     return 0
 
@@ -158,6 +164,12 @@ def main(argv: list[str] | None = None) -> int:
     p_swe.add_argument("--timeout", type=int, default=1800, help="Per-test-run timeout (s).")
     p_swe.add_argument("--json-out", dest="json_out", default="swebench-report.json")
     p_swe.add_argument("--markdown", default=None, help="Optional Markdown results table path.")
+    p_swe.add_argument(
+        "--by-repo",
+        dest="by_repo",
+        action="store_true",
+        help="Also print/emit a per-repo resolved-rate breakdown.",
+    )
     p_swe.set_defaults(func=_cmd_swebench)
 
     p_swe_cmp = sub.add_parser(
