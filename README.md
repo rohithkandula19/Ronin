@@ -389,7 +389,7 @@ ronin is MIT-licensed and meant to be picked up by other people. A few notes if 
 | Package | What it does | Tests |
 |---|---|---|
 | `agent-patterns` | ReAct, Planner-Executor, Multi-Agent Supervisor, Reflexion + a provider abstraction (streaming, 429 retry, MCP-style metadata) | 81 |
-| `eval-suite` | LLM-as-a-judge, golden datasets, drift detection, HTML reports | 11 |
+| `eval-suite` | LLM-as-a-judge + **SWE-bench execution harness** (resolved-rate, regression gate), golden datasets, drift detection, HTML reports | 38 |
 | `memory` | Short-term (rolling summary), long-term (pluggable vector store), user preferences | 11 |
 | `hardening` | Prompt-injection scanner, faithfulness/grounding harness, tool allowlist, approval gates, output validator, token budgets, tracing | 60 |
 | `mcp-servers` | Read-only Postgres, Stripe, Linear, Slack, Notion, Tavily, GitHub templates | 67 |
@@ -431,6 +431,25 @@ suite = EvalSuite(
 )
 report = suite.run(GoldenDataset.from_jsonl("./golden.jsonl"))
 ```
+
+Or score the agent on **SWE-bench** — real repo bugs, graded by *running tests*
+(a task is resolved iff its `FAIL_TO_PASS` tests pass and `PASS_TO_PASS` don't
+regress), no Docker required:
+
+```python
+from ronin_eval_suite import SWEBenchDataset, SWEBenchHarness, make_local_git_evaluator
+
+report = SWEBenchHarness(
+    patch_runner=lambda task: agent.solve(task.problem_statement),  # -> unified diff
+    evaluator=make_local_git_evaluator("./checkout"),
+).run(SWEBenchDataset.from_jsonl("tasks.jsonl"))
+print(report.summary["resolved_rate"])
+```
+```bash
+csk-eval swebench tasks.jsonl --predictions preds.jsonl --repo-root ./checkout --markdown out.md
+```
+
+> Ships the **harness**, not a published score — run it with your provider to produce numbers.
 
 ## Why ronin vs ...
 
