@@ -346,6 +346,46 @@ def compare_swebench(baseline: SWEBenchReport, candidate: SWEBenchReport) -> SWE
     return cmp
 
 
+def generate_predictions(
+    dataset: SWEBenchDataset,
+    patch_runner: Callable[[SWEBenchTask], str],
+    *,
+    model: str = "",
+) -> list[dict[str, str]]:
+    """Run ``patch_runner`` over a dataset and collect SWE-bench prediction rows.
+
+    Returns one ``{instance_id, model_patch, model_name_or_path}`` dict per task
+    — the standard prediction schema. This is the *generate* half of SWE-bench's
+    two-phase flow; pair it with :func:`write_predictions` to persist, then score
+    the file later (decoupling slow patch generation from evaluation). A runner
+    that raises on a task yields an empty patch for it, never aborting the batch.
+    """
+    rows: list[dict[str, str]] = []
+    for task in dataset:
+        try:
+            patch = patch_runner(task)
+        except Exception:  # noqa: BLE001 — one task must not abort generation
+            patch = ""
+        rows.append(
+            {
+                "instance_id": task.instance_id,
+                "model_patch": patch or "",
+                "model_name_or_path": model,
+            }
+        )
+    return rows
+
+
+def write_predictions(
+    path: str | Path, predictions: list[dict[str, str]]
+) -> None:
+    """Write prediction rows as JSONL (the format ``csk-eval swebench`` reads)."""
+    Path(path).write_text(
+        "\n".join(json.dumps(row) for row in predictions) + "\n",
+        encoding="utf-8",
+    )
+
+
 def oracle_runner(task: SWEBenchTask) -> str:
     """A ``patch_runner`` that returns each task's **gold** patch.
 

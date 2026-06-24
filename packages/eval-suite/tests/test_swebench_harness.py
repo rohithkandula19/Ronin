@@ -378,3 +378,27 @@ def test_render_markdown_repo_breakdown_section_optional():
     assert "### By repo" in md
     assert "| `django__django` | 1/1 | 100.0% |" in md
     assert "| `flask__flask` | 0/1 | 0.0% |" in md
+
+
+def test_generate_and_write_predictions_round_trip(tmp_path):
+    from ronin_eval_suite import generate_predictions, write_predictions
+    from ronin_eval_suite import cli
+
+    ds = SWEBenchDataset([_task("r__p-1"), _task("r__p-2")])
+
+    def runner(t):
+        if t.instance_id == "r__p-2":
+            raise RuntimeError("agent crashed")  # must not abort the batch
+        return "diff --git a b\n+fix\n"
+
+    rows = generate_predictions(ds, runner, model="ronin-x")
+    assert [r["instance_id"] for r in rows] == ["r__p-1", "r__p-2"]
+    assert rows[0]["model_patch"] == "diff --git a b\n+fix\n"
+    assert rows[1]["model_patch"] == ""  # crashed task -> empty patch
+    assert rows[0]["model_name_or_path"] == "ronin-x"
+
+    out = tmp_path / "preds.jsonl"
+    write_predictions(out, rows)
+    # the file the CLI reads round-trips back to the same patches
+    loaded = cli._load_predictions(out)
+    assert loaded == {"r__p-1": "diff --git a b\n+fix\n", "r__p-2": ""}
