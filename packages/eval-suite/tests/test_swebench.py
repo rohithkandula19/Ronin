@@ -83,6 +83,31 @@ def test_dataset_rejects_duplicate_instance_ids():
         SWEBenchDataset([_task("dup"), _task("dup")])
 
 
+def test_dataset_repos_are_sorted_and_unique():
+    ds = SWEBenchDataset(
+        [_task("a", repo="z/one"), _task("b", repo="a/two"), _task("c", repo="z/one")]
+    )
+    assert ds.repos() == ["a/two", "z/one"]
+
+
+def test_dataset_subset_filters_by_ids_repo_and_limit():
+    ds = SWEBenchDataset(
+        [
+            _task("a", repo="r/1"),
+            _task("b", repo="r/1"),
+            _task("c", repo="r/2"),
+            _task("d", repo="r/1"),
+        ]
+    )
+    assert [t.instance_id for t in ds.subset(repo="r/1")] == ["a", "b", "d"]
+    assert [t.instance_id for t in ds.subset(ids=["b", "c"])] == ["b", "c"]
+    assert [t.instance_id for t in ds.subset(limit=2)] == ["a", "b"]
+    # filters compose: repo then limit
+    assert [t.instance_id for t in ds.subset(repo="r/1", limit=2)] == ["a", "b"]
+    # subset returns a fresh dataset, original untouched
+    assert len(ds) == 4
+
+
 # --- resolution rule --------------------------------------------------------------
 
 def test_is_resolved_requires_all_fail_to_pass_and_pass_to_pass():

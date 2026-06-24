@@ -103,6 +103,32 @@ class SWEBenchDataset:
     def __len__(self) -> int:
         return len(self.tasks)
 
+    def repos(self) -> list[str]:
+        """Sorted unique repos in the dataset."""
+        return sorted({t.repo for t in self.tasks if t.repo})
+
+    def subset(
+        self,
+        *,
+        ids: list[str] | None = None,
+        repo: str | None = None,
+        limit: int | None = None,
+    ) -> "SWEBenchDataset":
+        """Return a new dataset narrowed by ``ids`` / ``repo`` / ``limit`` (applied in that order).
+
+        Handy for smoke runs (``limit=5``) or single-repo evaluation, since the
+        local-git evaluator targets one checkout at a time.
+        """
+        tasks = list(self.tasks)
+        if ids is not None:
+            wanted = set(ids)
+            tasks = [t for t in tasks if t.instance_id in wanted]
+        if repo is not None:
+            tasks = [t for t in tasks if t.repo == repo]
+        if limit is not None:
+            tasks = tasks[:limit]
+        return SWEBenchDataset(tasks)
+
 
 class TaskEvaluation(BaseModel):
     """Which named tests passed / failed after a patch was applied and run.
