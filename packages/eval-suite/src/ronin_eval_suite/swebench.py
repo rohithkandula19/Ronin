@@ -247,6 +247,43 @@ class SWEBenchHarness(BaseModel):
         )
 
 
+def render_swebench_markdown(report: SWEBenchReport) -> str:
+    """Render a report as a Markdown summary + per-instance table.
+
+    Designed to paste directly into a PR comment or README. The headline line
+    is the resolved rate; the table lists each instance with its FAIL_TO_PASS /
+    PASS_TO_PASS tallies and a status glyph.
+    """
+    s = report.summary or {}
+    total = int(s.get("total", len(report.results)))
+    resolved = int(s.get("resolved", sum(1 for r in report.results if r.resolved)))
+    rate = s.get("resolved_rate", (resolved / total if total else 0.0))
+
+    title = report.label or report.model or "SWE-bench"
+    lines = [
+        f"## {title} — resolved {resolved}/{total} ({rate:.1%})",
+        "",
+        "| Instance | Status | FAIL→PASS | PASS→PASS | Notes |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for r in report.results:
+        if r.error:
+            status, note = "⚠️ error", r.error
+        elif not r.patch_generated:
+            status, note = "∅ no patch", "agent produced no patch"
+        elif r.resolved:
+            status, note = "✅ resolved", ""
+        else:
+            status, note = "❌ unresolved", ""
+        lines.append(
+            f"| `{r.instance_id}` | {status} "
+            f"| {r.fail_to_pass_passed}/{r.fail_to_pass_total} "
+            f"| {r.pass_to_pass_passed}/{r.pass_to_pass_total} "
+            f"| {note} |"
+        )
+    return "\n".join(lines) + "\n"
+
+
 def make_local_git_evaluator(
     repo_root: str | Path,
     *,

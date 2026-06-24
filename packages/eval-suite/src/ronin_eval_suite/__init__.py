@@ -29,6 +29,7 @@ from .swebench import (
     TaskEvaluation,
     is_resolved,
     make_local_git_evaluator,
+    render_swebench_markdown,
 )
 from .types import EvalCase, EvalScore, RunReport, Rubric
 
@@ -51,4 +52,5 @@ __all__ = [
     "judge_one",
     "make_local_git_evaluator",
     "render_html_report",
+    "render_swebench_markdown",
 ]

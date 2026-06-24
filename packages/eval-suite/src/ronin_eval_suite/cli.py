@@ -22,6 +22,7 @@ from .swebench import (
     SWEBenchHarness,
     SWEBenchTask,
     make_local_git_evaluator,
+    render_swebench_markdown,
 )
 from .types import RunReport, Rubric
 
@@ -76,13 +77,15 @@ def _cmd_swebench(args: argparse.Namespace) -> int:
     )
     report = harness.run(dataset)
     Path(args.json_out).write_text(report.model_dump_json(indent=2), encoding="utf-8")
+    if args.markdown:
+        Path(args.markdown).write_text(render_swebench_markdown(report), encoding="utf-8")
     s = report.summary
     print(
         f"Resolved {int(s['resolved'])}/{int(s['total'])} "
         f"({s['resolved_rate']:.1%})  ·  patches: {int(s['patch_generated'])}  ·  "
         f"errored: {int(s['errored'])}"
     )
-    print(f"JSON: {args.json_out}")
+    print(f"JSON: {args.json_out}" + (f"  Markdown: {args.markdown}" if args.markdown else ""))
     return 0
 
 
@@ -129,6 +132,7 @@ def main(argv: list[str] | None = None) -> int:
     p_swe.add_argument("--label", default=None)
     p_swe.add_argument("--timeout", type=int, default=1800, help="Per-test-run timeout (s).")
     p_swe.add_argument("--json-out", dest="json_out", default="swebench-report.json")
+    p_swe.add_argument("--markdown", default=None, help="Optional Markdown results table path.")
     p_swe.set_defaults(func=_cmd_swebench)
 
     p_drift = sub.add_parser("drift", help="Compare two run reports.")

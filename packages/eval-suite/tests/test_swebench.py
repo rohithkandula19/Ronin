@@ -9,9 +9,11 @@ from ronin_eval_suite import (
     SWEBenchDataset,
     SWEBenchHarness,
     SWEBenchReport,
+    SWEBenchResult,
     SWEBenchTask,
     TaskEvaluation,
     is_resolved,
+    render_swebench_markdown,
 )
 from ronin_eval_suite.swebench import _parse_pytest_results
 
@@ -223,6 +225,37 @@ def test_parse_pytest_results_buckets_passed_failed_and_errors():
     ev = _parse_pytest_results(stdout, wanted)
     assert ev.passed_tests == ["tests/test_x.py::test_existing"]
     assert set(ev.failed_tests) == {"tests/test_x.py::test_new", "tests/test_x.py::test_collide"}
+
+
+def test_render_markdown_has_headline_and_one_row_per_status():
+    report = SWEBenchReport(
+        label="ronin · gemini",
+        results=[
+            SWEBenchResult(
+                instance_id="ok-1", resolved=True, patch_generated=True,
+                fail_to_pass_passed=1, fail_to_pass_total=1,
+                pass_to_pass_passed=2, pass_to_pass_total=2,
+            ),
+            SWEBenchResult(
+                instance_id="bad-1", resolved=False, patch_generated=True,
+                fail_to_pass_passed=0, fail_to_pass_total=1,
+            ),
+            SWEBenchResult(instance_id="none-1", resolved=False, patch_generated=False),
+            SWEBenchResult(
+                instance_id="err-1", resolved=False, patch_generated=True, error="git apply failed",
+            ),
+        ],
+    )
+    report.compute_summary()
+    md = render_swebench_markdown(report)
+
+    assert "## ronin · gemini — resolved 1/4 (25.0%)" in md
+    assert "| `ok-1` | ✅ resolved | 1/1 | 2/2 |" in md
+    assert "❌ unresolved" in md
+    assert "∅ no patch" in md
+    assert "⚠️ error" in md and "git apply failed" in md
+    # header + separator + 4 data rows
+    assert md.count("\n| `") == 4
 
 
 def test_parse_pytest_results_omits_uncategorized_tests():
