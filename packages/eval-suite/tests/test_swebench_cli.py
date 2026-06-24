@@ -112,6 +112,43 @@ def _write_report(path, resolved_by_id, rate):
     path.write_text(rep.model_dump_json(), encoding="utf-8")
 
 
+def test_swebench_limit_runs_a_subset(tmp_path, monkeypatch, capsys):
+    tasks = tmp_path / "tasks.jsonl"
+    _write_tasks(tasks)  # two tasks
+    preds = tmp_path / "preds.jsonl"
+    preds.write_text(
+        "\n".join(
+            [
+                json.dumps({"instance_id": "demo__pkg-1", "model_patch": "diff\n"}),
+                json.dumps({"instance_id": "demo__pkg-2", "model_patch": "diff\n"}),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        cli,
+        "make_local_git_evaluator",
+        lambda root, **kw: (lambda t, p: TaskEvaluation(passed_tests=t.fail_to_pass + t.pass_to_pass)),
+    )
+    rc = cli.main(
+        [
+            "swebench",
+            str(tasks),
+            "--predictions",
+            str(preds),
+            "--repo-root",
+            str(tmp_path),
+            "--limit",
+            "1",
+            "--json-out",
+            str(tmp_path / "r.json"),
+        ]
+    )
+    assert rc == 0
+    # only the first task was scored
+    assert "Resolved 1/1" in capsys.readouterr().out
+
+
 def test_swebench_compare_exits_nonzero_on_regression(tmp_path, capsys):
     base = tmp_path / "base.json"
     cand = tmp_path / "cand.json"

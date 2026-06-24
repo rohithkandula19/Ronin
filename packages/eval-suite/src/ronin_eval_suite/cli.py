@@ -67,6 +67,12 @@ def _load_predictions(path: str | Path) -> dict[str, str]:
 
 def _cmd_swebench(args: argparse.Namespace) -> int:
     dataset = SWEBenchDataset.from_jsonl(args.tasks)
+    if args.repo or args.limit or args.only:
+        dataset = dataset.subset(
+            ids=args.only.split(",") if args.only else None,
+            repo=args.repo,
+            limit=args.limit,
+        )
     predictions = _load_predictions(args.predictions)
 
     def runner(task: SWEBenchTask) -> str:
@@ -144,6 +150,9 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         help="Local git checkout the patches apply to (mutated: reset --hard + clean).",
     )
+    p_swe.add_argument("--repo", default=None, help="Only score tasks for this repo (owner/name).")
+    p_swe.add_argument("--limit", type=int, default=None, help="Score at most N tasks (smoke run).")
+    p_swe.add_argument("--only", default=None, help="Comma-separated instance_ids to score.")
     p_swe.add_argument("--model", default="")
     p_swe.add_argument("--label", default=None)
     p_swe.add_argument("--timeout", type=int, default=1800, help="Per-test-run timeout (s).")
