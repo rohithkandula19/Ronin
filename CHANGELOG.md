@@ -4,6 +4,14 @@ All notable changes to this project will be documented here. Format follows [Kee
 
 ## [Unreleased]
 
+### Added — premium status line, mode chips, git awareness (Wave 2)
+- **Live status line + per-turn footer** now show, at a glance, what ronin is and what it may do: a **FREE / PAID / LOCAL / UNKNOWN** cost badge, `provider/model`, the current **mode**, the **git branch** (with `*` for a dirty tree and `↑/↓` ahead/behind), and the context size — e.g. `FREE · cerebras/gpt-oss-120b · normal · main* · 12.4k ctx`. The footer adds elapsed time and the cost badge.
+- **Cost badge** is honest: FREE only when pricing is known-$0, PAID when a paid key is required, LOCAL for Ollama/offline, and **UNKNOWN** only when pricing can't be determined (a custom endpoint) — never guessed.
+- **Git awareness** is lightweight (one `git status --porcelain -b`) and **fails closed**: outside a repo the branch segment simply drops, nothing crashes. Detached HEAD and fresh repos (no commits) are handled.
+- **Mode chips** for `normal · plan · auto-accept · offline · free · scout · review`, each with its own colour, so you always know what's permitted.
+- **Free-first first-run**: with no key configured, ronin now leads with the free path — exact commands `/free on`, `/login gemini`, `/provider`, plus keyless Ollama/local — and frames Claude/OpenAI as optional, never required.
+- New pure, fully-offline-tested `status` module (16 tests) plus first-run guidance tests.
+
 ### Added — in-session UX (free-first controls + theming)
 - **`/provider`** — list every provider with a free/paid tag and key health (keyless / key set / needs key), and switch with `/provider <name>` (keeps the saved per-provider key, resets to the new provider's default model). A live provider-health view without leaving the session.
 - **`/free [on]`** — show whether the current model runs at **$0** and which free providers are ready; `/free on` switches to the best free provider you can run right now (a free tier you hold a key for, else the keyless local brain).
