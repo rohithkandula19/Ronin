@@ -620,3 +620,37 @@ def test_free_on_picks_keyed_free_provider(tmp_path: Path, monkeypatch) -> None:
     action, out = _call_cfg("/free on", cfg, root=tmp_path)
     assert action == "handled"
     assert cfg.provider == "cerebras"  # preferred free tier we hold a key for
+
+
+# --- /theme ------------------------------------------------------------------
+
+def test_theme_lists_available(tmp_path: Path) -> None:
+    cfg = RoninConfig(provider="anthropic")
+    action, out = _call_cfg("/theme", cfg, root=tmp_path)
+    assert action == "handled"
+    assert "dracula" in out  # the default is in the curated list
+
+
+def test_theme_switch_applies_live_and_persists(tmp_path: Path, monkeypatch) -> None:
+    import ronin_cli.theme as theme
+    saved = {}
+    monkeypatch.setattr("ronin_cli.config.save_config", lambda c: saved.setdefault("cfg", c))
+    monkeypatch.setattr(theme, "CODE_THEME", "dracula", raising=False)
+    cfg = RoninConfig(provider="anthropic")
+    action, out = _call_cfg("/theme monokai", cfg, root=tmp_path)
+    assert action == "handled"
+    assert theme.CODE_THEME == "monokai"      # live switch
+    assert cfg.theme == "monokai"             # persisted to config
+    assert saved.get("cfg") is cfg            # save_config was called
+    theme.set_code_theme("dracula")           # restore for other tests
+
+
+def test_theme_rejects_unknown(tmp_path: Path, monkeypatch) -> None:
+    import ronin_cli.theme as theme
+    monkeypatch.setattr(theme, "CODE_THEME", "dracula", raising=False)
+    cfg = RoninConfig(provider="anthropic")
+    action, out = _call_cfg("/theme notreal", cfg, root=tmp_path)
+    assert action == "handled"
+    assert "unknown theme" in out
+    assert theme.CODE_THEME == "dracula"      # unchanged
+    assert cfg.theme is None

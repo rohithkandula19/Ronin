@@ -150,6 +150,10 @@ class RoninConfig(BaseModel):
     # default for edit tasks; set False here, or export RONIN_SELF_VERIFY=0 (env
     # wins), to opt out. Read-only / plan runs have nothing to verify.
     self_verify: bool = True
+    # Syntax-highlight theme for code blocks and diffs (a Pygments style name,
+    # e.g. "dracula", "monokai", "github-dark", "nord"). None → ronin's default
+    # (dracula). Set live + persisted via /theme; applied at session start.
+    theme: str | None = None
 
     anthropic_api_key: str | None = None
     openai_api_key: str | None = None  # legacy shared slot (openai/together/groq/…)

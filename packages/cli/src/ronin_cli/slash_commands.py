@@ -713,6 +713,39 @@ def _slash_free(ctx: SlashCtx) -> str:
     return "handled"
 
 
+def _slash_theme(ctx: SlashCtx) -> str:
+    """Show or switch the code syntax-highlight theme: /theme [name].
+
+    Applies live (the renderers re-read the theme each turn) and is saved to
+    config so it sticks across sessions. Affects code blocks and diffs.
+    """
+    from . import theme as _theme
+    from .config import save_config
+    parts, console, config = ctx.parts, ctx.console, ctx.config
+    choices = _theme.available_code_themes()
+
+    if len(parts) > 1:
+        name = parts[1].strip().lower()
+        if not _theme.set_code_theme(name):
+            console.print(f"  [#e0af68]unknown theme[/#e0af68] '{name}' — try: "
+                          + ", ".join(choices))
+            return "handled"
+        config.theme = name
+        save_config(config)
+        console.print(f"  [green]✓[/green] theme → [bold]{name}[/bold] "
+                      "[dim](code blocks + diffs; saved)[/dim]")
+        return "handled"
+
+    current = _theme.CODE_THEME
+    console.print(f"[bold]theme[/bold] [#6b7089]· active [bold]{current}[/bold] · "
+                  "switch with [bold]/theme <name>[/bold][/#6b7089]")
+    items = []
+    for t in choices:
+        items.append(f"[#9ece6a]●[/#9ece6a] {t}" if t == current else f"[dim]·[/dim] {t}")
+    console.print("  " + "   ".join(items))
+    return "handled"
+
+
 # command name (and aliases) → handler
 SLASH_DISPATCH: dict[str, Callable[[SlashCtx], str]] = {
     "q": _slash_quit, "quit": _slash_quit, "exit": _slash_quit,
@@ -720,6 +753,7 @@ SLASH_DISPATCH: dict[str, Callable[[SlashCtx], str]] = {
     "login": _slash_login, "key": _slash_login,
     "provider": _slash_provider, "providers": _slash_provider,
     "free": _slash_free,
+    "theme": _slash_theme,
     "clear": _slash_clear,
     "undo": _slash_undo,
     "diff": _slash_diff,

@@ -1148,6 +1148,7 @@ SLASH_COMMANDS: dict[str, str] = {
     "login": "set the LLM provider + API key (e.g. /login openrouter) — masked, saved locally",
     "provider": "show providers (free/paid + key health), or switch: /provider <name>",
     "free": "free-mode status, or switch to a $0 provider: /free [on]",
+    "theme": "show or switch the code syntax-highlight theme: /theme [name]",
     "clear": "forget the conversation so far",
     "undo": "revert the most recent file change",
     "diff": "show the working-tree git diff",
@@ -1188,7 +1189,7 @@ _HELP_GROUPS: list[tuple[str, list[str]]] = [
     ("✏️  editing & git", ["undo", "diff", "commit", "pr"]),
     ("📁  context & memory", ["memory", "init", "context", "compact", "resume", "clear"]),
     ("🔧  tools & agents", ["tools", "mcp", "integrations", "agents", "verify", "voice"]),
-    ("⚙️  session", ["status", "copy", "export", "vim", "doctor", "config", "help", "quit"]),
+    ("⚙️  session", ["status", "copy", "export", "vim", "theme", "doctor", "config", "help", "quit"]),
 ]
 
 
@@ -1460,6 +1461,8 @@ def run_code_session(
     carries forward. Type [bold]/help[/bold] for in-session commands.
     ``continue_session`` resumes the last session's history for this repo.
     """
+    from .theme import apply_saved_theme
+    apply_saved_theme(config.theme)  # honor a persisted /theme choice
     undo_stack: list = []
     transcript: list[str] = load_session(root) if continue_session else []
     # Structured conversation kept alive across turns — the real Message list with
@@ -1779,6 +1782,9 @@ def run_unified_session(
     """The single front door: one conversation that talks, generates media, AND
     writes/runs code (edits + commands gated). Bare ``ronin`` opens this."""
     from rich.panel import Panel
+
+    from .theme import apply_saved_theme
+    apply_saved_theme(config.theme)  # honor a persisted /theme choice
 
     from .media import build_media_tools, show_artifacts
     from .memory_store import build_remember_tool, memory_prompt_block

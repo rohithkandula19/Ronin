@@ -20,8 +20,42 @@ BULLET = f"[{ACCENT}]⏺[/{ACCENT}]"   # filled turn/action marker (Claude-Code 
 CONNECTOR = "⎿"                       # result connector under a tool call (CC's ⎿)
 
 # One syntax-highlight theme for everything ronin renders (diffs, code blocks in
-# answers) so the look is cohesive. Vivid, on-brand (purple/cyan).
+# answers) so the look is cohesive. Vivid, on-brand (purple/cyan). Mutable: the
+# renderers (`code_mode`, `streaming`) re-import this at render time, so
+# ``set_code_theme`` swaps the look live mid-session. Switch via /theme.
 CODE_THEME = "dracula"
+
+# Curated, on-brand-ish dark Pygments styles offered by /theme. Only names that
+# actually ship with the installed Pygments are accepted (validated below).
+_CURATED_THEMES = (
+    "dracula", "monokai", "github-dark", "nord", "one-dark",
+    "gruvbox-dark", "material", "native", "solarized-dark", "zenburn",
+)
+
+
+def available_code_themes() -> list[str]:
+    """Curated themes that exist in the installed Pygments, in display order."""
+    from pygments.styles import get_all_styles
+    installed = set(get_all_styles())
+    return [t for t in _CURATED_THEMES if t in installed]
+
+
+def set_code_theme(name: str) -> bool:
+    """Switch the live syntax-highlight theme. Returns False for an unknown name
+    (leaving the current theme unchanged), so callers can warn rather than crash
+    a later render on an invalid Pygments style."""
+    global CODE_THEME
+    from pygments.styles import get_all_styles
+    if name not in set(get_all_styles()):
+        return False
+    CODE_THEME = name
+    return True
+
+
+def apply_saved_theme(name: str | None) -> None:
+    """Apply a persisted theme preference at session start (no-op if None/unknown)."""
+    if name:
+        set_code_theme(name)
 
 # gradient stops for the ronin wordmark (cyan → teal → mint)
 GRADIENT = ((0x22, 0xD3, 0xEE), (0x2D, 0xD4, 0xBF), (0x34, 0xD3, 0x99))
