@@ -1146,6 +1146,8 @@ def build_isolated_task_tool(config: RoninConfig, root: Path | str, *,
 SLASH_COMMANDS: dict[str, str] = {
     "help": "show this help",
     "login": "set the LLM provider + API key (e.g. /login openrouter) — masked, saved locally",
+    "provider": "show providers (free/paid + key health), or switch: /provider <name>",
+    "free": "free-mode status, or switch to a $0 provider: /free [on]",
     "clear": "forget the conversation so far",
     "undo": "revert the most recent file change",
     "diff": "show the working-tree git diff",
@@ -1182,7 +1184,7 @@ SLASH_COMMANDS: dict[str, str] = {
 
 # /help, grouped into sections for a calm, scannable layout.
 _HELP_GROUPS: list[tuple[str, list[str]]] = [
-    ("🧠  provider & model", ["login", "model", "models", "route", "router", "effort", "cost"]),
+    ("🧠  provider & model", ["login", "provider", "free", "model", "models", "route", "router", "effort", "cost"]),
     ("✏️  editing & git", ["undo", "diff", "commit", "pr"]),
     ("📁  context & memory", ["memory", "init", "context", "compact", "resume", "clear"]),
     ("🔧  tools & agents", ["tools", "mcp", "integrations", "agents", "verify", "voice"]),

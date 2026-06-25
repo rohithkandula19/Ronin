@@ -550,3 +550,73 @@ def test_fix_reports_green_without_key(tmp_path: Path) -> None:
     assert action == "handled"
     if "make" in out:        # make present on this host
         assert "green" in out
+
+
+# --- /provider and /free -----------------------------------------------------
+
+def _call_cfg(user: str, config, *, root: Path):
+    """Like _call but with a caller-supplied config (provider/key control)."""
+    console, buf = _console()
+    action = handle_slash_command(
+        user, console=console, root=root, config=config,
+        undo_stack=[], transcript=[], message_history=[],
+    )
+    return action, buf.getvalue()
+
+
+def test_provider_lists_with_free_and_key_health(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    cfg = RoninConfig(provider="cerebras")
+    action, out = _call_cfg("/provider", cfg, root=tmp_path)
+    assert action == "handled"
+    # cerebras is free and is the active provider
+    assert "cerebras" in out and "free" in out
+    # anthropic is paid and (no key) should read as needing a key
+    assert "anthropic" in out
+
+
+def test_provider_switch_resets_model_and_warns_on_missing_key(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr("ronin_cli.config.save_config", lambda c: tmp_path / "config.toml")
+    cfg = RoninConfig(provider="cerebras", model="gpt-oss-120b")
+    action, out = _call_cfg("/provider anthropic", cfg, root=tmp_path)
+    assert action == "handled"
+    assert cfg.provider == "anthropic"
+    assert cfg.model is None  # reset to the new provider's default
+    assert "no key for anthropic" in out
+
+
+def test_provider_rejects_unknown(tmp_path: Path) -> None:
+    cfg = RoninConfig(provider="cerebras")
+    action, out = _call_cfg("/provider nope", cfg, root=tmp_path)
+    assert action == "handled"
+    assert "unknown provider" in out
+    assert cfg.provider == "cerebras"  # unchanged
+
+
+def test_free_status_on_free_provider(tmp_path: Path) -> None:
+    cfg = RoninConfig(provider="groq")
+    action, out = _call_cfg("/free", cfg, root=tmp_path)
+    assert action == "handled"
+    assert "free" in out
+
+
+def test_free_on_switches_paid_to_free(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr("ronin_cli.config.save_config", lambda c: tmp_path / "config.toml")
+    cfg = RoninConfig(provider="anthropic")  # paid, no key
+    action, out = _call_cfg("/free on", cfg, root=tmp_path)
+    assert action == "handled"
+    # no free-tier key available -> falls back to the keyless local brain
+    assert cfg.provider == "local"
+    assert "free mode" in out
+
+
+def test_free_on_picks_keyed_free_provider(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr("ronin_cli.config.save_config", lambda c: tmp_path / "config.toml")
+    cfg = RoninConfig(provider="anthropic")
+    cfg.set_key_for("cerebras", "sk-test-key")
+    action, out = _call_cfg("/free on", cfg, root=tmp_path)
+    assert action == "handled"
+    assert cfg.provider == "cerebras"  # preferred free tier we hold a key for
