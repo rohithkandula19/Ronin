@@ -341,12 +341,14 @@ _DONE_VERBS = ("Forged", "Sharpened", "Pondered", "Tracked", "Schemed",
 
 
 def _status_line(config: RoninConfig, result: "CodeRunResult", elapsed: float,
-                 ledger: "object | None" = None, budget: float | None = None) -> str:
+                 ledger: "object | None" = None, budget: float | None = None,
+                 root: "Path | str" = ".") -> str:
     """A subtle per-turn footer in Claude-Code's retrospective style —
-    ``✻ <verb> for <time> · ↑in ↓out · provider model`` — plus a Cost-Router
-    savings line (routing) or a spend-vs-budget line (budget)."""
+    ``✻ <FREE/PAID> <verb> for <time> · ↑in ↓out · provider model · branch*`` —
+    plus a Cost-Router savings line (routing) or a spend-vs-budget line (budget)."""
     import random
 
+    from .status import cost_badge, git_state
     u = result.usage or {}
     inp, out = u.get("input_tokens", 0), u.get("output_tokens", 0)
     cached = u.get("cache_read_input_tokens", 0)
@@ -358,7 +360,13 @@ def _status_line(config: RoninConfig, result: "CodeRunResult", elapsed: float,
             tok += f" ⚡{_fmt_tokens(cached)} cached"
         bits.append(tok)
     bits.append(f"{config.provider} {config.resolved_model()}")
-    line = "  [#2dd4bf]✻[/#2dd4bf] [#6b7089]" + "  ·  ".join(bits) + "[/#6b7089]"
+    badge, bhex = cost_badge(config)
+    line = (f"  [#2dd4bf]✻[/#2dd4bf] [{bhex}]{badge}[/{bhex}]  [#6b7089]"
+            + "  ·  ".join(bits) + "[/#6b7089]")
+    g = git_state(root)
+    if g.label():
+        ghex = "#e0af68" if g.dirty else "#9ece6a"
+        line += f"  [#6b7089]·[/#6b7089]  [{ghex}]{g.label()}[/{ghex}]"
     if ledger is not None and getattr(ledger, "turns", 0) > 0:
         if budget:
             over = ledger.spent >= budget
@@ -1505,8 +1513,9 @@ def run_code_session(
                 # Bottom-right gauge: provider + how much context window is left
                 # (ticks down as the conversation grows, Claude-Code-style).
                 _status = config.provider
+                _used = 0
+                _left = 100
                 try:
-                    _used = 0
                     for _m in (message_history or []):
                         if not isinstance(_m, dict):
                             continue
@@ -1518,7 +1527,11 @@ def run_code_session(
                                 if isinstance(_p, dict):
                                     _used += _estimate_tokens(_p.get("text", ""))
                     _left = max(0, 100 - int(_used * 100 / 128000))
-                    _status = f"{config.provider} · {_left}% ctx"
+                    # Premium live status: FREE/PAID · provider/model · mode · branch* · ctx
+                    from .prompt_box import current_mode
+                    from .status import status_text
+                    _status = status_text(config, root, edit_mode=current_mode(),
+                                          ctx_tokens=_used)
                 except Exception:  # noqa: BLE001
                     pass
                 import os as _os_pin
@@ -1721,7 +1734,7 @@ def run_code_session(
                 _badge = confidence_badge(result.output)
                 if _badge:
                     console.print("  " + _badge)
-            console.print(_status_line(turn_cfg, result, _elapsed, ledger=ledger, budget=_budget) + "\n")
+            console.print(_status_line(turn_cfg, result, _elapsed, ledger=ledger, budget=_budget, root=root) + "\n")
 
 
 UNIFIED_SYSTEM = """You are ronin — one capable assistant living in the user's terminal.
@@ -1854,8 +1867,9 @@ def run_unified_session(
                 # Bottom-right gauge: provider + how much context window is left
                 # (ticks down as the conversation grows, Claude-Code-style).
                 _status = config.provider
+                _used = 0
+                _left = 100
                 try:
-                    _used = 0
                     for _m in (message_history or []):
                         if not isinstance(_m, dict):
                             continue
@@ -1867,7 +1881,11 @@ def run_unified_session(
                                 if isinstance(_p, dict):
                                     _used += _estimate_tokens(_p.get("text", ""))
                     _left = max(0, 100 - int(_used * 100 / 128000))
-                    _status = f"{config.provider} · {_left}% ctx"
+                    # Premium live status: FREE/PAID · provider/model · mode · branch* · ctx
+                    from .prompt_box import current_mode
+                    from .status import status_text
+                    _status = status_text(config, root, edit_mode=current_mode(),
+                                          ctx_tokens=_used)
                 except Exception:  # noqa: BLE001
                     pass
                 import os as _os_pin
@@ -2068,5 +2086,5 @@ def run_unified_session(
                 _badge = confidence_badge(result.output)
                 if _badge:
                     console.print("  " + _badge)
-            console.print(_status_line(turn_cfg, result, _elapsed, ledger=ledger, budget=_budget) + "\n")
+            console.print(_status_line(turn_cfg, result, _elapsed, ledger=ledger, budget=_budget, root=root) + "\n")
         show_artifacts(artifacts)  # display any image/video produced
