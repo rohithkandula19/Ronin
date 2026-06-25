@@ -149,18 +149,12 @@ def _root(
             if picked is not None:
                 config = picked
             else:
-                from .theme import ACCENT
-                console.print(f"\n[bold {ACCENT}]ʕ•ᴥ•ʔ  ronin[/bold {ACCENT}]\n")
-                console.print("[dim]Set up any time with [bold]ronin init[/bold], or "
-                              "[bold]/login[/bold] inside a session.[/dim]")
+                from .onboard import render_first_run
+                render_first_run(console)
                 return
         else:
-            from .theme import ACCENT
-            console.print(f"\n[bold {ACCENT}]ʕ•ᴥ•ʔ  ronin[/bold {ACCENT}]\n")
-            console.print(
-                "[dim]No provider configured yet. Run [bold]ronin init[/bold] to get "
-                "started, or [bold]ronin --help[/bold] for all commands.[/dim]"
-            )
+            from .onboard import render_first_run
+            render_first_run(console)
             console.print(ctx.get_help())
             return
 

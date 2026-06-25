@@ -29,6 +29,32 @@ PROVIDERS: list[ProviderChoice] = [
 ]
 
 
+def first_run_guidance() -> list[str]:
+    """Free-first no-key guidance, as Rich-markup lines (pure / unit-tested).
+
+    Shown when ronin starts without a configured provider and the picker is
+    skipped or unavailable. Leads with $0 options and the exact commands; Claude
+    and OpenAI are presented as optional, never required.
+    """
+    return [
+        "ronin runs [bold]FREE[/bold] — no credit card. Start with a free provider:",
+        "  [bold]/free on[/bold]        jump to a $0 provider you can run right now",
+        "  [bold]/login gemini[/bold]   paste a free key  [dim](also: groq · cerebras · openrouter)[/dim]",
+        "  [bold]/provider[/bold]       list every provider · free/paid · which have keys",
+        "[dim]keyless & local: [bold]ollama[/bold] (run `ollama serve`) or the in-process "
+        "[bold]local[/bold] brain[/dim]",
+        "[dim]Claude / OpenAI are optional — only if you want to pay for them.[/dim]",
+    ]
+
+
+def render_first_run(console) -> None:
+    """Print the free-first guidance with the ronin mark."""
+    from .theme import ACCENT
+    console.print(f"\n[bold {ACCENT}]ʕ•ᴥ•ʔ  ronin[/bold {ACCENT}]\n")
+    for line in first_run_guidance():
+        console.print("  " + line)
+
+
 def build_config(base, choice: ProviderChoice, key: str | None):
     """Return a config switched to ``choice`` with ``key`` stored (if any). Pure."""
     cfg = base.model_copy(update={"provider": choice.key, "model": choice.model})

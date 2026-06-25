@@ -39,3 +39,39 @@ def test_build_config_strips_key_whitespace() -> None:
 def test_every_provider_has_a_key_source() -> None:
     assert all(p.where for p in PROVIDERS)
     assert all(p.blurb for p in PROVIDERS)
+
+
+# --- Wave 2: free-first no-key guidance --------------------------------------
+
+def test_first_run_guidance_leads_with_free_and_exact_commands() -> None:
+    from ronin_cli.onboard import first_run_guidance
+    text = "\n".join(first_run_guidance())
+    # the exact commands the brief requires
+    assert "/free on" in text
+    assert "/login gemini" in text
+    assert "/provider" in text
+    # free providers are surfaced
+    for prov in ("groq", "cerebras", "openrouter", "ollama"):
+        assert prov in text
+    # FREE is emphasised early (first line)
+    assert "FREE" in first_run_guidance()[0]
+
+
+def test_first_run_guidance_does_not_make_paid_required() -> None:
+    from ronin_cli.onboard import first_run_guidance
+    text = "\n".join(first_run_guidance()).lower()
+    # Claude/OpenAI may be mentioned but only as optional, never required
+    assert "optional" in text
+    assert "required" not in text
+
+
+def test_render_first_run_prints_guidance() -> None:
+    import io
+
+    from rich.console import Console
+
+    from ronin_cli.onboard import render_first_run
+    buf = io.StringIO()
+    render_first_run(Console(file=buf, force_terminal=False, width=100))
+    out = buf.getvalue()
+    assert "ronin" in out and "/free on" in out and "/provider" in out
