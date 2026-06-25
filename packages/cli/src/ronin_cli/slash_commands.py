@@ -713,6 +713,43 @@ def _slash_free(ctx: SlashCtx) -> str:
     return "handled"
 
 
+def _slash_role(ctx: SlashCtx) -> str:
+    """Show or set the coding role: /role [researcher|implementer|reviewer|tester|
+    architect|debugger|clear].
+
+    A role shapes how ronin approaches the task (and read-only roles restrict it
+    to read-only tools) — it never bypasses an approval gate. Persists for the
+    session; shown in the chip strip + status line.
+    """
+    from . import roles
+    parts, console = ctx.parts, ctx.console
+
+    if len(parts) > 1:
+        parsed = roles.parse_role(parts[1])
+        if parsed is None:
+            known = ", ".join(roles.ROLES)
+            console.print(f"  [#e0af68]unknown role[/#e0af68] '{parts[1]}' — try: {known}, clear")
+            return "handled"
+        if parsed == "clear":
+            roles.set_role(None)
+            console.print("  [green]✓[/green] role [bold]cleared[/bold] [dim](default behavior)[/dim]")
+            return "handled"
+        roles.set_role(parsed)
+        r = roles.ROLES[parsed]
+        ro = " [dim]· read-only[/dim]" if r.read_only else " [dim]· edits gated[/dim]"
+        console.print(f"  [green]✓[/green] role → [bold]{r.label}[/bold] [dim]({r.blurb})[/dim]{ro}")
+        return "handled"
+
+    cur = roles.current_role()
+    console.print(f"[bold]role[/bold] [#6b7089]· active [bold]{cur or 'none'}[/bold] · "
+                  "set with [bold]/role <name>[/bold] · [bold]/role clear[/bold][/#6b7089]")
+    for key, r in roles.ROLES.items():
+        dot = "[#9ece6a]●[/#9ece6a]" if key == cur else "[dim]·[/dim]"
+        ro = "[dim]read-only[/dim]" if r.read_only else "[#7dd3fc]edits[/#7dd3fc]"
+        console.print(f"  {dot} [bold]{r.key:<11}[/bold] [dim]{r.blurb:<22}[/dim] {ro}")
+    return "handled"
+
+
 def _slash_theme(ctx: SlashCtx) -> str:
     """Show or switch the code syntax-highlight theme: /theme [name].
 
@@ -753,6 +790,7 @@ SLASH_DISPATCH: dict[str, Callable[[SlashCtx], str]] = {
     "login": _slash_login, "key": _slash_login,
     "provider": _slash_provider, "providers": _slash_provider,
     "free": _slash_free,
+    "role": _slash_role, "roles": _slash_role,
     "theme": _slash_theme,
     "clear": _slash_clear,
     "undo": _slash_undo,

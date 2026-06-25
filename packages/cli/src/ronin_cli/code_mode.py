@@ -1157,6 +1157,7 @@ SLASH_COMMANDS: dict[str, str] = {
     "provider": "show providers (free/paid + key health), or switch: /provider <name>",
     "free": "free-mode status, or switch to a $0 provider: /free [on]",
     "theme": "show or switch the code syntax-highlight theme: /theme [name]",
+    "role": "set a coding role (researcher/implementer/reviewer/tester/architect/debugger): /role <name>",
     "clear": "forget the conversation so far",
     "undo": "revert the most recent file change",
     "diff": "show the working-tree git diff",
@@ -1197,6 +1198,7 @@ _HELP_GROUPS: list[tuple[str, list[str]]] = [
     ("✏️  editing & git", ["undo", "diff", "commit", "pr"]),
     ("📁  context & memory", ["memory", "init", "context", "compact", "resume", "clear"]),
     ("🔧  tools & agents", ["tools", "mcp", "integrations", "agents", "verify", "voice"]),
+    ("🎭  roles", ["role"]),
     ("⚙️  session", ["status", "copy", "export", "vim", "theme", "doctor", "config", "help", "quit"]),
 ]
 
@@ -1229,6 +1231,15 @@ def _render_help(console: "Console") -> None:
         for name in extra:
             console.print(f"    [cyan]/{name:<9}[/cyan] [dim]{SLASH_COMMANDS[name]}[/dim]")
         console.print()
+    # Roles — the six coding roles, each with its one-line purpose.
+    from .roles import ROLES, current_role
+    _cur = current_role()
+    console.print(f"  [bold {ACCENT}]🎭  roles[/bold {ACCENT}] [dim]· "
+                  f"active: {_cur or 'none'} · [bold]/role <name>[/bold] · [bold]/role clear[/bold][/dim]")
+    for r in ROLES.values():
+        ro = "read-only" if r.read_only else "edits gated"
+        console.print(f"    [cyan]/role {r.key:<11}[/cyan] [dim]{r.blurb:<22} ({ro})[/dim]")
+    console.print()
     console.print(Text("  @path / @url to add context · ! to run a shell command · "
                        "# to note a memory · shift+tab to cycle mode", style=MUTE))
     console.print()
