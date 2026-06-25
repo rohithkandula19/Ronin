@@ -4,6 +4,14 @@ All notable changes to this project will be documented here. Format follows [Kee
 
 ## [Unreleased]
 
+### Added — in-session UX (free-first controls + theming)
+- **`/provider`** — list every provider with a free/paid tag and key health (keyless / key set / needs key), and switch with `/provider <name>` (keeps the saved per-provider key, resets to the new provider's default model). A live provider-health view without leaving the session.
+- **`/free [on]`** — show whether the current model runs at **$0** and which free providers are ready; `/free on` switches to the best free provider you can run right now (a free tier you hold a key for, else the keyless local brain).
+- **`/theme [name]`** — switch the code/diff syntax-highlight theme from a curated set of dark Pygments styles. Applies **live** (renderers re-read the theme each turn) and persists to config (new `theme` field), reapplied at session start.
+
+### Fixed
+- **Ronin now knows its own features.** A free model asked "does ronin have games?" answered *no* — but `ronin play` ships a **31-game arcade**. The agent's front-door prompt listed only its tools, never ronin's own features, so the model guessed wrong. Added a factual ABOUT RONIN block (arcade + free-first providers + headline commands) with a "don't guess about yourself" directive; a drift-guard test keeps the stated game count equal to `len(GAMES)`.
+
 **Web research and page watches** — both free and keyless, both offline-tested.
 
 ### Added — SWE-bench harness (eval-suite)

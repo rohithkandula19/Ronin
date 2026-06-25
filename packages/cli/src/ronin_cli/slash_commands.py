@@ -606,11 +606,154 @@ def _slash_permissions(ctx: SlashCtx) -> str:
     return "handled"
 
 
+def _free_pref_order() -> list[str]:
+    """Free providers in preference order (cross-provider, key-based tiers first;
+    keyless local brains last as the always-available fallback)."""
+    return ["cerebras", "groq", "gemini", "openrouter", "ollama", "local"]
+
+
+def _provider_health(config: RoninConfig, name: str) -> tuple[bool, bool, bool]:
+    """(is_free, is_keyless, has_auth) for a provider — the pure health summary."""
+    from .config import PROVIDER_PRESETS
+    from .cost import is_free
+    model = PROVIDER_PRESETS.get(name, {}).get("model", "")
+    keyless = name in ("ollama", "local")
+    has_auth = keyless or bool(config.key_for(name))
+    return is_free(name, model), keyless, has_auth
+
+
+def _slash_provider(ctx: SlashCtx) -> str:
+    """Show providers (free/paid + key health), or switch: /provider <name>.
+
+    Switching keeps your per-provider key (set once via /login) and resets the
+    model to the new provider's default. Unlike /login it never prompts for a key.
+    """
+    from rich.table import Table as _Table
+
+    from .config import PROVIDER_PRESETS, save_config
+    parts, console, config = ctx.parts, ctx.console, ctx.config
+
+    if len(parts) > 1:
+        prov = parts[1].lower()
+        if prov not in PROVIDER_PRESETS and prov != "custom":
+            known = ", ".join(sorted(PROVIDER_PRESETS))
+            console.print(f"  [#e0af68]unknown provider[/#e0af68] '{prov}' — known: {known}, custom")
+            return "handled"
+        if prov != config.provider:
+            config.provider = prov
+            config.model = None  # adopt the new provider's default model
+        save_config(config)
+        free, keyless, has_auth = _provider_health(config, prov)
+        badge = "[#9ece6a]$0 free[/#9ece6a]" if free else "[#e0af68]paid[/#e0af68]"
+        console.print(f"  [green]✓[/green] provider → [bold]{prov}[/bold] "
+                      f"[dim]({config.resolved_model()})[/dim] · {badge}; using it from your next message.")
+        if not has_auth:
+            console.print(f"  [#e0af68]no key for {prov}[/#e0af68] — add one with [bold]/login {prov}[/bold]")
+        elif keyless and prov == "ollama":
+            console.print("  [dim]needs a local Ollama server running ([bold]ollama serve[/bold])[/dim]")
+        return "handled"
+
+    console.print("[bold]providers[/bold] [#6b7089]· ● = active · switch with "
+                  "[bold]/provider <name>[/bold][/#6b7089]")
+    grid = _Table.grid(padding=(0, 2))
+    grid.add_column(no_wrap=True)
+    grid.add_column()
+    grid.add_column()
+    for name in sorted(PROVIDER_PRESETS):
+        free, keyless, has_auth = _provider_health(config, name)
+        dot = "[#9ece6a]●[/#9ece6a]" if name == config.provider else "[dim]·[/dim]"
+        tag = "[#9ece6a]$0 free[/#9ece6a]" if free else "[#6b7089]paid[/#6b7089]"
+        key = ("[dim]keyless[/dim]" if keyless
+               else "[#9ece6a]key set[/#9ece6a]" if has_auth
+               else "[#e0af68]needs key[/#e0af68]")
+        grid.add_row(f"{dot} [bold]{name}[/bold]", tag, key)
+    console.print(grid)
+    return "handled"
+
+
+def _slash_free(ctx: SlashCtx) -> str:
+    """Free-mode status, or switch to a $0 provider: /free [on].
+
+    /free       → is the current model free? which free providers are ready?
+    /free on    → switch to the best free provider you can run right now
+                  (a free tier you hold a key for, else the keyless local brain).
+    """
+    from .config import PROVIDER_PRESETS, save_config
+    from .cost import is_free
+    parts, console, config = ctx.parts, ctx.console, ctx.config
+    cur_free = is_free(config.provider, config.resolved_model())
+    keyed = [p for p in _free_pref_order()
+             if p in PROVIDER_PRESETS and p not in ("ollama", "local") and config.key_for(p)]
+
+    if len(parts) > 1 and parts[1].lower() in ("on", "yes", "true"):
+        if cur_free:
+            console.print(f"  [#9ece6a]✓ already free[/#9ece6a] — [bold]{config.provider}[/bold] "
+                          f"runs at [bold]$0[/bold].")
+            return "handled"
+        target = keyed[0] if keyed else "local"  # local = keyless in-process brain
+        config.provider = target
+        config.model = None
+        save_config(config)
+        console.print(f"  [#9ece6a]✓ free mode[/#9ece6a] → [bold]{target}[/bold] "
+                      f"[dim]({config.resolved_model()})[/dim] · [#9ece6a]$0[/#9ece6a]; "
+                      "using it from your next message.")
+        if target == "local":
+            console.print("  [dim]first run downloads a small local model (~GBs, one time)[/dim]")
+        return "handled"
+
+    badge = "[#9ece6a]$0 free[/#9ece6a]" if cur_free else "[#e0af68]paid[/#e0af68]"
+    console.print(f"[bold]free mode[/bold] · current [bold]{config.provider}[/bold] "
+                  f"[dim]({config.resolved_model()})[/dim] · {badge}")
+    if keyed:
+        console.print(f"  [#9ece6a]free & ready[/#9ece6a] [dim](key set)[/dim]: " + ", ".join(keyed))
+    console.print("  [dim]keyless free: [bold]local[/bold] (in-process), "
+                  "[bold]ollama[/bold] (local server)[/dim]")
+    if not cur_free:
+        console.print("  [dim]switch to free now with [bold]/free on[/bold][/dim]")
+    return "handled"
+
+
+def _slash_theme(ctx: SlashCtx) -> str:
+    """Show or switch the code syntax-highlight theme: /theme [name].
+
+    Applies live (the renderers re-read the theme each turn) and is saved to
+    config so it sticks across sessions. Affects code blocks and diffs.
+    """
+    from . import theme as _theme
+    from .config import save_config
+    parts, console, config = ctx.parts, ctx.console, ctx.config
+    choices = _theme.available_code_themes()
+
+    if len(parts) > 1:
+        name = parts[1].strip().lower()
+        if not _theme.set_code_theme(name):
+            console.print(f"  [#e0af68]unknown theme[/#e0af68] '{name}' — try: "
+                          + ", ".join(choices))
+            return "handled"
+        config.theme = name
+        save_config(config)
+        console.print(f"  [green]✓[/green] theme → [bold]{name}[/bold] "
+                      "[dim](code blocks + diffs; saved)[/dim]")
+        return "handled"
+
+    current = _theme.CODE_THEME
+    console.print(f"[bold]theme[/bold] [#6b7089]· active [bold]{current}[/bold] · "
+                  "switch with [bold]/theme <name>[/bold][/#6b7089]")
+    items = []
+    for t in choices:
+        items.append(f"[#9ece6a]●[/#9ece6a] {t}" if t == current else f"[dim]·[/dim] {t}")
+    console.print("  " + "   ".join(items))
+    return "handled"
+
+
 # command name (and aliases) → handler
 SLASH_DISPATCH: dict[str, Callable[[SlashCtx], str]] = {
     "q": _slash_quit, "quit": _slash_quit, "exit": _slash_quit,
     "help": _slash_help, "h": _slash_help, "?": _slash_help,
     "login": _slash_login, "key": _slash_login,
+    "provider": _slash_provider, "providers": _slash_provider,
+    "free": _slash_free,
+    "theme": _slash_theme,
     "clear": _slash_clear,
     "undo": _slash_undo,
     "diff": _slash_diff,

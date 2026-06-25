@@ -66,11 +66,11 @@ A coding agent that reads, edits, and runs your code: every write and shell comm
 - **Tools**: read / write / `edit` / `multi_edit` / `glob` / search / run, plus **`web_search` / `fetch_url`**, **read-only git** (`git_status` / `git_diff` / `git_log`), **semantic code intelligence** (`diagnostics` / `definition` / `references` via LSP), a **`task`** subagent plus **`parallel_task`** (concurrent read-only fan-out) and **`isolated_task`** (parallel *mutating* sub-agents, each in its own git worktree so edits can't collide), and any **MCP** server's tools (`ronin mcp add …`).
 - **Integrations**: give the agent new tools three ways, each one command: **local MCP** servers (24-server catalog: `ronin mcp install github`), **remote/hosted MCP** servers (`ronin mcp add-remote …`), or **plugins** (200 built-ins like weather/currency/dns/uuid + scaffold your own with `ronin plugin new`). See **[docs/INTEGRATIONS.md](docs/INTEGRATIONS.md)**.
 - **Project memory**: auto-loads `RONIN.md` / `CLAUDE.md` / `AGENTS.md` from the repo so it follows your conventions.
-- **30 slash commands** · steer across turns: `/help`, `/login`, `/model`, `/models`, `/mcp`, `/agents`, `/compact`, `/context`, `/copy`, `/export`, `/resume`, `/diff`, `/undo`, `/commit`, `/pr`, `/doctor`, `/config`, and more. A per-turn status line shows provider · model · tokens · time.
+- **33 slash commands** · steer across turns: `/help`, `/login`, `/provider`, `/free`, `/model`, `/models`, `/theme`, `/mcp`, `/agents`, `/compact`, `/context`, `/copy`, `/export`, `/resume`, `/diff`, `/undo`, `/commit`, `/pr`, `/doctor`, `/config`, and more. `/provider` shows every provider with a free/paid + key-health view; `/free` switches to a $0 provider; `/theme` restyles code blocks + diffs live. A per-turn status line shows provider · model · tokens · time.
 
 ## 🧠 Supported providers
 
-`ronin` works with any LLM, proprietary or open-source. **Switch provider or model from inside a session, no restart:** `/login <provider>` sets a provider + key (masked), `/model <name>` swaps the model.
+`ronin` works with any LLM, proprietary or open-source. **Switch provider or model from inside a session, no restart:** `/login <provider>` sets a provider + key (masked), `/provider` lists every provider with a free/paid + key-health view and switches between them, `/free [on]` jumps to a $0 provider, and `/model <name>` swaps the model.
 
 | Provider | Free? | Default model | Notes |
 |---|---|---|---|
@@ -86,6 +86,8 @@ A coding agent that reads, edits, and runs your code: every write and shell comm
 ```bash
 ronin                       # then, in-session:
 /login gemini               # paste a free key at the masked prompt
+/provider                   # see all providers · free/paid · which have keys
+/free on                    # switch to a $0 provider you can run right now
 /model gemini-flash-latest  # or switch models without re-entering the key
 /models                     # list what the current provider offers
 ```
