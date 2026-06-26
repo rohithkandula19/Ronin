@@ -4,6 +4,12 @@ All notable changes to this project will be documented here. Format follows [Kee
 
 ## [Unreleased]
 
+### Added — role agents, chip strip, richer plan tracker (Wave 3)
+- **First-class role agents** via `/role`: **researcher · implementer · reviewer · tester · architect · debugger**. A role shapes how ronin approaches the task (its guidance is appended to the system prompt) and, for the read-only roles (researcher / reviewer / architect), is **enforced** — the agent only gets read-only tools, so a review can't accidentally edit. Doer roles (implementer / tester / debugger) still flow through the same approval gate; a role is guidance, **never a safety bypass**. The role persists for the session and shows in the chip strip. `/help` gains a Roles section.
+- **Gentle role suggestions**: when no role is set and a task clearly fits one, ronin surfaces a one-line tip (e.g. `/role debugger` for "why is this failing?") — it points at the command and never switches for you. Shown at most once per session; not on the general chat front door.
+- **Always-visible chip strip** in the input box: `[FREE] [provider:model] [normal] [main*] [write-gated] [role:x]`. **Width-aware** — under a narrow terminal it sheds the lowest-priority chips first (role, then branch, then model) but never the cost badge, mode, or write-gate. Adds the **write-gated / auto-accept / read-only** safety chip so it's always clear what ronin may do. Never crashes outside a git repo.
+- **Richer plan tracker**: the live checklist now supports **blocked** (`⊘`) and **failed** (`✗`) in addition to done/active/pending, and the tool tells the agent to use them honestly rather than fake `completed`. Renders nothing when there's no plan; updates only from real `update_todos` state.
+
 ### Added — premium status line, mode chips, git awareness (Wave 2)
 - **Live status line + per-turn footer** now show, at a glance, what ronin is and what it may do: a **FREE / PAID / LOCAL / UNKNOWN** cost badge, `provider/model`, the current **mode**, the **git branch** (with `*` for a dirty tree and `↑/↓` ahead/behind), and the context size — e.g. `FREE · cerebras/gpt-oss-120b · normal · main* · 12.4k ctx`. The footer adds elapsed time and the cost badge.
 - **Cost badge** is honest: FREE only when pricing is known-$0, PAID when a paid key is required, LOCAL for Ollama/offline, and **UNKNOWN** only when pricing can't be determined (a custom endpoint) — never guessed.

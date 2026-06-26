@@ -61,20 +61,28 @@ A coding agent that reads, edits, and runs your code: every write and shell comm
 - **Premium status line + mode chips**: a live footer always shows what ronin is and what it's allowed to do — a **FREE / PAID / LOCAL** badge, `provider/model`, the current **mode**, your **git branch** (with `*` when dirty and `↑/↓` ahead/behind), and the context size. Real output, no theming required:
 
   ```text
-  live (input box):  FREE · cerebras/gpt-oss-120b · normal · main* · 12.4k ctx
-  per-turn footer:   ✻ FREE  Forged for 1.3s · ↑11.4k ↓314 · cerebras gpt-oss-120b · main*
+  chip strip (input):  [FREE] [cerebras:gpt-oss-120b] [normal] [main*] [write-gated]
+  per-turn footer:     ✻ FREE  Forged for 1.3s · ↑11.4k ↓314 · cerebras gpt-oss-120b · main*
   ```
 
-  The badge reads **FREE** on free tiers, **PAID** when a paid key is required, **LOCAL** for Ollama/offline, and **UNKNOWN** only when pricing genuinely can't be determined (a custom endpoint). Mode chips cover **normal · plan · auto-accept · offline · free · scout · review**, and the status line never crashes outside a git repo (the branch segment just drops).
+  The input box carries an **always-visible chip strip** — cost badge, `provider:model`, mode, git branch, the **write-gated / auto-accept** safety state, and the active **role** if set. It's **width-aware**: in a narrow terminal it sheds the lowest-priority chips first (role, then branch) but never the badge, mode, or write-gate. The badge reads **FREE** on free tiers, **PAID** when a paid key is required, **LOCAL** for Ollama/offline, and **UNKNOWN** only when pricing genuinely can't be determined (a custom endpoint). It never crashes outside a git repo (the branch chip just drops).
+- **Role agents** (`/role`): pick how ronin works — **researcher** (read-only explore), **implementer** (gated edits), **reviewer** (read-only diff review), **tester** (verify with tests), **architect** (design first), **debugger** (root-cause failures). Read-only roles are *enforced* (the agent only gets read-only tools), not just suggested; doer roles still flow through the approval gate. The active role shows in the chip strip, and ronin gently suggests a fitting role (e.g. `/role debugger` for "why is this failing?") without ever switching for you.
+
+  ```text
+  /role debugger     why is the token refresh failing?   → root-cause first, then fix (gated)
+  /role reviewer     review my changes                   → read-only findings, no edits
+  /role researcher   how does the router pick a model?   → read-only explanation w/ file:line
+  /role clear        back to default behavior
+  ```
 - **Shift+Tab modes**: cycle **normal → auto-accept → plan** edit modes, shown live in the input chrome.
 - **Streaming Markdown + inline tool calls**: replies stream as rendered Markdown; tool activity renders Claude-Code-style as `⏺ Read(file)` with `⎿ result` underneath; edits are shown as syntax-highlighted diffs you approve.
 - **@-file & @-URL mentions**: drop `@path` to pull a file into context, or `@https://…` to pull a web page's readable text into context. Start a message with a folder path to `cd` into it.
 - **Plan mode** (`--plan`) proposes the steps read-only, you approve, then it executes. **Resume** (`--continue`) picks up your last session.
-- **Live plan tracker**: multi-step tasks show a checklist (`✓ / ▶ / ☐`) the agent keeps current as it works.
+- **Live plan tracker**: multi-step tasks show a checklist the agent keeps current as it works — `✓` done · `▶` active · `☐` pending · `⊘` blocked · `✗` failed. It updates only from the agent's real `update_todos` state (no faked progress), and shows nothing when there's no plan.
 - **Tools**: read / write / `edit` / `multi_edit` / `glob` / search / run, plus **`web_search` / `fetch_url`**, **read-only git** (`git_status` / `git_diff` / `git_log`), **semantic code intelligence** (`diagnostics` / `definition` / `references` via LSP), a **`task`** subagent plus **`parallel_task`** (concurrent read-only fan-out) and **`isolated_task`** (parallel *mutating* sub-agents, each in its own git worktree so edits can't collide), and any **MCP** server's tools (`ronin mcp add …`).
 - **Integrations**: give the agent new tools three ways, each one command: **local MCP** servers (24-server catalog: `ronin mcp install github`), **remote/hosted MCP** servers (`ronin mcp add-remote …`), or **plugins** (200 built-ins like weather/currency/dns/uuid + scaffold your own with `ronin plugin new`). See **[docs/INTEGRATIONS.md](docs/INTEGRATIONS.md)**.
 - **Project memory**: auto-loads `RONIN.md` / `CLAUDE.md` / `AGENTS.md` from the repo so it follows your conventions.
-- **33 slash commands** · steer across turns: `/help`, `/login`, `/provider`, `/free`, `/model`, `/models`, `/theme`, `/mcp`, `/agents`, `/compact`, `/context`, `/copy`, `/export`, `/resume`, `/diff`, `/undo`, `/commit`, `/pr`, `/doctor`, `/config`, and more. `/provider` shows every provider with a free/paid + key-health view; `/free` switches to a $0 provider; `/theme` restyles code blocks + diffs live. The live status line + per-turn footer show the FREE/PAID badge, provider/model, mode, git branch, context, and time.
+- **34 slash commands** · steer across turns: `/help`, `/login`, `/provider`, `/free`, `/role`, `/model`, `/models`, `/theme`, `/mcp`, `/agents`, `/compact`, `/context`, `/copy`, `/export`, `/resume`, `/diff`, `/undo`, `/commit`, `/pr`, `/doctor`, `/config`, and more. `/provider` shows every provider with a free/paid + key-health view; `/free` switches to a $0 provider; `/role` picks a coding role; `/theme` restyles code blocks + diffs live. The chip strip + per-turn footer show the FREE/PAID badge, provider/model, mode, git branch, role, context, and time.
 
 ## 🧠 Supported providers
 
