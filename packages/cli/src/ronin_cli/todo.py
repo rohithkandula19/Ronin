@@ -16,12 +16,14 @@ from typing import Any
 
 from ronin_agent_patterns import Tool
 
-VALID_STATUS = {"pending", "in_progress", "completed"}
+VALID_STATUS = {"pending", "in_progress", "completed", "blocked", "failed"}
 
 _STATUS_GLYPH = {
     "completed": "[green]✓[/green]",
     "in_progress": "[yellow]▶[/yellow]",
     "pending": "[dim]☐[/dim]",
+    "blocked": "[#e0af68]⊘[/#e0af68]",
+    "failed": "[#f7768e]✗[/#f7768e]",
 }
 
 
@@ -44,7 +46,14 @@ class TodoStore:
 
     def summary(self) -> str:
         done = sum(1 for t in self.todos if t["status"] == "completed")
-        return f"{done}/{len(self.todos)} done"
+        s = f"{done}/{len(self.todos)} done"
+        blocked = sum(1 for t in self.todos if t["status"] == "blocked")
+        failed = sum(1 for t in self.todos if t["status"] == "failed")
+        if blocked:
+            s += f", {blocked} blocked"
+        if failed:
+            s += f", {failed} failed"
+        return s
 
 
 def build_todo_tool(store: TodoStore) -> Tool:
@@ -59,8 +68,10 @@ def build_todo_tool(store: TodoStore) -> Tool:
         description=(
             "Create or update your task checklist for a multi-step task. Pass the "
             "FULL list every time (it replaces the previous one). Keep exactly one "
-            "item 'in_progress'; mark items 'completed' as you finish them. Use this "
-            "for any task with 3+ steps so progress is visible."
+            "item 'in_progress'; mark items 'completed' as you finish them. Use "
+            "'blocked' for a step waiting on something (a missing dep, the user) and "
+            "'failed' for a step that genuinely failed — never mark 'completed' to "
+            "fake progress. Use this for any task with 3+ steps so progress is visible."
         ),
         input_schema={
             "type": "object",
@@ -96,5 +107,9 @@ def render_todos(console, todos: list[dict[str, Any]]) -> None:
             console.print(f"  {glyph} [dim strike]{content}[/dim strike]")
         elif status == "in_progress":
             console.print(f"  {glyph} [bold]{content}[/bold]")
+        elif status == "failed":
+            console.print(f"  {glyph} [#f7768e]{content}[/#f7768e]")
+        elif status == "blocked":
+            console.print(f"  {glyph} [#e0af68]{content}[/#e0af68] [dim](blocked)[/dim]")
         else:
             console.print(f"  {glyph} [dim]{content}[/dim]")
