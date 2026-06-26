@@ -217,3 +217,119 @@ def test_stage_line_truncates_in_narrow_terminal() -> None:
     assert len(visible) <= 32  # width + small slack for the indent
     assert "implementer" in visible
     assert "…" in visible  # detail was trimmed
+
+
+# --- orchestration (injected stage runner) -----------------------------------
+
+from ronin_cli.pipeline import StageOutcome, run_pipeline
+
+
+def _recording_runner(calls, *, fail_on=None, block_on=None):
+    def runner(config, role, prompt, *, read_only, root, console, max_iterations):
+        calls.append({"role": role, "read_only": read_only, "prompt": prompt})
+        if block_on == role:
+            return StageOutcome(success=False, summary=f"{role} blocked", blocked=True)
+        if fail_on == role:
+            return StageOutcome(success=False, summary=f"{role} failed")
+        return StageOutcome(success=True, summary=f"{role} ok")
+    return runner
+
+
+def test_pipeline_runs_stages_in_order_with_correct_readonly() -> None:
+    calls: list = []
+    cfg = RoninConfig(provider="cerebras")
+    state = run_pipeline(cfg, "do x", DEFAULT_ROLES, write=False,
+                         stage_runner=_recording_runner(calls))
+    assert [c["role"] for c in calls] == DEFAULT_ROLES        # sequential, in order
+    # read-only roles always RO; doer roles RO too without --write
+    assert all(c["read_only"] for c in calls)
+    assert state.outcome() == "completed"
+    assert all(s.status == "completed" for s in state.stages)
+    # handoff: later prompts carry prior stage summaries
+    assert "architect: architect ok" in calls[1]["prompt"]
+
+
+def test_write_capable_lets_doers_act_but_keeps_readonly_roles_locked() -> None:
+    calls: list = []
+    cfg = RoninConfig(provider="anthropic")
+    run_pipeline(cfg, "do x", ["architect", "implementer", "reviewer", "tester"],
+                 write=True, stage_runner=_recording_runner(calls))
+    ro = {c["role"]: c["read_only"] for c in calls}
+    assert ro["architect"] is True and ro["reviewer"] is True   # always read-only
+    assert ro["implementer"] is False and ro["tester"] is False  # may act (still gated)
+
+
+def test_pipeline_stops_on_failure_and_skips_rest() -> None:
+    calls: list = []
+    cfg = RoninConfig(provider="cerebras")
+    state = run_pipeline(cfg, "x", DEFAULT_ROLES,
+                         stage_runner=_recording_runner(calls, fail_on="implementer"))
+    assert [c["role"] for c in calls] == ["architect", "implementer"]  # halted
+    assert state.stage("implementer").status == "failed"
+    assert state.stage("reviewer").status == "skipped"
+    assert state.stage("tester").status == "skipped"
+    assert state.outcome() == "failed"
+    assert "stopped at implementer" in state.final_recommendation
+
+
+def test_pipeline_blocked_stage_halts() -> None:
+    calls: list = []
+    cfg = RoninConfig(provider="cerebras")
+    state = run_pipeline(cfg, "x", ["architect", "implementer", "tester"],
+                         stage_runner=_recording_runner(calls, block_on="implementer"))
+    assert state.stage("implementer").status == "blocked"
+    assert state.stage("tester").status == "skipped"
+    assert state.outcome() == "blocked"
+
+
+def test_dry_run_runs_no_stages() -> None:
+    def boom(*a, **k):
+        raise AssertionError("stage runner must not be called in --dry-run")
+    cfg = RoninConfig(provider="cerebras")
+    state = run_pipeline(cfg, "x", DEFAULT_ROLES, dry_run=True, stage_runner=boom)
+    assert state.outcome() == "planned"
+    assert all(s.status == "pending" for s in state.stages)
+
+
+def test_free_flag_sets_free_badge(monkeypatch) -> None:
+    _clear_shared_keys(monkeypatch)
+    cfg = RoninConfig(provider="anthropic")  # paid → free resolves to keyless local
+    state = run_pipeline(cfg, "x", ["architect"], free=True,
+                         stage_runner=_recording_runner([]))
+    # local keyless brain → LOCAL badge (still $0, never a paid API)
+    assert state.badge in ("FREE", "LOCAL")
+    assert state.provider in ("local", "cerebras", "groq", "gemini", "openrouter")
+
+
+def test_offline_flag_sets_local_badge() -> None:
+    cfg = RoninConfig(provider="anthropic")
+    state = run_pipeline(cfg, "x", ["architect"], offline=True,
+                         stage_runner=_recording_runner([]))
+    assert state.badge == "LOCAL"
+    assert state.offline is True
+    assert state.provider == "ollama"
+
+
+def test_default_runner_enforces_readonly_role_no_writes(tmp_path, monkeypatch) -> None:
+    """Integration: the real stage runner + a read-only role makes no edits."""
+    from unittest.mock import patch
+
+    from ronin_agent_patterns import FakeProvider, LLMResponse, ToolCall
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+    (tmp_path / "f.py").write_text("x = 1\n", encoding="utf-8")
+    # architect (read-only) tries to write — the tool isn't available, file stays
+    prov = FakeProvider(responses=[
+        LLMResponse(text="planning", stop_reason="tool_use",
+                    tool_calls=[ToolCall(id="t1", name="write_file",
+                                         arguments={"path": "f.py", "content": "x = 2\n"})],
+                    usage={"input_tokens": 5, "output_tokens": 2}),
+        LLMResponse(text="Here is the plan: change x to 2.", stop_reason="end_turn",
+                    usage={"input_tokens": 5, "output_tokens": 2}),
+    ])
+    cfg = RoninConfig(provider="anthropic")
+    with patch("ronin_cli.code_mode.build_provider", return_value=prov):
+        state = run_pipeline(cfg, "bump x", ["architect"], write=True, root=tmp_path,
+                             console=None, max_iterations=4)
+    assert (tmp_path / "f.py").read_text() == "x = 1\n"   # architect can't write
+    assert "write_file" not in prov.calls[0]["tool_names"]
+    assert state.stages[0].status in ("completed", "failed")

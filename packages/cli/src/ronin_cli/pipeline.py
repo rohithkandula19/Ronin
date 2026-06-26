@@ -12,7 +12,8 @@ fully testable; only :func:`run_pipeline` touches the agent.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Callable
 
 from pydantic import BaseModel, Field
 
@@ -229,3 +230,166 @@ def plan_pipeline(
         offline=offline, provider=provider, model=model, badge=badge, dry_run=dry_run,
         stages=[PipelineStage(role=r) for r in role_list],
     )
+
+
+# --- orchestration -----------------------------------------------------------
+
+@dataclass
+class StageOutcome:
+    """What one stage produced. Returned by a stage runner."""
+    success: bool
+    summary: str
+    files_changed: list[str] = field(default_factory=list)
+    commands_requested: list[str] = field(default_factory=list)
+    test_result: str = ""
+    blocked: bool = False
+
+
+# (config, role, prompt, *, read_only, root, console, max_iterations) -> StageOutcome
+StageRunner = Callable[..., StageOutcome]
+
+_STAGE_INSTRUCTION = {
+    "architect": "Produce a concise, concrete implementation plan: the files/modules "
+                 "to touch, the approach, and the ordered steps. Read-only — do not edit.",
+    "implementer": "Carry out the plan with focused, idiomatic edits.",
+    "reviewer": "Review the changes/plan so far for correctness, risks, security, and "
+                "missing tests. Report findings (file·line · severity · fix). Read-only.",
+    "tester": "Identify this project's tests for the change and verify them. Report real "
+              "results — never claim green without a passing run.",
+    "researcher": "Explore the relevant code read-only and report findings with file·line.",
+    "debugger": "Find the root cause of the failure before any fix; explain the actual cause.",
+}
+
+
+def _summarize(text: str, limit: int = 240) -> str:
+    text = (text or "").strip()
+    if not text:
+        return "(no output)"
+    para = text.split("\n\n", 1)[0].replace("\n", " ").strip()
+    return para if len(para) <= limit else para[: limit - 1] + "…"
+
+
+def _stage_prompt(task: str, role: str, prior: list[tuple[str, str]],
+                  *, write_capable: bool) -> str:
+    lines = [f"Original task: {task}", ""]
+    if prior:
+        lines.append("Context from prior pipeline stages:")
+        lines += [f"- {r}: {s}" for r, s in prior]
+        lines.append("")
+    lines.append(_STAGE_INSTRUCTION.get(role, "Do your part of the task for your role."))
+    if role in ("implementer", "tester", "debugger") and not write_capable:
+        lines.append("This is a READ-ONLY proposal run (no --write): describe exactly what "
+                     "you would change/run, but make no edits and run no commands.")
+    return "\n".join(lines)
+
+
+def _default_stage_runner(config, role, prompt, *, read_only, root, console,
+                          max_iterations) -> StageOutcome:
+    from .code_mode import run_code_agent
+    undo: list = []
+    result = run_code_agent(
+        config, prompt, root=root, console=console, yolo=False,
+        read_only=read_only, role=role, undo_stack=undo, max_iterations=max_iterations,
+    )
+    files = sorted({e[0] for e in undo if isinstance(e, (list, tuple)) and e})
+    return StageOutcome(
+        success=bool(result.success) and not result.blocked,
+        summary=_summarize(result.output),
+        files_changed=files,
+        blocked=bool(result.blocked),
+    )
+
+
+def _final_recommendation(state: PipelineState) -> str:
+    out = state.outcome()
+    done = sum(1 for s in state.stages if s.status == COMPLETED)
+    total = len(state.stages)
+    if out == "completed":
+        return f"all {total} stages completed."
+    stopper = next((s for s in state.stages if s.status in _STOP_STATUSES), None)
+    if stopper is not None:
+        return (f"stopped at {stopper.role} ({stopper.status}) after {done}/{total} "
+                f"stages — resolve it and re-run.")
+    return f"{done}/{total} stages completed."
+
+
+def run_pipeline(
+    config,
+    task: str,
+    role_list: list[str],
+    *,
+    write: bool = False,
+    free: bool = False,
+    offline: bool = False,
+    dry_run: bool = False,
+    root="." ,
+    console=None,
+    max_iterations: int = 25,
+    stage_runner: StageRunner | None = None,
+) -> PipelineState:
+    """Run the roles in sequence, handing each stage's summary to the next.
+
+    Sequential and single-agent-per-stage — NOT parallel, NOT autonomous. Each
+    stage is a gated ``run_code_agent`` run wearing its role; read-only roles
+    (and the whole pipeline without ``--write``) are enforced. A blocked/failed
+    stage halts the run (remaining stages are marked skipped). ``dry_run`` runs
+    nothing. Inject ``stage_runner`` to test the orchestration without a model.
+    """
+    from .offline import apply_free, apply_offline
+    from .status import cost_badge
+
+    cfg = config
+    if offline:
+        cfg = apply_offline(cfg.model_copy(update={"offline": True}))
+    elif free:
+        cfg = apply_free(cfg)
+    badge = "LOCAL" if offline else cost_badge(cfg)[0]
+    write_capable = bool(write) and not dry_run
+
+    state = plan_pipeline(
+        task, role_list, write_capable=write_capable, free=free, offline=offline,
+        provider=cfg.provider, model=cfg.resolved_model(), badge=badge, dry_run=dry_run,
+    )
+
+    if dry_run:
+        if console is not None:
+            render_pipeline_plan(console, state)
+        return state
+
+    runner = stage_runner or _default_stage_runner
+    prior: list[tuple[str, str]] = []
+    for i, role in enumerate(role_list):
+        stage = state.stages[i]
+        stage.status = ACTIVE
+        if console is not None:
+            console.print(f"  [yellow]▶[/yellow] [bold]{role}[/bold] "
+                          f"[dim]— {_PHASE.get(role, 'working')}[/dim]", highlight=False)
+        ro = stage_read_only(role, write_capable=write_capable)
+        prompt = _stage_prompt(task, role, prior, write_capable=write_capable)
+        try:
+            outcome = runner(cfg, role, prompt, read_only=ro, root=root,
+                             console=console, max_iterations=max_iterations)
+        except Exception as exc:  # noqa: BLE001 — one stage's crash shouldn't nuke the report
+            stage.status = FAILED
+            stage.summary = f"stage error: {exc}"
+            break
+        stage.summary = outcome.summary
+        stage.files_changed = list(outcome.files_changed)
+        stage.commands_requested = list(outcome.commands_requested)
+        stage.test_result = outcome.test_result
+        if outcome.blocked:
+            stage.status = BLOCKED
+            break  # stop — do not silently continue past a blocked stage
+        if not outcome.success:
+            stage.status = FAILED
+            break
+        stage.status = COMPLETED
+        prior.append((role, outcome.summary))
+
+    if state.stopped:  # mark the un-run tail as skipped
+        for s in state.stages:
+            if s.status == PENDING:
+                s.status = SKIPPED
+
+    state.final_recommendation = _final_recommendation(state)
+    return state
