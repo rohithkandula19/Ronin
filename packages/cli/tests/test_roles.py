@@ -75,3 +75,23 @@ def test_role_help_lines_cover_all_roles() -> None:
 )
 def test_suggest_role(task, expected) -> None:
     assert roles.suggest_role(task) == expected
+
+
+# --- role suggestion line (surfaced, never forced) ---------------------------
+
+def test_suggestion_line_only_when_no_role_active() -> None:
+    line = roles.role_suggestion_line("why is this failing?", current=None)
+    assert line is not None and "/role debugger" in line
+    # with a role already active, no suggestion (don't nag)
+    assert roles.role_suggestion_line("why is this failing?", current="implementer") is None
+
+
+def test_suggestion_line_none_for_neutral_task() -> None:
+    assert roles.role_suggestion_line("hello there", current=None) is None
+
+
+def test_suggestion_line_points_to_command_not_autoswitch() -> None:
+    line = roles.role_suggestion_line("review my PR", current=None)
+    assert "/role reviewer" in line
+    # purely a tip — calling it must not change the active role
+    assert roles.current_role() is None

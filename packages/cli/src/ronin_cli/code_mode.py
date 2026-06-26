@@ -1498,6 +1498,7 @@ def run_code_session(
     from .theme import apply_saved_theme
     apply_saved_theme(config.theme)  # honor a persisted /theme choice
     undo_stack: list = []
+    _role_hints_shown: set[str] = set()  # surface each role suggestion at most once
     transcript: list[str] = load_session(root) if continue_session else []
     # Structured conversation kept alive across turns — the real Message list with
     # tool calls/results, so the agent remembers files it read and the prompt-cache
@@ -1668,11 +1669,16 @@ def run_code_session(
 
         # Shift+Tab edit mode: plan → read-only, auto-accept → yolo, normal → default
         from .prompt_box import current_mode
-        from .roles import current_role
+        from .roles import current_role, role_suggestion_line
         _mode = current_mode()
         _role = current_role()
         _turn_yolo = True if _mode == "auto-accept" else yolo
         _read_only = (_mode == "plan")
+        # Gentle, once-per-session role suggestion (only when no role is set).
+        _hint = role_suggestion_line(user, _role)
+        if _hint and _hint not in _role_hints_shown:
+            _role_hints_shown.add(_hint)
+            console.print(f"  [#6b7089]{_hint}[/#6b7089]")
 
         import time as _time
         _t0 = _time.time()

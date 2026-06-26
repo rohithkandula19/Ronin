@@ -161,3 +161,18 @@ def suggest_role(task: str) -> str | None:
         if any(k in low for k in keywords):
             return role
     return None
+
+
+def role_suggestion_line(task: str, current: str | None) -> str | None:
+    """A gentle one-line hint suggesting a role, or None.
+
+    Only suggests when **no** role is active and the task clearly fits one. The
+    user stays in control: it points at ``/role <name>`` but never switches.
+    """
+    if current:
+        return None
+    role = suggest_role(task)
+    if not role:
+        return None
+    return (f"💡 tip: this looks like a job for [bold]/role {role}[/bold] — "
+            f"{ROLES[role].blurb.lower()}")
