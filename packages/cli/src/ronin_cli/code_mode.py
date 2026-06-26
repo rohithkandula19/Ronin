@@ -603,6 +603,7 @@ def run_code_agent(
     extra_system: str = "",
     include_image_tool: bool = True,
     base_system: str | None = None,
+    role: str | None = None,
     deny=None,
     # Headless callback overrides — when set (e.g. by the TUI), these replace the
     # console renderer/gate so the agent can be driven from another front-end.
@@ -620,6 +621,12 @@ def run_code_agent(
             error=f"injection-scan flagged: {[h['label'] for h in scan.hits]}",
             blocked=True,
         )
+
+    # A read-only role (researcher / reviewer / architect) restricts the agent to
+    # read-only tools — guidance that's also enforced, never a safety bypass.
+    from .roles import role_is_read_only
+    if role and role_is_read_only(role):
+        read_only = True
 
     # Full-access mode lifts the filesystem sandbox (and auto-approve is set by
     # the session via yolo). Otherwise stay confined to the project root.
@@ -694,6 +701,14 @@ def run_code_agent(
     system = base_system or CODE_SYSTEM
     if extra_system:
         system += "\n\n" + extra_system
+    # Role guidance shapes how the agent approaches the task (read-only roles are
+    # additionally enforced above). It augments the system prompt; it never lifts
+    # an approval gate.
+    if role:
+        from .roles import role_guidance
+        _rg = role_guidance(role)
+        if _rg:
+            system += "\n\n" + _rg
     # Make the agent aware of ronin's own integration commands + what's connected,
     # so it recommends `ronin mcp install github` instead of a generic git tutorial.
     # Interactive turns only (console set) — sub-agents/evals stay deterministic.
@@ -1157,6 +1172,7 @@ SLASH_COMMANDS: dict[str, str] = {
     "provider": "show providers (free/paid + key health), or switch: /provider <name>",
     "free": "free-mode status, or switch to a $0 provider: /free [on]",
     "theme": "show or switch the code syntax-highlight theme: /theme [name]",
+    "role": "set a coding role (researcher/implementer/reviewer/tester/architect/debugger): /role <name>",
     "clear": "forget the conversation so far",
     "undo": "revert the most recent file change",
     "diff": "show the working-tree git diff",
@@ -1197,6 +1213,7 @@ _HELP_GROUPS: list[tuple[str, list[str]]] = [
     ("✏️  editing & git", ["undo", "diff", "commit", "pr"]),
     ("📁  context & memory", ["memory", "init", "context", "compact", "resume", "clear"]),
     ("🔧  tools & agents", ["tools", "mcp", "integrations", "agents", "verify", "voice"]),
+    ("🎭  roles", ["role"]),
     ("⚙️  session", ["status", "copy", "export", "vim", "theme", "doctor", "config", "help", "quit"]),
 ]
 
@@ -1229,6 +1246,15 @@ def _render_help(console: "Console") -> None:
         for name in extra:
             console.print(f"    [cyan]/{name:<9}[/cyan] [dim]{SLASH_COMMANDS[name]}[/dim]")
         console.print()
+    # Roles — the six coding roles, each with its one-line purpose.
+    from .roles import ROLES, current_role
+    _cur = current_role()
+    console.print(f"  [bold {ACCENT}]🎭  roles[/bold {ACCENT}] [dim]· "
+                  f"active: {_cur or 'none'} · [bold]/role <name>[/bold] · [bold]/role clear[/bold][/dim]")
+    for r in ROLES.values():
+        ro = "read-only" if r.read_only else "edits gated"
+        console.print(f"    [cyan]/role {r.key:<11}[/cyan] [dim]{r.blurb:<22} ({ro})[/dim]")
+    console.print()
     console.print(Text("  @path / @url to add context · ! to run a shell command · "
                        "# to note a memory · shift+tab to cycle mode", style=MUTE))
     console.print()
@@ -1472,6 +1498,7 @@ def run_code_session(
     from .theme import apply_saved_theme
     apply_saved_theme(config.theme)  # honor a persisted /theme choice
     undo_stack: list = []
+    _role_hints_shown: set[str] = set()  # surface each role suggestion at most once
     transcript: list[str] = load_session(root) if continue_session else []
     # Structured conversation kept alive across turns — the real Message list with
     # tool calls/results, so the agent remembers files it read and the prompt-cache
@@ -1527,11 +1554,13 @@ def run_code_session(
                                 if isinstance(_p, dict):
                                     _used += _estimate_tokens(_p.get("text", ""))
                     _left = max(0, 100 - int(_used * 100 / 128000))
-                    # Premium live status: FREE/PAID · provider/model · mode · branch* · ctx
+                    # Always-visible chip strip: [FREE] [provider:model] [mode]
+                    # [branch*] [write-gated] [role:x], width-aware.
                     from .prompt_box import current_mode
-                    from .status import status_text
-                    _status = status_text(config, root, edit_mode=current_mode(),
-                                          ctx_tokens=_used)
+                    from .roles import current_role
+                    from .status import chip_strip
+                    _status = chip_strip(config, root, edit_mode=current_mode(),
+                                         role=current_role(), width=max(40, console.width))
                 except Exception:  # noqa: BLE001
                     pass
                 import os as _os_pin
@@ -1640,9 +1669,16 @@ def run_code_session(
 
         # Shift+Tab edit mode: plan → read-only, auto-accept → yolo, normal → default
         from .prompt_box import current_mode
+        from .roles import current_role, role_suggestion_line
         _mode = current_mode()
+        _role = current_role()
         _turn_yolo = True if _mode == "auto-accept" else yolo
         _read_only = (_mode == "plan")
+        # Gentle, once-per-session role suggestion (only when no role is set).
+        _hint = role_suggestion_line(user, _role)
+        if _hint and _hint not in _role_hints_shown:
+            _role_hints_shown.add(_hint)
+            console.print(f"  [#6b7089]{_hint}[/#6b7089]")
 
         import time as _time
         _t0 = _time.time()
@@ -1669,7 +1705,7 @@ def run_code_session(
                 turn_cfg, user, root=root, console=console, yolo=_turn_yolo,
                 max_iterations=max_iterations, undo_stack=undo_stack,
                 history_prefix=history_prefix, message_history=message_history,
-                read_only=_read_only,
+                read_only=_read_only, role=_role,
                 extra_tools=(build_background_tools(root) + build_checkpoint_tools(root)
                              + build_vision_tools(turn_cfg, root)
                              + build_semantic_tools(turn_cfg, root)),
@@ -1881,11 +1917,13 @@ def run_unified_session(
                                 if isinstance(_p, dict):
                                     _used += _estimate_tokens(_p.get("text", ""))
                     _left = max(0, 100 - int(_used * 100 / 128000))
-                    # Premium live status: FREE/PAID · provider/model · mode · branch* · ctx
+                    # Always-visible chip strip: [FREE] [provider:model] [mode]
+                    # [branch*] [write-gated] [role:x], width-aware.
                     from .prompt_box import current_mode
-                    from .status import status_text
-                    _status = status_text(config, root, edit_mode=current_mode(),
-                                          ctx_tokens=_used)
+                    from .roles import current_role
+                    from .status import chip_strip
+                    _status = chip_strip(config, root, edit_mode=current_mode(),
+                                         role=current_role(), width=max(40, console.width))
                 except Exception:  # noqa: BLE001
                     pass
                 import os as _os_pin
@@ -2004,7 +2042,9 @@ def run_unified_session(
 
         # Shift+Tab edit mode: plan → read-only, auto-accept → yolo, normal → default
         from .prompt_box import current_mode
+        from .roles import current_role
         _mode = current_mode()
+        _role = current_role()
         _turn_yolo = True if _mode == "auto-accept" else yolo
         _read_only = (_mode == "plan")
 
@@ -2018,7 +2058,7 @@ def run_unified_session(
                 turn_cfg, user, root=root, console=console, yolo=_turn_yolo,
                 max_iterations=max_iterations, undo_stack=undo_stack,
                 history_prefix=history_prefix, message_history=message_history,
-                extra_tools=extra, read_only=_read_only,
+                extra_tools=extra, read_only=_read_only, role=_role,
                 base_system=UNIFIED_SYSTEM, extra_system=mem_block, include_image_tool=False,
             )
         pending.extend(_iq.drain())

@@ -654,3 +654,58 @@ def test_theme_rejects_unknown(tmp_path: Path, monkeypatch) -> None:
     assert "unknown theme" in out
     assert theme.CODE_THEME == "dracula"      # unchanged
     assert cfg.theme is None
+
+
+# --- /role (Wave 3) ----------------------------------------------------------
+
+import pytest as _pytest
+
+
+@_pytest.fixture(autouse=True)
+def _reset_role_state():
+    from ronin_cli import roles
+    roles.set_role(None)
+    yield
+    roles.set_role(None)
+
+
+def test_role_lists_when_no_arg(tmp_path: Path) -> None:
+    action, out = _call("/role", root=tmp_path)
+    assert action == "handled"
+    for k in ("researcher", "implementer", "reviewer", "tester", "architect", "debugger"):
+        assert k in out
+
+
+def test_role_set_persists_in_session(tmp_path: Path) -> None:
+    from ronin_cli import roles
+    action, out = _call("/role debugger", root=tmp_path)
+    assert action == "handled"
+    assert roles.current_role() == "debugger"   # persists across the session
+    assert "Debugger" in out
+
+
+def test_role_read_only_label_shown(tmp_path: Path) -> None:
+    _, out = _call("/role reviewer", root=tmp_path)
+    assert "read-only" in out
+
+
+def test_role_clear(tmp_path: Path) -> None:
+    from ronin_cli import roles
+    _call("/role architect", root=tmp_path)
+    assert roles.current_role() == "architect"
+    _, out = _call("/role clear", root=tmp_path)
+    assert roles.current_role() is None
+    assert "cleared" in out
+
+
+def test_role_rejects_unknown(tmp_path: Path) -> None:
+    from ronin_cli import roles
+    _, out = _call("/role wizard", root=tmp_path)
+    assert "unknown role" in out
+    assert roles.current_role() is None
+
+
+def test_help_has_roles_section(tmp_path: Path) -> None:
+    _, out = _call("/help", root=tmp_path)
+    assert "roles" in out.lower()
+    assert "/role researcher" in out and "/role debugger" in out

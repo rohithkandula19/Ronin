@@ -77,3 +77,61 @@ def test_code_agent_renders_plan_checklist(tmp_path: Path, monkeypatch: pytest.M
     out = buf.getvalue()
     assert "Plan" in out
     assert "Read target.py" in out and "Apply the fix" in out
+
+
+# --- Wave 3: blocked / failed states + summary -------------------------------
+
+def test_blocked_and_failed_are_valid_statuses() -> None:
+    store = TodoStore()
+    store.replace([
+        {"content": "Read module", "status": "completed"},
+        {"content": "Patch bug", "status": "in_progress"},
+        {"content": "Run tests", "status": "blocked"},
+        {"content": "Deploy", "status": "failed"},
+        {"content": "Doc it", "status": "pending"},
+    ])
+    statuses = [t["status"] for t in store.todos]
+    assert statuses == ["completed", "in_progress", "blocked", "failed", "pending"]
+
+
+def test_summary_counts_blocked_and_failed() -> None:
+    store = TodoStore()
+    store.replace([
+        {"content": "a", "status": "completed"},
+        {"content": "b", "status": "blocked"},
+        {"content": "c", "status": "failed"},
+        {"content": "d", "status": "failed"},
+    ])
+    s = store.summary()
+    assert "1/4 done" in s and "1 blocked" in s and "2 failed" in s
+
+
+def test_render_shows_all_five_states() -> None:
+    buf = io.StringIO()
+    console = Console(file=buf, force_terminal=False, width=80)
+    render_todos(console, [
+        {"content": "Read auth module", "status": "completed"},
+        {"content": "Patch token refresh bug", "status": "in_progress"},
+        {"content": "Run focused tests", "status": "blocked"},
+        {"content": "Ship", "status": "failed"},
+        {"content": "Summarize diff", "status": "pending"},
+    ])
+    out = buf.getvalue()
+    assert "Plan" in out
+    for word in ("Read auth module", "Patch token refresh bug", "Run focused tests",
+                 "Ship", "Summarize diff"):
+        assert word in out
+    assert "blocked" in out  # the blocked annotation
+
+
+def test_render_no_plan_is_silent() -> None:
+    buf = io.StringIO()
+    console = Console(file=buf, force_terminal=False, width=80)
+    render_todos(console, [])           # no plan → render nothing
+    assert buf.getvalue() == ""
+
+
+def test_unknown_status_still_coerced_to_pending() -> None:
+    store = TodoStore()
+    store.replace([{"content": "x", "status": "wat"}])
+    assert store.todos == [{"content": "x", "status": "pending"}]
