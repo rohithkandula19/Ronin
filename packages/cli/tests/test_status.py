@@ -159,3 +159,67 @@ def test_status_omits_git_segment_outside_repo() -> None:
     # no trailing branch noise; still shows badge + model
     assert "FREE" in text
     assert text.count(" · ") >= 1
+
+
+# --- chip strip (Wave 3) -----------------------------------------------------
+
+from ronin_cli.status import chip_strip, gate_label
+
+
+def test_chip_strip_full_row() -> None:
+    cfg = RoninConfig(provider="cerebras")
+    g = GitState(repo=True, branch="main", dirty=True, changes=1)
+    strip = chip_strip(cfg, ".", edit_mode="normal", width=120, git=g)
+    assert "[FREE]" in strip
+    assert f"[cerebras:{cfg.resolved_model()}]" in strip
+    assert "[normal]" in strip
+    assert "[main*]" in strip
+    assert "[write-gated]" in strip
+
+
+def test_chip_strip_shows_role_chip() -> None:
+    cfg = RoninConfig(provider="groq")
+    strip = chip_strip(cfg, ".", role="debugger", width=120, git=GitState())
+    assert "[role:debugger]" in strip
+
+
+def test_chip_strip_auto_accept_drops_write_gated() -> None:
+    cfg = RoninConfig(provider="anthropic")
+    strip = chip_strip(cfg, ".", edit_mode="auto-accept", width=120, git=GitState())
+    assert "[auto-accept]" in strip
+    assert "write-gated" not in strip  # the mode chip already conveys it
+
+
+def test_chip_strip_read_only_role_shows_read_only_gate() -> None:
+    cfg = RoninConfig(provider="groq")
+    strip = chip_strip(cfg, ".", role="reviewer", width=120, git=GitState())
+    assert "[read-only]" in strip
+
+
+def test_chip_strip_degrades_in_narrow_terminal() -> None:
+    cfg = RoninConfig(provider="cerebras")
+    g = GitState(repo=True, branch="feature/very-long-branch-name", dirty=True)
+    narrow = chip_strip(cfg, ".", edit_mode="normal", role="debugger", width=28, git=g)
+    # never exceeds the width budget
+    assert len(narrow) <= 28
+    # but the safety + cost signals survive
+    assert "[FREE]" in narrow
+    assert "[normal]" in narrow
+    # lowest-priority chips (role / branch) are the first to be dropped
+    assert "[role:debugger]" not in narrow
+
+
+def test_chip_strip_outside_git_has_no_branch() -> None:
+    cfg = RoninConfig(provider="groq")
+    strip = chip_strip(cfg, ".", width=120, git=GitState())  # not a repo
+    assert "[FREE]" in strip
+    # no branch chip, no crash
+    assert "*" not in strip
+
+
+def test_gate_label_semantics() -> None:
+    assert gate_label("normal") == "write-gated"
+    assert gate_label("plan") == "read-only"
+    assert gate_label("auto-accept") is None
+    assert gate_label("normal", full_access=True) is None
+    assert gate_label("normal", read_only=True) == "read-only"

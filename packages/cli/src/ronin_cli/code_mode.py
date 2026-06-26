@@ -1553,11 +1553,13 @@ def run_code_session(
                                 if isinstance(_p, dict):
                                     _used += _estimate_tokens(_p.get("text", ""))
                     _left = max(0, 100 - int(_used * 100 / 128000))
-                    # Premium live status: FREE/PAID · provider/model · mode · branch* · ctx
+                    # Always-visible chip strip: [FREE] [provider:model] [mode]
+                    # [branch*] [write-gated] [role:x], width-aware.
                     from .prompt_box import current_mode
-                    from .status import status_text
-                    _status = status_text(config, root, edit_mode=current_mode(),
-                                          ctx_tokens=_used)
+                    from .roles import current_role
+                    from .status import chip_strip
+                    _status = chip_strip(config, root, edit_mode=current_mode(),
+                                         role=current_role(), width=max(40, console.width))
                 except Exception:  # noqa: BLE001
                     pass
                 import os as _os_pin
@@ -1909,11 +1911,13 @@ def run_unified_session(
                                 if isinstance(_p, dict):
                                     _used += _estimate_tokens(_p.get("text", ""))
                     _left = max(0, 100 - int(_used * 100 / 128000))
-                    # Premium live status: FREE/PAID · provider/model · mode · branch* · ctx
+                    # Always-visible chip strip: [FREE] [provider:model] [mode]
+                    # [branch*] [write-gated] [role:x], width-aware.
                     from .prompt_box import current_mode
-                    from .status import status_text
-                    _status = status_text(config, root, edit_mode=current_mode(),
-                                          ctx_tokens=_used)
+                    from .roles import current_role
+                    from .status import chip_strip
+                    _status = chip_strip(config, root, edit_mode=current_mode(),
+                                         role=current_role(), width=max(40, console.width))
                 except Exception:  # noqa: BLE001
                     pass
                 import os as _os_pin

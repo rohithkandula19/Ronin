@@ -227,3 +227,69 @@ def status_markup(config, root, *, edit_mode: str = "normal",
     segs = status_segments(config, root, edit_mode=edit_mode, ctx_tokens=ctx_tokens,
                            elapsed=elapsed, git=git, brand=brand)
     return f"  [{MUTE}]·[/{MUTE}]  ".join(f"[{hex_}]{text}[/{hex_}]" for text, hex_ in segs)
+
+
+# --- the chip strip ----------------------------------------------------------
+
+def gate_label(edit_mode: str, *, full_access: bool = False,
+               read_only: bool = False) -> str | None:
+    """The write-gate chip text, or None when the mode chip already conveys it.
+
+    - read-only mode/role -> "read-only"
+    - auto-accept / full-access -> None (the mode chip already says auto-accept)
+    - otherwise -> "write-gated" (the safety default: edits need approval)
+    """
+    if read_only or edit_mode == "plan":
+        return "read-only"
+    if full_access or edit_mode == "auto-accept":
+        return None
+    return "write-gated"
+
+
+def chip_strip(config, root, *, edit_mode: str = "normal", role: str | None = None,
+               width: int = 80, git: GitState | None = None,
+               full_access: bool | None = None) -> str:
+    """A compact, bracketed, width-aware chip row, e.g.::
+
+        [FREE] [cerebras:gpt-oss-120b] [normal] [main*] [write-gated]
+
+    Always shows the cost badge and mode; appends the write-gate, git branch, and
+    role chips as space allows. Under a narrow terminal it sheds the
+    lowest-priority chips first (role, then branch, then model) but never the
+    badge / mode / gate (the cost + safety signals). Never crashes outside git.
+    """
+    from .roles import role_is_read_only
+
+    if full_access is None:
+        full_access = getattr(config, "full_access", False)
+    badge, _ = cost_badge(config)
+    g = git if git is not None else git_state(root)
+    read_only = bool(role and role_is_read_only(role))
+
+    # (text, drop_priority) — higher priority is kept longer under narrow width.
+    items: list[tuple[str, int]] = [
+        (badge, 100),                                              # cost — always
+        (f"{config.provider}:{config.resolved_model()}", 50),     # what's running
+        (edit_mode, 90),                                          # mode — safety
+    ]
+    gate = gate_label(edit_mode, full_access=full_access, read_only=read_only)
+    if gate:
+        items.append((gate, 85))                                  # gate — safety
+    if g.label():
+        items.append((g.label(), 30))                            # git
+    if role:
+        items.append((f"role:{role}", 20))                       # role
+
+    def _render(keep: set[int]) -> str:
+        return " ".join(f"[{items[i][0]}]" for i in range(len(items)) if i in keep)
+
+    keep = set(range(len(items)))
+    line = _render(keep)
+    if len(line) <= width:
+        return line
+    # shed lowest-priority chips (preserving order) until it fits
+    for i in sorted(keep, key=lambda j: items[j][1]):
+        if len(_render(keep)) <= width:
+            break
+        keep.discard(i)
+    return _render(keep)
