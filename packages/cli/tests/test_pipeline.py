@@ -136,3 +136,84 @@ def test_apply_free_picks_first_preference_with_shared_key(monkeypatch) -> None:
 def test_apply_offline_forces_local_brain() -> None:
     cfg = RoninConfig(provider="anthropic", offline=True)
     assert apply_offline(cfg).provider == "ollama"
+
+
+# --- renderers ---------------------------------------------------------------
+
+import io
+from rich.console import Console
+
+from ronin_cli.pipeline import (
+    render_pipeline,
+    render_pipeline_plan,
+    render_pipeline_result,
+    stage_line,
+)
+
+
+def _render(fn, state, width=80) -> str:
+    buf = io.StringIO()
+    fn(Console(file=buf, force_terminal=False, width=width), state)
+    return buf.getvalue()
+
+
+def test_render_pipeline_live_states() -> None:
+    st = plan_pipeline("fix bug", DEFAULT_ROLES)
+    st.stages[0].status = "completed"; st.stages[0].summary = "plan created"
+    st.stages[1].status = "active"
+    out = _render(render_pipeline, st)
+    assert "Pipeline" in out
+    assert "✓ architect" in out and "plan created" in out
+    assert "▶ implementer" in out
+    assert "☐ reviewer" in out and "waiting" in out
+
+
+def test_render_blocked_and_failed_states() -> None:
+    st = plan_pipeline("x", ["implementer", "tester"])
+    st.stages[0].status = "failed"; st.stages[0].summary = "patch did not apply"
+    st.stages[1].status = "blocked"
+    out = _render(render_pipeline, st)
+    assert "✗ implementer" in out and "patch did not apply" in out
+    assert "⊘ tester" in out and "blocked" in out
+
+
+def test_render_result_lists_each_stage_and_final() -> None:
+    st = plan_pipeline("ship", ["architect", "reviewer"])
+    st.stages[0].status = "completed"; st.stages[0].summary = "designed modules"
+    st.stages[1].status = "completed"; st.stages[1].summary = "no blocking issues"
+    st.final_recommendation = "safe to merge"
+    out = _render(render_pipeline_result, st)
+    assert "Pipeline result" in out
+    assert "Architect:" in out and "designed modules" in out
+    assert "Reviewer:" in out and "no blocking issues" in out
+    assert "Final:" in out and "safe to merge" in out
+
+
+def test_dry_run_plan_shows_sequence_and_permissions() -> None:
+    st = plan_pipeline("do x", DEFAULT_ROLES, write_capable=False,
+                       provider="cerebras", model="gpt-oss-120b", badge="FREE", dry_run=True)
+    out = _render(render_pipeline_plan, st)
+    assert "dry run" in out and "READ-ONLY" in out
+    assert "FREE" in out and "cerebras/gpt-oss-120b" in out
+    for role in DEFAULT_ROLES:
+        assert role in out
+    assert "read-only (proposal)" in out  # implementer in read-only pipeline
+
+
+def test_dry_run_plan_write_capable_label() -> None:
+    st = plan_pipeline("do x", ["implementer"], write_capable=True, dry_run=True)
+    out = _render(render_pipeline_plan, st)
+    assert "WRITE-CAPABLE" in out
+    assert "edits + commands (gated)" in out
+
+
+def test_stage_line_truncates_in_narrow_terminal() -> None:
+    st = PipelineStage(role="implementer", status="active",
+                       summary="proposing a very long diff across many files and modules here")
+    line = stage_line(st, width=30)
+    # the visible text (strip rich tags) stays within budget
+    import re
+    visible = re.sub(r"\[/?[^\]]+\]", "", line)
+    assert len(visible) <= 32  # width + small slack for the indent
+    assert "implementer" in visible
+    assert "…" in visible  # detail was trimmed
