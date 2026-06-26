@@ -603,6 +603,7 @@ def run_code_agent(
     extra_system: str = "",
     include_image_tool: bool = True,
     base_system: str | None = None,
+    role: str | None = None,
     deny=None,
     # Headless callback overrides — when set (e.g. by the TUI), these replace the
     # console renderer/gate so the agent can be driven from another front-end.
@@ -620,6 +621,12 @@ def run_code_agent(
             error=f"injection-scan flagged: {[h['label'] for h in scan.hits]}",
             blocked=True,
         )
+
+    # A read-only role (researcher / reviewer / architect) restricts the agent to
+    # read-only tools — guidance that's also enforced, never a safety bypass.
+    from .roles import role_is_read_only
+    if role and role_is_read_only(role):
+        read_only = True
 
     # Full-access mode lifts the filesystem sandbox (and auto-approve is set by
     # the session via yolo). Otherwise stay confined to the project root.
@@ -694,6 +701,14 @@ def run_code_agent(
     system = base_system or CODE_SYSTEM
     if extra_system:
         system += "\n\n" + extra_system
+    # Role guidance shapes how the agent approaches the task (read-only roles are
+    # additionally enforced above). It augments the system prompt; it never lifts
+    # an approval gate.
+    if role:
+        from .roles import role_guidance
+        _rg = role_guidance(role)
+        if _rg:
+            system += "\n\n" + _rg
     # Make the agent aware of ronin's own integration commands + what's connected,
     # so it recommends `ronin mcp install github` instead of a generic git tutorial.
     # Interactive turns only (console set) — sub-agents/evals stay deterministic.
@@ -1651,7 +1666,9 @@ def run_code_session(
 
         # Shift+Tab edit mode: plan → read-only, auto-accept → yolo, normal → default
         from .prompt_box import current_mode
+        from .roles import current_role
         _mode = current_mode()
+        _role = current_role()
         _turn_yolo = True if _mode == "auto-accept" else yolo
         _read_only = (_mode == "plan")
 
@@ -1680,7 +1697,7 @@ def run_code_session(
                 turn_cfg, user, root=root, console=console, yolo=_turn_yolo,
                 max_iterations=max_iterations, undo_stack=undo_stack,
                 history_prefix=history_prefix, message_history=message_history,
-                read_only=_read_only,
+                read_only=_read_only, role=_role,
                 extra_tools=(build_background_tools(root) + build_checkpoint_tools(root)
                              + build_vision_tools(turn_cfg, root)
                              + build_semantic_tools(turn_cfg, root)),
@@ -2015,7 +2032,9 @@ def run_unified_session(
 
         # Shift+Tab edit mode: plan → read-only, auto-accept → yolo, normal → default
         from .prompt_box import current_mode
+        from .roles import current_role
         _mode = current_mode()
+        _role = current_role()
         _turn_yolo = True if _mode == "auto-accept" else yolo
         _read_only = (_mode == "plan")
 
@@ -2029,7 +2048,7 @@ def run_unified_session(
                 turn_cfg, user, root=root, console=console, yolo=_turn_yolo,
                 max_iterations=max_iterations, undo_stack=undo_stack,
                 history_prefix=history_prefix, message_history=message_history,
-                extra_tools=extra, read_only=_read_only,
+                extra_tools=extra, read_only=_read_only, role=_role,
                 base_system=UNIFIED_SYSTEM, extra_system=mem_block, include_image_tool=False,
             )
         pending.extend(_iq.drain())

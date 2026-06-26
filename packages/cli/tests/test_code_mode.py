@@ -395,3 +395,51 @@ def test_message_history_takes_precedence_over_text_prefix(tmp_path: Path, monke
     assert "SHOULD-NOT-APPEAR" not in contents          # text tail suppressed
     assert "earlier question" in contents               # structured history used
     assert "new question" in contents
+
+
+# ---------- Wave 3: role-aware run_code_agent ----------
+
+def test_read_only_role_blocks_writes_even_with_yolo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A read-only role (researcher) must restrict the agent to read-only tools,
+    so a write is impossible even under yolo. Guidance that is also enforced."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+    (tmp_path / "target.py").write_text("fixed = False\n", encoding="utf-8")
+    config = RoninConfig(provider="anthropic")
+    prov = _edit_provider()  # tries read then write then summarize
+
+    with patch("ronin_cli.code_mode.build_provider", return_value=prov):
+        result = run_code_agent(config, "look at target.py", root=tmp_path,
+                                console=None, yolo=True, role="researcher")
+
+    assert result.success
+    # the write tool was never available → the file is untouched
+    assert (tmp_path / "target.py").read_text() == "fixed = False\n"
+    # write_file was filtered out of the toolset offered to the model
+    assert "write_file" not in prov.calls[0]["tool_names"]
+    assert "read_file" in prov.calls[0]["tool_names"]
+
+
+def test_role_guidance_injected_into_system_prompt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+    config = RoninConfig(provider="anthropic")
+    prov = FakeProvider(responses=[
+        LLMResponse(text="On it.", stop_reason="end_turn",
+                    usage={"input_tokens": 5, "output_tokens": 2}),
+    ])
+    with patch("ronin_cli.code_mode.build_provider", return_value=prov):
+        run_code_agent(config, "review the diff", root=tmp_path, console=None,
+                       yolo=True, role="reviewer")
+    assert "ROLE: Reviewer" in prov.calls[0]["system"]
+
+
+def test_no_role_leaves_tools_and_system_unchanged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+    config = RoninConfig(provider="anthropic")
+    prov = FakeProvider(responses=[
+        LLMResponse(text="hi", stop_reason="end_turn",
+                    usage={"input_tokens": 5, "output_tokens": 2}),
+    ])
+    with patch("ronin_cli.code_mode.build_provider", return_value=prov):
+        run_code_agent(config, "hello", root=tmp_path, console=None, yolo=True)
+    assert "ROLE:" not in prov.calls[0]["system"]   # no role → no role block
+    assert "write_file" in prov.calls[0]["tool_names"]  # full toolset
