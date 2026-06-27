@@ -611,9 +611,10 @@ def test_truth_table_fields() -> None:
     st.final_verdict = compute_final_verdict(st)
     t = truth_table(st)
     assert t["tests_run"] == "yes"
-    assert t["verify_command"] == "passed"
+    assert t["verify_result"] == "passed"
     assert "1 met" in t["acceptance"]
     assert t["contract"] == "passed"
+    assert t["semantic_contract"] == "disabled"  # not enabled in this state
     assert t["review_blockers"] == "none"
     assert t["final_verdict"] == "passed"
 
@@ -756,3 +757,61 @@ def test_no_detected_command_preserves_advisory(tmp_path) -> None:
     state = run_pipeline(cfg, "x", ["verifier"], stage_runner=runner, root=tmp_path)
     assert state.verify_source == "not_found"
     assert state.final_verdict == "passed"
+
+
+# --- Wave 7: semantic contract integration + truth table ---------------------
+
+def test_semantic_failed_forces_final_failed() -> None:
+    st = _completed_state(["implementer", "verifier"], verdict="passed",
+                          iv={"requested": True, "ran": True, "passed": True},
+                          contract={"final_contract_status": "passed"})
+    st.semantic = {"final_semantic_status": "failed",
+                   "objective_alignment": "misaligned", "evidence": ["touches unrelated files"]}
+    assert compute_final_verdict(st) == "failed"
+
+
+def test_semantic_warning_is_advisory_not_failing() -> None:
+    st = _completed_state(["implementer", "verifier"], verdict="passed",
+                          iv={"requested": True, "ran": True, "passed": True},
+                          contract={"final_contract_status": "passed"})
+    st.semantic = {"final_semantic_status": "warning"}
+    assert compute_final_verdict(st) == "passed"  # warning doesn't block
+
+
+def test_truth_table_has_wave7_rows() -> None:
+    st = _completed_state(["implementer", "verifier"], verdict="passed",
+                          iv={"requested": True, "ran": True, "passed": True})
+    st.verify_source = "detected"
+    st.git_snapshot = {"dirty_state": False}
+    st.semantic = {"final_semantic_status": "passed"}
+    st.final_verdict = compute_final_verdict(st)
+    t = truth_table(st)
+    assert t["verify_command"] == "detected"
+    assert t["git_snapshot"] == "clean"
+    assert t["semantic_contract"] == "passed"
+
+
+def test_run_pipeline_semantic_enabled_records_report() -> None:
+    def runner(config, role, prompt, *, read_only, root, console, max_iterations):
+        art = None
+        if role == "implementer":
+            art = {"kind": "implementation_report", "files_changed": ["x.py"]}
+        if role == "verifier":
+            art = {"kind": "verification_report", "final_verdict": "passed", "tests_run": ["t"]}
+        return StageOutcome(success=True, summary=f"{role} ok", artifact=art)
+
+    import ronin_cli.pipeline as pl
+    # inject the judge by patching check_semantic_contract's runner indirectly:
+    import ronin_cli.runner as rn
+    from ronin_agent_patterns import FakeProvider, LLMResponse
+    prov = FakeProvider(responses=[LLMResponse(
+        text='```json\n{"objective_alignment":"aligned","acceptance_alignment":"aligned",'
+             '"scope_creep_risk":"none","evidence":["did the thing"]}\n```',
+        stop_reason="end_turn", usage={"input_tokens": 1, "output_tokens": 1})])
+    import unittest.mock as mock
+    cfg = RoninConfig(provider="cerebras")
+    with mock.patch.object(rn, "build_provider", return_value=prov):
+        state = run_pipeline(cfg, "x", ["implementer", "verifier"], stage_runner=runner,
+                             auto_verify_enabled=False, semantic_enabled=True)
+    assert state.semantic.get("final_semantic_status") == "passed"
+    assert state.semantic.get("parsed") is True

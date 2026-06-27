@@ -506,6 +506,7 @@ def pipeline(
     verify_timeout: int = typer.Option(600, "--verify-timeout", help="Timeout (seconds) for the verify command."),
     no_independent_verify: bool = typer.Option(False, "--no-independent-verify", help="Skip running --verify-cmd; keep advisory verifier only."),
     no_auto_verify: bool = typer.Option(False, "--no-auto-verify", help="Don't auto-detect a verify command when --verify-cmd is absent."),
+    semantic_contract: bool = typer.Option(False, "--semantic-contract/--no-semantic-contract", help="Run a read-only semantic check: does the diff actually fulfil the plan? (extra model call)"),
     save_state_path: Optional[Path] = typer.Option(None, "--save-state", help="Write PipelineState JSON after every stage."),
     resume: Optional[Path] = typer.Option(None, "--resume", help="Resume a saved PipelineState JSON from the first incomplete stage."),
     rerun_completed: bool = typer.Option(False, "--rerun-completed", help="On --resume, re-run completed stages too."),
@@ -600,6 +601,7 @@ def pipeline(
         verify_cmd=verify_cmd, verify_timeout=verify_timeout,
         independent_verify_enabled=not no_independent_verify,
         auto_verify_enabled=not no_auto_verify,
+        semantic_enabled=semantic_contract,
         resume_state=resume_state, rerun_completed=rerun_completed,
         save_path=save_state_path,
     )
