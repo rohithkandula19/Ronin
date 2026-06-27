@@ -650,3 +650,50 @@ def test_run_pipeline_no_verify_cmd_preserves_advisory() -> None:
     state = run_pipeline(cfg, "x", ["architect", "verifier"], stage_runner=runner)
     assert state.independent_verify == {}          # nothing ran
     assert state.final_verdict == "passed"          # advisory preserved
+
+
+# --- Wave 6: CLI flags (resume / verify / json shape / gating) ---------------
+
+def test_cli_no_task_no_resume_exits_2(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    res = _runner.invoke(app, ["pipeline"])
+    assert res.exit_code == 2
+    assert "give a task" in res.stdout or "--resume" in res.stdout
+
+
+def test_cli_resume_corrupt_file_exits_2(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json", encoding="utf-8")
+    res = _runner.invoke(app, ["pipeline", "--resume", str(bad)])
+    assert res.exit_code == 2
+    assert "corrupt" in res.stdout.lower() or "incompatible" in res.stdout.lower()
+
+
+def test_cli_resume_continues_from_incomplete(tmp_path, monkeypatch) -> None:
+    import json as _json
+    monkeypatch.chdir(tmp_path)
+    # a saved state: architect done, implementer failed, verifier pending
+    saved = plan_pipeline("resume me", ["architect", "implementer", "verifier"])
+    saved.stages[0].status = "completed"
+    saved.stages[0].artifact = {"kind": "architect"}
+    saved.stages[1].status = "failed"
+    saved.root = str(tmp_path)
+    path = tmp_path / "st.json"
+    path.write_text(saved.model_dump_json(), encoding="utf-8")
+    out = tmp_path / "after.json"
+    # resume in dry-run so no model is needed; it should load + re-render the plan
+    res = _runner.invoke(app, ["pipeline", "--resume", str(path), "--dry-run", "--out", str(out)])
+    assert res.exit_code == 0
+    data = _json.loads(out.read_text())
+    assert data["task"] == "resume me"
+    assert data["roles"] == ["architect", "implementer", "verifier"]
+
+
+def test_cli_json_state_has_wave6_fields(tmp_path, monkeypatch) -> None:
+    import json as _json
+    monkeypatch.chdir(tmp_path)
+    res = _runner.invoke(app, ["pipeline", "do x", "--dry-run", "--json"])
+    data = _json.loads(res.stdout)
+    for key in ("contract", "independent_verify", "final_verdict", "verdict", "root"):
+        assert key in data

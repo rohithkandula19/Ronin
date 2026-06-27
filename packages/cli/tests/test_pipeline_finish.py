@@ -117,3 +117,15 @@ def test_finish_skips_outside_git_repo(tmp_path: Path) -> None:
     res = finish_pipeline(None, tmp_path, RoninConfig(provider="cerebras"),
                           _verifier_state("passed"), do_commit=True)
     assert res["skipped_reason"] == "not a git repository"
+
+
+# --- Wave 6: commit gate keyed on the combined final verdict -----------------
+
+def test_gate_uses_final_verdict_when_present() -> None:
+    st = _verifier_state("passed")          # verifier stage said passed…
+    st.final_verdict = "failed"             # …but the combined verdict failed (e.g. verify)
+    allowed, reason = commit_gate(st)
+    assert allowed is False and "failed" in reason
+    # and a passing combined verdict allows it
+    st.final_verdict = "passed"
+    assert commit_gate(st)[0] is True
