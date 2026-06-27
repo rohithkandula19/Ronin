@@ -19,8 +19,9 @@ from pydantic import BaseModel, Field
 
 from . import roles as _roles
 
-# architect designs → implementer proposes/edits → reviewer reviews → tester verifies
-DEFAULT_ROLES: list[str] = ["architect", "implementer", "reviewer", "tester"]
+# architect designs → implementer edits → reviewer reviews → tester runs tests →
+# verifier confirms the work actually meets the plan's acceptance criteria.
+DEFAULT_ROLES: list[str] = ["architect", "implementer", "reviewer", "tester", "verifier"]
 
 # stage status vocabulary (mirrors the plan tracker)
 PENDING, ACTIVE, COMPLETED, BLOCKED, FAILED, SKIPPED = (

@@ -86,6 +86,18 @@ ROLES: dict[str, Role] = {
             "actual cause — not just the symptom — before changing anything."
         ),
     ),
+    "verifier": Role(
+        "verifier", "Verifier", "Confirm the work is really done",
+        read_only=True,
+        guidance=(
+            "ROLE: Verifier. READ-ONLY final check. Confirm the implementation actually "
+            "matches the architect's acceptance criteria, that the claimed tests really "
+            "ran (don't take 'passed' on faith — look for evidence), and that the files "
+            "changed match the plan. Flag any unverified claim. Produce a verdict of "
+            "passed / failed / blocked / unknown — and NEVER mark unknown as passed. Do "
+            "NOT edit files or fix anything; only verify and report."
+        ),
+    ),
 }
 
 

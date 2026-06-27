@@ -19,7 +19,7 @@ from ronin_cli.pipeline import (
 # --- role parsing ------------------------------------------------------------
 
 def test_default_role_sequence() -> None:
-    assert DEFAULT_ROLES == ["architect", "implementer", "reviewer", "tester"]
+    assert DEFAULT_ROLES == ["architect", "implementer", "reviewer", "tester", "verifier"]
     assert parse_roles(None) == DEFAULT_ROLES
     assert parse_roles("") == DEFAULT_ROLES
     assert parse_roles("  ") == DEFAULT_ROLES
