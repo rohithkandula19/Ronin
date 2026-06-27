@@ -769,7 +769,8 @@ def run_pipeline(
             ).text
 
         sem = check_semantic_contract(state.architect_plan(), state.implementation_report(),
-                                      state.review_report(), judge_runner=_judge)
+                                      state.review_report(), judge_runner=_judge,
+                                      diff_evidence=state.diff_evidence)
         state.semantic = sem.model_dump()
 
     state.final_verdict = compute_final_verdict(state)

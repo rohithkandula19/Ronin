@@ -808,11 +808,25 @@ def test_run_pipeline_semantic_enabled_records_report() -> None:
         text='```json\n{"objective_alignment":"aligned","acceptance_alignment":"aligned",'
              '"scope_creep_risk":"none","evidence":["did the thing"]}\n```',
         stop_reason="end_turn", usage={"input_tokens": 1, "output_tokens": 1})])
+    import pathlib
+    import subprocess as _sp
+    import tempfile
+
     import unittest.mock as mock
     cfg = RoninConfig(provider="cerebras")
-    with mock.patch.object(rn, "build_provider", return_value=prov):
-        state = run_pipeline(cfg, "x", ["implementer", "verifier"], stage_runner=runner,
-                             auto_verify_enabled=False, semantic_enabled=True)
+    # deterministic full diff: a tmp git repo with a small uncommitted change, so
+    # the semantic 'passed' isn't downgraded for a missing/truncated diff.
+    with tempfile.TemporaryDirectory() as td:
+        for args in (("init", "-q"), ("config", "user.email", "t@t.t"), ("config", "user.name", "t")):
+            _sp.run(["git", "-C", td, *args], check=True, capture_output=True)
+        (pathlib.Path(td) / "x.py").write_text("v = 1\n", encoding="utf-8")
+        _sp.run(["git", "-C", td, "add", "-A"], check=True, capture_output=True)
+        _sp.run(["git", "-C", td, "commit", "-q", "-m", "init"], check=True, capture_output=True)
+        (pathlib.Path(td) / "x.py").write_text("v = 2\n", encoding="utf-8")  # real, small diff
+        with mock.patch.object(rn, "build_provider", return_value=prov):
+            state = run_pipeline(cfg, "x", ["implementer", "verifier"], stage_runner=runner,
+                                 root=td, auto_verify_enabled=False, semantic_enabled=True)
+    assert state.diff_evidence.get("full_diff_available") is True
     assert state.semantic.get("final_semantic_status") == "passed"
     assert state.semantic.get("parsed") is True
 
