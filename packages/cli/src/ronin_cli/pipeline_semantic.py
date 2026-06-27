@@ -54,9 +54,10 @@ def finalize_semantic_status(report: SemanticContractReport) -> str:
 
 
 def build_semantic_prompt(plan: ArchitectPlan | None, impl: ImplementationReport | None,
-                          review: ReviewReport | None) -> str:
+                          review: ReviewReport | None, diff_evidence: dict | None = None) -> str:
     lines = ["You are a READ-ONLY semantic reviewer. Judge whether the implementation "
-             "actually fulfils the plan. Do NOT edit anything.", ""]
+             "actually fulfils the plan, grounded in the ACTUAL diff below. Do NOT edit "
+             "anything.", ""]
     if plan is not None:
         lines += [f"PLAN objective: {plan.objective or '(none stated)'}",
                   f"PLAN files_to_change: {', '.join(plan.files_to_change) or '(none)'}",
@@ -71,11 +72,23 @@ def build_semantic_prompt(plan: ArchitectPlan | None, impl: ImplementationReport
     if review is not None and review.required_fixes:
         lines.append(f"REVIEW required_fixes: {' | '.join(review.required_fixes)}")
         lines.append("")
+
+    de = diff_evidence or {}
+    if de.get("captured") and de.get("full_diff_available"):
+        trunc = " (TRUNCATED — judge cautiously, don't claim certainty)" if de.get("truncated") else ""
+        lines += [f"ACTUAL DIFF{trunc} — files: {', '.join(de.get('files_changed', [])) or '(none)'} "
+                  f"(+{de.get('additions', 0)} / -{de.get('deletions', 0)}):",
+                  "```diff", de.get("diff_excerpt", "")[:8000], "```", ""]
+    else:
+        lines += ["ACTUAL DIFF: not available — you cannot confirm what changed. Do NOT "
+                  "claim the work is aligned; prefer 'unknown' for what the diff would show.", ""]
+
     lines += [
-        "Answer: did the diff implement the planned objective? did changed files match "
-        "the plan? were the acceptance criteria addressed? is there obvious scope creep? "
-        "any unresolved risks? Be honest about uncertainty — say 'unknown' when the "
-        "evidence is weak.",
+        "Answer, grounded in the actual diff: did the diff implement the planned objective? "
+        "did changed files match the plan? are there unexpected files changed? were the "
+        "acceptance criteria likely addressed? is there scope creep? any risky changes the "
+        "implementer didn't mention? Be honest about uncertainty — say 'unknown' when the "
+        "diff is missing or too thin to tell.",
         "",
         "End with a single ```json block of this shape (use explicit unknowns):",
         '{"objective_alignment": "aligned|partially_aligned|misaligned|unknown", '
@@ -87,14 +100,19 @@ def build_semantic_prompt(plan: ArchitectPlan | None, impl: ImplementationReport
 
 
 def check_semantic_contract(plan: ArchitectPlan | None, impl: ImplementationReport | None,
-                            review: ReviewReport | None, *, judge_runner) -> SemanticContractReport:
+                            review: ReviewReport | None, *, judge_runner,
+                            diff_evidence: dict | None = None) -> SemanticContractReport:
     """Run the injected ``judge_runner(prompt) -> str`` and build a conservative
     report. Returns an all-unknown report (never raises) when there's no runner,
-    no parseable JSON, or the runner errors."""
+    no parseable JSON, or the runner errors.
+
+    Honesty: a 'passed' status is downgraded when the diff evidence is missing
+    (→ unknown) or truncated (→ warning) — no semantic certainty without a full
+    diff to look at."""
     if judge_runner is None:
         return SemanticContractReport(final_semantic_status="unknown",
                                       summary="semantic check not run (no judge)")
-    prompt = build_semantic_prompt(plan, impl, review)
+    prompt = build_semantic_prompt(plan, impl, review, diff_evidence)
     try:
         reply = judge_runner(prompt) or ""
     except Exception as exc:  # noqa: BLE001 — degrade to unknown, never crash the run
@@ -110,5 +128,12 @@ def check_semantic_contract(plan: ArchitectPlan | None, impl: ImplementationRepo
         report = SemanticContractReport()
     report.parsed = True
     report.summary = (reply.strip().splitlines() or [""])[0][:200]
-    report.final_semantic_status = finalize_semantic_status(report)
+    status = finalize_semantic_status(report)
+    # Don't claim semantic certainty without a full diff to look at.
+    de = diff_evidence or {}
+    diff_full = bool(de.get("captured") and de.get("full_diff_available")
+                     and not de.get("truncated"))
+    if status == "passed" and not diff_full:
+        status = "warning" if de.get("truncated") else "unknown"
+    report.final_semantic_status = status
     return report

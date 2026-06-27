@@ -17,7 +17,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import typer
 from rich import box
@@ -502,16 +502,23 @@ def pipeline(
     roles: str = typer.Option(
         None, "--roles", help="Comma-separated role order. Default: "
         "architect,implementer,reviewer,tester,verifier."),
-    verify_cmd: Optional[str] = typer.Option(None, "--verify-cmd", help="Command the verifier runs itself (gated) to independently confirm the work."),
+    verify_cmd: Optional[List[str]] = typer.Option(None, "--verify-cmd", help="Verification command the verifier runs itself (gated). Repeatable for multiple suites."),
+    verify_suite: Optional[List[str]] = typer.Option(None, "--verify-suite", help="Named verification suite 'name:command' (gated). Repeatable."),
+    auto_verify_all: bool = typer.Option(False, "--auto-verify-all", help="Auto-detect and run multiple suites (tests, lint, typecheck, build) — all gated."),
     verify_timeout: int = typer.Option(600, "--verify-timeout", help="Timeout (seconds) for the verify command."),
     no_independent_verify: bool = typer.Option(False, "--no-independent-verify", help="Skip running --verify-cmd; keep advisory verifier only."),
     no_auto_verify: bool = typer.Option(False, "--no-auto-verify", help="Don't auto-detect a verify command when --verify-cmd is absent."),
     semantic_contract: bool = typer.Option(False, "--semantic-contract/--no-semantic-contract", help="Run a read-only semantic check: does the diff actually fulfil the plan? (extra model call)"),
+    diff_context: int = typer.Option(3, "--diff-context", help="Unified-diff context lines for the captured evidence."),
+    max_diff_bytes: int = typer.Option(20000, "--max-diff-bytes", help="Truncate the captured diff excerpt to this many bytes."),
+    no_diff_evidence: bool = typer.Option(False, "--no-diff-evidence", help="Don't capture the working-tree diff as evidence."),
     save_state_path: Optional[Path] = typer.Option(None, "--save-state", help="Write PipelineState JSON after every stage."),
     resume: Optional[Path] = typer.Option(None, "--resume", help="Resume a saved PipelineState JSON from the first incomplete stage."),
     rerun_completed: bool = typer.Option(False, "--rerun-completed", help="On --resume, re-run completed stages too."),
     force_resume: bool = typer.Option(False, "--force-resume", help="Resume even if the git/working-tree state changed since the checkpoint."),
     checkpoint: bool = typer.Option(False, "--checkpoint", help="Create a lightweight git safety snapshot before running (never touches your tree)."),
+    restore_checkpoint: bool = typer.Option(False, "--restore-checkpoint", help="On an unsafe --resume, offer to restore the saved checkpoint (gated, overwrites the tree)."),
+    no_restore_offer: bool = typer.Option(False, "--no-restore-offer", help="On an unsafe --resume, don't mention/offer checkpoint restore."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show the plan + permissions; run nothing, edit nothing."),
     write: bool = typer.Option(False, "--write", help="Allow doer stages to edit/run (still approval-gated). Off = read-only proposal."),
     free: bool = typer.Option(False, "--free", help="Prefer a free ($0) provider for all stages."),
@@ -559,17 +566,46 @@ def pipeline(
         from .pipeline_git_snapshot import GitSnapshot, compare_snapshots, git_snapshot
         saved_snap = GitSnapshot.model_validate(resume_state.git_snapshot) if resume_state.git_snapshot else None
         cmp = compare_snapshots(saved_snap, git_snapshot("."))
+        resume_state.resume_git_status = cmp.status if cmp.status != "clean" else "matched"
         if cmp.status in ("changed", "warning"):
             console.print(f"[yellow]⚠ working tree changed since the checkpoint "
                           f"({cmp.status}):[/yellow]")
             for w in cmp.warnings:
                 console.print(f"  [yellow]· {w}[/yellow]")
-            if not force_resume:
+            cid = resume_state.checkpoint_id
+            # Offer a gated restore only when explicitly requested AND a checkpoint
+            # exists. Never automatic; the restore itself asks before overwriting.
+            if restore_checkpoint and cid is not None:
+                from .checkpoint import restore_checkpoint as _restore
+                console.print(f"  [bold]restore checkpoint #{cid}[/bold] to match the saved state? "
+                              "this [bold]overwrites your current working tree[/bold].")
+                if Confirm.ask("  proceed with restore?", default=False, console=console):
+                    console.print(f"  [dim]{_restore('.', cid)}[/dim]")
+                    cmp2 = compare_snapshots(saved_snap, git_snapshot("."))
+                    if cmp2.status in ("changed", "warning") and not force_resume:
+                        console.print("[red]tree still doesn't match after restore — pass "
+                                      "[bold]--force-resume[/bold] to continue anyway.[/red]")
+                        raise typer.Exit(2)
+                    resume_state.resume_git_status = "restored"
+                    console.print("[green]✓ restored — continuing[/green]")
+                elif not force_resume:
+                    console.print("[red]restore declined — exiting. Pass [bold]--force-resume[/bold] "
+                                  "to continue without restoring.[/red]")
+                    raise typer.Exit(2)
+            elif cid is not None and not no_restore_offer:
+                console.print(f"  [dim]a checkpoint (#{cid}) is available — pass "
+                              "[bold]--restore-checkpoint[/bold] to restore it (gated), or "
+                              "[bold]--force-resume[/bold] to continue as-is.[/dim]")
+                if not force_resume:
+                    raise typer.Exit(2)
+            elif not force_resume:
                 console.print("[red]refusing to resume — re-check your changes, then pass "
                               "[bold]--force-resume[/bold] to continue anyway.[/red]")
                 raise typer.Exit(2)
-            console.print("[dim]--force-resume: continuing despite the changes[/dim]")
+            if force_resume and resume_state.resume_git_status != "restored":
+                console.print("[dim]--force-resume: continuing despite the changes[/dim]")
         elif cmp.status == "unavailable":
+            resume_state.resume_git_status = "unavailable"
             console.print("[dim]note: git state unavailable — can't verify the tree is unchanged[/dim]")
     else:
         if not task.strip():
@@ -582,11 +618,14 @@ def pipeline(
             raise typer.Exit(2)
 
     # --checkpoint: a lightweight safety snapshot of the working tree (tracked +
-    # untracked) into a ronin ref, WITHOUT touching the index/branch/HEAD.
+    # untracked) into a ronin ref, WITHOUT touching the index/branch/HEAD. Its id
+    # is saved into the state so a later --resume can restore it.
+    _checkpoint_id = None
     if checkpoint:
         from .checkpoint import NotAGitRepo, create_checkpoint
         try:
             cp = create_checkpoint(Path("."), label="pipeline")
+            _checkpoint_id = cp.id
             console.print(f"[dim]✓ checkpoint #{cp.id} ({cp.sha[:8]}) — restore with "
                           f"[bold]ronin checkpoint restore {cp.id}[/bold] if needed[/dim]")
         except NotAGitRepo:
@@ -598,12 +637,15 @@ def pipeline(
     state = run_pipeline(
         config, task, role_list, write=write, free=free, offline=offline,
         dry_run=dry_run, console=render_console,
-        verify_cmd=verify_cmd, verify_timeout=verify_timeout,
+        verify_cmds=verify_cmd, verify_suites=verify_suite, auto_verify_all=auto_verify_all,
+        verify_timeout=verify_timeout,
         independent_verify_enabled=not no_independent_verify,
         auto_verify_enabled=not no_auto_verify,
         semantic_enabled=semantic_contract,
+        diff_context=diff_context, max_diff_bytes=max_diff_bytes,
+        diff_evidence_enabled=not no_diff_evidence,
         resume_state=resume_state, rerun_completed=rerun_completed,
-        save_path=save_state_path,
+        save_path=save_state_path, checkpoint_id=_checkpoint_id,
     )
 
     if json_out:

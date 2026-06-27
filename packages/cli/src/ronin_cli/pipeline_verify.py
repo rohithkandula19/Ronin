@@ -118,6 +118,141 @@ def _subprocess_run(command: str, *, cwd: str, timeout: int) -> subprocess.Compl
                           text=True, timeout=timeout)
 
 
+class SuiteRun(BaseModel):
+    """Result of one named verification suite. Serializable."""
+    name: str = ""
+    command: str = ""
+    status: str = "unknown"   # passed / failed / blocked / skipped / unknown
+    exit_code: int | None = None
+    duration: float = 0.0
+    output_summary: str = ""
+    declined: bool = False
+    timed_out: bool = False
+
+
+def parse_verify_suite(spec: str) -> tuple[str, str]:
+    """Parse ``"name:command"`` into ``(name, command)``; a spec with no colon
+    becomes ``("verify", spec)``."""
+    spec = (spec or "").strip()
+    name, sep, cmd = spec.partition(":")
+    if not sep:
+        return "verify", spec
+    return name.strip() or "verify", cmd.strip()
+
+
+def auto_detect_suites(root) -> list[tuple[str, str]]:
+    """Best-effort detection of several verification suites for ``--auto-verify-all``.
+
+    Returns ``(name, command)`` pairs for the suites that look applicable to this
+    repo (tests, lint, typecheck). Running them is still gated; this only lists
+    candidates. Conservative — only suggests a suite when its config/tool is
+    plausibly present."""
+    import shutil
+    from pathlib import Path
+
+    root = Path(root)
+    suites: list[tuple[str, str]] = []
+
+    tests = auto_detect_verify_command(root)
+    if tests is not None:
+        suites.append(("tests", tests[0]))
+
+    py = (root / "pyproject.toml").is_file() or (root / "setup.cfg").is_file() \
+        or any(root.glob("*.py"))
+    uv = "uv run " if shutil.which("uv") else ""
+    if py:
+        pp = (root / "pyproject.toml")
+        wants_ruff = shutil.which("ruff") or (pp.is_file() and "ruff" in pp.read_text(
+            encoding="utf-8", errors="ignore"))
+        if wants_ruff:
+            suites.append(("lint", f"{uv}ruff check ."))
+        if shutil.which("mypy") or (pp.is_file() and "mypy" in pp.read_text(
+                encoding="utf-8", errors="ignore")):
+            suites.append(("typecheck", f"{uv}mypy ."))
+
+    if (root / "package.json").is_file():
+        try:
+            import json as _json
+            scripts = (_json.loads((root / "package.json").read_text(encoding="utf-8"))
+                       .get("scripts") or {})
+        except (ValueError, OSError):
+            scripts = {}
+        pm = "pnpm" if (root / "pnpm-lock.yaml").is_file() else \
+            ("yarn" if (root / "yarn.lock").is_file() else "npm")
+        for suite, script in (("lint", "lint"), ("typecheck", "typecheck"), ("build", "build")):
+            if script in scripts:
+                suites.append((suite, f"{pm} run {script}"))
+        if (root / "tsconfig.json").is_file() and "typecheck" not in dict(suites):
+            suites.append(("typecheck", "npx tsc --noEmit"))
+
+    # de-dup by command, keep first
+    seen, out = set(), []
+    for name, cmd in suites:
+        if cmd not in seen:
+            seen.add(cmd)
+            out.append((name, cmd))
+    return out
+
+
+def run_suite(name: str, command: str, root, *, timeout: int = 600, yolo: bool = False,
+              console=None, approve_fn=None, run_fn=None, clock=None) -> SuiteRun:
+    """Run one suite (gated, via :func:`independent_verify`) into a :class:`SuiteRun`."""
+    clock = clock or _monotonic
+    t0 = clock()
+    iv = independent_verify(command, root, timeout=timeout, yolo=yolo, console=console,
+                            approve_fn=approve_fn, run_fn=run_fn)
+    status = {"passed": "passed", "failed": "failed", "blocked": "blocked",
+              "not_provided": "skipped"}.get(iv.verdict(), "unknown")
+    return SuiteRun(name=name, command=command, status=status, exit_code=iv.exit_code,
+                    duration=round(clock() - t0, 3), output_summary=iv.output_summary,
+                    declined=iv.declined, timed_out=iv.timed_out)
+
+
+def run_suites(suites: list[tuple[str, str]], root, *, timeout: int = 600,
+               yolo: bool = False, console=None, approve_fn=None, run_fn=None,
+               clock=None) -> list[SuiteRun]:
+    """Run each ``(name, command)`` suite in order, gated. A declined suite halts
+    the rest (don't keep prompting once the user said no)."""
+    results: list[SuiteRun] = []
+    for name, command in suites:
+        if console is not None:
+            console.print(f"  [#6b7089]suite[/#6b7089] [bold]{name}[/bold]: "
+                          f"[cyan]{command}[/cyan]", highlight=False)
+        sr = run_suite(name, command, root, timeout=timeout, yolo=yolo, console=console,
+                       approve_fn=approve_fn, run_fn=run_fn, clock=clock)
+        results.append(sr)
+        if sr.declined:
+            break  # the user declined — stop asking
+    return results
+
+
+def aggregate_verify(suites: list[SuiteRun]) -> VerifyRun:
+    """Collapse the suite results into a single VerifyRun for the final verdict.
+
+    Any failed suite → failed; any declined/blocked (none failed) → blocked;
+    all passed → passed."""
+    if not suites:
+        return VerifyRun(requested=False)
+    run = VerifyRun(requested=True, command="; ".join(s.name for s in suites))
+    if any(s.status == "failed" for s in suites):
+        run.ran = True
+        run.passed = False
+        return run
+    if any(s.declined or s.status == "blocked" for s in suites):
+        run.declined = True
+        return run
+    if any(s.status == "passed" for s in suites):
+        run.ran = True
+        run.passed = True
+        return run
+    return VerifyRun(requested=False)  # all skipped → nothing really ran
+
+
+def _monotonic() -> float:
+    import time
+    return time.monotonic()
+
+
 def reconcile_with_tester(verify: VerifyRun, tester_verdict: str | None) -> str | None:
     """Note when the tester over-claimed vs the independent run, or None.
 

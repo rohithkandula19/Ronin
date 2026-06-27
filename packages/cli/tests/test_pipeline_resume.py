@@ -132,17 +132,72 @@ def _init_repo(tmp_path):
     subprocess.run(["git", "-C", str(tmp_path), "commit", "-q", "-m", "init"], check=True, capture_output=True)
 
 
-def _saved_state(tmp_path, snap_dict):
+def _saved_state(tmp_path, snap_dict, *, checkpoint_id=None):
     st = plan_pipeline("resume me", ["architect", "verifier"])
     st.stages[0].status = "completed"
     st.stages[0].artifact = {"kind": "architect"}
     st.stages[1].status = "failed"
     st.root = str(tmp_path.resolve())
     st.git_snapshot = snap_dict
+    st.checkpoint_id = checkpoint_id
     # keep the state file OUTSIDE the repo so it doesn't dirty the tree vs the snapshot
     path = tmp_path.parent / "st.json"
     path.write_text(st.model_dump_json(), encoding="utf-8")
     return path
+
+
+# --- Wave 8: checkpoint restore on unsafe resume -----------------------------
+
+def test_resume_mismatch_offers_restore(tmp_path, monkeypatch) -> None:
+    _init_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    snap = git_snapshot(tmp_path).model_dump()
+    path = _saved_state(tmp_path, snap, checkpoint_id=1)
+    (tmp_path / "a.txt").write_text("CHANGED\n", encoding="utf-8")
+    res = _runner.invoke(app, ["pipeline", "--resume", str(path), "--dry-run"])
+    assert res.exit_code == 2
+    assert "--restore-checkpoint" in res.stdout  # the offer is surfaced
+
+
+def test_no_restore_offer_suppresses(tmp_path, monkeypatch) -> None:
+    _init_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    snap = git_snapshot(tmp_path).model_dump()
+    path = _saved_state(tmp_path, snap, checkpoint_id=1)
+    (tmp_path / "a.txt").write_text("CHANGED\n", encoding="utf-8")
+    res = _runner.invoke(app, ["pipeline", "--resume", str(path), "--dry-run", "--no-restore-offer"])
+    assert res.exit_code == 2
+    assert "restore-checkpoint" not in res.stdout  # offer suppressed
+    assert "refusing to resume" in res.stdout
+
+
+def test_restore_declined_exits_safely(tmp_path, monkeypatch) -> None:
+    _init_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    snap = git_snapshot(tmp_path).model_dump()
+    path = _saved_state(tmp_path, snap, checkpoint_id=1)
+    (tmp_path / "a.txt").write_text("CHANGED\n", encoding="utf-8")
+    res = _runner.invoke(app, ["pipeline", "--resume", str(path), "--dry-run",
+                               "--restore-checkpoint"], input="n\n")
+    assert res.exit_code == 2
+    assert "declined" in res.stdout
+    # local change is untouched (never destroyed without approval)
+    assert (tmp_path / "a.txt").read_text() == "CHANGED\n"
+
+
+def test_restore_success_rechecks_and_continues(tmp_path, monkeypatch) -> None:
+    from ronin_cli.checkpoint import create_checkpoint
+    _init_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    cp = create_checkpoint(tmp_path, label="pipeline")     # snapshot the clean tree
+    snap = git_snapshot(tmp_path).model_dump()             # taken AFTER the checkpoint
+    path = _saved_state(tmp_path, snap, checkpoint_id=cp.id)
+    (tmp_path / "a.txt").write_text("CHANGED\n", encoding="utf-8")  # now dirty
+    res = _runner.invoke(app, ["pipeline", "--resume", str(path), "--dry-run",
+                               "--restore-checkpoint"], input="y\n")
+    assert res.exit_code == 0
+    assert "restored" in res.stdout.lower()
+    assert (tmp_path / "a.txt").read_text() == "one\n"     # tree restored from the checkpoint
 
 
 def test_resume_same_git_state_succeeds(tmp_path, monkeypatch) -> None:

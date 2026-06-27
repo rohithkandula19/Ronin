@@ -119,7 +119,11 @@ class PipelineState(BaseModel):
     verify_source: str = ""      # provided / detected / not_found / disabled
     contract: dict = Field(default_factory=dict)            # serialized ContractCheckReport
     semantic: dict = Field(default_factory=dict)            # serialized SemanticContractReport
+    diff_evidence: dict = Field(default_factory=dict)       # serialized DiffEvidence (real diff)
+    suites: list[dict] = Field(default_factory=list)        # serialized SuiteRun list
     git_snapshot: dict = Field(default_factory=dict)        # serialized GitSnapshot at run start
+    checkpoint_id: int | None = None  # --checkpoint id (for safe restore on resume)
+    resume_git_status: str = ""  # matched / changed / restored / warning / unavailable (set on resume)
     final_verdict: str = ""      # combined Wave-6+ verdict (verifier + verify + contract + …)
     final_recommendation: str = ""
 
@@ -264,6 +268,7 @@ def render_pipeline_result(console, state: PipelineState) -> None:
         console.print(f"  {glyph} [bold]{label}:[/bold] [dim]{detail}[/dim]", highlight=False)
         if s.files_changed:
             console.print(f"      [dim]files: {', '.join(s.files_changed)}[/dim]", highlight=False)
+    render_suites(console, state)
     render_acceptance(console, state)
     render_final_verification(console, state)
     if state.final_recommendation:
@@ -487,11 +492,29 @@ def truth_table(state: PipelineState) -> dict[str, str]:
     crit = state.acceptance_summary()
     contract_status = (state.contract or {}).get("final_contract_status", "unknown")
     blockers = (state.contract or {}).get("blocking_issues") or []
-    git_status = (state.git_snapshot or {}).get("dirty_state")
-    git_cell = "unavailable" if not state.git_snapshot else ("changed" if git_status else "clean")
+    if state.resume_git_status:  # set by the CLI on a --resume (matched/restored/…)
+        git_cell = state.resume_git_status
+    else:
+        git_status = (state.git_snapshot or {}).get("dirty_state")
+        git_cell = "unavailable" if not state.git_snapshot else ("changed" if git_status else "clean")
     semantic_cell = (state.semantic or {}).get("final_semantic_status", "disabled") \
         if state.semantic else "disabled"
+    de = state.diff_evidence or {}
+    if not de or not de.get("captured"):
+        diff_cell = "disabled" if de.get("note") == "diff evidence disabled" else "missing"
+    elif de.get("truncated"):
+        diff_cell = "truncated"
+    elif de.get("full_diff_available"):
+        diff_cell = "available"
+    else:
+        diff_cell = "missing"
+    n = len(state.suites)
+    passed_n = sum(1 for s in state.suites if s.get("status") == "passed")
+    failed_n = sum(1 for s in state.suites if s.get("status") == "failed")
+    suites_cell = f"{n} total, {passed_n} passed, {failed_n} failed" if n else "none"
     return {
+        "diff_evidence": diff_cell,
+        "suites": suites_cell,
         "verify_command": state.verify_source or "not_found",
         "tests_run": tests_run,
         "verify_result": iv.verdict(),
@@ -505,11 +528,33 @@ def truth_table(state: PipelineState) -> dict[str, str]:
     }
 
 
+_SUITE_GLYPH = {"passed": "[green]✓[/green]", "failed": "[#f7768e]✗[/#f7768e]",
+                "blocked": "[#e0af68]⊘[/#e0af68]", "skipped": "[dim]–[/dim]",
+                "unknown": "[dim]?[/dim]"}
+
+
+def render_suites(console, state: PipelineState) -> None:
+    """Compact per-suite table (name · command · status · exit · duration)."""
+    if not state.suites:
+        return
+    console.print("  [bold]Verification suites[/bold]")
+    for s in state.suites:
+        glyph = _SUITE_GLYPH.get(s.get("status", "unknown"), "[dim]?[/dim]")
+        ec = s.get("exit_code")
+        meta = f"exit {ec}" if ec is not None else s.get("status", "")
+        dur = f"{s.get('duration', 0):.2f}s"
+        console.print(f"    {glyph} [bold]{s.get('name', '')}[/bold] "
+                      f"[dim]{s.get('command', '')}[/dim] [#6b7089]· {meta} · {dur}[/#6b7089]",
+                      highlight=False)
+
+
 def render_final_verification(console, state: PipelineState) -> None:
     """The compact 'Final Verification' truth table."""
     t = truth_table(state)
     hexc = _VERDICT_HEX.get(t["final_verdict"], "#6b7089")
     console.print("  [bold]Final Verification[/bold]")
+    console.print(f"    [dim]Diff evidence:[/dim]      {t['diff_evidence']}", highlight=False)
+    console.print(f"    [dim]Suites run:[/dim]         {t['suites']}", highlight=False)
     console.print(f"    [dim]Verify command:[/dim]     {t['verify_command']}", highlight=False)
     console.print(f"    [dim]Verify result:[/dim]      {t['verify_result']}", highlight=False)
     console.print(f"    [dim]Tests run:[/dim]          {t['tests_run']}", highlight=False)
@@ -536,13 +581,20 @@ def run_pipeline(
     max_iterations: int = 25,
     stage_runner: StageRunner | None = None,
     verify_cmd: str | None = None,
+    verify_cmds: list[str] | None = None,
+    verify_suites: list[str] | None = None,
+    auto_verify_all: bool = False,
     verify_timeout: int = 600,
     independent_verify_enabled: bool = True,
     auto_verify_enabled: bool = True,
     semantic_enabled: bool = False,
+    diff_context: int = 3,
+    max_diff_bytes: int = 20000,
+    diff_evidence_enabled: bool = True,
     resume_state: PipelineState | None = None,
     rerun_completed: bool = False,
     save_path=None,
+    checkpoint_id: int | None = None,
 ) -> PipelineState:
     """Run the roles in sequence, handing each stage's summary to the next.
 
@@ -578,6 +630,7 @@ def run_pipeline(
             provider=cfg.provider, model=cfg.resolved_model(), badge=badge, dry_run=dry_run,
         )
         state.root = str(_Path(root).resolve())
+        state.checkpoint_id = checkpoint_id
         # Snapshot the git state so a later --resume can detect a moved tree.
         if not dry_run:
             import datetime as _dt
@@ -650,6 +703,13 @@ def run_pipeline(
     if ver is not None:
         state.verdict = ver.final_verdict
 
+    # Wave 8: capture the real working-tree diff (read-only) as evidence for the
+    # semantic check + the truth table.
+    from .pipeline_diff import capture_diff
+    state.diff_evidence = capture_diff(
+        root, context=diff_context, max_bytes=max_diff_bytes,
+        include=diff_evidence_enabled).model_dump()
+
     # Wave 6: cross-artifact contract checks (always, from whatever artifacts exist).
     from .pipeline_contract import check_contract
     state.contract = check_contract(
@@ -657,30 +717,44 @@ def run_pipeline(
         state.review_report(), ver,
     ).model_dump()
 
-    # Independent verification. Prefer the user's --verify-cmd; otherwise auto-
-    # detect the repo's test command (Wave 7). Either way the command is gated.
-    if not independent_verify_enabled:
-        state.verify_source = "disabled"
-    elif verify_cmd:
-        state.verify_source = "provided"
-    elif auto_verify_enabled and not state.stopped:
-        from .pipeline_verify import auto_detect_verify_command
-        detected = auto_detect_verify_command(root)
-        if detected is not None:
-            verify_cmd = detected[0]
-            state.verify_source = "detected"
-            if console is not None:
-                console.print(f"  [#6b7089]auto-detected verify command:[/#6b7089] "
-                              f"[cyan]{verify_cmd}[/cyan]", highlight=False)
+    # Independent verification (Wave 8: one or more gated suites). Sources, in
+    # order: explicit --verify-suite / --verify-cmd; else --auto-verify-all
+    # (several detected suites); else a single auto-detected test command.
+    from .pipeline_verify import (
+        aggregate_verify,
+        auto_detect_suites,
+        auto_detect_verify_command,
+        parse_verify_suite,
+        reconcile_with_tester,
+        run_suites,
+    )
+    suite_specs: list[tuple[str, str]] = []
+    if not independent_verify_enabled or state.stopped:
+        state.verify_source = "disabled" if not independent_verify_enabled else "not_found"
+    else:
+        explicit = [parse_verify_suite(s) for s in (verify_suites or [])]
+        cmds = ([verify_cmd] if verify_cmd else []) + list(verify_cmds or [])
+        for i, c in enumerate(cmds):
+            explicit.append(("tests" if i == 0 and not (verify_suites or []) else f"verify-{i + 1}", c))
+        if explicit:
+            suite_specs, state.verify_source = explicit, "provided"
+        elif auto_verify_all:
+            suite_specs = auto_detect_suites(root)
+            state.verify_source = "detected" if suite_specs else "not_found"
+        elif auto_verify_enabled:
+            detected = auto_detect_verify_command(root)
+            if detected is not None:
+                suite_specs, state.verify_source = [("tests", detected[0])], "detected"
+            else:
+                state.verify_source = "not_found"
         else:
             state.verify_source = "not_found"
-    else:
-        state.verify_source = "not_found"
 
-    if verify_cmd and independent_verify_enabled and not state.stopped:
-        from .pipeline_verify import independent_verify, reconcile_with_tester
-        iv = independent_verify(verify_cmd, root, timeout=verify_timeout,
+    if suite_specs:
+        suite_runs = run_suites(suite_specs, root, timeout=verify_timeout,
                                 yolo=getattr(cfg, "full_access", False), console=console)
+        state.suites = [s.model_dump() for s in suite_runs]
+        iv = aggregate_verify(suite_runs)
         state.independent_verify = iv.model_dump()
         note = reconcile_with_tester(iv, state.verdict)
         if note and console is not None:
@@ -702,7 +776,8 @@ def run_pipeline(
             ).text
 
         sem = check_semantic_contract(state.architect_plan(), state.implementation_report(),
-                                      state.review_report(), judge_runner=_judge)
+                                      state.review_report(), judge_runner=_judge,
+                                      diff_evidence=state.diff_evidence)
         state.semantic = sem.model_dump()
 
     state.final_verdict = compute_final_verdict(state)

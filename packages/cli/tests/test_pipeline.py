@@ -808,10 +808,95 @@ def test_run_pipeline_semantic_enabled_records_report() -> None:
         text='```json\n{"objective_alignment":"aligned","acceptance_alignment":"aligned",'
              '"scope_creep_risk":"none","evidence":["did the thing"]}\n```',
         stop_reason="end_turn", usage={"input_tokens": 1, "output_tokens": 1})])
+    import pathlib
+    import subprocess as _sp
+    import tempfile
+
     import unittest.mock as mock
     cfg = RoninConfig(provider="cerebras")
-    with mock.patch.object(rn, "build_provider", return_value=prov):
-        state = run_pipeline(cfg, "x", ["implementer", "verifier"], stage_runner=runner,
-                             auto_verify_enabled=False, semantic_enabled=True)
+    # deterministic full diff: a tmp git repo with a small uncommitted change, so
+    # the semantic 'passed' isn't downgraded for a missing/truncated diff.
+    with tempfile.TemporaryDirectory() as td:
+        for args in (("init", "-q"), ("config", "user.email", "t@t.t"), ("config", "user.name", "t")):
+            _sp.run(["git", "-C", td, *args], check=True, capture_output=True)
+        (pathlib.Path(td) / "x.py").write_text("v = 1\n", encoding="utf-8")
+        _sp.run(["git", "-C", td, "add", "-A"], check=True, capture_output=True)
+        _sp.run(["git", "-C", td, "commit", "-q", "-m", "init"], check=True, capture_output=True)
+        (pathlib.Path(td) / "x.py").write_text("v = 2\n", encoding="utf-8")  # real, small diff
+        with mock.patch.object(rn, "build_provider", return_value=prov):
+            state = run_pipeline(cfg, "x", ["implementer", "verifier"], stage_runner=runner,
+                                 root=td, auto_verify_enabled=False, semantic_enabled=True)
+    assert state.diff_evidence.get("full_diff_available") is True
     assert state.semantic.get("final_semantic_status") == "passed"
     assert state.semantic.get("parsed") is True
+
+
+# --- Wave 8: diff evidence capture in run_pipeline ---------------------------
+
+def test_run_pipeline_captures_diff_evidence(tmp_path) -> None:
+    import subprocess as _sp
+    for args in (("init", "-q"), ("config", "user.email", "t@t.t"), ("config", "user.name", "t")):
+        _sp.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
+    _sp.run(["git", "-C", str(tmp_path), "add", "-A"], check=True, capture_output=True)
+    _sp.run(["git", "-C", str(tmp_path), "commit", "-q", "-m", "init"], check=True, capture_output=True)
+    (tmp_path / "a.py").write_text("x = 1\ny = 2\n", encoding="utf-8")  # a real change
+
+    def runner(config, role, prompt, *, read_only, root, console, max_iterations):
+        return StageOutcome(success=True, summary=f"{role} ok")
+
+    cfg = RoninConfig(provider="cerebras")
+    state = run_pipeline(cfg, "x", ["architect"], stage_runner=runner, root=tmp_path,
+                         auto_verify_enabled=False)
+    assert state.diff_evidence["captured"] is True
+    assert "a.py" in state.diff_evidence["files_changed"]
+    assert state.diff_evidence["full_diff_available"] is True
+
+
+def test_run_pipeline_no_diff_evidence(tmp_path) -> None:
+    def runner(config, role, prompt, *, read_only, root, console, max_iterations):
+        return StageOutcome(success=True, summary=f"{role} ok")
+    cfg = RoninConfig(provider="cerebras")
+    state = run_pipeline(cfg, "x", ["architect"], stage_runner=runner, root=tmp_path,
+                         auto_verify_enabled=False, diff_evidence_enabled=False)
+    assert state.diff_evidence["captured"] is False
+    assert "disabled" in state.diff_evidence["note"]
+
+
+# --- Wave 8: multi-suite in run_pipeline + truth table -----------------------
+
+def test_run_pipeline_multi_suite_failure_fails(tmp_path) -> None:
+    def runner(config, role, prompt, *, read_only, root, console, max_iterations):
+        art = {"kind": "verification_report", "final_verdict": "passed", "tests_run": ["t"]} \
+            if role == "verifier" else None
+        return StageOutcome(success=True, summary=f"{role} ok", artifact=art)
+
+    import ronin_cli.pipeline_verify as pv
+    from ronin_cli.pipeline_verify import SuiteRun
+
+    def fake_run_suites(suites, root, **kw):
+        return [SuiteRun(name="unit", command="pytest", status="passed", exit_code=0),
+                SuiteRun(name="lint", command="ruff", status="failed", exit_code=1)]
+
+    import unittest.mock as mock
+    cfg = RoninConfig(provider="cerebras")
+    with mock.patch.object(pv, "run_suites", fake_run_suites):
+        state = run_pipeline(cfg, "x", ["verifier"], stage_runner=runner, root=tmp_path,
+                             verify_suites=["unit:pytest", "lint:ruff"])
+    assert len(state.suites) == 2
+    assert state.verify_source == "provided"
+    assert state.final_verdict == "failed"   # a failing suite fails the run
+    t = truth_table(state)
+    assert "2 total, 1 passed, 1 failed" in t["suites"]
+
+
+def test_truth_table_diff_evidence_cell() -> None:
+    st = _completed_state(["verifier"], verdict="passed")
+    st.diff_evidence = {"captured": True, "full_diff_available": True, "truncated": False}
+    assert truth_table(st)["diff_evidence"] == "available"
+    st.diff_evidence = {"captured": True, "full_diff_available": True, "truncated": True}
+    assert truth_table(st)["diff_evidence"] == "truncated"
+    st.diff_evidence = {"captured": False, "note": "diff evidence disabled"}
+    assert truth_table(st)["diff_evidence"] == "disabled"
+    st.diff_evidence = {"captured": False, "note": "not a git repository"}
+    assert truth_table(st)["diff_evidence"] == "missing"

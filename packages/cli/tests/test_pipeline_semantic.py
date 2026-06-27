@@ -28,8 +28,10 @@ def test_passed_case() -> None:
     judge = _judge({"objective_alignment": "aligned", "acceptance_alignment": "aligned",
                     "scope_creep_risk": "none", "missing_plan_items": [],
                     "unexpected_changes": [], "evidence": ["export.py implements CSV"]})
+    # 'passed' requires a full diff to look at (Wave 8 honesty)
+    full_diff = {"captured": True, "full_diff_available": True, "truncated": False}
     r = check_semantic_contract(ArchitectPlan(objective="csv"), ImplementationReport(),
-                                None, judge_runner=judge)
+                                None, judge_runner=judge, diff_evidence=full_diff)
     assert r.parsed is True and r.final_semantic_status == "passed"
 
 
@@ -82,3 +84,56 @@ def test_prompt_includes_objective_and_asks_for_json() -> None:
     p = build_semantic_prompt(ArchitectPlan(objective="add CSV export"), ImplementationReport(), None)
     assert "add CSV export" in p
     assert "```json" in p and "scope_creep_risk" in p
+
+
+# --- Wave 8: full-diff semantic evidence + truncation honesty ----------------
+
+def test_prompt_includes_actual_diff() -> None:
+    de = {"captured": True, "full_diff_available": True, "truncated": False,
+          "files_changed": ["export.py"], "additions": 12, "deletions": 1,
+          "diff_excerpt": "diff --git a/export.py b/export.py\n+def to_csv():"}
+    p = build_semantic_prompt(ArchitectPlan(objective="csv"), ImplementationReport(), None, de)
+    assert "ACTUAL DIFF" in p and "export.py" in p and "to_csv" in p
+
+
+def test_prompt_notes_missing_diff() -> None:
+    p = build_semantic_prompt(ArchitectPlan(), ImplementationReport(), None,
+                              {"captured": False})
+    assert "not available" in p and "Do NOT" in p
+
+
+def test_passed_downgraded_to_unknown_without_diff() -> None:
+    judge = _judge({"objective_alignment": "aligned", "acceptance_alignment": "aligned",
+                    "scope_creep_risk": "none", "evidence": ["looks right"]})
+    # no diff evidence → a 'passed' judgement must not stand
+    r = check_semantic_contract(ArchitectPlan(), ImplementationReport(), None,
+                                judge_runner=judge, diff_evidence={"captured": False})
+    assert r.final_semantic_status == "unknown"
+
+
+def test_passed_downgraded_to_warning_when_truncated() -> None:
+    judge = _judge({"objective_alignment": "aligned", "acceptance_alignment": "aligned",
+                    "scope_creep_risk": "none", "evidence": ["aligned"]})
+    r = check_semantic_contract(ArchitectPlan(), ImplementationReport(), None,
+                                judge_runner=judge,
+                                diff_evidence={"captured": True, "full_diff_available": True,
+                                               "truncated": True})
+    assert r.final_semantic_status == "warning"
+
+
+def test_passed_stands_with_full_diff() -> None:
+    judge = _judge({"objective_alignment": "aligned", "acceptance_alignment": "aligned",
+                    "scope_creep_risk": "none", "evidence": ["the diff adds to_csv"]})
+    r = check_semantic_contract(ArchitectPlan(), ImplementationReport(), None,
+                                judge_runner=judge,
+                                diff_evidence={"captured": True, "full_diff_available": True,
+                                               "truncated": False})
+    assert r.final_semantic_status == "passed"
+
+
+def test_failed_stands_regardless_of_diff() -> None:
+    # a clear contradiction fails even without a full diff
+    judge = _judge({"objective_alignment": "misaligned", "evidence": ["unrelated changes"]})
+    r = check_semantic_contract(None, None, None, judge_runner=judge,
+                                diff_evidence={"captured": False})
+    assert r.final_semantic_status == "failed"
