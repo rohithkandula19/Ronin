@@ -86,3 +86,48 @@ def test_verify_run_round_trips() -> None:
     run = independent_verify("pytest", ".", yolo=True, run_fn=_fake_run(0, "ok"))
     again = VerifyRun.model_validate_json(run.model_dump_json())
     assert again.passed is True and again.command == "pytest"
+
+
+# --- Wave 7: auto-detected verify command ------------------------------------
+
+from ronin_cli.pipeline_verify import auto_detect_verify_command
+
+
+def test_auto_detect_uv_pytest(tmp_path) -> None:
+    (tmp_path / "pyproject.toml").write_text("[tool.pytest.ini_options]\n", encoding="utf-8")
+    (tmp_path / "tests").mkdir()
+    detected = auto_detect_verify_command(tmp_path)
+    assert detected is not None
+    cmd, runner = detected
+    assert runner == "pytest"
+    assert "pytest" in cmd  # "uv run pytest -q" (or bare "pytest -q")
+
+
+def test_auto_detect_node(tmp_path) -> None:
+    import json as _json
+    (tmp_path / "package.json").write_text(
+        _json.dumps({"scripts": {"test": "vitest run"}}), encoding="utf-8")
+    cmd, runner = auto_detect_verify_command(tmp_path)
+    assert runner == "node" and "test" in cmd
+
+
+def test_auto_detect_cargo(tmp_path) -> None:
+    (tmp_path / "Cargo.toml").write_text("[package]\n", encoding="utf-8")
+    cmd, runner = auto_detect_verify_command(tmp_path)
+    assert (cmd, runner) == ("cargo test", "cargo")
+
+
+def test_auto_detect_go(tmp_path) -> None:
+    (tmp_path / "go.mod").write_text("module x\n", encoding="utf-8")
+    cmd, runner = auto_detect_verify_command(tmp_path)
+    assert cmd == "go test ./..." and runner == "go"
+
+
+def test_auto_detect_memory_verify_line(tmp_path) -> None:
+    (tmp_path / "RONIN.md").write_text("verify: mvn test\n", encoding="utf-8")
+    cmd, runner = auto_detect_verify_command(tmp_path)
+    assert cmd == "mvn test"
+
+
+def test_auto_detect_none_in_empty_dir(tmp_path) -> None:
+    assert auto_detect_verify_command(tmp_path) is None

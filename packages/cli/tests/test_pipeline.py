@@ -411,7 +411,8 @@ def test_state_verdict_from_verifier_artifact() -> None:
         return StageOutcome(success=True, summary=f"{role} ok", artifact=art)
 
     cfg = RoninConfig(provider="cerebras")
-    state = run_pipeline(cfg, "x", ["architect", "verifier"], stage_runner=runner)
+    state = run_pipeline(cfg, "x", ["architect", "verifier"], stage_runner=runner,
+                         auto_verify_enabled=False)
     assert state.verdict == "passed"
     assert state.acceptance_summary()["met"] == ["exports csv"]
     assert "PASSED" in state.final_recommendation
@@ -647,7 +648,8 @@ def test_run_pipeline_no_verify_cmd_preserves_advisory() -> None:
         return StageOutcome(success=True, summary=f"{role} ok", artifact=art)
 
     cfg = RoninConfig(provider="cerebras")
-    state = run_pipeline(cfg, "x", ["architect", "verifier"], stage_runner=runner)
+    state = run_pipeline(cfg, "x", ["architect", "verifier"], stage_runner=runner,
+                         auto_verify_enabled=False)
     assert state.independent_verify == {}          # nothing ran
     assert state.final_verdict == "passed"          # advisory preserved
 
@@ -697,3 +699,60 @@ def test_cli_json_state_has_wave6_fields(tmp_path, monkeypatch) -> None:
     data = _json.loads(res.stdout)
     for key in ("contract", "independent_verify", "final_verdict", "verdict", "root"):
         assert key in data
+
+
+# --- Wave 7: auto-detected verification --------------------------------------
+
+def test_auto_verify_failure_overrides_tester(tmp_path, monkeypatch) -> None:
+    # a python repo so detection finds pytest
+    (tmp_path / "pyproject.toml").write_text("[tool.pytest.ini_options]\n", encoding="utf-8")
+    (tmp_path / "tests").mkdir()
+
+    def runner(config, role, prompt, *, read_only, root, console, max_iterations):
+        art = {"kind": "verification_report", "final_verdict": "passed",
+               "tests_run": ["t1"]} if role == "tester" else None
+        return StageOutcome(success=True, summary=f"{role} ok", artifact=art)
+
+    import ronin_cli.pipeline_verify as pv
+    from ronin_cli.pipeline_verify import VerifyRun
+
+    def fake_verify(command, root, **kw):
+        return VerifyRun(requested=True, command=command, ran=True, passed=False, exit_code=1)
+
+    cfg = RoninConfig(provider="cerebras")
+    import unittest.mock as mock
+    with mock.patch.object(pv, "independent_verify", fake_verify):
+        state = run_pipeline(cfg, "x", ["tester"], stage_runner=runner, root=tmp_path)
+    assert state.verify_source == "detected"
+    assert state.independent_verify["passed"] is False
+    assert state.final_verdict == "failed"   # auto-verify failure overrides tester
+
+
+def test_no_auto_verify_disables_detection(tmp_path) -> None:
+    (tmp_path / "pyproject.toml").write_text("[tool.pytest.ini_options]\n", encoding="utf-8")
+    (tmp_path / "tests").mkdir()
+
+    def runner(config, role, prompt, *, read_only, root, console, max_iterations):
+        art = {"kind": "verification_report", "final_verdict": "passed",
+               "tests_run": ["t1"]} if role == "verifier" else None
+        return StageOutcome(success=True, summary=f"{role} ok", artifact=art)
+
+    cfg = RoninConfig(provider="cerebras")
+    state = run_pipeline(cfg, "x", ["architect", "verifier"], stage_runner=runner,
+                         root=tmp_path, auto_verify_enabled=False)
+    assert state.independent_verify == {}        # nothing ran
+    assert state.verify_source == "not_found"
+    assert state.final_verdict == "passed"        # advisory verifier preserved
+
+
+def test_no_detected_command_preserves_advisory(tmp_path) -> None:
+    # empty dir → no command detected → advisory verifier still passes
+    def runner(config, role, prompt, *, read_only, root, console, max_iterations):
+        art = {"kind": "verification_report", "final_verdict": "passed",
+               "tests_run": ["t1"]} if role == "verifier" else None
+        return StageOutcome(success=True, summary=f"{role} ok", artifact=art)
+
+    cfg = RoninConfig(provider="cerebras")
+    state = run_pipeline(cfg, "x", ["verifier"], stage_runner=runner, root=tmp_path)
+    assert state.verify_source == "not_found"
+    assert state.final_verdict == "passed"

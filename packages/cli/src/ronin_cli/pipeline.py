@@ -116,8 +116,11 @@ class PipelineState(BaseModel):
     stages: list[PipelineStage] = Field(default_factory=list)
     verdict: str = ""            # verifier/tester stage verdict: passed/failed/blocked/unknown
     independent_verify: dict = Field(default_factory=dict)  # serialized VerifyRun
+    verify_source: str = ""      # provided / detected / not_found / disabled
     contract: dict = Field(default_factory=dict)            # serialized ContractCheckReport
-    final_verdict: str = ""      # combined Wave-6 verdict (verifier + verify + contract + …)
+    semantic: dict = Field(default_factory=dict)            # serialized SemanticContractReport
+    git_snapshot: dict = Field(default_factory=dict)        # serialized GitSnapshot at run start
+    final_verdict: str = ""      # combined Wave-6+ verdict (verifier + verify + contract + …)
     final_recommendation: str = ""
 
     def stage(self, role: str) -> PipelineStage | None:
@@ -523,6 +526,7 @@ def run_pipeline(
     verify_cmd: str | None = None,
     verify_timeout: int = 600,
     independent_verify_enabled: bool = True,
+    auto_verify_enabled: bool = True,
     resume_state: PipelineState | None = None,
     rerun_completed: bool = False,
     save_path=None,
@@ -631,8 +635,26 @@ def run_pipeline(
         state.review_report(), ver,
     ).model_dump()
 
-    # Independent verification: run the user's command ourselves (gated), reconcile
-    # against the tester's claim. Skipped if the pipeline already halted.
+    # Independent verification. Prefer the user's --verify-cmd; otherwise auto-
+    # detect the repo's test command (Wave 7). Either way the command is gated.
+    if not independent_verify_enabled:
+        state.verify_source = "disabled"
+    elif verify_cmd:
+        state.verify_source = "provided"
+    elif auto_verify_enabled and not state.stopped:
+        from .pipeline_verify import auto_detect_verify_command
+        detected = auto_detect_verify_command(root)
+        if detected is not None:
+            verify_cmd = detected[0]
+            state.verify_source = "detected"
+            if console is not None:
+                console.print(f"  [#6b7089]auto-detected verify command:[/#6b7089] "
+                              f"[cyan]{verify_cmd}[/cyan]", highlight=False)
+        else:
+            state.verify_source = "not_found"
+    else:
+        state.verify_source = "not_found"
+
     if verify_cmd and independent_verify_enabled and not state.stopped:
         from .pipeline_verify import independent_verify, reconcile_with_tester
         iv = independent_verify(verify_cmd, root, timeout=verify_timeout,
