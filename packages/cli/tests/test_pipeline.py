@@ -465,3 +465,43 @@ def test_default_runner_builds_architect_plan_artifact(tmp_path, monkeypatch) ->
     assert plan.objective == "add CSV export"
     assert plan.files_to_change == ["export.py"]
     assert plan.acceptance_criteria[0].text == "CSV downloads"
+
+
+# --- Wave 5: acceptance + verdict rendering ----------------------------------
+
+from ronin_cli.pipeline import render_acceptance
+
+
+def _state_with_verification(verdict, crits):
+    st = plan_pipeline("x", ["architect", "verifier"])
+    st.stages[0].status = "completed"
+    st.stages[1].status = "completed"
+    st.stages[1].artifact = {
+        "kind": "verification_report", "final_verdict": verdict,
+        "acceptance_criteria_status": crits,
+    }
+    st.verdict = verdict
+    return st
+
+
+def test_render_acceptance_buckets() -> None:
+    st = _state_with_verification("failed", [
+        {"text": "exports csv", "status": "met"},
+        {"text": "handles big files", "status": "unmet"},
+        {"text": "unicode safe", "status": "unknown"},
+    ])
+    out = _render(render_acceptance, st)
+    assert "Acceptance criteria" in out
+    assert "exports csv" in out and "handles big files" in out and "unicode safe" in out
+
+
+def test_render_result_shows_verdict() -> None:
+    st = _state_with_verification("passed", [{"text": "x", "status": "met"}])
+    out = _render(render_pipeline_result, st)
+    assert "Verdict:" in out and "PASSED" in out
+
+
+def test_render_acceptance_silent_without_verifier() -> None:
+    st = plan_pipeline("x", ["architect"])
+    st.stages[0].status = "completed"
+    assert _render(render_acceptance, st) == ""

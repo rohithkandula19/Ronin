@@ -220,8 +220,24 @@ def render_pipeline_plan(console, state: PipelineState) -> None:
         console.print(f"    [cyan]{i}. {role:<12}[/cyan] [dim]{perm}[/dim]", highlight=False)
 
 
+_VERDICT_HEX = {"passed": "#9ece6a", "failed": "#f7768e",
+                "blocked": "#e0af68", "unknown": "#6b7089"}
+
+
+def render_acceptance(console, state: PipelineState) -> None:
+    """Acceptance-criteria rollup (met / unmet / unknown), if a verifier ran."""
+    crit = state.acceptance_summary()
+    if not any(crit.values()):
+        return
+    console.print("  [bold]Acceptance criteria[/bold]")
+    for status, glyph, hexc in (("met", "✓", "#9ece6a"), ("unmet", "✗", "#f7768e"),
+                                ("unknown", "?", "#e0af68"), ("not_applicable", "–", "#6b7089")):
+        for text in crit[status]:
+            console.print(f"    [{hexc}]{glyph}[/{hexc}] [dim]{text}[/dim]", highlight=False)
+
+
 def render_pipeline_result(console, state: PipelineState) -> None:
-    """The final per-stage summary + the overall recommendation."""
+    """The final per-stage summary, acceptance criteria, verdict + recommendation."""
     console.print("  [bold]Pipeline result[/bold] "
                   f"[dim]· {state.outcome()}[/dim]")
     for s in state.stages:
@@ -231,6 +247,11 @@ def render_pipeline_result(console, state: PipelineState) -> None:
         console.print(f"  {glyph} [bold]{label}:[/bold] [dim]{detail}[/dim]", highlight=False)
         if s.files_changed:
             console.print(f"      [dim]files: {', '.join(s.files_changed)}[/dim]", highlight=False)
+    render_acceptance(console, state)
+    if state.verdict:
+        hexc = _VERDICT_HEX.get(state.verdict, "#6b7089")
+        console.print(f"  [bold]Verdict:[/bold] [{hexc}]{state.verdict.upper()}[/{hexc}]",
+                      highlight=False)
     if state.final_recommendation:
         console.print(f"  [#2dd4bf]Final:[/#2dd4bf] {state.final_recommendation}", highlight=False)
 
