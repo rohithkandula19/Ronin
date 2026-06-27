@@ -116,14 +116,19 @@ Because ronin is **provider-agnostic**, it can do things a single-vendor agent s
 
 - **🧩 Multi-model consensus**: `ronin consensus "<task>" -m anthropic,gemini,cerebras` runs the *same* question on several models in parallel, then a judge model synthesizes one cross-checked answer (with a "where they agreed / diverged" note). More robust on hard design/review/decision questions than any single model. Read-only.
 - **🧭 Multi-agent orchestrator · provider-agnostic sub-agents**: `ronin orchestrate "<goal>" -r researcher=anthropic,implementer=cerebras,reviewer=gemini,tester=groq` decomposes a goal into subtasks, assigns each to a built-in specialist sub-agent (researcher, implementer, reviewer, tester) **on its own vendor's model**, runs the independent ones in **parallel**, and synthesizes the result. `--write` runs editing sub-agents in **isolated git worktrees** (no collisions); `--offline` keeps it $0 with zero egress. Complements `consensus`/`dojo` (same task, many models) by splitting *different* subtasks across models. See [docs/ORCHESTRATOR.md](docs/ORCHESTRATOR.md).
-- **🪜 Role-handoff pipeline**: `ronin pipeline "<task>"` runs the Wave-3 roles **in sequence** with gated handoffs — **architect → implementer → reviewer → tester** by default — each stage handing its summary to the next. It's **sequential and gated, not parallel or autonomous**: read-only roles (architect/reviewer) are *enforced*, without `--write` the whole run is a read-only proposal, every edit/command still hits the approval gate, and a blocked/failed stage **halts** (the rest are marked skipped). `--dry-run` prints the plan + per-stage permissions and runs nothing; `--free`/`--offline` keep it $0; `--json`/`--out` emit the full state. Complements `orchestrate` (parallel, multi-vendor) with a single-provider, step-by-step, safety-first flow.
+- **🪜 Role-handoff pipeline**: `ronin pipeline "<task>"` runs the roles **in sequence** with gated handoffs — **architect → implementer → reviewer → tester → verifier** by default — passing a **structured artifact** between stages, not just prose. The architect emits an `ArchitectPlan` (objective, files to change, steps, risks, **acceptance criteria**); the implementer an `ImplementationReport`; the reviewer a `ReviewReport`; tester/verifier a `VerificationReport`. Each is typed, serializable, and uses **explicit unknowns** — a stage never fabricates a field.
+  - **Verifier** (read-only) confirms the work meets the architect's acceptance criteria, that claimed tests really ran, and that changed files match the plan — verdict **passed / failed / blocked / unknown**, and it **never upgrades unknown to passed**.
+  - **Safety**: read-only roles (architect/reviewer/verifier) are *enforced*; without `--write` the whole run is a read-only proposal; every edit/command still hits the approval gate; a blocked/failed stage **halts** (the rest → skipped, artifacts preserved); exit is non-zero on a failed/blocked verdict.
+  - **Gated finish** (opt-in, never silent): `--commit` offers a commit **only after a passing verifier** (a non-passing verdict requires an explicit y/N), always showing the diff summary first; `--pr` then offers a gated push + PR; `--branch` / `--commit-message` / `--pr-title` / `--pr-body` override the drafts. `--dry-run` describes the whole plan + what it *would* commit and changes nothing.
+  - `--free`/`--offline` keep it $0; `--json`/`--out` emit the full state **including artifacts**. Complements `orchestrate` (parallel, multi-vendor) with a single-provider, step-by-step, safety-first flow.
 
   ```bash
-  ronin pipeline "add CSV export"                                   # architect→implementer→reviewer→tester (read-only proposal)
-  ronin pipeline "fix failing auth tests" --roles debugger,implementer,tester --write
-  ronin pipeline "review this refactor" --roles reviewer,tester --dry-run
+  ronin pipeline "add CSV export"                                   # architect→…→verifier (read-only proposal)
+  ronin pipeline "add CSV export" --write --commit                  # gated edits, then a gated commit if verifier passes
+  ronin pipeline "fix auth tests" --roles debugger,implementer,tester,verifier --write --commit --pr
+  ronin pipeline "review this refactor" --roles reviewer,verifier --dry-run
   ronin pipeline "add retry logic" --free
-  ronin pipeline "analyze this repo" --offline --roles architect,researcher
+  ronin pipeline "analyze this repo" --offline --roles architect,researcher --json
   ```
 - **🔁 Cross-provider failover**: set `failover` in config and a turn that hits a rate-limit or outage on the primary **transparently continues on the next provider** instead of dying. (Tokens already streamed aren't silently re-answered.)
 - **🔒 Fully offline mode**: `ronin --offline` forces a **local brain** (Ollama / any localhost model) and **strips every network tool**, so ronin codes on a plane or in an air-gapped box with **zero egress**: nothing leaves the machine.
@@ -355,7 +360,7 @@ database_url = "postgres://readonly_user:...@host:5432/db"   # a read-only role
 | **`ronin eval [--model X]`** | **Score agent quality on objective tasks, works on any provider (no LLM judge).** |
 | **`ronin explain <path>`** | **Explain a codebase: prose + Mermaid diagram + optional voice.** |
 | **`ronin investigate "<symptom>"`** | **Root-cause a problem across your business data AND your code.** |
-| **`ronin pipeline "<task>"`** | **Sequential gated role handoff: architect→implementer→reviewer→tester. `--dry-run`, `--roles`, `--write`, `--free`, `--offline`, `--json`.** |
+| **`ronin pipeline "<task>"`** | **Sequential gated role handoff with structured artifacts + verifier: architect→implementer→reviewer→tester→verifier. `--dry-run`, `--roles`, `--write`, `--free`, `--offline`, `--json`, `--commit`, `--pr`.** |
 | **`ronin review [--base main]`** | **AI code review of your diff: severity-tagged findings, read-only.** |
 | **`ronin fix "<command>"`** | **Autonomous fix-until-green: runs the command, edits + re-runs until it passes.** |
 | **`ronin book "<request>"`** | **Prepare-and-confirm a booking (flight, hotel, restaurant, ticket): researches options into a summary (option, price, link, details), optionally pre-fills a form in the browser up to the payment step, then STOPS. It never pays. You confirm and pay yourself. The browser is an optional extra (`pip install 'ronin-cli[browser]'`); without it you get search + a prepared summary + manual steps.** |
