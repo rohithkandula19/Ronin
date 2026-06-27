@@ -690,9 +690,11 @@ def _slash_free(ctx: SlashCtx) -> str:
             console.print(f"  [#9ece6a]✓ already free[/#9ece6a] — [bold]{config.provider}[/bold] "
                           f"runs at [bold]$0[/bold].")
             return "handled"
-        target = keyed[0] if keyed else "local"  # local = keyless in-process brain
+        from .offline import apply_free
+        freed = apply_free(config)  # shared free-resolution (also used by `pipeline --free`)
+        target = freed.provider
         config.provider = target
-        config.model = None
+        config.model = freed.model
         save_config(config)
         console.print(f"  [#9ece6a]✓ free mode[/#9ece6a] → [bold]{target}[/bold] "
                       f"[dim]({config.resolved_model()})[/dim] · [#9ece6a]$0[/#9ece6a]; "

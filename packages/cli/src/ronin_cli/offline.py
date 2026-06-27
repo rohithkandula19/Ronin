@@ -56,3 +56,27 @@ def apply_offline(config: RoninConfig) -> RoninConfig:
 def strip_network_tools(tools: list) -> list:
     """Drop any network-touching tools (used when offline)."""
     return [t for t in tools if getattr(t, "name", None) not in NETWORK_TOOLS]
+
+
+# Free providers in preference order: cross-provider free tiers you may hold a
+# key for first, then the always-available keyless local brains.
+FREE_PREFERENCE: tuple[str, ...] = ("cerebras", "groq", "gemini", "openrouter", "ollama", "local")
+
+
+def apply_free(config: RoninConfig) -> RoninConfig:
+    """Return a config switched to a $0 provider (no-op if already free).
+
+    Prefers a free tier the user already holds a key for; otherwise falls back to
+    the keyless in-process ``local`` brain. Never selects a paid provider, and
+    never requires Claude/OpenAI. The single source of truth for ``/free on`` and
+    ``ronin pipeline --free``."""
+    from .config import PROVIDER_PRESETS
+    from .cost import is_free
+    if is_free(config.provider, config.resolved_model()):
+        return config
+    for prov in FREE_PREFERENCE:
+        if prov in ("ollama", "local"):
+            continue
+        if prov in PROVIDER_PRESETS and config.key_for(prov):
+            return config.model_copy(update={"provider": prov, "model": None})
+    return config.model_copy(update={"provider": "local", "model": None})
