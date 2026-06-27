@@ -112,8 +112,12 @@ class PipelineState(BaseModel):
     model: str = ""
     badge: str = ""              # FREE / PAID / LOCAL / UNKNOWN
     dry_run: bool = False
+    root: str = ""               # repo path the run targeted (for resume sanity checks)
     stages: list[PipelineStage] = Field(default_factory=list)
-    verdict: str = ""            # verifier/tester final verdict: passed/failed/blocked/unknown
+    verdict: str = ""            # verifier/tester stage verdict: passed/failed/blocked/unknown
+    independent_verify: dict = Field(default_factory=dict)  # serialized VerifyRun
+    contract: dict = Field(default_factory=dict)            # serialized ContractCheckReport
+    final_verdict: str = ""      # combined Wave-6 verdict (verifier + verify + contract + …)
     final_recommendation: str = ""
 
     def stage(self, role: str) -> PipelineStage | None:
@@ -133,6 +137,16 @@ class PipelineState(BaseModel):
             if s and s.artifact:
                 return VerificationReport.model_validate(s.artifact)
         return None
+
+    def implementation_report(self):
+        from .pipeline_artifacts import ImplementationReport
+        s = self.stage("implementer")
+        return ImplementationReport.model_validate(s.artifact) if s and s.artifact else None
+
+    def review_report(self):
+        from .pipeline_artifacts import ReviewReport
+        s = self.stage("reviewer")
+        return ReviewReport.model_validate(s.artifact) if s and s.artifact else None
 
     def acceptance_summary(self) -> dict[str, list[str]]:
         """met / unmet / unknown / not_applicable buckets from the verification."""
@@ -248,10 +262,7 @@ def render_pipeline_result(console, state: PipelineState) -> None:
         if s.files_changed:
             console.print(f"      [dim]files: {', '.join(s.files_changed)}[/dim]", highlight=False)
     render_acceptance(console, state)
-    if state.verdict:
-        hexc = _VERDICT_HEX.get(state.verdict, "#6b7089")
-        console.print(f"  [bold]Verdict:[/bold] [{hexc}]{state.verdict.upper()}[/{hexc}]",
-                      highlight=False)
+    render_final_verification(console, state)
     if state.final_recommendation:
         console.print(f"  [#2dd4bf]Final:[/#2dd4bf] {state.final_recommendation}", highlight=False)
 
@@ -410,17 +421,90 @@ def _final_recommendation(state: PipelineState) -> str:
     if stopper is not None:
         return (f"stopped at {stopper.role} ({stopper.status}) after {done}/{total} "
                 f"stages — resolve it and re-run.")
-    if state.verdict:
+    verdict = state.final_verdict or state.verdict
+    if verdict:
         crit = state.acceptance_summary()
         tail = ""
         if crit["unmet"]:
             tail += f" · {len(crit['unmet'])} criteria unmet"
         if crit["unknown"]:
             tail += f" · {len(crit['unknown'])} unverified"
-        return _VERDICT_MSG.get(state.verdict, f"verdict: {state.verdict}") + tail
+        return _VERDICT_MSG.get(verdict, f"verdict: {verdict}") + tail
     if done == total and total:
         return f"all {total} stages completed."
     return f"{done}/{total} stages completed."
+
+
+def compute_final_verdict(state: PipelineState) -> str:
+    """The combined Wave-6 verdict: passed / failed / blocked / unknown (pure).
+
+    Precedence (safety-first): a halted stage wins; then any hard fail (failed
+    independent verify, failed contract, unmet acceptance criterion, failed
+    verifier); then blocks (declined/blocked verify, blocked verifier). 'passed'
+    requires real evidence — a passing independent verify, or (advisory mode, no
+    verify command) a passing verifier — with the contract not failed."""
+    from .pipeline_verify import VerifyRun
+    if any(s.status == BLOCKED for s in state.stages):
+        return "blocked"
+    if any(s.status == FAILED for s in state.stages):
+        return "failed"
+
+    iv = VerifyRun.model_validate(state.independent_verify) if state.independent_verify else VerifyRun()
+    iv_verdict = iv.verdict()
+    contract_status = (state.contract or {}).get("final_contract_status", "unknown")
+    has_unmet = bool(state.acceptance_summary()["unmet"])
+    has_blockers = bool((state.contract or {}).get("blocking_issues"))
+    verifier_v = state.verdict
+
+    if iv_verdict == "failed" or contract_status == "failed" or has_unmet \
+            or has_blockers or verifier_v == "failed":
+        return "failed"
+    if iv_verdict == "blocked" or verifier_v == "blocked":
+        return "blocked"
+    if iv_verdict == "passed" and contract_status != "failed":
+        return "passed"  # real verification is sufficient even if the verifier was unsure
+    if iv_verdict == "not_provided" and verifier_v == "passed" and contract_status != "failed":
+        return "passed"  # advisory mode preserved (Wave 5 behavior)
+    return "unknown"
+
+
+def truth_table(state: PipelineState) -> dict[str, str]:
+    """The compact final-verification summary as plain strings (pure/testable)."""
+    from .pipeline_verify import VerifyRun
+    ver = state.verification()
+    iv = VerifyRun.model_validate(state.independent_verify) if state.independent_verify else VerifyRun()
+    if (ver and ver.tests_run) or iv.ran:
+        tests_run = "yes"
+    elif ver is not None:
+        tests_run = "no"
+    else:
+        tests_run = "unknown"
+    crit = state.acceptance_summary()
+    contract_status = (state.contract or {}).get("final_contract_status", "unknown")
+    blockers = (state.contract or {}).get("blocking_issues") or []
+    return {
+        "tests_run": tests_run,
+        "verify_command": iv.verdict(),
+        "acceptance": f"{len(crit['met'])} met, {len(crit['unknown'])} unknown, "
+                      f"{len(crit['unmet'])} unmet",
+        "contract": contract_status,
+        "review_blockers": "present" if blockers else "none",
+        "final_verdict": state.final_verdict or "unknown",
+    }
+
+
+def render_final_verification(console, state: PipelineState) -> None:
+    """The compact 'Final Verification' truth table."""
+    t = truth_table(state)
+    hexc = _VERDICT_HEX.get(t["final_verdict"], "#6b7089")
+    console.print("  [bold]Final Verification[/bold]")
+    console.print(f"    [dim]Tests run:[/dim]          {t['tests_run']}", highlight=False)
+    console.print(f"    [dim]Verify command:[/dim]     {t['verify_command']}", highlight=False)
+    console.print(f"    [dim]Acceptance criteria:[/dim] {t['acceptance']}", highlight=False)
+    console.print(f"    [dim]Contract checks:[/dim]    {t['contract']}", highlight=False)
+    console.print(f"    [dim]Review blockers:[/dim]    {t['review_blockers']}", highlight=False)
+    console.print(f"    [dim]Final verdict:[/dim]      "
+                  f"[{hexc}]{t['final_verdict'].upper()}[/{hexc}]", highlight=False)
 
 
 def run_pipeline(
@@ -436,6 +520,9 @@ def run_pipeline(
     console=None,
     max_iterations: int = 25,
     stage_runner: StageRunner | None = None,
+    verify_cmd: str | None = None,
+    verify_timeout: int = 600,
+    independent_verify_enabled: bool = True,
 ) -> PipelineState:
     """Run the roles in sequence, handing each stage's summary to the next.
 
@@ -462,6 +549,8 @@ def run_pipeline(
         task, role_list, write_capable=write_capable, free=free, offline=offline,
         provider=cfg.provider, model=cfg.resolved_model(), badge=badge, dry_run=dry_run,
     )
+    from pathlib import Path as _Path
+    state.root = str(_Path(root).resolve())
 
     if dry_run:
         if console is not None:
@@ -509,5 +598,25 @@ def run_pipeline(
     ver = state.verification()  # verifier's report, else tester's
     if ver is not None:
         state.verdict = ver.final_verdict
+
+    # Wave 6: cross-artifact contract checks (always, from whatever artifacts exist).
+    from .pipeline_contract import check_contract
+    state.contract = check_contract(
+        state.architect_plan(), state.implementation_report(),
+        state.review_report(), ver,
+    ).model_dump()
+
+    # Independent verification: run the user's command ourselves (gated), reconcile
+    # against the tester's claim. Skipped if the pipeline already halted.
+    if verify_cmd and independent_verify_enabled and not state.stopped:
+        from .pipeline_verify import independent_verify, reconcile_with_tester
+        iv = independent_verify(verify_cmd, root, timeout=verify_timeout,
+                                yolo=getattr(cfg, "full_access", False), console=console)
+        state.independent_verify = iv.model_dump()
+        note = reconcile_with_tester(iv, state.verdict)
+        if note and console is not None:
+            console.print(f"  [#e0af68]⚠ {note}[/#e0af68]")
+
+    state.final_verdict = compute_final_verdict(state)
     state.final_recommendation = _final_recommendation(state)
     return state
