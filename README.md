@@ -116,6 +116,15 @@ Because ronin is **provider-agnostic**, it can do things a single-vendor agent s
 
 - **🧩 Multi-model consensus**: `ronin consensus "<task>" -m anthropic,gemini,cerebras` runs the *same* question on several models in parallel, then a judge model synthesizes one cross-checked answer (with a "where they agreed / diverged" note). More robust on hard design/review/decision questions than any single model. Read-only.
 - **🧭 Multi-agent orchestrator · provider-agnostic sub-agents**: `ronin orchestrate "<goal>" -r researcher=anthropic,implementer=cerebras,reviewer=gemini,tester=groq` decomposes a goal into subtasks, assigns each to a built-in specialist sub-agent (researcher, implementer, reviewer, tester) **on its own vendor's model**, runs the independent ones in **parallel**, and synthesizes the result. `--write` runs editing sub-agents in **isolated git worktrees** (no collisions); `--offline` keeps it $0 with zero egress. Complements `consensus`/`dojo` (same task, many models) by splitting *different* subtasks across models. See [docs/ORCHESTRATOR.md](docs/ORCHESTRATOR.md).
+- **🪜 Role-handoff pipeline**: `ronin pipeline "<task>"` runs the Wave-3 roles **in sequence** with gated handoffs — **architect → implementer → reviewer → tester** by default — each stage handing its summary to the next. It's **sequential and gated, not parallel or autonomous**: read-only roles (architect/reviewer) are *enforced*, without `--write` the whole run is a read-only proposal, every edit/command still hits the approval gate, and a blocked/failed stage **halts** (the rest are marked skipped). `--dry-run` prints the plan + per-stage permissions and runs nothing; `--free`/`--offline` keep it $0; `--json`/`--out` emit the full state. Complements `orchestrate` (parallel, multi-vendor) with a single-provider, step-by-step, safety-first flow.
+
+  ```bash
+  ronin pipeline "add CSV export"                                   # architect→implementer→reviewer→tester (read-only proposal)
+  ronin pipeline "fix failing auth tests" --roles debugger,implementer,tester --write
+  ronin pipeline "review this refactor" --roles reviewer,tester --dry-run
+  ronin pipeline "add retry logic" --free
+  ronin pipeline "analyze this repo" --offline --roles architect,researcher
+  ```
 - **🔁 Cross-provider failover**: set `failover` in config and a turn that hits a rate-limit or outage on the primary **transparently continues on the next provider** instead of dying. (Tokens already streamed aren't silently re-answered.)
 - **🔒 Fully offline mode**: `ronin --offline` forces a **local brain** (Ollama / any localhost model) and **strips every network tool**, so ronin codes on a plane or in an air-gapped box with **zero egress**: nothing leaves the machine.
 - **📊 Eval-driven model bake-off**: `ronin bench -m anthropic,gemini,ollama:llama3.1` runs the **objective** eval battery (no LLM judge) across models and tells you the **cheapest model that clears your quality bar**. Pick a model with data, not vibes.
@@ -346,6 +355,7 @@ database_url = "postgres://readonly_user:...@host:5432/db"   # a read-only role
 | **`ronin eval [--model X]`** | **Score agent quality on objective tasks, works on any provider (no LLM judge).** |
 | **`ronin explain <path>`** | **Explain a codebase: prose + Mermaid diagram + optional voice.** |
 | **`ronin investigate "<symptom>"`** | **Root-cause a problem across your business data AND your code.** |
+| **`ronin pipeline "<task>"`** | **Sequential gated role handoff: architect→implementer→reviewer→tester. `--dry-run`, `--roles`, `--write`, `--free`, `--offline`, `--json`.** |
 | **`ronin review [--base main]`** | **AI code review of your diff: severity-tagged findings, read-only.** |
 | **`ronin fix "<command>"`** | **Autonomous fix-until-green: runs the command, edits + re-runs until it passes.** |
 | **`ronin book "<request>"`** | **Prepare-and-confirm a booking (flight, hotel, restaurant, ticket): researches options into a summary (option, price, link, details), optionally pre-fills a form in the browser up to the payment step, then STOPS. It never pays. You confirm and pay yourself. The browser is an optional extra (`pip install 'ronin-cli[browser]'`); without it you get search + a prepared summary + manual steps.** |

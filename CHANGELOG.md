@@ -4,6 +4,14 @@ All notable changes to this project will be documented here. Format follows [Kee
 
 ## [Unreleased]
 
+### Added — role-handoff pipeline (Wave 4)
+- **`ronin pipeline "<task>"`** runs the Wave-3 roles **in sequence** with gated handoffs — default **architect → implementer → reviewer → tester** — each stage handing its summary to the next. It is **sequential, one agent per stage — not parallel and not autonomous** (the help text and docs say so plainly).
+  - **Safety model**: read-only roles (architect/reviewer/researcher) are *enforced* (read-only tools only); doer roles run read-only unless `--write`; every edit/command still flows through the existing approval gate (yolo is never set); a **blocked or failed stage halts** the run and the remaining stages are marked `skipped` (never silently continued).
+  - **`--dry-run`** prints the planned sequence, each stage's permissions, the read-only/write-capable mode, and the brain + cost badge — and runs nothing, edits nothing.
+  - **`--free`** resolves to a $0 provider (shared `apply_free`: a free tier you hold a key for, else the keyless local brain — never a paid API); **`--offline`** forces the local/Ollama brain and strips network tools. The pipeline shows a FREE / LOCAL badge.
+  - **`--roles a,b,c`** sets a custom sequence (validated against the shared role registry); **`--json`** / **`--out <file>`** emit the full serializable `PipelineState`.
+- New pure, fully-offline `pipeline` module (state model, parsing, permission logic, renderers) with an **injectable stage runner** so the orchestration is tested without a model — 34 tests, including a `FakeProvider` integration proving a read-only stage cannot write. Roles remain the single source of truth (`roles.py`); `apply_free` is now shared by `/free on` and the pipeline.
+
 ### Added — role agents, chip strip, richer plan tracker (Wave 3)
 - **First-class role agents** via `/role`: **researcher · implementer · reviewer · tester · architect · debugger**. A role shapes how ronin approaches the task (its guidance is appended to the system prompt) and, for the read-only roles (researcher / reviewer / architect), is **enforced** — the agent only gets read-only tools, so a review can't accidentally edit. Doer roles (implementer / tester / debugger) still flow through the same approval gate; a role is guidance, **never a safety bypass**. The role persists for the session and shows in the chip strip. `/help` gains a Roles section.
 - **Gentle role suggestions**: when no role is set and a task clearly fits one, ronin surfaces a one-line tip (e.g. `/role debugger` for "why is this failing?") — it points at the command and never switches for you. Shown at most once per session; not on the general chat front door.
