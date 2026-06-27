@@ -523,6 +523,9 @@ def run_pipeline(
     verify_cmd: str | None = None,
     verify_timeout: int = 600,
     independent_verify_enabled: bool = True,
+    resume_state: PipelineState | None = None,
+    rerun_completed: bool = False,
+    save_path=None,
 ) -> PipelineState:
     """Run the roles in sequence, handing each stage's summary to the next.
 
@@ -545,22 +548,40 @@ def run_pipeline(
     # return below (no stage ever runs), not from forcing this False.
     write_capable = bool(write)
 
-    state = plan_pipeline(
-        task, role_list, write_capable=write_capable, free=free, offline=offline,
-        provider=cfg.provider, model=cfg.resolved_model(), badge=badge, dry_run=dry_run,
-    )
     from pathlib import Path as _Path
-    state.root = str(_Path(root).resolve())
+    if resume_state is not None:
+        # Continue a saved run: reuse its stages/roles/task; completed stages keep
+        # their artifacts and don't re-run (unless --rerun-completed).
+        state = resume_state
+        role_list = state.roles
+        task = state.task
+    else:
+        state = plan_pipeline(
+            task, role_list, write_capable=write_capable, free=free, offline=offline,
+            provider=cfg.provider, model=cfg.resolved_model(), badge=badge, dry_run=dry_run,
+        )
+        state.root = str(_Path(root).resolve())
 
     if dry_run:
         if console is not None:
             render_pipeline_plan(console, state)
         return state
 
+    def _save() -> None:
+        if save_path is not None:
+            from .pipeline_state_io import save_state
+            save_state(state, save_path)
+
     runner = stage_runner or _default_stage_runner
     prior_artifacts: list[dict] = []
     for i, role in enumerate(role_list):
         stage = state.stages[i]
+        # On resume, keep an already-completed stage (and feed its artifact forward)
+        # without re-running it, unless the user asked to rerun completed stages.
+        if stage.status == COMPLETED and not rerun_completed:
+            if stage.artifact:
+                prior_artifacts.append(stage.artifact)
+            continue
         stage.status = ACTIVE
         if console is not None:
             console.print(f"  [yellow]▶[/yellow] [bold]{role}[/bold] "
@@ -573,6 +594,7 @@ def run_pipeline(
         except Exception as exc:  # noqa: BLE001 — one stage's crash shouldn't nuke the report
             stage.status = FAILED
             stage.summary = f"stage error: {exc}"
+            _save()
             break
         stage.summary = outcome.summary
         stage.files_changed = list(outcome.files_changed)
@@ -582,13 +604,16 @@ def run_pipeline(
             stage.artifact = outcome.artifact  # preserved even if a later stage fails
         if outcome.blocked:
             stage.status = BLOCKED
+            _save()
             break  # stop — do not silently continue past a blocked stage
         if not outcome.success:
             stage.status = FAILED
+            _save()
             break
         stage.status = COMPLETED
         if outcome.artifact:
             prior_artifacts.append(outcome.artifact)
+        _save()  # checkpoint after every successful stage
 
     if state.stopped:  # mark the un-run tail as skipped (artifacts so far preserved)
         for s in state.stages:
@@ -619,4 +644,5 @@ def run_pipeline(
 
     state.final_verdict = compute_final_verdict(state)
     state.final_recommendation = _final_recommendation(state)
+    _save()  # final checkpoint
     return state
