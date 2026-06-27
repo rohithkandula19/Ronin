@@ -116,8 +116,11 @@ class PipelineState(BaseModel):
     stages: list[PipelineStage] = Field(default_factory=list)
     verdict: str = ""            # verifier/tester stage verdict: passed/failed/blocked/unknown
     independent_verify: dict = Field(default_factory=dict)  # serialized VerifyRun
+    verify_source: str = ""      # provided / detected / not_found / disabled
     contract: dict = Field(default_factory=dict)            # serialized ContractCheckReport
-    final_verdict: str = ""      # combined Wave-6 verdict (verifier + verify + contract + …)
+    semantic: dict = Field(default_factory=dict)            # serialized SemanticContractReport
+    git_snapshot: dict = Field(default_factory=dict)        # serialized GitSnapshot at run start
+    final_verdict: str = ""      # combined Wave-6+ verdict (verifier + verify + contract + …)
     final_recommendation: str = ""
 
     def stage(self, role: str) -> PipelineStage | None:
@@ -456,8 +459,10 @@ def compute_final_verdict(state: PipelineState) -> str:
     has_blockers = bool((state.contract or {}).get("blocking_issues"))
     verifier_v = state.verdict
 
+    # Semantic check is advisory unless it reports a clear misalignment ('failed').
+    semantic_status = (state.semantic or {}).get("final_semantic_status", "")
     if iv_verdict == "failed" or contract_status == "failed" or has_unmet \
-            or has_blockers or verifier_v == "failed":
+            or has_blockers or verifier_v == "failed" or semantic_status == "failed":
         return "failed"
     if iv_verdict == "blocked" or verifier_v == "blocked":
         return "blocked"
@@ -482,12 +487,19 @@ def truth_table(state: PipelineState) -> dict[str, str]:
     crit = state.acceptance_summary()
     contract_status = (state.contract or {}).get("final_contract_status", "unknown")
     blockers = (state.contract or {}).get("blocking_issues") or []
+    git_status = (state.git_snapshot or {}).get("dirty_state")
+    git_cell = "unavailable" if not state.git_snapshot else ("changed" if git_status else "clean")
+    semantic_cell = (state.semantic or {}).get("final_semantic_status", "disabled") \
+        if state.semantic else "disabled"
     return {
+        "verify_command": state.verify_source or "not_found",
         "tests_run": tests_run,
-        "verify_command": iv.verdict(),
-        "acceptance": f"{len(crit['met'])} met, {len(crit['unknown'])} unknown, "
-                      f"{len(crit['unmet'])} unmet",
+        "verify_result": iv.verdict(),
+        "git_snapshot": git_cell,
+        "acceptance": f"{len(crit['met'])} met, {len(crit['unmet'])} unmet, "
+                      f"{len(crit['unknown'])} unknown",
         "contract": contract_status,
+        "semantic_contract": semantic_cell,
         "review_blockers": "present" if blockers else "none",
         "final_verdict": state.final_verdict or "unknown",
     }
@@ -498,10 +510,13 @@ def render_final_verification(console, state: PipelineState) -> None:
     t = truth_table(state)
     hexc = _VERDICT_HEX.get(t["final_verdict"], "#6b7089")
     console.print("  [bold]Final Verification[/bold]")
-    console.print(f"    [dim]Tests run:[/dim]          {t['tests_run']}", highlight=False)
     console.print(f"    [dim]Verify command:[/dim]     {t['verify_command']}", highlight=False)
+    console.print(f"    [dim]Verify result:[/dim]      {t['verify_result']}", highlight=False)
+    console.print(f"    [dim]Tests run:[/dim]          {t['tests_run']}", highlight=False)
+    console.print(f"    [dim]Git snapshot:[/dim]       {t['git_snapshot']}", highlight=False)
     console.print(f"    [dim]Acceptance criteria:[/dim] {t['acceptance']}", highlight=False)
     console.print(f"    [dim]Contract checks:[/dim]    {t['contract']}", highlight=False)
+    console.print(f"    [dim]Semantic contract:[/dim]  {t['semantic_contract']}", highlight=False)
     console.print(f"    [dim]Review blockers:[/dim]    {t['review_blockers']}", highlight=False)
     console.print(f"    [dim]Final verdict:[/dim]      "
                   f"[{hexc}]{t['final_verdict'].upper()}[/{hexc}]", highlight=False)
@@ -523,6 +538,8 @@ def run_pipeline(
     verify_cmd: str | None = None,
     verify_timeout: int = 600,
     independent_verify_enabled: bool = True,
+    auto_verify_enabled: bool = True,
+    semantic_enabled: bool = False,
     resume_state: PipelineState | None = None,
     rerun_completed: bool = False,
     save_path=None,
@@ -561,6 +578,15 @@ def run_pipeline(
             provider=cfg.provider, model=cfg.resolved_model(), badge=badge, dry_run=dry_run,
         )
         state.root = str(_Path(root).resolve())
+        # Snapshot the git state so a later --resume can detect a moved tree.
+        if not dry_run:
+            import datetime as _dt
+
+            from . import __version__
+            from .pipeline_git_snapshot import git_snapshot
+            state.git_snapshot = git_snapshot(
+                root, timestamp=_dt.datetime.now().isoformat(timespec="seconds"),
+                version=__version__).model_dump()
 
     if dry_run:
         if console is not None:
@@ -631,8 +657,26 @@ def run_pipeline(
         state.review_report(), ver,
     ).model_dump()
 
-    # Independent verification: run the user's command ourselves (gated), reconcile
-    # against the tester's claim. Skipped if the pipeline already halted.
+    # Independent verification. Prefer the user's --verify-cmd; otherwise auto-
+    # detect the repo's test command (Wave 7). Either way the command is gated.
+    if not independent_verify_enabled:
+        state.verify_source = "disabled"
+    elif verify_cmd:
+        state.verify_source = "provided"
+    elif auto_verify_enabled and not state.stopped:
+        from .pipeline_verify import auto_detect_verify_command
+        detected = auto_detect_verify_command(root)
+        if detected is not None:
+            verify_cmd = detected[0]
+            state.verify_source = "detected"
+            if console is not None:
+                console.print(f"  [#6b7089]auto-detected verify command:[/#6b7089] "
+                              f"[cyan]{verify_cmd}[/cyan]", highlight=False)
+        else:
+            state.verify_source = "not_found"
+    else:
+        state.verify_source = "not_found"
+
     if verify_cmd and independent_verify_enabled and not state.stopped:
         from .pipeline_verify import independent_verify, reconcile_with_tester
         iv = independent_verify(verify_cmd, root, timeout=verify_timeout,
@@ -641,6 +685,25 @@ def run_pipeline(
         note = reconcile_with_tester(iv, state.verdict)
         if note and console is not None:
             console.print(f"  [#e0af68]⚠ {note}[/#e0af68]")
+
+    # Optional semantic contract: a read-only model pass judging whether the diff
+    # actually fulfils the plan. Opt-in (--semantic-contract) to avoid extra calls.
+    if semantic_enabled and not state.stopped:
+        from .pipeline_semantic import check_semantic_contract
+
+        def _judge(prompt: str) -> str:
+            from ronin_agent_patterns import Message
+
+            from .runner import build_provider
+            return build_provider(cfg).complete(
+                system="You are a careful, read-only semantic reviewer. Judge alignment "
+                       "honestly and admit uncertainty.",
+                messages=[Message(role="user", content=prompt)], tools=[], max_tokens=700,
+            ).text
+
+        sem = check_semantic_contract(state.architect_plan(), state.implementation_report(),
+                                      state.review_report(), judge_runner=_judge)
+        state.semantic = sem.model_dump()
 
     state.final_verdict = compute_final_verdict(state)
     state.final_recommendation = _final_recommendation(state)

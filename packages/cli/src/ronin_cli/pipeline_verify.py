@@ -38,6 +38,22 @@ class VerifyRun(BaseModel):
         return "passed" if self.passed else "failed"
 
 
+def auto_detect_verify_command(root) -> tuple[str, str] | None:
+    """Detect the repo's test/verification command via verify_cmd, as a shell
+    string + runner label (e.g. ``("uv run pytest -q", "pytest")``), or None.
+
+    Wraps the existing :func:`ronin_cli.verify_cmd.detect_verify_command`, which
+    already covers uv/pytest, npm/pnpm/yarn, cargo, go, make, and a memory-file
+    ``verify:`` line. Returns the command as a single string for the gated runner."""
+    from .verify_cmd import detect_verify_command
+    import shlex
+    detected = detect_verify_command(root)
+    if detected is None:
+        return None
+    cmd_list, runner = detected
+    return shlex.join(cmd_list), runner
+
+
 def _default_confirm(console, command: str) -> bool:
     """Existing-style shell approval prompt (default-deny)."""
     if console is not None:
@@ -45,8 +61,8 @@ def _default_confirm(console, command: str) -> bool:
         console.print("  [yellow]run this verification command?[/yellow] [grey50]y / N[/grey50] ", end="")
     try:
         return input().strip().lower() in ("y", "yes")
-    except (EOFError, KeyboardInterrupt):
-        return False
+    except (EOFError, KeyboardInterrupt, OSError):
+        return False  # no interactive stdin → default-deny (never auto-run)
 
 
 def independent_verify(

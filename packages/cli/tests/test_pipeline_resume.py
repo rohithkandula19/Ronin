@@ -111,3 +111,80 @@ def test_save_path_checkpoints_after_each_stage(tmp_path) -> None:
     assert path.is_file()
     final = load_state(path)
     assert all(s.status == "completed" for s in final.stages)
+
+
+# --- Wave 7: git snapshot safety + checkpoint --------------------------------
+
+import subprocess
+
+from typer.testing import CliRunner
+from ronin_cli.main import app
+from ronin_cli.pipeline_git_snapshot import git_snapshot
+
+_runner = CliRunner()
+
+
+def _init_repo(tmp_path):
+    for args in (("init", "-q"), ("config", "user.email", "t@t.t"), ("config", "user.name", "t")):
+        subprocess.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
+    (tmp_path / "a.txt").write_text("one\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "-A"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(tmp_path), "commit", "-q", "-m", "init"], check=True, capture_output=True)
+
+
+def _saved_state(tmp_path, snap_dict):
+    st = plan_pipeline("resume me", ["architect", "verifier"])
+    st.stages[0].status = "completed"
+    st.stages[0].artifact = {"kind": "architect"}
+    st.stages[1].status = "failed"
+    st.root = str(tmp_path.resolve())
+    st.git_snapshot = snap_dict
+    # keep the state file OUTSIDE the repo so it doesn't dirty the tree vs the snapshot
+    path = tmp_path.parent / "st.json"
+    path.write_text(st.model_dump_json(), encoding="utf-8")
+    return path
+
+
+def test_resume_same_git_state_succeeds(tmp_path, monkeypatch) -> None:
+    _init_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    snap = git_snapshot(tmp_path).model_dump()
+    path = _saved_state(tmp_path, snap)
+    out = tmp_path.parent / "after.json"
+    res = _runner.invoke(app, ["pipeline", "--resume", str(path), "--dry-run", "--out", str(out)])
+    assert res.exit_code == 0  # clean tree → no refusal
+
+
+def test_resume_changed_git_state_refused(tmp_path, monkeypatch) -> None:
+    _init_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    snap = git_snapshot(tmp_path).model_dump()
+    path = _saved_state(tmp_path, snap)
+    # change the tree after the snapshot
+    (tmp_path / "a.txt").write_text("CHANGED\n", encoding="utf-8")
+    res = _runner.invoke(app, ["pipeline", "--resume", str(path), "--dry-run"])
+    assert res.exit_code == 2
+    assert "working tree changed" in res.stdout
+    assert "--force-resume" in res.stdout
+
+
+def test_force_resume_allows_changed_state(tmp_path, monkeypatch) -> None:
+    _init_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    snap = git_snapshot(tmp_path).model_dump()
+    path = _saved_state(tmp_path, snap)
+    (tmp_path / "a.txt").write_text("CHANGED\n", encoding="utf-8")
+    res = _runner.invoke(app, ["pipeline", "--resume", str(path), "--dry-run", "--force-resume"])
+    assert res.exit_code == 0
+    assert "continuing despite" in res.stdout
+
+
+def test_checkpoint_does_not_destroy_changes(tmp_path, monkeypatch) -> None:
+    _init_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "a.txt").write_text("LOCAL EDIT\n", encoding="utf-8")  # uncommitted work
+    res = _runner.invoke(app, ["pipeline", "do x", "--dry-run", "--checkpoint"])
+    assert res.exit_code == 0
+    assert "checkpoint #" in res.stdout
+    # the local edit is untouched
+    assert (tmp_path / "a.txt").read_text() == "LOCAL EDIT\n"
