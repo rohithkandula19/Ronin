@@ -131,3 +131,72 @@ def test_auto_detect_memory_verify_line(tmp_path) -> None:
 
 def test_auto_detect_none_in_empty_dir(tmp_path) -> None:
     assert auto_detect_verify_command(tmp_path) is None
+
+
+# --- Wave 8: multi-suite verification ----------------------------------------
+
+from ronin_cli.pipeline_verify import (
+    SuiteRun,
+    aggregate_verify,
+    auto_detect_suites,
+    parse_verify_suite,
+    run_suites,
+)
+
+
+def test_parse_verify_suite() -> None:
+    assert parse_verify_suite("unit:uv run pytest -q") == ("unit", "uv run pytest -q")
+    assert parse_verify_suite("pnpm test") == ("verify", "pnpm test")
+    assert parse_verify_suite(" lint : ruff check . ") == ("lint", "ruff check .")
+
+
+def test_run_suites_aggregates(tmp_path) -> None:
+    def fake(returncode):
+        import subprocess
+        return lambda command, *, cwd, timeout: subprocess.CompletedProcess(command, returncode, "", "")
+    # two suites: unit passes, lint fails
+    runs = []
+    for name, cmd, rc in [("unit", "pytest", 0), ("lint", "ruff", 1)]:
+        from ronin_cli.pipeline_verify import run_suite
+        runs.append(run_suite(name, cmd, tmp_path, yolo=True, run_fn=fake(rc), clock=lambda: 0.0))
+    assert [r.status for r in runs] == ["passed", "failed"]
+    agg = aggregate_verify(runs)
+    assert agg.verdict() == "failed"  # any failed suite → failed
+
+
+def test_failed_suite_fails_final_verdict() -> None:
+    suites = [SuiteRun(name="unit", status="passed"), SuiteRun(name="lint", status="failed")]
+    assert aggregate_verify(suites).verdict() == "failed"
+
+
+def test_declined_suite_blocks_not_passes() -> None:
+    suites = [SuiteRun(name="unit", status="passed"),
+              SuiteRun(name="lint", status="blocked", declined=True)]
+    assert aggregate_verify(suites).verdict() == "blocked"
+
+
+def test_all_passed_suites_pass() -> None:
+    suites = [SuiteRun(name="unit", status="passed"), SuiteRun(name="lint", status="passed")]
+    assert aggregate_verify(suites).verdict() == "passed"
+
+
+def test_run_suites_declined_halts_rest(tmp_path) -> None:
+    calls = []
+
+    def approve(cmd):
+        calls.append(cmd)
+        return False  # decline everything
+
+    runs = run_suites([("unit", "pytest"), ("lint", "ruff")], tmp_path,
+                      approve_fn=approve, run_fn=lambda *a, **k: None, clock=lambda: 0.0)
+    assert len(runs) == 1 and runs[0].declined is True  # stopped after the first decline
+    assert calls == ["pytest"]
+
+
+def test_auto_detect_suites_python(tmp_path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.ruff]\n[tool.pytest.ini_options]\n", encoding="utf-8")
+    (tmp_path / "tests").mkdir()
+    suites = auto_detect_suites(tmp_path)
+    names = {n for n, _ in suites}
+    assert "tests" in names and "lint" in names  # pytest + ruff detected

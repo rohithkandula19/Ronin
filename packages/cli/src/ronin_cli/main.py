@@ -17,7 +17,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import typer
 from rich import box
@@ -502,7 +502,9 @@ def pipeline(
     roles: str = typer.Option(
         None, "--roles", help="Comma-separated role order. Default: "
         "architect,implementer,reviewer,tester,verifier."),
-    verify_cmd: Optional[str] = typer.Option(None, "--verify-cmd", help="Command the verifier runs itself (gated) to independently confirm the work."),
+    verify_cmd: Optional[List[str]] = typer.Option(None, "--verify-cmd", help="Verification command the verifier runs itself (gated). Repeatable for multiple suites."),
+    verify_suite: Optional[List[str]] = typer.Option(None, "--verify-suite", help="Named verification suite 'name:command' (gated). Repeatable."),
+    auto_verify_all: bool = typer.Option(False, "--auto-verify-all", help="Auto-detect and run multiple suites (tests, lint, typecheck, build) — all gated."),
     verify_timeout: int = typer.Option(600, "--verify-timeout", help="Timeout (seconds) for the verify command."),
     no_independent_verify: bool = typer.Option(False, "--no-independent-verify", help="Skip running --verify-cmd; keep advisory verifier only."),
     no_auto_verify: bool = typer.Option(False, "--no-auto-verify", help="Don't auto-detect a verify command when --verify-cmd is absent."),
@@ -601,7 +603,8 @@ def pipeline(
     state = run_pipeline(
         config, task, role_list, write=write, free=free, offline=offline,
         dry_run=dry_run, console=render_console,
-        verify_cmd=verify_cmd, verify_timeout=verify_timeout,
+        verify_cmds=verify_cmd, verify_suites=verify_suite, auto_verify_all=auto_verify_all,
+        verify_timeout=verify_timeout,
         independent_verify_enabled=not no_independent_verify,
         auto_verify_enabled=not no_auto_verify,
         semantic_enabled=semantic_contract,

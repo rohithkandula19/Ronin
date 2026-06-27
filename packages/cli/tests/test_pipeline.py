@@ -847,3 +847,42 @@ def test_run_pipeline_no_diff_evidence(tmp_path) -> None:
                          auto_verify_enabled=False, diff_evidence_enabled=False)
     assert state.diff_evidence["captured"] is False
     assert "disabled" in state.diff_evidence["note"]
+
+
+# --- Wave 8: multi-suite in run_pipeline + truth table -----------------------
+
+def test_run_pipeline_multi_suite_failure_fails(tmp_path) -> None:
+    def runner(config, role, prompt, *, read_only, root, console, max_iterations):
+        art = {"kind": "verification_report", "final_verdict": "passed", "tests_run": ["t"]} \
+            if role == "verifier" else None
+        return StageOutcome(success=True, summary=f"{role} ok", artifact=art)
+
+    import ronin_cli.pipeline_verify as pv
+    from ronin_cli.pipeline_verify import SuiteRun
+
+    def fake_run_suites(suites, root, **kw):
+        return [SuiteRun(name="unit", command="pytest", status="passed", exit_code=0),
+                SuiteRun(name="lint", command="ruff", status="failed", exit_code=1)]
+
+    import unittest.mock as mock
+    cfg = RoninConfig(provider="cerebras")
+    with mock.patch.object(pv, "run_suites", fake_run_suites):
+        state = run_pipeline(cfg, "x", ["verifier"], stage_runner=runner, root=tmp_path,
+                             verify_suites=["unit:pytest", "lint:ruff"])
+    assert len(state.suites) == 2
+    assert state.verify_source == "provided"
+    assert state.final_verdict == "failed"   # a failing suite fails the run
+    t = truth_table(state)
+    assert "2 total, 1 passed, 1 failed" in t["suites"]
+
+
+def test_truth_table_diff_evidence_cell() -> None:
+    st = _completed_state(["verifier"], verdict="passed")
+    st.diff_evidence = {"captured": True, "full_diff_available": True, "truncated": False}
+    assert truth_table(st)["diff_evidence"] == "available"
+    st.diff_evidence = {"captured": True, "full_diff_available": True, "truncated": True}
+    assert truth_table(st)["diff_evidence"] == "truncated"
+    st.diff_evidence = {"captured": False, "note": "diff evidence disabled"}
+    assert truth_table(st)["diff_evidence"] == "disabled"
+    st.diff_evidence = {"captured": False, "note": "not a git repository"}
+    assert truth_table(st)["diff_evidence"] == "missing"
