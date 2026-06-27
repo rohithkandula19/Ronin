@@ -16,12 +16,13 @@ def _reset_role():
 def test_six_builtin_roles_exist() -> None:
     assert set(roles.ROLES) == {
         "researcher", "implementer", "reviewer", "tester", "architect", "debugger",
+        "verifier",
     }
 
 
 def test_read_only_roles_are_research_review_architect() -> None:
     ro = {k for k, r in roles.ROLES.items() if r.read_only}
-    assert ro == {"researcher", "reviewer", "architect"}
+    assert ro == {"researcher", "reviewer", "architect", "verifier"}
     # the doers are not read-only
     for k in ("implementer", "tester", "debugger"):
         assert roles.role_is_read_only(k) is False

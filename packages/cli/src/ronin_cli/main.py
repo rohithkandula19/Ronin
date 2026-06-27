@@ -508,6 +508,12 @@ def pipeline(
     offline: bool = typer.Option(False, "--offline", help="Local/Ollama only; strip network tools."),
     json_out: bool = typer.Option(False, "--json", help="Emit the pipeline state as JSON (suppresses the pretty render)."),
     out: Optional[Path] = typer.Option(None, "--out", help="Write the JSON pipeline state to a file."),
+    do_commit: bool = typer.Option(False, "--commit", help="After a passing verifier, offer a gated commit (asks first)."),
+    do_pr: bool = typer.Option(False, "--pr", help="After committing, offer a gated push + PR (asks first)."),
+    branch: Optional[str] = typer.Option(None, "--branch", help="Create this branch before committing."),
+    commit_message: Optional[str] = typer.Option(None, "--commit-message", help="Use this commit message instead of drafting one."),
+    pr_title: Optional[str] = typer.Option(None, "--pr-title", help="Use this PR title instead of drafting one."),
+    pr_body: Optional[str] = typer.Option(None, "--pr-body", help="Use this PR body instead of drafting one."),
 ) -> None:
     """Run a gated role-handoff pipeline: architect → implementer → reviewer → tester.
 
@@ -544,12 +550,21 @@ def pipeline(
         console.print()
         render_pipeline_result(console, state)
 
+    # Optional, gated commit/PR finish (never silent; honors the dry-run flag).
+    if do_commit or do_pr:
+        from .pipeline_finish import finish_pipeline
+        finish_pipeline(
+            None if json_out else console, Path("."), config, state,
+            do_commit=do_commit, do_pr=do_pr, branch=branch, message=commit_message,
+            title=pr_title, body=pr_body, dry_run=dry_run,
+        )
+
     if out is not None:
         out.write_text(state.model_dump_json(indent=2), encoding="utf-8")
         if not json_out:
             console.print(f"[dim]wrote pipeline state → {out}[/dim]")
 
-    if state.outcome() in ("failed", "blocked"):
+    if state.outcome() in ("failed", "blocked") or state.verdict in ("failed", "blocked"):
         raise typer.Exit(1)
 
 
