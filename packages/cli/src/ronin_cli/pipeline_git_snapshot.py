@@ -57,10 +57,16 @@ def git_snapshot(root, *, timestamp: str = "", version: str = "") -> GitSnapshot
         for line in status.stdout.splitlines():
             if not line.strip():
                 continue
+            path = line[3:].strip()
+            # Ignore ronin's own metadata dir — it's not user work, and a
+            # checkpoint restore removes/recreates it, which would otherwise look
+            # like a spurious tree change.
+            if path == ".ronin" or path.startswith(".ronin/"):
+                continue
             if line.startswith("??"):
-                snap.untracked_files.append(line[3:].strip())
+                snap.untracked_files.append(path)
             else:
-                snap.dirty_files.append(line[3:].strip())
+                snap.dirty_files.append(path)
     snap.dirty_state = bool(snap.dirty_files or snap.untracked_files)
     return snap
 

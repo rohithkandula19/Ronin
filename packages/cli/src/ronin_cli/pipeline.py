@@ -122,6 +122,8 @@ class PipelineState(BaseModel):
     diff_evidence: dict = Field(default_factory=dict)       # serialized DiffEvidence (real diff)
     suites: list[dict] = Field(default_factory=list)        # serialized SuiteRun list
     git_snapshot: dict = Field(default_factory=dict)        # serialized GitSnapshot at run start
+    checkpoint_id: int | None = None  # --checkpoint id (for safe restore on resume)
+    resume_git_status: str = ""  # matched / changed / restored / warning / unavailable (set on resume)
     final_verdict: str = ""      # combined Wave-6+ verdict (verifier + verify + contract + …)
     final_recommendation: str = ""
 
@@ -490,8 +492,11 @@ def truth_table(state: PipelineState) -> dict[str, str]:
     crit = state.acceptance_summary()
     contract_status = (state.contract or {}).get("final_contract_status", "unknown")
     blockers = (state.contract or {}).get("blocking_issues") or []
-    git_status = (state.git_snapshot or {}).get("dirty_state")
-    git_cell = "unavailable" if not state.git_snapshot else ("changed" if git_status else "clean")
+    if state.resume_git_status:  # set by the CLI on a --resume (matched/restored/…)
+        git_cell = state.resume_git_status
+    else:
+        git_status = (state.git_snapshot or {}).get("dirty_state")
+        git_cell = "unavailable" if not state.git_snapshot else ("changed" if git_status else "clean")
     semantic_cell = (state.semantic or {}).get("final_semantic_status", "disabled") \
         if state.semantic else "disabled"
     de = state.diff_evidence or {}
@@ -589,6 +594,7 @@ def run_pipeline(
     resume_state: PipelineState | None = None,
     rerun_completed: bool = False,
     save_path=None,
+    checkpoint_id: int | None = None,
 ) -> PipelineState:
     """Run the roles in sequence, handing each stage's summary to the next.
 
@@ -624,6 +630,7 @@ def run_pipeline(
             provider=cfg.provider, model=cfg.resolved_model(), badge=badge, dry_run=dry_run,
         )
         state.root = str(_Path(root).resolve())
+        state.checkpoint_id = checkpoint_id
         # Snapshot the git state so a later --resume can detect a moved tree.
         if not dry_run:
             import datetime as _dt

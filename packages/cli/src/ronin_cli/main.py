@@ -517,6 +517,8 @@ def pipeline(
     rerun_completed: bool = typer.Option(False, "--rerun-completed", help="On --resume, re-run completed stages too."),
     force_resume: bool = typer.Option(False, "--force-resume", help="Resume even if the git/working-tree state changed since the checkpoint."),
     checkpoint: bool = typer.Option(False, "--checkpoint", help="Create a lightweight git safety snapshot before running (never touches your tree)."),
+    restore_checkpoint: bool = typer.Option(False, "--restore-checkpoint", help="On an unsafe --resume, offer to restore the saved checkpoint (gated, overwrites the tree)."),
+    no_restore_offer: bool = typer.Option(False, "--no-restore-offer", help="On an unsafe --resume, don't mention/offer checkpoint restore."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show the plan + permissions; run nothing, edit nothing."),
     write: bool = typer.Option(False, "--write", help="Allow doer stages to edit/run (still approval-gated). Off = read-only proposal."),
     free: bool = typer.Option(False, "--free", help="Prefer a free ($0) provider for all stages."),
@@ -564,17 +566,46 @@ def pipeline(
         from .pipeline_git_snapshot import GitSnapshot, compare_snapshots, git_snapshot
         saved_snap = GitSnapshot.model_validate(resume_state.git_snapshot) if resume_state.git_snapshot else None
         cmp = compare_snapshots(saved_snap, git_snapshot("."))
+        resume_state.resume_git_status = cmp.status if cmp.status != "clean" else "matched"
         if cmp.status in ("changed", "warning"):
             console.print(f"[yellow]⚠ working tree changed since the checkpoint "
                           f"({cmp.status}):[/yellow]")
             for w in cmp.warnings:
                 console.print(f"  [yellow]· {w}[/yellow]")
-            if not force_resume:
+            cid = resume_state.checkpoint_id
+            # Offer a gated restore only when explicitly requested AND a checkpoint
+            # exists. Never automatic; the restore itself asks before overwriting.
+            if restore_checkpoint and cid is not None:
+                from .checkpoint import restore_checkpoint as _restore
+                console.print(f"  [bold]restore checkpoint #{cid}[/bold] to match the saved state? "
+                              "this [bold]overwrites your current working tree[/bold].")
+                if Confirm.ask("  proceed with restore?", default=False, console=console):
+                    console.print(f"  [dim]{_restore('.', cid)}[/dim]")
+                    cmp2 = compare_snapshots(saved_snap, git_snapshot("."))
+                    if cmp2.status in ("changed", "warning") and not force_resume:
+                        console.print("[red]tree still doesn't match after restore — pass "
+                                      "[bold]--force-resume[/bold] to continue anyway.[/red]")
+                        raise typer.Exit(2)
+                    resume_state.resume_git_status = "restored"
+                    console.print("[green]✓ restored — continuing[/green]")
+                elif not force_resume:
+                    console.print("[red]restore declined — exiting. Pass [bold]--force-resume[/bold] "
+                                  "to continue without restoring.[/red]")
+                    raise typer.Exit(2)
+            elif cid is not None and not no_restore_offer:
+                console.print(f"  [dim]a checkpoint (#{cid}) is available — pass "
+                              "[bold]--restore-checkpoint[/bold] to restore it (gated), or "
+                              "[bold]--force-resume[/bold] to continue as-is.[/dim]")
+                if not force_resume:
+                    raise typer.Exit(2)
+            elif not force_resume:
                 console.print("[red]refusing to resume — re-check your changes, then pass "
                               "[bold]--force-resume[/bold] to continue anyway.[/red]")
                 raise typer.Exit(2)
-            console.print("[dim]--force-resume: continuing despite the changes[/dim]")
+            if force_resume and resume_state.resume_git_status != "restored":
+                console.print("[dim]--force-resume: continuing despite the changes[/dim]")
         elif cmp.status == "unavailable":
+            resume_state.resume_git_status = "unavailable"
             console.print("[dim]note: git state unavailable — can't verify the tree is unchanged[/dim]")
     else:
         if not task.strip():
@@ -587,11 +618,14 @@ def pipeline(
             raise typer.Exit(2)
 
     # --checkpoint: a lightweight safety snapshot of the working tree (tracked +
-    # untracked) into a ronin ref, WITHOUT touching the index/branch/HEAD.
+    # untracked) into a ronin ref, WITHOUT touching the index/branch/HEAD. Its id
+    # is saved into the state so a later --resume can restore it.
+    _checkpoint_id = None
     if checkpoint:
         from .checkpoint import NotAGitRepo, create_checkpoint
         try:
             cp = create_checkpoint(Path("."), label="pipeline")
+            _checkpoint_id = cp.id
             console.print(f"[dim]✓ checkpoint #{cp.id} ({cp.sha[:8]}) — restore with "
                           f"[bold]ronin checkpoint restore {cp.id}[/bold] if needed[/dim]")
         except NotAGitRepo:
@@ -611,7 +645,7 @@ def pipeline(
         diff_context=diff_context, max_diff_bytes=max_diff_bytes,
         diff_evidence_enabled=not no_diff_evidence,
         resume_state=resume_state, rerun_completed=rerun_completed,
-        save_path=save_state_path,
+        save_path=save_state_path, checkpoint_id=_checkpoint_id,
     )
 
     if json_out:
