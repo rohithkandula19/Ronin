@@ -498,10 +498,16 @@ def consensus(
 
 @app.command()
 def pipeline(
-    task: str = typer.Argument(..., help="The task to run through the role pipeline."),
+    task: str = typer.Argument("", help="The task to run through the role pipeline (omit with --resume)."),
     roles: str = typer.Option(
         None, "--roles", help="Comma-separated role order. Default: "
-        "architect,implementer,reviewer,tester."),
+        "architect,implementer,reviewer,tester,verifier."),
+    verify_cmd: Optional[str] = typer.Option(None, "--verify-cmd", help="Command the verifier runs itself (gated) to independently confirm the work."),
+    verify_timeout: int = typer.Option(600, "--verify-timeout", help="Timeout (seconds) for the verify command."),
+    no_independent_verify: bool = typer.Option(False, "--no-independent-verify", help="Skip running --verify-cmd; keep advisory verifier only."),
+    save_state_path: Optional[Path] = typer.Option(None, "--save-state", help="Write PipelineState JSON after every stage."),
+    resume: Optional[Path] = typer.Option(None, "--resume", help="Resume a saved PipelineState JSON from the first incomplete stage."),
+    rerun_completed: bool = typer.Option(False, "--rerun-completed", help="On --resume, re-run completed stages too."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show the plan + permissions; run nothing, edit nothing."),
     write: bool = typer.Option(False, "--write", help="Allow doer stages to edit/run (still approval-gated). Off = read-only proposal."),
     free: bool = typer.Option(False, "--free", help="Prefer a free ($0) provider for all stages."),
@@ -532,17 +538,43 @@ def pipeline(
     from .pipeline import parse_roles, render_pipeline_result, run_pipeline
 
     config = load_config()
-    try:
-        role_list = parse_roles(roles)
-    except ValueError as exc:
-        console.print(f"[yellow]{exc}[/yellow]")
-        raise typer.Exit(2)
+
+    # --resume: load a saved state and continue; otherwise parse the role order.
+    resume_state = None
+    if resume is not None:
+        from .pipeline_state_io import PipelineStateError, load_state
+        try:
+            resume_state = load_state(resume)
+        except PipelineStateError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(2)
+        role_list = resume_state.roles
+        task = resume_state.task
+        cur_root = str(Path(".").resolve())
+        if resume_state.root and resume_state.root != cur_root:
+            console.print(f"[yellow]⚠ saved state targeted {resume_state.root}, but you're in "
+                          f"{cur_root} — git state may differ.[/yellow]")
+    else:
+        if not task.strip():
+            console.print("[yellow]give a task, or use --resume <file>[/yellow]")
+            raise typer.Exit(2)
+        try:
+            role_list = parse_roles(roles)
+        except ValueError as exc:
+            console.print(f"[yellow]{exc}[/yellow]")
+            raise typer.Exit(2)
 
     # --json is machine-readable: suppress human rendering (also keeps gates
     # fail-closed since there's no console to approve at).
     render_console = None if json_out else console
-    state = run_pipeline(config, task, role_list, write=write, free=free,
-                         offline=offline, dry_run=dry_run, console=render_console)
+    state = run_pipeline(
+        config, task, role_list, write=write, free=free, offline=offline,
+        dry_run=dry_run, console=render_console,
+        verify_cmd=verify_cmd, verify_timeout=verify_timeout,
+        independent_verify_enabled=not no_independent_verify,
+        resume_state=resume_state, rerun_completed=rerun_completed,
+        save_path=save_state_path,
+    )
 
     if json_out:
         typer.echo(state.model_dump_json(indent=2))
@@ -564,7 +596,10 @@ def pipeline(
         if not json_out:
             console.print(f"[dim]wrote pipeline state → {out}[/dim]")
 
-    if state.outcome() in ("failed", "blocked") or state.verdict in ("failed", "blocked"):
+    # Dry-run is a preview (nothing ran) → always exit 0. A real run reflects the
+    # outcome / combined verdict in the exit code.
+    if not dry_run and (state.outcome() in ("failed", "blocked")
+                        or state.final_verdict in ("failed", "blocked")):
         raise typer.Exit(1)
 
 

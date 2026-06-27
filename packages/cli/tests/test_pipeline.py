@@ -481,6 +481,8 @@ def _state_with_verification(verdict, crits):
         "acceptance_criteria_status": crits,
     }
     st.verdict = verdict
+    from ronin_cli.pipeline import compute_final_verdict
+    st.final_verdict = compute_final_verdict(st)
     return st
 
 
@@ -498,7 +500,8 @@ def test_render_acceptance_buckets() -> None:
 def test_render_result_shows_verdict() -> None:
     st = _state_with_verification("passed", [{"text": "x", "status": "met"}])
     out = _render(render_pipeline_result, st)
-    assert "Verdict:" in out and "PASSED" in out
+    assert "Final Verification" in out
+    assert "Final verdict:" in out and "PASSED" in out
 
 
 def test_render_acceptance_silent_without_verifier() -> None:
@@ -524,3 +527,173 @@ def test_cli_commit_dry_run_describes_but_does_not_commit(tmp_path, monkeypatch)
     n = subprocess.run(["git", "-C", str(tmp_path), "rev-list", "--count", "HEAD"],
                        capture_output=True, text=True).stdout.strip()
     assert n == "1"
+
+
+# --- Wave 6: final verdict precedence + independent verify + contract --------
+
+from ronin_cli.pipeline import compute_final_verdict, truth_table
+
+
+def _completed_state(roles, verdict="", iv=None, contract=None, crits=None):
+    st = plan_pipeline("x", roles)
+    for s in st.stages:
+        s.status = "completed"
+    if "verifier" in roles or "tester" in roles:
+        role = "verifier" if "verifier" in roles else "tester"
+        st.stage(role).artifact = {
+            "kind": "verification_report", "final_verdict": verdict,
+            "acceptance_criteria_status": crits or [],
+        }
+    st.verdict = verdict
+    if iv is not None:
+        st.independent_verify = iv
+    if contract is not None:
+        st.contract = contract
+    return st
+
+
+def test_final_verdict_independent_fail_overrides_tester_pass() -> None:
+    st = _completed_state(["implementer", "tester"], verdict="passed",
+                          iv={"requested": True, "ran": True, "passed": False})
+    assert compute_final_verdict(st) == "failed"
+
+
+def test_final_verdict_independent_pass_is_sufficient() -> None:
+    st = _completed_state(["implementer", "verifier"], verdict="unknown",
+                          iv={"requested": True, "ran": True, "passed": True})
+    assert compute_final_verdict(st) == "passed"  # real verification wins over 'unknown'
+
+
+def test_final_verdict_declined_verify_is_blocked() -> None:
+    st = _completed_state(["verifier"], verdict="passed",
+                          iv={"requested": True, "declined": True})
+    assert compute_final_verdict(st) == "blocked"
+
+
+def test_final_verdict_advisory_mode_preserved() -> None:
+    # no verify command → advisory verifier 'passed' still passes
+    st = _completed_state(["architect", "verifier"], verdict="passed")
+    assert compute_final_verdict(st) == "passed"
+
+
+def test_final_verdict_contract_failed_is_failed() -> None:
+    st = _completed_state(["verifier"], verdict="passed",
+                          contract={"final_contract_status": "failed"})
+    assert compute_final_verdict(st) == "failed"
+
+
+def test_final_verdict_blocking_review_fails() -> None:
+    st = _completed_state(["reviewer", "verifier"], verdict="passed",
+                          contract={"final_contract_status": "failed",
+                                    "blocking_issues": ["unresolved review fix: x"]})
+    assert compute_final_verdict(st) == "failed"
+
+
+def test_final_verdict_unmet_criterion_fails() -> None:
+    st = _completed_state(["verifier"], verdict="passed",
+                          crits=[{"text": "x", "status": "unmet"}])
+    assert compute_final_verdict(st) == "failed"
+
+
+def test_final_verdict_blocked_stage_wins() -> None:
+    st = plan_pipeline("x", ["architect", "implementer"])
+    st.stages[0].status = "completed"
+    st.stages[1].status = "blocked"
+    assert compute_final_verdict(st) == "blocked"
+
+
+def test_truth_table_fields() -> None:
+    st = _completed_state(["implementer", "verifier"], verdict="passed",
+                          iv={"requested": True, "ran": True, "passed": True},
+                          contract={"final_contract_status": "passed"},
+                          crits=[{"text": "a", "status": "met"}])
+    st.final_verdict = compute_final_verdict(st)
+    t = truth_table(st)
+    assert t["tests_run"] == "yes"
+    assert t["verify_command"] == "passed"
+    assert "1 met" in t["acceptance"]
+    assert t["contract"] == "passed"
+    assert t["review_blockers"] == "none"
+    assert t["final_verdict"] == "passed"
+
+
+def test_run_pipeline_independent_verify_failing_sets_failed() -> None:
+    # tester says passed, but the injected verify command fails → final verdict failed
+    def runner(config, role, prompt, *, read_only, root, console, max_iterations):
+        art = None
+        if role == "tester":
+            art = {"kind": "verification_report", "final_verdict": "passed", "tests_run": ["t1"]}
+        return StageOutcome(success=True, summary=f"{role} ok", artifact=art)
+
+    import ronin_cli.pipeline_verify as pv
+    from ronin_cli.pipeline_verify import VerifyRun
+
+    def fake_verify(command, root, **kw):
+        return VerifyRun(requested=True, command=command, ran=True, passed=False, exit_code=1)
+
+    cfg = RoninConfig(provider="cerebras")
+    import unittest.mock as mock
+    with mock.patch.object(pv, "independent_verify", fake_verify):
+        state = run_pipeline(cfg, "x", ["tester"], stage_runner=runner,
+                             verify_cmd="pytest -q")
+    assert state.independent_verify["passed"] is False
+    assert state.final_verdict == "failed"
+
+
+def test_run_pipeline_no_verify_cmd_preserves_advisory() -> None:
+    def runner(config, role, prompt, *, read_only, root, console, max_iterations):
+        art = {"kind": "verification_report", "final_verdict": "passed",
+               "tests_run": ["t1"]} if role == "verifier" else None
+        return StageOutcome(success=True, summary=f"{role} ok", artifact=art)
+
+    cfg = RoninConfig(provider="cerebras")
+    state = run_pipeline(cfg, "x", ["architect", "verifier"], stage_runner=runner)
+    assert state.independent_verify == {}          # nothing ran
+    assert state.final_verdict == "passed"          # advisory preserved
+
+
+# --- Wave 6: CLI flags (resume / verify / json shape / gating) ---------------
+
+def test_cli_no_task_no_resume_exits_2(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    res = _runner.invoke(app, ["pipeline"])
+    assert res.exit_code == 2
+    assert "give a task" in res.stdout or "--resume" in res.stdout
+
+
+def test_cli_resume_corrupt_file_exits_2(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json", encoding="utf-8")
+    res = _runner.invoke(app, ["pipeline", "--resume", str(bad)])
+    assert res.exit_code == 2
+    assert "corrupt" in res.stdout.lower() or "incompatible" in res.stdout.lower()
+
+
+def test_cli_resume_continues_from_incomplete(tmp_path, monkeypatch) -> None:
+    import json as _json
+    monkeypatch.chdir(tmp_path)
+    # a saved state: architect done, implementer failed, verifier pending
+    saved = plan_pipeline("resume me", ["architect", "implementer", "verifier"])
+    saved.stages[0].status = "completed"
+    saved.stages[0].artifact = {"kind": "architect"}
+    saved.stages[1].status = "failed"
+    saved.root = str(tmp_path)
+    path = tmp_path / "st.json"
+    path.write_text(saved.model_dump_json(), encoding="utf-8")
+    out = tmp_path / "after.json"
+    # resume in dry-run so no model is needed; it should load + re-render the plan
+    res = _runner.invoke(app, ["pipeline", "--resume", str(path), "--dry-run", "--out", str(out)])
+    assert res.exit_code == 0
+    data = _json.loads(out.read_text())
+    assert data["task"] == "resume me"
+    assert data["roles"] == ["architect", "implementer", "verifier"]
+
+
+def test_cli_json_state_has_wave6_fields(tmp_path, monkeypatch) -> None:
+    import json as _json
+    monkeypatch.chdir(tmp_path)
+    res = _runner.invoke(app, ["pipeline", "do x", "--dry-run", "--json"])
+    data = _json.loads(res.stdout)
+    for key in ("contract", "independent_verify", "final_verdict", "verdict", "root"):
+        assert key in data

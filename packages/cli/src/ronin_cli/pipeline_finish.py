@@ -30,11 +30,14 @@ def commit_gate(state, *, force: bool = False) -> tuple[bool, str]:
                         if s.status in ("failed", "blocked")), None)
         where = f"{stopper.role} ({stopper.status})" if stopper else "a stage"
         return force, f"pipeline stopped at {where}"
-    if state.verification() is not None:
-        v = state.verdict or "unknown"
+    # Prefer the combined Wave-6 verdict (verifier + independent verify + contract)
+    # when it's been computed; fall back to the verifier-stage verdict.
+    final = state.final_verdict or state.verdict
+    if state.verification() is not None or state.final_verdict:
+        v = final or "unknown"
         if v == "passed":
-            return True, "verifier passed"
-        return force, f"verifier verdict is '{v}', not 'passed'"
+            return True, "final verdict: passed"
+        return force, f"final verdict is '{v}', not 'passed'"
     if state.outcome() == "completed":
         return True, "all stages completed (no verifier ran)"
     return force, "pipeline did not complete"
