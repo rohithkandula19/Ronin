@@ -565,6 +565,15 @@ def run_pipeline(
             provider=cfg.provider, model=cfg.resolved_model(), badge=badge, dry_run=dry_run,
         )
         state.root = str(_Path(root).resolve())
+        # Snapshot the git state so a later --resume can detect a moved tree.
+        if not dry_run:
+            import datetime as _dt
+
+            from . import __version__
+            from .pipeline_git_snapshot import git_snapshot
+            state.git_snapshot = git_snapshot(
+                root, timestamp=_dt.datetime.now().isoformat(timespec="seconds"),
+                version=__version__).model_dump()
 
     if dry_run:
         if console is not None:

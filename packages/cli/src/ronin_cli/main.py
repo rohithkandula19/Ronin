@@ -509,6 +509,8 @@ def pipeline(
     save_state_path: Optional[Path] = typer.Option(None, "--save-state", help="Write PipelineState JSON after every stage."),
     resume: Optional[Path] = typer.Option(None, "--resume", help="Resume a saved PipelineState JSON from the first incomplete stage."),
     rerun_completed: bool = typer.Option(False, "--rerun-completed", help="On --resume, re-run completed stages too."),
+    force_resume: bool = typer.Option(False, "--force-resume", help="Resume even if the git/working-tree state changed since the checkpoint."),
+    checkpoint: bool = typer.Option(False, "--checkpoint", help="Create a lightweight git safety snapshot before running (never touches your tree)."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show the plan + permissions; run nothing, edit nothing."),
     write: bool = typer.Option(False, "--write", help="Allow doer stages to edit/run (still approval-gated). Off = read-only proposal."),
     free: bool = typer.Option(False, "--free", help="Prefer a free ($0) provider for all stages."),
@@ -551,10 +553,23 @@ def pipeline(
             raise typer.Exit(2)
         role_list = resume_state.roles
         task = resume_state.task
-        cur_root = str(Path(".").resolve())
-        if resume_state.root and resume_state.root != cur_root:
-            console.print(f"[yellow]⚠ saved state targeted {resume_state.root}, but you're in "
-                          f"{cur_root} — git state may differ.[/yellow]")
+        # Git-snapshot safety: compare the saved tree state to now; refuse an
+        # unsafe resume unless --force-resume. Never resets or stashes anything.
+        from .pipeline_git_snapshot import GitSnapshot, compare_snapshots, git_snapshot
+        saved_snap = GitSnapshot.model_validate(resume_state.git_snapshot) if resume_state.git_snapshot else None
+        cmp = compare_snapshots(saved_snap, git_snapshot("."))
+        if cmp.status in ("changed", "warning"):
+            console.print(f"[yellow]⚠ working tree changed since the checkpoint "
+                          f"({cmp.status}):[/yellow]")
+            for w in cmp.warnings:
+                console.print(f"  [yellow]· {w}[/yellow]")
+            if not force_resume:
+                console.print("[red]refusing to resume — re-check your changes, then pass "
+                              "[bold]--force-resume[/bold] to continue anyway.[/red]")
+                raise typer.Exit(2)
+            console.print("[dim]--force-resume: continuing despite the changes[/dim]")
+        elif cmp.status == "unavailable":
+            console.print("[dim]note: git state unavailable — can't verify the tree is unchanged[/dim]")
     else:
         if not task.strip():
             console.print("[yellow]give a task, or use --resume <file>[/yellow]")
@@ -564,6 +579,17 @@ def pipeline(
         except ValueError as exc:
             console.print(f"[yellow]{exc}[/yellow]")
             raise typer.Exit(2)
+
+    # --checkpoint: a lightweight safety snapshot of the working tree (tracked +
+    # untracked) into a ronin ref, WITHOUT touching the index/branch/HEAD.
+    if checkpoint:
+        from .checkpoint import NotAGitRepo, create_checkpoint
+        try:
+            cp = create_checkpoint(Path("."), label="pipeline")
+            console.print(f"[dim]✓ checkpoint #{cp.id} ({cp.sha[:8]}) — restore with "
+                          f"[bold]ronin checkpoint restore {cp.id}[/bold] if needed[/dim]")
+        except NotAGitRepo:
+            console.print("[yellow]--checkpoint needs a git repo — skipping[/yellow]")
 
     # --json is machine-readable: suppress human rendering (also keeps gates
     # fail-closed since there's no console to approve at).
