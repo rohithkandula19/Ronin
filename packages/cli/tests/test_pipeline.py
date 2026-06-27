@@ -505,3 +505,22 @@ def test_render_acceptance_silent_without_verifier() -> None:
     st = plan_pipeline("x", ["architect"])
     st.stages[0].status = "completed"
     assert _render(render_acceptance, st) == ""
+
+
+# --- Wave 5: CLI commit/PR gating --------------------------------------------
+
+def test_cli_commit_dry_run_describes_but_does_not_commit(tmp_path, monkeypatch) -> None:
+    import subprocess
+    for args in (("init", "-q"), ("config", "user.email", "t@t.t"), ("config", "user.name", "t")):
+        subprocess.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
+    (tmp_path / "f.txt").write_text("x\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "-A"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(tmp_path), "commit", "-q", "-m", "init"], check=True, capture_output=True)
+    monkeypatch.chdir(tmp_path)
+    res = _runner.invoke(app, ["pipeline", "do x", "--dry-run", "--commit"])
+    assert res.exit_code == 0
+    assert "would:" in res.stdout and "commit" in res.stdout
+    # still only the initial commit
+    n = subprocess.run(["git", "-C", str(tmp_path), "rev-list", "--count", "HEAD"],
+                       capture_output=True, text=True).stdout.strip()
+    assert n == "1"
