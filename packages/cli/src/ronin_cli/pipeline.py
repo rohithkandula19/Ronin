@@ -344,7 +344,9 @@ def run_pipeline(
     elif free:
         cfg = apply_free(cfg)
     badge = "LOCAL" if offline else cost_badge(cfg)[0]
-    write_capable = bool(write) and not dry_run
+    # Reflects what a real run WOULD do; dry-run safety comes from the early
+    # return below (no stage ever runs), not from forcing this False.
+    write_capable = bool(write)
 
     state = plan_pipeline(
         task, role_list, write_capable=write_capable, free=free, offline=offline,

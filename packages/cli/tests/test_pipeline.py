@@ -333,3 +333,64 @@ def test_default_runner_enforces_readonly_role_no_writes(tmp_path, monkeypatch) 
     assert (tmp_path / "f.py").read_text() == "x = 1\n"   # architect can't write
     assert "write_file" not in prov.calls[0]["tool_names"]
     assert state.stages[0].status in ("completed", "failed")
+
+
+# --- CLI command (ronin pipeline) --------------------------------------------
+
+from typer.testing import CliRunner
+
+from ronin_cli.main import app
+
+_runner = CliRunner()
+
+
+def test_cli_dry_run_shows_plan_and_edits_nothing(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "keep.py").write_text("v = 1\n", encoding="utf-8")
+    res = _runner.invoke(app, ["pipeline", "add a feature", "--dry-run"])
+    assert res.exit_code == 0
+    assert "Pipeline plan" in res.stdout and "dry run" in res.stdout
+    assert "READ-ONLY" in res.stdout
+    for role in ("architect", "implementer", "reviewer", "tester"):
+        assert role in res.stdout
+    # nothing was edited
+    assert (tmp_path / "keep.py").read_text() == "v = 1\n"
+
+
+def test_cli_dry_run_json_shape(tmp_path, monkeypatch) -> None:
+    import json as _json
+    monkeypatch.chdir(tmp_path)
+    res = _runner.invoke(app, ["pipeline", "do x", "--dry-run", "--json",
+                               "--roles", "reviewer,tester"])
+    assert res.exit_code == 0
+    data = _json.loads(res.stdout)
+    assert data["task"] == "do x"
+    assert data["roles"] == ["reviewer", "tester"]
+    assert [s["status"] for s in data["stages"]] == ["pending", "pending"]
+    assert data["dry_run"] is True
+
+
+def test_cli_invalid_roles_exit_2(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    res = _runner.invoke(app, ["pipeline", "x", "--roles", "architect,wizard"])
+    assert res.exit_code == 2
+    assert "unknown role" in res.stdout
+
+
+def test_cli_out_writes_json_file(tmp_path, monkeypatch) -> None:
+    import json as _json
+    monkeypatch.chdir(tmp_path)
+    out = tmp_path / "state.json"
+    res = _runner.invoke(app, ["pipeline", "ship", "--dry-run", "--out", str(out)])
+    assert res.exit_code == 0
+    assert out.exists()
+    data = _json.loads(out.read_text())
+    assert data["task"] == "ship" and data["dry_run"] is True
+
+
+def test_cli_dry_run_write_flag_shows_write_capable(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    res = _runner.invoke(app, ["pipeline", "x", "--dry-run", "--write",
+                               "--roles", "implementer"])
+    assert res.exit_code == 0
+    assert "WRITE-CAPABLE" in res.stdout

@@ -497,6 +497,63 @@ def consensus(
 
 
 @app.command()
+def pipeline(
+    task: str = typer.Argument(..., help="The task to run through the role pipeline."),
+    roles: str = typer.Option(
+        None, "--roles", help="Comma-separated role order. Default: "
+        "architect,implementer,reviewer,tester."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show the plan + permissions; run nothing, edit nothing."),
+    write: bool = typer.Option(False, "--write", help="Allow doer stages to edit/run (still approval-gated). Off = read-only proposal."),
+    free: bool = typer.Option(False, "--free", help="Prefer a free ($0) provider for all stages."),
+    offline: bool = typer.Option(False, "--offline", help="Local/Ollama only; strip network tools."),
+    json_out: bool = typer.Option(False, "--json", help="Emit the pipeline state as JSON (suppresses the pretty render)."),
+    out: Optional[Path] = typer.Option(None, "--out", help="Write the JSON pipeline state to a file."),
+) -> None:
+    """Run a gated role-handoff pipeline: architect → implementer → reviewer → tester.
+
+    SEQUENTIAL, one agent per stage — NOT parallel and NOT autonomous. Each stage
+    wears a role (Wave 3) and hands its summary to the next. Read-only roles
+    (architect/reviewer) are enforced; without --write the whole run is a
+    read-only proposal; every edit/command still hits the approval gate. A
+    blocked/failed stage halts the run.
+
+      ronin pipeline "add CSV export"
+      ronin pipeline "fix failing auth tests" --roles debugger,implementer,tester
+      ronin pipeline "review this refactor" --roles reviewer,tester --dry-run
+      ronin pipeline "add retry logic" --free
+      ronin pipeline "analyze this repo" --offline --roles architect,researcher
+    """
+    from .pipeline import parse_roles, render_pipeline_result, run_pipeline
+
+    config = load_config()
+    try:
+        role_list = parse_roles(roles)
+    except ValueError as exc:
+        console.print(f"[yellow]{exc}[/yellow]")
+        raise typer.Exit(2)
+
+    # --json is machine-readable: suppress human rendering (also keeps gates
+    # fail-closed since there's no console to approve at).
+    render_console = None if json_out else console
+    state = run_pipeline(config, task, role_list, write=write, free=free,
+                         offline=offline, dry_run=dry_run, console=render_console)
+
+    if json_out:
+        typer.echo(state.model_dump_json(indent=2))
+    elif not dry_run:
+        console.print()
+        render_pipeline_result(console, state)
+
+    if out is not None:
+        out.write_text(state.model_dump_json(indent=2), encoding="utf-8")
+        if not json_out:
+            console.print(f"[dim]wrote pipeline state → {out}[/dim]")
+
+    if state.outcome() in ("failed", "blocked"):
+        raise typer.Exit(1)
+
+
+@app.command()
 def ghost(
     root: Path = typer.Option(Path("."), "--root", help="Directory to watch."),
     test: bool = typer.Option(False, "--test", help="Run the test suite after each save and react."),
