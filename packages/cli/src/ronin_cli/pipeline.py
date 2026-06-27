@@ -119,6 +119,8 @@ class PipelineState(BaseModel):
     verify_source: str = ""      # provided / detected / not_found / disabled
     contract: dict = Field(default_factory=dict)            # serialized ContractCheckReport
     semantic: dict = Field(default_factory=dict)            # serialized SemanticContractReport
+    diff_evidence: dict = Field(default_factory=dict)       # serialized DiffEvidence (real diff)
+    suites: list[dict] = Field(default_factory=list)        # serialized SuiteRun list
     git_snapshot: dict = Field(default_factory=dict)        # serialized GitSnapshot at run start
     final_verdict: str = ""      # combined Wave-6+ verdict (verifier + verify + contract + …)
     final_recommendation: str = ""
@@ -540,6 +542,9 @@ def run_pipeline(
     independent_verify_enabled: bool = True,
     auto_verify_enabled: bool = True,
     semantic_enabled: bool = False,
+    diff_context: int = 3,
+    max_diff_bytes: int = 20000,
+    diff_evidence_enabled: bool = True,
     resume_state: PipelineState | None = None,
     rerun_completed: bool = False,
     save_path=None,
@@ -649,6 +654,13 @@ def run_pipeline(
     ver = state.verification()  # verifier's report, else tester's
     if ver is not None:
         state.verdict = ver.final_verdict
+
+    # Wave 8: capture the real working-tree diff (read-only) as evidence for the
+    # semantic check + the truth table.
+    from .pipeline_diff import capture_diff
+    state.diff_evidence = capture_diff(
+        root, context=diff_context, max_bytes=max_diff_bytes,
+        include=diff_evidence_enabled).model_dump()
 
     # Wave 6: cross-artifact contract checks (always, from whatever artifacts exist).
     from .pipeline_contract import check_contract

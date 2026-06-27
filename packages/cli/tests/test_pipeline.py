@@ -815,3 +815,35 @@ def test_run_pipeline_semantic_enabled_records_report() -> None:
                              auto_verify_enabled=False, semantic_enabled=True)
     assert state.semantic.get("final_semantic_status") == "passed"
     assert state.semantic.get("parsed") is True
+
+
+# --- Wave 8: diff evidence capture in run_pipeline ---------------------------
+
+def test_run_pipeline_captures_diff_evidence(tmp_path) -> None:
+    import subprocess as _sp
+    for args in (("init", "-q"), ("config", "user.email", "t@t.t"), ("config", "user.name", "t")):
+        _sp.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
+    _sp.run(["git", "-C", str(tmp_path), "add", "-A"], check=True, capture_output=True)
+    _sp.run(["git", "-C", str(tmp_path), "commit", "-q", "-m", "init"], check=True, capture_output=True)
+    (tmp_path / "a.py").write_text("x = 1\ny = 2\n", encoding="utf-8")  # a real change
+
+    def runner(config, role, prompt, *, read_only, root, console, max_iterations):
+        return StageOutcome(success=True, summary=f"{role} ok")
+
+    cfg = RoninConfig(provider="cerebras")
+    state = run_pipeline(cfg, "x", ["architect"], stage_runner=runner, root=tmp_path,
+                         auto_verify_enabled=False)
+    assert state.diff_evidence["captured"] is True
+    assert "a.py" in state.diff_evidence["files_changed"]
+    assert state.diff_evidence["full_diff_available"] is True
+
+
+def test_run_pipeline_no_diff_evidence(tmp_path) -> None:
+    def runner(config, role, prompt, *, read_only, root, console, max_iterations):
+        return StageOutcome(success=True, summary=f"{role} ok")
+    cfg = RoninConfig(provider="cerebras")
+    state = run_pipeline(cfg, "x", ["architect"], stage_runner=runner, root=tmp_path,
+                         auto_verify_enabled=False, diff_evidence_enabled=False)
+    assert state.diff_evidence["captured"] is False
+    assert "disabled" in state.diff_evidence["note"]

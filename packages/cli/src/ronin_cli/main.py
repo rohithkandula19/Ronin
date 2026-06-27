@@ -507,6 +507,9 @@ def pipeline(
     no_independent_verify: bool = typer.Option(False, "--no-independent-verify", help="Skip running --verify-cmd; keep advisory verifier only."),
     no_auto_verify: bool = typer.Option(False, "--no-auto-verify", help="Don't auto-detect a verify command when --verify-cmd is absent."),
     semantic_contract: bool = typer.Option(False, "--semantic-contract/--no-semantic-contract", help="Run a read-only semantic check: does the diff actually fulfil the plan? (extra model call)"),
+    diff_context: int = typer.Option(3, "--diff-context", help="Unified-diff context lines for the captured evidence."),
+    max_diff_bytes: int = typer.Option(20000, "--max-diff-bytes", help="Truncate the captured diff excerpt to this many bytes."),
+    no_diff_evidence: bool = typer.Option(False, "--no-diff-evidence", help="Don't capture the working-tree diff as evidence."),
     save_state_path: Optional[Path] = typer.Option(None, "--save-state", help="Write PipelineState JSON after every stage."),
     resume: Optional[Path] = typer.Option(None, "--resume", help="Resume a saved PipelineState JSON from the first incomplete stage."),
     rerun_completed: bool = typer.Option(False, "--rerun-completed", help="On --resume, re-run completed stages too."),
@@ -602,6 +605,8 @@ def pipeline(
         independent_verify_enabled=not no_independent_verify,
         auto_verify_enabled=not no_auto_verify,
         semantic_enabled=semantic_contract,
+        diff_context=diff_context, max_diff_bytes=max_diff_bytes,
+        diff_evidence_enabled=not no_diff_evidence,
         resume_state=resume_state, rerun_completed=rerun_completed,
         save_path=save_state_path,
     )
