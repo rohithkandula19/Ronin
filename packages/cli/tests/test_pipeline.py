@@ -231,7 +231,8 @@ def _recording_runner(calls, *, fail_on=None, block_on=None):
             return StageOutcome(success=False, summary=f"{role} blocked", blocked=True)
         if fail_on == role:
             return StageOutcome(success=False, summary=f"{role} failed")
-        return StageOutcome(success=True, summary=f"{role} ok")
+        return StageOutcome(success=True, summary=f"{role} ok",
+                            artifact={"kind": f"{role}_artifact", "marker": f"{role}-did-it"})
     return runner
 
 
@@ -245,8 +246,10 @@ def test_pipeline_runs_stages_in_order_with_correct_readonly() -> None:
     assert all(c["read_only"] for c in calls)
     assert state.outcome() == "completed"
     assert all(s.status == "completed" for s in state.stages)
-    # handoff: later prompts carry prior stage summaries
-    assert "architect: architect ok" in calls[1]["prompt"]
+    # handoff: the architect's structured artifact is passed into the next prompt
+    assert "architect-did-it" in calls[1]["prompt"]
+    # and each stage stores its artifact on the state (so --json includes them)
+    assert state.stage("architect").artifact["marker"] == "architect-did-it"
 
 
 def test_write_capable_lets_doers_act_but_keeps_readonly_roles_locked() -> None:
@@ -394,3 +397,71 @@ def test_cli_dry_run_write_flag_shows_write_capable(tmp_path, monkeypatch) -> No
                                "--roles", "implementer"])
     assert res.exit_code == 0
     assert "WRITE-CAPABLE" in res.stdout
+
+
+# --- Wave 5: artifact handoff + verdict --------------------------------------
+
+def test_state_verdict_from_verifier_artifact() -> None:
+    def runner(config, role, prompt, *, read_only, root, console, max_iterations):
+        art = None
+        if role == "verifier":
+            art = {"kind": "verification_report", "final_verdict": "passed",
+                   "tests_run": ["t1"],
+                   "acceptance_criteria_status": [{"text": "exports csv", "status": "met"}]}
+        return StageOutcome(success=True, summary=f"{role} ok", artifact=art)
+
+    cfg = RoninConfig(provider="cerebras")
+    state = run_pipeline(cfg, "x", ["architect", "verifier"], stage_runner=runner)
+    assert state.verdict == "passed"
+    assert state.acceptance_summary()["met"] == ["exports csv"]
+    assert "PASSED" in state.final_recommendation
+
+
+def test_artifacts_preserved_when_a_later_stage_fails() -> None:
+    def runner(config, role, prompt, *, read_only, root, console, max_iterations):
+        if role == "reviewer":
+            return StageOutcome(success=False, summary="reviewer failed")
+        return StageOutcome(success=True, summary=f"{role} ok",
+                            artifact={"kind": f"{role}", "ok": True})
+
+    cfg = RoninConfig(provider="cerebras")
+    state = run_pipeline(cfg, "x", ["architect", "implementer", "reviewer", "verifier"],
+                         stage_runner=runner)
+    # earlier artifacts survive the failure
+    assert state.stage("architect").artifact == {"kind": "architect", "ok": True}
+    assert state.stage("implementer").artifact == {"kind": "implementer", "ok": True}
+    assert state.stage("reviewer").status == "failed"
+    assert state.stage("verifier").status == "skipped"
+
+
+def test_json_output_includes_artifacts(tmp_path, monkeypatch) -> None:
+    import json as _json
+    monkeypatch.chdir(tmp_path)
+    res = _runner.invoke(app, ["pipeline", "do x", "--dry-run", "--json"])
+    data = _json.loads(res.stdout)
+    # dry-run stages carry the artifact field (empty dict), so the shape is stable
+    assert "artifact" in data["stages"][0]
+    assert "verdict" in data
+
+
+def test_default_runner_builds_architect_plan_artifact(tmp_path, monkeypatch) -> None:
+    from unittest.mock import patch
+
+    from ronin_agent_patterns import FakeProvider, LLMResponse
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+    plan_json = ('Here is the plan.\n```json\n'
+                 '{"objective": "add CSV export", "files_to_change": ["export.py"], '
+                 '"acceptance_criteria": [{"id":"ac1","text":"CSV downloads","status":"unknown"}]}\n```')
+    prov = FakeProvider(responses=[
+        LLMResponse(text=plan_json, stop_reason="end_turn",
+                    usage={"input_tokens": 5, "output_tokens": 2}),
+    ])
+    cfg = RoninConfig(provider="anthropic")
+    with patch("ronin_cli.code_mode.build_provider", return_value=prov):
+        state = run_pipeline(cfg, "add CSV export", ["architect"], root=tmp_path,
+                             console=None, max_iterations=3)
+    plan = state.architect_plan()
+    assert plan is not None and plan.parsed is True
+    assert plan.objective == "add CSV export"
+    assert plan.files_to_change == ["export.py"]
+    assert plan.acceptance_criteria[0].text == "CSV downloads"

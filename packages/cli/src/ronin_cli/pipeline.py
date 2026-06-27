@@ -98,6 +98,7 @@ class PipelineStage(BaseModel):
     files_changed: list[str] = Field(default_factory=list)
     commands_requested: list[str] = Field(default_factory=list)
     test_result: str = ""
+    artifact: dict = Field(default_factory=dict)  # serialized handoff artifact
 
 
 class PipelineState(BaseModel):
@@ -112,10 +113,31 @@ class PipelineState(BaseModel):
     badge: str = ""              # FREE / PAID / LOCAL / UNKNOWN
     dry_run: bool = False
     stages: list[PipelineStage] = Field(default_factory=list)
+    verdict: str = ""            # verifier/tester final verdict: passed/failed/blocked/unknown
     final_recommendation: str = ""
 
     def stage(self, role: str) -> PipelineStage | None:
         return next((s for s in self.stages if s.role == role), None)
+
+    def architect_plan(self):
+        """Reconstruct the ArchitectPlan artifact, or None."""
+        from .pipeline_artifacts import ArchitectPlan
+        s = self.stage("architect")
+        return ArchitectPlan.model_validate(s.artifact) if s and s.artifact else None
+
+    def verification(self):
+        """The authoritative VerificationReport (verifier's, else tester's), or None."""
+        from .pipeline_artifacts import VerificationReport
+        for role in ("verifier", "tester"):
+            s = self.stage(role)
+            if s and s.artifact:
+                return VerificationReport.model_validate(s.artifact)
+        return None
+
+    def acceptance_summary(self) -> dict[str, list[str]]:
+        """met / unmet / unknown / not_applicable buckets from the verification."""
+        from .pipeline_artifacts import roll_up_criteria
+        return roll_up_criteria(self.verification())
 
     @property
     def stopped(self) -> bool:
@@ -244,6 +266,7 @@ class StageOutcome:
     commands_requested: list[str] = field(default_factory=list)
     test_result: str = ""
     blocked: bool = False
+    artifact: dict | None = None  # serialized structured artifact for the next stage
 
 
 # (config, role, prompt, *, read_only, root, console, max_iterations) -> StageOutcome
@@ -257,8 +280,32 @@ _STAGE_INSTRUCTION = {
                 "missing tests. Report findings (file·line · severity · fix). Read-only.",
     "tester": "Identify this project's tests for the change and verify them. Report real "
               "results — never claim green without a passing run.",
+    "verifier": "READ-ONLY final check. Confirm the implementation meets the architect's "
+                "acceptance criteria, that the claimed tests actually ran, and that changed "
+                "files match the plan. Flag unverified claims. Verdict: passed/failed/blocked/"
+                "unknown — never mark unknown as passed.",
     "researcher": "Explore the relevant code read-only and report findings with file·line.",
     "debugger": "Find the root cause of the failure before any fix; explain the actual cause.",
+}
+
+# Per-role JSON shape the stage is asked to emit (kept short on purpose).
+_ARTIFACT_HINT = {
+    "architect": '{"objective": "...", "constraints": [], "assumptions": [], '
+                 '"files_to_inspect": [], "files_to_change": [], "implementation_steps": [], '
+                 '"risks": [], "test_strategy": "...", '
+                 '"acceptance_criteria": [{"id": "ac1", "text": "...", "status": "unknown"}]}',
+    "implementer": '{"completed_steps": [], "files_changed": [], "diff_summary": "...", '
+                   '"commands_requested": [], "commands_run": [], "unresolved_items": [], '
+                   '"confidence": "low|medium|high"}',
+    "reviewer": '{"findings": [{"text": "...", "severity": "info|low|medium|high|blocking", '
+                '"affected_files": []}], "required_fixes": [], "safety_concerns": [], '
+                '"architecture_concerns": [], "approval_recommendation": "approve|request_changes"}',
+    "tester": '{"tests_discovered": [], "tests_run": [], "passed": 0, "failed": 0, '
+              '"command_outputs_summary": "...", "final_verdict": "passed|failed|blocked|unknown"}',
+    "verifier": '{"tests_run": [], "passed": 0, "failed": 0, "blocked_reason": "", '
+                '"acceptance_criteria_status": [{"id": "ac1", "text": "...", '
+                '"status": "met|unmet|unknown|not_applicable"}], '
+                '"final_verdict": "passed|failed|blocked|unknown"}',
 }
 
 
@@ -270,47 +317,88 @@ def _summarize(text: str, limit: int = 240) -> str:
     return para if len(para) <= limit else para[: limit - 1] + "…"
 
 
-def _stage_prompt(task: str, role: str, prior: list[tuple[str, str]],
+def _stage_prompt(task: str, role: str, prior_artifacts: list[dict],
                   *, write_capable: bool) -> str:
+    import json as _json
     lines = [f"Original task: {task}", ""]
-    if prior:
-        lines.append("Context from prior pipeline stages:")
-        lines += [f"- {r}: {s}" for r, s in prior]
+    if prior_artifacts:
+        lines.append("Structured artifacts from prior pipeline stages (consume these):")
+        for art in prior_artifacts:
+            lines.append("```json")
+            lines.append(_json.dumps(art, default=str)[:1800])
+            lines.append("```")
         lines.append("")
     lines.append(_STAGE_INSTRUCTION.get(role, "Do your part of the task for your role."))
     if role in ("implementer", "tester", "debugger") and not write_capable:
         lines.append("This is a READ-ONLY proposal run (no --write): describe exactly what "
                      "you would change/run, but make no edits and run no commands.")
+    hint = _ARTIFACT_HINT.get(role)
+    if hint:
+        lines.append("")
+        lines.append("End your reply with a single ```json block matching this shape "
+                     "(use explicit empty/unknown values for anything you can't determine):")
+        lines.append(hint)
     return "\n".join(lines)
 
 
 def _default_stage_runner(config, role, prompt, *, read_only, root, console,
                           max_iterations) -> StageOutcome:
     from .code_mode import run_code_agent
+    from .pipeline_artifacts import (
+        ImplementationReport,
+        VerificationReport,
+        artifact_for_role,
+        finalize_verdict,
+    )
     undo: list = []
     result = run_code_agent(
         config, prompt, root=root, console=console, yolo=False,
         read_only=read_only, role=role, undo_stack=undo, max_iterations=max_iterations,
     )
     files = sorted({e[0] for e in undo if isinstance(e, (list, tuple)) and e})
+
+    # Build the role's structured artifact from the reply (lenient; explicit
+    # unknowns on failure), then reconcile with real evidence.
+    art = artifact_for_role(role).from_text(result.output, summary=_summarize(result.output))
+    if isinstance(art, ImplementationReport) and not art.files_changed:
+        art.files_changed = files  # ground-truth from the undo stack
+    if isinstance(art, VerificationReport):
+        art.final_verdict = finalize_verdict(art)  # conservative; never fakes "passed"
+
     return StageOutcome(
         success=bool(result.success) and not result.blocked,
         summary=_summarize(result.output),
         files_changed=files,
         blocked=bool(result.blocked),
+        artifact=art.model_dump(),
     )
 
 
+_VERDICT_MSG = {
+    "passed": "verifier PASSED — acceptance criteria met.",
+    "failed": "verifier FAILED — the work does not meet the task.",
+    "blocked": "verifier BLOCKED — verification could not complete.",
+    "unknown": "verifier UNKNOWN — could not confirm; treat as NOT done.",
+}
+
+
 def _final_recommendation(state: PipelineState) -> str:
-    out = state.outcome()
     done = sum(1 for s in state.stages if s.status == COMPLETED)
     total = len(state.stages)
-    if out == "completed":
-        return f"all {total} stages completed."
     stopper = next((s for s in state.stages if s.status in _STOP_STATUSES), None)
     if stopper is not None:
         return (f"stopped at {stopper.role} ({stopper.status}) after {done}/{total} "
                 f"stages — resolve it and re-run.")
+    if state.verdict:
+        crit = state.acceptance_summary()
+        tail = ""
+        if crit["unmet"]:
+            tail += f" · {len(crit['unmet'])} criteria unmet"
+        if crit["unknown"]:
+            tail += f" · {len(crit['unknown'])} unverified"
+        return _VERDICT_MSG.get(state.verdict, f"verdict: {state.verdict}") + tail
+    if done == total and total:
+        return f"all {total} stages completed."
     return f"{done}/{total} stages completed."
 
 
@@ -360,7 +448,7 @@ def run_pipeline(
         return state
 
     runner = stage_runner or _default_stage_runner
-    prior: list[tuple[str, str]] = []
+    prior_artifacts: list[dict] = []
     for i, role in enumerate(role_list):
         stage = state.stages[i]
         stage.status = ACTIVE
@@ -368,7 +456,7 @@ def run_pipeline(
             console.print(f"  [yellow]▶[/yellow] [bold]{role}[/bold] "
                           f"[dim]— {_PHASE.get(role, 'working')}[/dim]", highlight=False)
         ro = stage_read_only(role, write_capable=write_capable)
-        prompt = _stage_prompt(task, role, prior, write_capable=write_capable)
+        prompt = _stage_prompt(task, role, prior_artifacts, write_capable=write_capable)
         try:
             outcome = runner(cfg, role, prompt, read_only=ro, root=root,
                              console=console, max_iterations=max_iterations)
@@ -380,6 +468,8 @@ def run_pipeline(
         stage.files_changed = list(outcome.files_changed)
         stage.commands_requested = list(outcome.commands_requested)
         stage.test_result = outcome.test_result
+        if outcome.artifact:
+            stage.artifact = outcome.artifact  # preserved even if a later stage fails
         if outcome.blocked:
             stage.status = BLOCKED
             break  # stop — do not silently continue past a blocked stage
@@ -387,12 +477,16 @@ def run_pipeline(
             stage.status = FAILED
             break
         stage.status = COMPLETED
-        prior.append((role, outcome.summary))
+        if outcome.artifact:
+            prior_artifacts.append(outcome.artifact)
 
-    if state.stopped:  # mark the un-run tail as skipped
+    if state.stopped:  # mark the un-run tail as skipped (artifacts so far preserved)
         for s in state.stages:
             if s.status == PENDING:
                 s.status = SKIPPED
 
+    ver = state.verification()  # verifier's report, else tester's
+    if ver is not None:
+        state.verdict = ver.final_verdict
     state.final_recommendation = _final_recommendation(state)
     return state
