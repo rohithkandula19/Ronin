@@ -4,6 +4,13 @@ All notable changes to this project will be documented here. Format follows [Kee
 
 ## [Unreleased]
 
+### Terminal UX polish + safety hardening
+- **Destructive floor (safety).** A catastrophic `run_command` — `rm -rf`, `git push --force`, `drop table`, `mkfs`, `dd`, fork bomb — is **never** silently auto-approved, not even under `--yolo` / `--god-mode`. The gate shows a red block card (what · why · a safer alternative) and requires the user to type the phrase `run destructive`; a headless run can never confirm it. Normal commands under yolo are unchanged. Closes the RC security follow-up. Verified live (god-mode `rm -rf /` blocked, `ls -la` auto-approved).
+- **Premium approval cards.** Shell-command approvals render a bordered card (Command · Directory · Risk) with a read-only/runs-a-command/destructive risk label; file edits show File · Change (+/-) · Risk · Reason. Cards use safe Text cells (a command with `[brackets]` renders literally) and degrade to plain text under `NO_COLOR`.
+- **Chip strip: god-mode awareness.** Shows `[god-mode]` + a pinned `[DESTRUCTIVE FLOOR ACTIVE]` safety chip under `--full-access`; cost + safety chips (priority ≥85) are never shed, even in an extreme-narrow terminal.
+- **Slash palette.** New `/mode [normal|plan|auto-accept]` and `/plan` (thin wrappers over the existing edit-mode system); `/help` reorganized into product-feel groups (start · models · coding · pipeline & roles · safety · integrations · memory & context · session) — a test asserts every listed command is real.
+- The signature animated-panda launch screen is unchanged.
+
 ### v1.0 launch readiness (Wave 10)
 - **Fixed the installer.** `install.sh` was stale from the `csk → ronin` rename and installed a broken `csk` shim (curl install non-functional). It now installs `ronin` + `ro` shims that exec `uv run ronin`, with corrected header and get-started hints.
 - **`ronin --version`** now works (eager root flag), matching universal CLI convention; `ronin version` unchanged.

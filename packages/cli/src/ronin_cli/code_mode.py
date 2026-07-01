@@ -483,6 +483,31 @@ def _selective_gate(
                     ".ronin/settings.json — do not retry; choose another approach.")
         if name not in SENSITIVE_TOOLS and name not in gated:
             return True  # reads + media generation run freely
+        # DESTRUCTIVE FLOOR — a catastrophic shell command (rm -rf, force-push,
+        # drop table, mkfs, fork bomb…) is NEVER silently auto-approved, not even
+        # under --yolo / --god-mode. It always requires an explicit typed
+        # confirmation (default-deny), with a block card + a safer alternative.
+        if name == "run_command":
+            from .approvals import is_destructive_command
+            _cmd = str(args.get("command", ""))
+            if is_destructive_command(_cmd):
+                if console is None:
+                    return ("blocked: destructive command refused — the safety floor "
+                            "needs an interactive typed confirmation, unavailable here.")
+                from .input_queue import pause_capture
+                from .ui_cards import DESTRUCTIVE_CONFIRM_PHRASE, render_destructive_block
+                render_destructive_block(console, _cmd, root)
+                console.print(f"    [red]type [bold]{DESTRUCTIVE_CONFIRM_PHRASE}[/bold] to "
+                              "proceed — anything else cancels:[/red] ", end="")
+                try:
+                    with pause_capture():
+                        _typed = input().strip().lower()
+                except (EOFError, KeyboardInterrupt):
+                    return "blocked: destructive command cancelled (no confirmation)."
+                if _typed != DESTRUCTIVE_CONFIRM_PHRASE:
+                    return ("blocked: destructive command not confirmed — pick a safer "
+                            "approach (the safer alternative was shown above).")
+                return True  # explicitly, deliberately confirmed
         if yolo:
             return True
         # A standing allow short-circuits the prompt (the cure for approval fatigue).
@@ -524,10 +549,10 @@ def _selective_gate(
                 return True                           # the per-hunk y/n WAS the approval
             _render_diff(console, unified_diff(rel, before, after), path=rel)
         elif name == "run_command":
-            # escape: a command with [brackets] (globs, JSX routes) must not be
-            # parsed as Rich markup — that would crash the prompt.
-            from rich.markup import escape as _esc
-            console.print(f"  [#7dcfff]$[/#7dcfff] [bold]{_esc(str(args.get('command', '')))}[/bold]")
+            # Premium approval card: Command · Directory · Risk. Rich escaping is
+            # handled inside the card (Table cells don't parse the command as markup).
+            from .ui_cards import render_shell_approval
+            render_shell_approval(console, str(args.get("command", "")), root)
         elif name == "multi_edit":
             rel = args.get("path", "?")
             target = (root / rel)
@@ -1173,6 +1198,8 @@ SLASH_COMMANDS: dict[str, str] = {
     "free": "free-mode status, or switch to a $0 provider: /free [on]",
     "theme": "show or switch the code syntax-highlight theme: /theme [name]",
     "role": "set a coding role (researcher/implementer/reviewer/tester/architect/debugger): /role <name>",
+    "mode": "show or set the edit mode: /mode normal|plan|auto-accept (same as Shift+Tab)",
+    "plan": "enter plan (read-only) mode — explore without mutating",
     "clear": "forget the conversation so far",
     "undo": "revert the most recent file change",
     "diff": "show the working-tree git diff",
@@ -1207,14 +1234,17 @@ SLASH_COMMANDS: dict[str, str] = {
 }
 
 
-# /help, grouped into sections for a calm, scannable layout.
+# /help, grouped into product-feel sections for a calm, scannable layout. Every
+# name here must be a REAL command in SLASH_COMMANDS (checked by tests).
 _HELP_GROUPS: list[tuple[str, list[str]]] = [
-    ("🧠  provider & model", ["login", "provider", "free", "model", "models", "route", "router", "effort", "cost"]),
-    ("✏️  editing & git", ["undo", "diff", "commit", "pr"]),
-    ("📁  context & memory", ["memory", "init", "context", "compact", "resume", "clear"]),
-    ("🔧  tools & agents", ["tools", "mcp", "integrations", "agents", "verify", "voice"]),
-    ("🎭  roles", ["role"]),
-    ("⚙️  session", ["status", "copy", "export", "vim", "theme", "doctor", "config", "help", "quit"]),
+    ("▸  start", ["help", "clear", "resume", "doctor", "status"]),
+    ("🧠  models", ["login", "provider", "model", "models", "free", "route", "router", "cost"]),
+    ("✏️  coding", ["mode", "plan", "diff", "undo", "commit", "pr", "fix"]),
+    ("🚦  pipeline & roles", ["role", "verify", "effort"]),
+    ("🔒  safety", ["permissions"]),
+    ("🔌  integrations", ["mcp", "integrations", "tools", "agents", "voice"]),
+    ("📁  memory & context", ["memory", "init", "context", "compact", "export", "copy"]),
+    ("⚙️  session", ["theme", "vim", "config", "quit"]),
 ]
 
 

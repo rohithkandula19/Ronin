@@ -19,9 +19,9 @@ The prompt is **default-deny**: an empty answer, EOF (no interactive stdin), or 
 - **auto-accept** (Shift+Tab) — applies edits without a per-action `y/N` (still no payments/destructive-block bypass in the outward path).
 - **`--full-access` / `--god-mode`** — lifts the guards for a trusted, unsandboxed run. Entered only via an explicit flag **and a loud on-screen warning**.
 
-### ⚠️ `--god-mode` boundary (read this)
+### `--god-mode` and the destructive floor
 
-Under `--full-access`/`--god-mode`, the coding session's `run_command` **auto-approves any command, including `rm -rf`**, unless you've added a standing `deny` rule. The "destructive is always BLOCK" guarantee applies to the outward-action path, not the yolo coding shell. **Only run `--god-mode` in a directory you fully trust.** (Non-yolo sessions gate every command.) A future release will add a destructive hard-floor even under yolo.
+Under `--full-access`/`--god-mode`, the coding session auto-approves normal edits and commands without a per-action `y/N`. **But a destructive floor still stands:** a catastrophic `run_command` — `rm -rf`, `git push --force`, `drop table`, `mkfs`, `dd`, a fork bomb — is **never** silently auto-approved, even here. The gate shows a red block card (what · why · a safer alternative) and requires you to **type the phrase `run destructive`** to proceed; anything else is refused, and a headless (non-interactive) run can never confirm it. Normal commands under god-mode are unchanged. The chip strip shows `[god-mode] [DESTRUCTIVE FLOOR ACTIVE]` so the residual guarantee is always visible. Still: only run `--god-mode` in a directory you trust.
 
 ## Roles
 

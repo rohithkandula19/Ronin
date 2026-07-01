@@ -268,6 +268,13 @@ def is_destructive(action: Any) -> bool:
     return any(marker in _haystack(normalize(action)) for marker in DESTRUCTIVE_MARKERS)
 
 
+def is_destructive_command(command: str) -> bool:
+    """True if a raw shell command string matches a destructive marker. Pure —
+    the destructive floor's check for ``run_command``."""
+    c = (command or "").lower()
+    return any(marker in c for marker in DESTRUCTIVE_MARKERS)
+
+
 def _escalate(a: str, b: str) -> str:
     """Return the more restrictive of two gate levels (block > confirm > auto)."""
     return a if LEVELS.index(a) >= LEVELS.index(b) else b
