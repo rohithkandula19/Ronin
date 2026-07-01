@@ -145,9 +145,9 @@ from ronin_cli.pipeline_verify import (
 
 
 def test_parse_verify_suite() -> None:
-    assert parse_verify_suite("unit:uv run pytest -q") == ("unit", "uv run pytest -q")
-    assert parse_verify_suite("pnpm test") == ("verify", "pnpm test")
-    assert parse_verify_suite(" lint : ruff check . ") == ("lint", "ruff check .")
+    assert parse_verify_suite("unit:uv run pytest -q") == ("unit", "uv run pytest -q", True)
+    assert parse_verify_suite("pnpm test") == ("verify", "pnpm test", True)
+    assert parse_verify_suite(" lint : ruff check . ") == ("lint", "ruff check .", True)
 
 
 def test_run_suites_aggregates(tmp_path) -> None:
@@ -198,5 +198,68 @@ def test_auto_detect_suites_python(tmp_path) -> None:
         "[tool.ruff]\n[tool.pytest.ini_options]\n", encoding="utf-8")
     (tmp_path / "tests").mkdir()
     suites = auto_detect_suites(tmp_path)
-    names = {n for n, _ in suites}
+    names = {n for n, *_ in suites}
     assert "tests" in names and "lint" in names  # pytest + ruff detected
+
+
+# --- Wave 9: required / optional suites --------------------------------------
+
+from ronin_cli.pipeline_verify import has_optional_warning, run_suite
+
+
+def test_parse_optional_question_mark() -> None:
+    assert parse_verify_suite("lint?:ruff check .") == ("lint", "ruff check .", False)
+    assert parse_verify_suite("unit:pytest") == ("unit", "pytest", True)
+    # --optional-suite default flips required to False even without '?'
+    assert parse_verify_suite("typecheck:mypy .", default_required=False) == ("typecheck", "mypy .", False)
+
+
+def test_required_failure_fails_verdict() -> None:
+    suites = [SuiteRun(name="unit", required=True, status="failed", verdict_effect="failed"),
+              SuiteRun(name="lint", required=False, status="passed")]
+    assert aggregate_verify(suites).verdict() == "failed"
+
+
+def test_optional_failure_warns_only() -> None:
+    suites = [SuiteRun(name="unit", required=True, status="passed"),
+              SuiteRun(name="lint", required=False, status="failed", verdict_effect="warning")]
+    agg = aggregate_verify(suites)
+    assert agg.verdict() == "passed"          # optional failure does NOT fail
+    assert has_optional_warning(suites) is True
+
+
+def test_optional_blocked_does_not_pass_alone() -> None:
+    # only optional suites, one blocked → advisory (requested=False), never "passed"
+    suites = [SuiteRun(name="lint", required=False, status="blocked",
+                       declined=True, verdict_effect="warning")]
+    agg = aggregate_verify(suites)
+    assert agg.verdict() == "not_provided"    # not "passed"
+    assert has_optional_warning(suites) is True
+
+
+def test_verdict_effect_classification() -> None:
+    from ronin_cli.pipeline_verify import _verdict_effect
+    assert _verdict_effect("failed", required=True) == "failed"
+    assert _verdict_effect("failed", required=False) == "warning"
+    assert _verdict_effect("blocked", required=True) == "blocked"
+    assert _verdict_effect("blocked", required=False) == "warning"
+    assert _verdict_effect("passed", required=False) == "none"
+
+
+def test_auto_detect_classifies_lint_typecheck_optional(tmp_path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.ruff]\n[tool.mypy]\n[tool.pytest.ini_options]\n", encoding="utf-8")
+    (tmp_path / "tests").mkdir()
+    suites = {n: req for n, _, req in auto_detect_suites(tmp_path)}
+    assert suites.get("tests") is True        # tests required
+    assert suites.get("lint") is False        # lint optional
+    assert suites.get("typecheck") is False   # typecheck optional
+
+
+def test_run_suite_sets_required_and_effect(tmp_path) -> None:
+    import subprocess
+    fail = lambda command, *, cwd, timeout: subprocess.CompletedProcess(command, 1, "", "")
+    sr = run_suite("lint", "ruff", tmp_path, required=False, yolo=True,
+                   run_fn=fail, clock=lambda: 0.0)
+    assert sr.required is False and sr.status == "failed"
+    assert sr.verdict_effect == "warning"     # optional failure → warning

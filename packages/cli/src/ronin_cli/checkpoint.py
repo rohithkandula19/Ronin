@@ -102,6 +102,27 @@ def list_checkpoints(root: Path | str) -> list[Checkpoint]:
     return [Checkpoint(**r) for r in _load_meta(Path(root).resolve())]
 
 
+def checkpoint_details(root: Path | str) -> list[dict]:
+    """Richer, read-only checkpoint listing for the resume UI — id, created_at
+    (ISO), sha, label, and the tracked-file count captured in that snapshot."""
+    import datetime as _dt
+
+    root = Path(root).resolve()
+    out: list[dict] = []
+    for cp in list_checkpoints(root):
+        try:
+            created_at = _dt.datetime.fromtimestamp(cp.created).isoformat(timespec="seconds")
+        except (OverflowError, OSError, ValueError):
+            created_at = ""
+        try:
+            files = len(_snapshot_files(root, cp.sha))
+        except (OSError, subprocess.SubprocessError):
+            files = 0
+        out.append({"id": cp.id, "created_at": created_at, "sha": cp.sha,
+                    "short_sha": cp.sha[:8], "label": cp.label, "tracked_files": files})
+    return out
+
+
 def _snapshot_files(root: Path, sha: str) -> set[str]:
     out = _git(root, "ls-tree", "-r", "--name-only", sha, check=False)
     return {line for line in out.stdout.splitlines() if line}
