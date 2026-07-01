@@ -1,9 +1,9 @@
 {
-  "version": "0.59.0",
+  "version": "1.0.0-rc.1",
   "audited": "2026-07-01",
   "method": "read-only static audit + live CLI checks",
   "checks": [
-    {"id": 1, "name": "Package metadata correct", "status": "pass", "evidence": "ronin 0.59.0, requires-python>=3.11, MIT; ronin-cli classifiers + urls present"},
+    {"id": 1, "name": "Package metadata correct", "status": "pass", "evidence": "ronin 1.0.0-rc.1, requires-python>=3.11, MIT; ronin-cli classifiers + urls present"},
     {"id": 2, "name": "Console scripts ronin/ro", "status": "pass", "evidence": "[project.scripts] ronin & ro = ronin_cli.main:app"},
     {"id": 3, "name": "CLI entrypoints work", "status": "pass", "evidence": "ronin --help/version/--version/doctor/pipeline --dry-run exit 0, live"},
     {"id": 4, "name": "ronin version / --version", "status": "pass_fixed", "evidence": "version subcommand prints version+sha; --version eager flag added this wave"},

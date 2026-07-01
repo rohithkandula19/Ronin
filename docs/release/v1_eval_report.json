@@ -1,5 +1,5 @@
 {
-  "version": "0.59.0",
+  "version": "1.0.0-rc.1",
   "run_date": "2026-07-01",
   "environment": {"os": "darwin", "python": "3.14", "runner": "uv run --frozen"},
   "test_suite": {
