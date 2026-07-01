@@ -1,6 +1,6 @@
 [project]
 name = "ronin-relay"
-version = "1.0.0rc1"
+version = "1.0.0rc2"
 description = "Self-hosted relay for remote Ronin gateway access without opening a port on the laptop. Outbound-only connector, token auth, no arbitrary command execution."
 readme = "README.md"
 requires-python = ">=3.11"

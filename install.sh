@@ -6,7 +6,7 @@
 #   curl -sSL https://raw.githubusercontent.com/rohithkandula19/Ronin/main/install.sh | bash
 #
 # Or with a pinned version:
-#   curl -sSL https://raw.githubusercontent.com/rohithkandula19/Ronin/main/install.sh | bash -s -- --ref v1.0.0-rc.1
+#   curl -sSL https://raw.githubusercontent.com/rohithkandula19/Ronin/main/install.sh | bash -s -- --ref v1.0.0-rc.2
 #
 # What it does:
 #   1. Installs `uv` (https://github.com/astral-sh/uv) if it's not on PATH.

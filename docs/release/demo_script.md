@@ -1,12 +1,12 @@
 # ronin — Demo Script
 
-A ~2-minute terminal walkthrough. Every command below is real and verified against v1.0.0-rc.1. Record with [`vhs`](https://github.com/charmbracelet/vhs) (`docs/demo/demo.tape` drives the existing GIF) or asciinema.
+A ~2-minute terminal walkthrough. Every command below is real and verified against v1.0.0-rc.2. Record with [`vhs`](https://github.com/charmbracelet/vhs) (`docs/demo/demo.tape` drives the existing GIF) or asciinema.
 
 ## 0. Setup (once)
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/rohithkandula19/Ronin/main/install.sh | bash
-ronin --version          # ronin 1.0.0-rc.1 (<sha>, <branch>)
+ronin --version          # ronin 1.0.0-rc.2 (<sha>, <branch>)
 ```
 
 ## 1. Free-first, no credit card (~20s)
