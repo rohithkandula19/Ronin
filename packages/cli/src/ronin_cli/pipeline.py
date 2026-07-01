@@ -530,13 +530,19 @@ def truth_table(state: PipelineState) -> dict[str, str]:
                        + (f", optional {opt_warn} warning/{opt_passed} passed" if opt else ""))
     else:
         suites_cell = "none"
+    # verify result: required suites drive it; an optional warning surfaces as
+    # "warning" without failing the run.
+    verify_result = iv.verdict()
+    if any(s.get("verdict_effect") == "warning" for s in state.suites):
+        if verify_result in ("passed", "not_provided"):
+            verify_result = "warning"
     return {
         "diff_evidence": diff_cell,
         "untracked_evidence": untracked_cell,
         "suites": suites_cell,
         "verify_command": state.verify_source or "not_found",
         "tests_run": tests_run,
-        "verify_result": iv.verdict(),
+        "verify_result": verify_result,
         "git_snapshot": git_cell,
         "acceptance": f"{len(crit['met'])} met, {len(crit['unmet'])} unmet, "
                       f"{len(crit['unknown'])} unknown",
@@ -562,8 +568,11 @@ def render_suites(console, state: PipelineState) -> None:
         ec = s.get("exit_code")
         meta = f"exit {ec}" if ec is not None else s.get("status", "")
         dur = f"{s.get('duration', 0):.2f}s"
-        console.print(f"    {glyph} [bold]{s.get('name', '')}[/bold] "
-                      f"[dim]{s.get('command', '')}[/dim] [#6b7089]· {meta} · {dur}[/#6b7089]",
+        req = "required" if s.get("required", True) else "optional"
+        effect = s.get("verdict_effect", "none")
+        eff = f" · [#e0af68]{effect}[/#e0af68]" if effect == "warning" else ""
+        console.print(f"    {glyph} [bold]{s.get('name', '')}[/bold] [dim]({req})[/dim] "
+                      f"[dim]{s.get('command', '')}[/dim] [#6b7089]· {meta} · {dur}{eff}[/#6b7089]",
                       highlight=False)
 
 
@@ -603,6 +612,8 @@ def run_pipeline(
     verify_cmd: str | None = None,
     verify_cmds: list[str] | None = None,
     verify_suites: list[str] | None = None,
+    required_suites: list[str] | None = None,
+    optional_suites: list[str] | None = None,
     auto_verify_all: bool = False,
     verify_timeout: int = 600,
     independent_verify_enabled: bool = True,
@@ -748,14 +759,17 @@ def run_pipeline(
         reconcile_with_tester,
         run_suites,
     )
-    suite_specs: list[tuple[str, str]] = []
+    suite_specs: list[tuple] = []
     if not independent_verify_enabled or state.stopped:
         state.verify_source = "disabled" if not independent_verify_enabled else "not_found"
     else:
-        explicit = [parse_verify_suite(s) for s in (verify_suites or [])]
+        explicit: list[tuple] = [parse_verify_suite(s) for s in (verify_suites or [])]
+        explicit += [parse_verify_suite(s, default_required=True) for s in (required_suites or [])]
+        explicit += [parse_verify_suite(s, default_required=False) for s in (optional_suites or [])]
         cmds = ([verify_cmd] if verify_cmd else []) + list(verify_cmds or [])
         for i, c in enumerate(cmds):
-            explicit.append(("tests" if i == 0 and not (verify_suites or []) else f"verify-{i + 1}", c))
+            nm = "tests" if i == 0 and not (verify_suites or []) else f"verify-{i + 1}"
+            explicit.append((nm, c, True))
         if explicit:
             suite_specs, state.verify_source = explicit, "provided"
         elif auto_verify_all:
@@ -764,11 +778,18 @@ def run_pipeline(
         elif auto_verify_enabled:
             detected = auto_detect_verify_command(root)
             if detected is not None:
-                suite_specs, state.verify_source = [("tests", detected[0])], "detected"
+                suite_specs, state.verify_source = [("tests", detected[0], True)], "detected"
             else:
                 state.verify_source = "not_found"
         else:
             state.verify_source = "not_found"
+
+    if suite_specs and console is not None and state.verify_source == "detected":
+        # --auto-verify-all: show the detected classification before running.
+        for nm, cmd, req in suite_specs:
+            console.print(f"  [#6b7089]detected suite[/#6b7089] [bold]{nm}[/bold] "
+                          f"[dim]({'required' if req else 'optional'})[/dim]: [cyan]{cmd}[/cyan]",
+                          highlight=False)
 
     if suite_specs:
         suite_runs = run_suites(suite_specs, root, timeout=verify_timeout,

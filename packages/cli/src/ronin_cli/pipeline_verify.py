@@ -122,40 +122,67 @@ class SuiteRun(BaseModel):
     """Result of one named verification suite. Serializable."""
     name: str = ""
     command: str = ""
+    required: bool = True
     status: str = "unknown"   # passed / failed / blocked / skipped / unknown
     exit_code: int | None = None
     duration: float = 0.0
     output_summary: str = ""
     declined: bool = False
     timed_out: bool = False
+    verdict_effect: str = "none"  # failed / blocked / warning / none
 
 
-def parse_verify_suite(spec: str) -> tuple[str, str]:
-    """Parse ``"name:command"`` into ``(name, command)``; a spec with no colon
-    becomes ``("verify", spec)``."""
+def _verdict_effect(status: str, required: bool) -> str:
+    """How a suite result affects the final verdict.
+
+    Required failure → 'failed', required blocked → 'blocked'. An **optional**
+    failure/blocked is only a 'warning' (never fails or blocks the run)."""
+    if status == "failed":
+        return "failed" if required else "warning"
+    if status == "blocked":
+        return "blocked" if required else "warning"
+    return "none"
+
+
+def parse_verify_suite(spec: str, *, default_required: bool = True) -> tuple[str, str, bool]:
+    """Parse ``"name:command"`` → ``(name, command, required)``.
+
+    A trailing ``?`` on the name marks the suite **optional** (e.g.
+    ``"lint?:ruff check ."``). A spec with no colon becomes an unnamed
+    ``verify`` suite. ``default_required`` sets the default when no ``?`` is given
+    (so ``--optional-suite`` can flip it)."""
     spec = (spec or "").strip()
     name, sep, cmd = spec.partition(":")
     if not sep:
-        return "verify", spec
-    return name.strip() or "verify", cmd.strip()
+        return "verify", spec, default_required
+    name = name.strip()
+    required = default_required
+    if name.endswith("?"):
+        name, required = name[:-1].strip(), False
+    return (name or "verify", cmd.strip(), required)
 
 
-def auto_detect_suites(root) -> list[tuple[str, str]]:
-    """Best-effort detection of several verification suites for ``--auto-verify-all``.
+# suite name -> required? for --auto-verify-all classification
+_SUITE_REQUIRED = {"tests": True, "unit": True, "build": True,
+                   "typecheck": False, "lint": False, "format": False}
 
-    Returns ``(name, command)`` pairs for the suites that look applicable to this
-    repo (tests, lint, typecheck). Running them is still gated; this only lists
-    candidates. Conservative — only suggests a suite when its config/tool is
-    plausibly present."""
+
+def auto_detect_suites(root) -> list[tuple[str, str, bool]]:
+    """Best-effort detection of verification suites for ``--auto-verify-all``.
+
+    Returns ``(name, command, required)`` — tests/unit/build are **required**;
+    lint/typecheck/format are **optional** (a failing linter shouldn't fail the
+    whole run). Conservative: only suggests a suite when its tool/config is
+    plausibly present. Running each is still gated."""
     import shutil
     from pathlib import Path
 
     root = Path(root)
-    suites: list[tuple[str, str]] = []
+    raw: list[tuple[str, str]] = []
 
     tests = auto_detect_verify_command(root)
     if tests is not None:
-        suites.append(("tests", tests[0]))
+        raw.append(("tests", tests[0]))
 
     py = (root / "pyproject.toml").is_file() or (root / "setup.cfg").is_file() \
         or any(root.glob("*.py"))
@@ -165,10 +192,10 @@ def auto_detect_suites(root) -> list[tuple[str, str]]:
         wants_ruff = shutil.which("ruff") or (pp.is_file() and "ruff" in pp.read_text(
             encoding="utf-8", errors="ignore"))
         if wants_ruff:
-            suites.append(("lint", f"{uv}ruff check ."))
+            raw.append(("lint", f"{uv}ruff check ."))
         if shutil.which("mypy") or (pp.is_file() and "mypy" in pp.read_text(
                 encoding="utf-8", errors="ignore")):
-            suites.append(("typecheck", f"{uv}mypy ."))
+            raw.append(("typecheck", f"{uv}mypy ."))
 
     if (root / "package.json").is_file():
         try:
@@ -181,21 +208,21 @@ def auto_detect_suites(root) -> list[tuple[str, str]]:
             ("yarn" if (root / "yarn.lock").is_file() else "npm")
         for suite, script in (("lint", "lint"), ("typecheck", "typecheck"), ("build", "build")):
             if script in scripts:
-                suites.append((suite, f"{pm} run {script}"))
-        if (root / "tsconfig.json").is_file() and "typecheck" not in dict(suites):
-            suites.append(("typecheck", "npx tsc --noEmit"))
+                raw.append((suite, f"{pm} run {script}"))
+        if (root / "tsconfig.json").is_file() and "typecheck" not in dict(raw):
+            raw.append(("typecheck", "npx tsc --noEmit"))
 
-    # de-dup by command, keep first
     seen, out = set(), []
-    for name, cmd in suites:
+    for name, cmd in raw:  # de-dup by command, keep first, classify required
         if cmd not in seen:
             seen.add(cmd)
-            out.append((name, cmd))
+            out.append((name, cmd, _SUITE_REQUIRED.get(name, True)))
     return out
 
 
-def run_suite(name: str, command: str, root, *, timeout: int = 600, yolo: bool = False,
-              console=None, approve_fn=None, run_fn=None, clock=None) -> SuiteRun:
+def run_suite(name: str, command: str, root, *, required: bool = True, timeout: int = 600,
+              yolo: bool = False, console=None, approve_fn=None, run_fn=None,
+              clock=None) -> SuiteRun:
     """Run one suite (gated, via :func:`independent_verify`) into a :class:`SuiteRun`."""
     clock = clock or _monotonic
     t0 = clock()
@@ -203,23 +230,27 @@ def run_suite(name: str, command: str, root, *, timeout: int = 600, yolo: bool =
                             approve_fn=approve_fn, run_fn=run_fn)
     status = {"passed": "passed", "failed": "failed", "blocked": "blocked",
               "not_provided": "skipped"}.get(iv.verdict(), "unknown")
-    return SuiteRun(name=name, command=command, status=status, exit_code=iv.exit_code,
-                    duration=round(clock() - t0, 3), output_summary=iv.output_summary,
-                    declined=iv.declined, timed_out=iv.timed_out)
+    return SuiteRun(name=name, command=command, required=required, status=status,
+                    exit_code=iv.exit_code, duration=round(clock() - t0, 3),
+                    output_summary=iv.output_summary, declined=iv.declined,
+                    timed_out=iv.timed_out, verdict_effect=_verdict_effect(status, required))
 
 
-def run_suites(suites: list[tuple[str, str]], root, *, timeout: int = 600,
+def run_suites(suites: list[tuple], root, *, timeout: int = 600,
                yolo: bool = False, console=None, approve_fn=None, run_fn=None,
                clock=None) -> list[SuiteRun]:
-    """Run each ``(name, command)`` suite in order, gated. A declined suite halts
-    the rest (don't keep prompting once the user said no)."""
+    """Run each ``(name, command[, required])`` suite in order, gated. A declined
+    suite halts the rest (don't keep prompting once the user said no)."""
     results: list[SuiteRun] = []
-    for name, command in suites:
+    for spec in suites:
+        name, command = spec[0], spec[1]
+        required = spec[2] if len(spec) > 2 else True
         if console is not None:
-            console.print(f"  [#6b7089]suite[/#6b7089] [bold]{name}[/bold]: "
+            tag = "" if required else " [dim](optional)[/dim]"
+            console.print(f"  [#6b7089]suite[/#6b7089] [bold]{name}[/bold]{tag}: "
                           f"[cyan]{command}[/cyan]", highlight=False)
-        sr = run_suite(name, command, root, timeout=timeout, yolo=yolo, console=console,
-                       approve_fn=approve_fn, run_fn=run_fn, clock=clock)
+        sr = run_suite(name, command, root, required=required, timeout=timeout, yolo=yolo,
+                       console=console, approve_fn=approve_fn, run_fn=run_fn, clock=clock)
         results.append(sr)
         if sr.declined:
             break  # the user declined — stop asking
@@ -227,25 +258,34 @@ def run_suites(suites: list[tuple[str, str]], root, *, timeout: int = 600,
 
 
 def aggregate_verify(suites: list[SuiteRun]) -> VerifyRun:
-    """Collapse the suite results into a single VerifyRun for the final verdict.
+    """Collapse the suite results into a VerifyRun for the final verdict.
 
-    Any failed suite → failed; any declined/blocked (none failed) → blocked;
-    all passed → passed."""
-    if not suites:
+    Only **required** suites drive the verdict: any required failure → failed;
+    any required blocked/declined → blocked; else (a required suite passed) →
+    passed. When there are no required suites, the run is advisory-only
+    (``requested=False``) — optional suites never independently confirm the work
+    nor fail it."""
+    required = [s for s in suites if s.required]
+    if not required:
         return VerifyRun(requested=False)
-    run = VerifyRun(requested=True, command="; ".join(s.name for s in suites))
-    if any(s.status == "failed" for s in suites):
+    run = VerifyRun(requested=True, command="; ".join(s.name for s in required))
+    if any(s.status == "failed" for s in required):
         run.ran = True
         run.passed = False
         return run
-    if any(s.declined or s.status == "blocked" for s in suites):
+    if any(s.declined or s.status == "blocked" for s in required):
         run.declined = True
         return run
-    if any(s.status == "passed" for s in suites):
+    if any(s.status == "passed" for s in required):
         run.ran = True
         run.passed = True
         return run
-    return VerifyRun(requested=False)  # all skipped → nothing really ran
+    return VerifyRun(requested=False)  # all required skipped → nothing really ran
+
+
+def has_optional_warning(suites: list[SuiteRun]) -> bool:
+    """True if any optional suite warned (failed/blocked) — advisory, non-fatal."""
+    return any(not s.required and s.verdict_effect == "warning" for s in suites)
 
 
 def _monotonic() -> float:

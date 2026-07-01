@@ -900,3 +900,69 @@ def test_truth_table_diff_evidence_cell() -> None:
     assert truth_table(st)["diff_evidence"] == "disabled"
     st.diff_evidence = {"captured": False, "note": "not a git repository"}
     assert truth_table(st)["diff_evidence"] == "missing"
+
+
+# --- Wave 9: required/optional suites in run_pipeline ------------------------
+
+def test_run_pipeline_optional_suite_failure_warns_not_fails(tmp_path) -> None:
+    def runner(config, role, prompt, *, read_only, root, console, max_iterations):
+        art = {"kind": "verification_report", "final_verdict": "passed", "tests_run": ["t"]} \
+            if role == "verifier" else None
+        return StageOutcome(success=True, summary=f"{role} ok", artifact=art)
+
+    import ronin_cli.pipeline_verify as pv
+    from ronin_cli.pipeline_verify import SuiteRun
+
+    def fake_run_suites(suites, root, **kw):
+        return [SuiteRun(name="unit", required=True, status="passed", exit_code=0),
+                SuiteRun(name="lint", required=False, status="failed", exit_code=1,
+                         verdict_effect="warning")]
+
+    import unittest.mock as mock
+    cfg = RoninConfig(provider="cerebras")
+    with mock.patch.object(pv, "run_suites", fake_run_suites):
+        state = run_pipeline(cfg, "x", ["verifier"], stage_runner=runner, root=tmp_path,
+                             required_suites=["unit:pytest"], optional_suites=["lint:ruff"])
+    assert state.final_verdict == "passed"     # optional failure does NOT fail the run
+    t = truth_table(state)
+    assert "required 1 passed/0 failed" in t["suites"]
+    assert "optional 1 warning" in t["suites"]
+    assert t["verify_result"] == "warning"     # surfaced, but not fatal
+    # JSON carries the required flag
+    assert state.suites[1]["required"] is False
+    assert state.suites[1]["verdict_effect"] == "warning"
+
+
+def test_run_pipeline_required_suite_failure_fails(tmp_path) -> None:
+    def runner(config, role, prompt, *, read_only, root, console, max_iterations):
+        art = {"kind": "verification_report", "final_verdict": "passed", "tests_run": ["t"]} \
+            if role == "verifier" else None
+        return StageOutcome(success=True, summary=f"{role} ok", artifact=art)
+
+    import ronin_cli.pipeline_verify as pv
+    from ronin_cli.pipeline_verify import SuiteRun
+
+    def fake_run_suites(suites, root, **kw):
+        return [SuiteRun(name="unit", required=True, status="failed", exit_code=1,
+                         verdict_effect="failed")]
+
+    import unittest.mock as mock
+    cfg = RoninConfig(provider="cerebras")
+    with mock.patch.object(pv, "run_suites", fake_run_suites):
+        state = run_pipeline(cfg, "x", ["verifier"], stage_runner=runner, root=tmp_path,
+                             required_suites=["unit:pytest"])
+    assert state.final_verdict == "failed"
+
+
+def test_render_suites_shows_required_optional(tmp_path) -> None:
+    st = plan_pipeline("x", ["verifier"])
+    st.suites = [
+        {"name": "unit", "required": True, "command": "pytest", "status": "passed",
+         "exit_code": 0, "duration": 0.1, "verdict_effect": "none"},
+        {"name": "lint", "required": False, "command": "ruff", "status": "failed",
+         "exit_code": 1, "duration": 0.2, "verdict_effect": "warning"},
+    ]
+    from ronin_cli.pipeline import render_suites
+    out = _render(render_suites, st)
+    assert "unit" in out and "(required)" in out
+    assert "lint" in out and "(optional)" in out and "warning" in out
