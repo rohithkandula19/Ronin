@@ -61,11 +61,14 @@ def _render_card(console, *, title: str, rows: list[tuple[str, str]],
         return
     from rich.panel import Panel
     from rich.table import Table
+    from rich.text import Text
     grid = Table.grid(padding=(0, 2))
     grid.add_column(style=MUTE, no_wrap=True)
     grid.add_column(style=SOFT)
     for k, v in rows:
-        grid.add_row(k, v)
+        # Text() so arbitrary command/path/reason strings are never parsed as
+        # Rich markup (a command with [brackets] must not crash or restyle).
+        grid.add_row(Text(str(k)), Text(str(v)))
     console.print(Panel(grid, title=f"[{title_style}]{title}[/{title_style}]",
                         title_align="left", border_style=border, expand=False))
 
@@ -134,13 +137,31 @@ def render_startup_card(console, config, root, *, version: str, mode: str = "cod
     console.print(Panel(body, border_style=ACCENT, expand=False, padding=(0, 2)))
 
 
-def render_shell_approval(console, command: str, root, *, risk: str = "",
-                          reason: str = "") -> None:
+_READ_ONLY_CMD_PREFIXES = (
+    "ls", "cat", "head", "tail", "pwd", "echo", "grep", "rg", "find", "which",
+    "git status", "git diff", "git log", "git show", "git branch", "wc", "stat",
+    "tree", "env", "printenv", "date", "whoami", "uname", "df", "du",
+)
+
+
+def command_risk(command: str) -> str:
+    """A short risk label for a shell command (pure). Destructive first, then a
+    read-only heuristic, else the generic 'runs a command'."""
+    from .approvals import is_destructive_command
+    c = (command or "").strip().lower()
+    if is_destructive_command(c):
+        return "IRREVERSIBLE — destructive"
+    if any(c == p or c.startswith(p + " ") for p in _READ_ONLY_CMD_PREFIXES):
+        return "read-only"
+    return "runs a command"
+
+
+def render_shell_approval(console, command: str, root, *, reason: str = "") -> None:
     """Approval card for a shell command (display only — the caller still asks)."""
     _render_card(
         console, title="Approval required: shell command", border=WARN, title_style=f"bold {WARN}",
         rows=[("Command", command), ("Directory", str(root)),
-              ("Risk", risk or "runs a command"),
+              ("Risk", command_risk(command)),
               *([("Reason", reason)] if reason else [])],
     )
 

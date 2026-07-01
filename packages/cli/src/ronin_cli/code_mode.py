@@ -542,10 +542,10 @@ def _selective_gate(
                 return True                           # the per-hunk y/n WAS the approval
             _render_diff(console, unified_diff(rel, before, after), path=rel)
         elif name == "run_command":
-            # escape: a command with [brackets] (globs, JSX routes) must not be
-            # parsed as Rich markup — that would crash the prompt.
-            from rich.markup import escape as _esc
-            console.print(f"  [#7dcfff]$[/#7dcfff] [bold]{_esc(str(args.get('command', '')))}[/bold]")
+            # Premium approval card: Command · Directory · Risk. Rich escaping is
+            # handled inside the card (Table cells don't parse the command as markup).
+            from .ui_cards import render_shell_approval
+            render_shell_approval(console, str(args.get("command", "")), root)
         elif name == "multi_edit":
             rel = args.get("path", "?")
             target = (root / rel)
