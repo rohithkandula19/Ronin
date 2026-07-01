@@ -483,6 +483,31 @@ def _selective_gate(
                     ".ronin/settings.json — do not retry; choose another approach.")
         if name not in SENSITIVE_TOOLS and name not in gated:
             return True  # reads + media generation run freely
+        # DESTRUCTIVE FLOOR — a catastrophic shell command (rm -rf, force-push,
+        # drop table, mkfs, fork bomb…) is NEVER silently auto-approved, not even
+        # under --yolo / --god-mode. It always requires an explicit typed
+        # confirmation (default-deny), with a block card + a safer alternative.
+        if name == "run_command":
+            from .approvals import is_destructive_command
+            _cmd = str(args.get("command", ""))
+            if is_destructive_command(_cmd):
+                if console is None:
+                    return ("blocked: destructive command refused — the safety floor "
+                            "needs an interactive typed confirmation, unavailable here.")
+                from .input_queue import pause_capture
+                from .ui_cards import DESTRUCTIVE_CONFIRM_PHRASE, render_destructive_block
+                render_destructive_block(console, _cmd, root)
+                console.print(f"    [red]type [bold]{DESTRUCTIVE_CONFIRM_PHRASE}[/bold] to "
+                              "proceed — anything else cancels:[/red] ", end="")
+                try:
+                    with pause_capture():
+                        _typed = input().strip().lower()
+                except (EOFError, KeyboardInterrupt):
+                    return "blocked: destructive command cancelled (no confirmation)."
+                if _typed != DESTRUCTIVE_CONFIRM_PHRASE:
+                    return ("blocked: destructive command not confirmed — pick a safer "
+                            "approach (the safer alternative was shown above).")
+                return True  # explicitly, deliberately confirmed
         if yolo:
             return True
         # A standing allow short-circuits the prompt (the cure for approval fatigue).

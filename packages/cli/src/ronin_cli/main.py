@@ -175,6 +175,8 @@ def _root(
         console.print("[bold #e0af68]⚠ FULL-ACCESS MODE[/bold #e0af68] [dim]— filesystem-wide, "
                       "auto-approving every edit & command, no sandbox. Use only in a directory "
                       "you trust.[/dim]")
+        console.print("[dim]  (a destructive floor still stands: rm -rf / force-push / drop table "
+                      "/ mkfs need a typed confirmation, even here.)[/dim]")
     if not isinstance(sentinel, bool):
         sentinel = False
     if sentinel:
