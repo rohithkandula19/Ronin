@@ -26,7 +26,7 @@ from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
-from . import __version__
+from . import __version__, display_version
 from .config import PROVIDER_PRESETS, RoninConfig, find_config_path, load_config, save_config
 from .runner import AgentResultRich, run_ask, start_chat
 from .saved_queries import QueryStore, default_path as queries_path
@@ -1172,7 +1172,7 @@ def doctor(
         table.add_row("live check", live.status)
     services = config.configured_services()
     table.add_row("services", ", ".join(services) if services else "[red]none[/red]")
-    table.add_row("ronin version", __version__)
+    table.add_row("ronin version", display_version(__version__))
 
     console.print(table)
     if live is not None and live.remedy and not live.ok:
@@ -5552,7 +5552,7 @@ def version() -> None:
     """Print the ronin version.
 
     For a git checkout this also shows the short commit sha and branch, e.g.
-    "ronin 1.0.0-rc.1 (a1b2c3d, main)". For a wheel/pip install it prints just the
+    "ronin 1.0.0-rc.2 (a1b2c3d, main)". For a wheel/pip install it prints just the
     version. Git context is computed at runtime and git errors are swallowed.
     """
     from .selfupdate import version_line
