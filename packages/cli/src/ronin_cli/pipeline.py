@@ -124,6 +124,7 @@ class PipelineState(BaseModel):
     git_snapshot: dict = Field(default_factory=dict)        # serialized GitSnapshot at run start
     checkpoint_id: int | None = None  # --checkpoint id (for safe restore on resume)
     resume_git_status: str = ""  # matched / changed / restored / warning / unavailable (set on resume)
+    resume_checkpoint_restore: str = "not_needed"  # not_needed/offered/restored/declined/unavailable
     final_verdict: str = ""      # combined Wave-6+ verdict (verifier + verify + contract + …)
     final_recommendation: str = ""
 
@@ -544,6 +545,7 @@ def truth_table(state: PipelineState) -> dict[str, str]:
         "tests_run": tests_run,
         "verify_result": verify_result,
         "git_snapshot": git_cell,
+        "checkpoint_restore": state.resume_checkpoint_restore or "not_needed",
         "acceptance": f"{len(crit['met'])} met, {len(crit['unmet'])} unmet, "
                       f"{len(crit['unknown'])} unknown",
         "contract": contract_status,
@@ -588,6 +590,7 @@ def render_final_verification(console, state: PipelineState) -> None:
     console.print(f"    [dim]Verify result:[/dim]      {t['verify_result']}", highlight=False)
     console.print(f"    [dim]Tests run:[/dim]          {t['tests_run']}", highlight=False)
     console.print(f"    [dim]Git snapshot:[/dim]       {t['git_snapshot']}", highlight=False)
+    console.print(f"    [dim]Checkpoint restore:[/dim] {t['checkpoint_restore']}", highlight=False)
     console.print(f"    [dim]Acceptance criteria:[/dim] {t['acceptance']}", highlight=False)
     console.print(f"    [dim]Contract checks:[/dim]    {t['contract']}", highlight=False)
     console.print(f"    [dim]Semantic contract:[/dim]  {t['semantic_contract']}", highlight=False)

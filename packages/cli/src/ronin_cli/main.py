@@ -519,7 +519,11 @@ def pipeline(
     rerun_completed: bool = typer.Option(False, "--rerun-completed", help="On --resume, re-run completed stages too."),
     force_resume: bool = typer.Option(False, "--force-resume", help="Resume even if the git/working-tree state changed since the checkpoint."),
     checkpoint: bool = typer.Option(False, "--checkpoint", help="Create a lightweight git safety snapshot before running (never touches your tree)."),
-    restore_checkpoint: bool = typer.Option(False, "--restore-checkpoint", help="On an unsafe --resume, offer to restore the saved checkpoint (gated, overwrites the tree)."),
+    restore_checkpoint: bool = typer.Option(False, "--restore-checkpoint", help="On an unsafe --resume, offer to restore the run's saved checkpoint (gated, overwrites the tree)."),
+    restore_checkpoint_id: Optional[int] = typer.Option(None, "--restore-checkpoint-id", help="Restore a specific checkpoint id on an unsafe --resume (gated)."),
+    restore_latest_checkpoint: bool = typer.Option(False, "--restore-latest-checkpoint", help="Restore the newest available checkpoint on an unsafe --resume (gated)."),
+    restore_checkpoint_interactive: bool = typer.Option(False, "--restore-checkpoint-interactive", help="On an unsafe --resume, list checkpoints and pick one to restore (gated)."),
+    list_checkpoints_flag: bool = typer.Option(False, "--list-checkpoints", help="List available checkpoints (id, created, sha, files) and, with --resume, offer to pick one."),
     no_restore_offer: bool = typer.Option(False, "--no-restore-offer", help="On an unsafe --resume, don't mention/offer checkpoint restore."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show the plan + permissions; run nothing, edit nothing."),
     write: bool = typer.Option(False, "--write", help="Allow doer stages to edit/run (still approval-gated). Off = read-only proposal."),
@@ -565,8 +569,26 @@ def pipeline(
         task = resume_state.task
         # Git-snapshot safety: compare the saved tree state to now; refuse an
         # unsafe resume unless --force-resume. Never resets or stashes anything.
+        from .checkpoint import checkpoint_details
+        from .checkpoint import restore_checkpoint as _restore
         from .pipeline_git_snapshot import GitSnapshot, compare_snapshots, git_snapshot
         saved_snap = GitSnapshot.model_validate(resume_state.git_snapshot) if resume_state.git_snapshot else None
+        details = checkpoint_details(".")
+
+        def _show_checkpoints() -> None:
+            if not details:
+                console.print("  [dim]no checkpoints found (take one with [bold]--checkpoint[/bold])[/dim]")
+                return
+            console.print("  [bold]available checkpoints[/bold]")
+            for d in details:
+                src = " [#6b7089](this run)[/#6b7089]" if d["id"] == resume_state.checkpoint_id else ""
+                console.print(f"    [cyan]#{d['id']}[/cyan] [dim]{d['created_at']} · "
+                              f"{d['short_sha']} · {d['tracked_files']} files · {d['label']}[/dim]{src}",
+                              highlight=False)
+
+        if list_checkpoints_flag:
+            _show_checkpoints()
+
         cmp = compare_snapshots(saved_snap, git_snapshot("."))
         resume_state.resume_git_status = cmp.status if cmp.status != "clean" else "matched"
         if cmp.status in ("changed", "warning"):
@@ -574,36 +596,62 @@ def pipeline(
                           f"({cmp.status}):[/yellow]")
             for w in cmp.warnings:
                 console.print(f"  [yellow]· {w}[/yellow]")
-            cid = resume_state.checkpoint_id
-            # Offer a gated restore only when explicitly requested AND a checkpoint
-            # exists. Never automatic; the restore itself asks before overwriting.
-            if restore_checkpoint and cid is not None:
-                from .checkpoint import restore_checkpoint as _restore
-                console.print(f"  [bold]restore checkpoint #{cid}[/bold] to match the saved state? "
-                              "this [bold]overwrites your current working tree[/bold].")
+
+            # Choose which checkpoint to restore (never automatic).
+            valid_ids = {d["id"] for d in details}
+            target_id = None
+            if restore_checkpoint_id is not None:
+                if restore_checkpoint_id not in valid_ids:
+                    console.print(f"[red]no checkpoint #{restore_checkpoint_id} — see "
+                                  "[bold]--list-checkpoints[/bold].[/red]")
+                    raise typer.Exit(2)
+                target_id = restore_checkpoint_id
+            elif restore_latest_checkpoint and details:
+                target_id = max(valid_ids)
+            elif restore_checkpoint_interactive and details:
+                _show_checkpoints()
+                pick = Prompt.ask("  restore which checkpoint id? (blank to skip)",
+                                  default="", console=console).strip()
+                target_id = int(pick) if pick.isdigit() and int(pick) in valid_ids else None
+            elif restore_checkpoint and resume_state.checkpoint_id in valid_ids:
+                target_id = resume_state.checkpoint_id
+
+            if target_id is not None:
+                console.print(f"  [bold]restore checkpoint #{target_id}[/bold] — this "
+                              "[bold]overwrites your current working tree[/bold] (files are set to "
+                              "the snapshot; files created since are removed).")
                 if Confirm.ask("  proceed with restore?", default=False, console=console):
-                    console.print(f"  [dim]{_restore('.', cid)}[/dim]")
+                    console.print(f"  [dim]{_restore('.', target_id)}[/dim]")
                     cmp2 = compare_snapshots(saved_snap, git_snapshot("."))
                     if cmp2.status in ("changed", "warning") and not force_resume:
                         console.print("[red]tree still doesn't match after restore — pass "
                                       "[bold]--force-resume[/bold] to continue anyway.[/red]")
                         raise typer.Exit(2)
                     resume_state.resume_git_status = "restored"
+                    resume_state.resume_checkpoint_restore = "restored"
                     console.print("[green]✓ restored — continuing[/green]")
-                elif not force_resume:
-                    console.print("[red]restore declined — exiting. Pass [bold]--force-resume[/bold] "
-                                  "to continue without restoring.[/red]")
-                    raise typer.Exit(2)
-            elif cid is not None and not no_restore_offer:
-                console.print(f"  [dim]a checkpoint (#{cid}) is available — pass "
-                              "[bold]--restore-checkpoint[/bold] to restore it (gated), or "
+                else:
+                    resume_state.resume_checkpoint_restore = "declined"
+                    if not force_resume:
+                        console.print("[red]restore declined — exiting. Pass [bold]--force-resume[/bold] "
+                                      "to continue without restoring.[/red]")
+                        raise typer.Exit(2)
+            elif details and not no_restore_offer:
+                resume_state.resume_checkpoint_restore = "offered"
+                console.print("  [dim]checkpoints are available — pass "
+                              "[bold]--restore-latest-checkpoint[/bold], "
+                              "[bold]--restore-checkpoint-id <n>[/bold], or "
+                              "[bold]--restore-checkpoint-interactive[/bold] to restore (gated); "
+                              "[bold]--list-checkpoints[/bold] to see them; or "
                               "[bold]--force-resume[/bold] to continue as-is.[/dim]")
                 if not force_resume:
                     raise typer.Exit(2)
-            elif not force_resume:
-                console.print("[red]refusing to resume — re-check your changes, then pass "
-                              "[bold]--force-resume[/bold] to continue anyway.[/red]")
-                raise typer.Exit(2)
+            else:
+                resume_state.resume_checkpoint_restore = "unavailable"
+                if not force_resume:
+                    console.print("[red]refusing to resume — re-check your changes, then pass "
+                                  "[bold]--force-resume[/bold] to continue anyway.[/red]")
+                    raise typer.Exit(2)
             if force_resume and resume_state.resume_git_status != "restored":
                 console.print("[dim]--force-resume: continuing despite the changes[/dim]")
         elif cmp.status == "unavailable":
