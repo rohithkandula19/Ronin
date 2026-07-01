@@ -90,19 +90,26 @@ def _welcome(console: "Console", config: RoninConfig, root, yolo: bool, *, title
     from rich.text import Text
 
     from . import __version__
-    from .theme import MUTE
-    from .ui_cards import render_startup_card
+    from .panda_art import PANDA_ACTIVITIES, animate_inline
+    from .theme import MUTE, SOFT, gradient_text
 
     is_tty = bool(getattr(console, "is_terminal", False))
+    activity = random.choice(list(PANDA_ACTIVITIES)) if is_tty else "dancing"
     tip = random.choice(_WELCOME_TIPS) if is_tty else _WELCOME_TIPS[0]
+    greeting = _greeting() if is_tty else "ready"
 
-    # Premium compact product card, generated from real runtime state (cost badge,
-    # provider/model, git workspace, cwd). NO_COLOR + narrow terminals degrade
-    # gracefully inside render_startup_card.
-    render_startup_card(console, config, root, version=__version__)
+    info = Text()
+    info.append_text(gradient_text("ronin"))   # cyan→teal→mint premium wordmark
+    info.append(f" v{__version__}", style=MUTE)
+    info.append(f"  · {greeting}\n", style=f"italic {SOFT}")
+    info.append(f"{config.provider} · {config.resolved_model()}\n", style=SOFT)
+    info.append(str(_Path(root).resolve()), style=MUTE)
     if yolo:
-        console.print(Text("  ⚠ auto-approve (YOLO) — a destructive floor still stands",
-                           style="yellow"))
+        info.append("  · auto-approve (YOLO)", style="yellow")
+
+    console.print()
+    animate_inline(console, info, activity=activity, loops=3)
+    console.print()
     console.print(Text(f"  💡 {tip}", style=MUTE))
     console.print()
 
@@ -1191,6 +1198,8 @@ SLASH_COMMANDS: dict[str, str] = {
     "free": "free-mode status, or switch to a $0 provider: /free [on]",
     "theme": "show or switch the code syntax-highlight theme: /theme [name]",
     "role": "set a coding role (researcher/implementer/reviewer/tester/architect/debugger): /role <name>",
+    "mode": "show or set the edit mode: /mode normal|plan|auto-accept (same as Shift+Tab)",
+    "plan": "enter plan (read-only) mode — explore without mutating",
     "clear": "forget the conversation so far",
     "undo": "revert the most recent file change",
     "diff": "show the working-tree git diff",
@@ -1225,14 +1234,17 @@ SLASH_COMMANDS: dict[str, str] = {
 }
 
 
-# /help, grouped into sections for a calm, scannable layout.
+# /help, grouped into product-feel sections for a calm, scannable layout. Every
+# name here must be a REAL command in SLASH_COMMANDS (checked by tests).
 _HELP_GROUPS: list[tuple[str, list[str]]] = [
-    ("🧠  provider & model", ["login", "provider", "free", "model", "models", "route", "router", "effort", "cost"]),
-    ("✏️  editing & git", ["undo", "diff", "commit", "pr"]),
-    ("📁  context & memory", ["memory", "init", "context", "compact", "resume", "clear"]),
-    ("🔧  tools & agents", ["tools", "mcp", "integrations", "agents", "verify", "voice"]),
-    ("🎭  roles", ["role"]),
-    ("⚙️  session", ["status", "copy", "export", "vim", "theme", "doctor", "config", "help", "quit"]),
+    ("▸  start", ["help", "clear", "resume", "doctor", "status"]),
+    ("🧠  models", ["login", "provider", "model", "models", "free", "route", "router", "cost"]),
+    ("✏️  coding", ["mode", "plan", "diff", "undo", "commit", "pr", "fix"]),
+    ("🚦  pipeline & roles", ["role", "verify", "effort"]),
+    ("🔒  safety", ["permissions"]),
+    ("🔌  integrations", ["mcp", "integrations", "tools", "agents", "voice"]),
+    ("📁  memory & context", ["memory", "init", "context", "compact", "export", "copy"]),
+    ("⚙️  session", ["theme", "vim", "config", "quit"]),
 ]
 
 

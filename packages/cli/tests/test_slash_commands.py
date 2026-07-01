@@ -159,8 +159,10 @@ def test_summarize_result_counts() -> None:
 def test_slash_completer_completes_commands() -> None:
     from ronin_cli.prompt_box import _slash_completer
     assert _slash_completer("/he", 0) == "/help "
-    ms = {_slash_completer("/m", i) for i in range(4)} - {None}
-    assert {"/memory ", "/model ", "/models "} <= ms
+    ms, _i = set(), 0
+    while (_c := _slash_completer("/m", _i)) is not None:
+        ms.add(_c); _i += 1
+    assert {"/memory ", "/model ", "/models ", "/mode "} <= ms
     assert _slash_completer("hello", 0) is None       # only completes slash words
 
 
@@ -171,7 +173,7 @@ def test_slash_dropdown_rows_carry_name_and_description() -> None:
 
     rows = _slash_completions("/mo")
     inserts = {ins for ins, _, _ in rows}
-    assert inserts == {"/model", "/models"}
+    assert inserts == {"/mode", "/model", "/models"}
     # start_position replaces the whole typed "/mo" token (len 3 -> -3)
     assert all(start == -3 for _, start, _ in rows)
     # the visible row shows the command's real description
@@ -709,3 +711,48 @@ def test_help_has_roles_section(tmp_path: Path) -> None:
     _, out = _call("/help", root=tmp_path)
     assert "roles" in out.lower()
     assert "/role researcher" in out and "/role debugger" in out
+
+
+# --- Phase 7: /mode, /plan, and help-group integrity -------------------------
+
+def test_mode_command_sets_edit_mode(tmp_path) -> None:
+    from ronin_cli.prompt_box import set_mode, current_mode
+    set_mode("normal")
+    action, out = _call("/mode plan", root=tmp_path)
+    assert action == "handled" and current_mode() == "plan"
+    assert "plan" in out
+    set_mode("normal")
+
+
+def test_mode_rejects_unknown(tmp_path) -> None:
+    action, out = _call("/mode wat", root=tmp_path)
+    assert action == "handled" and "unknown mode" in out
+
+
+def test_plan_command_enters_plan_mode(tmp_path) -> None:
+    from ronin_cli.prompt_box import set_mode, current_mode
+    set_mode("normal")
+    action, out = _call("/plan", root=tmp_path)
+    assert action == "handled" and current_mode() == "plan"
+    assert "read-only" in out
+    set_mode("normal")
+
+
+def test_every_help_group_command_exists() -> None:
+    # HARD RULE: /help must never list a command that has no handler.
+    from ronin_cli.code_mode import SLASH_COMMANDS, _HELP_GROUPS
+    from ronin_cli.slash_commands import SLASH_DISPATCH
+    _special = {"voice"}  # handled pre-dispatch in code_mode, not via SLASH_DISPATCH
+    for header, names in _HELP_GROUPS:
+        for name in names:
+            assert name in SLASH_COMMANDS, f"{name} in /help group but not SLASH_COMMANDS"
+            assert name in SLASH_DISPATCH or name in _special, \
+                f"{name} in /help group but has no handler"
+
+
+def test_help_shows_product_groups(tmp_path) -> None:
+    action, out = _call("/help", root=tmp_path)
+    assert action == "handled"
+    low = out.lower()
+    for group in ("start", "models", "coding", "pipeline", "safety", "integrations"):
+        assert group in low

@@ -752,6 +752,38 @@ def _slash_role(ctx: SlashCtx) -> str:
     return "handled"
 
 
+def _slash_mode(ctx: SlashCtx) -> str:
+    """Show or set the edit mode: /mode [normal|plan|auto-accept].
+
+    Same three modes as Shift+Tab. `plan` is read-only; `auto-accept` applies
+    edits without a per-action y/N (the destructive floor still stands)."""
+    from .prompt_box import current_mode, set_mode
+    parts, console = ctx.parts, ctx.console
+    if len(parts) > 1:
+        want = parts[1].strip().lower()
+        if want not in ("normal", "plan", "auto-accept"):
+            console.print("  [#e0af68]unknown mode[/#e0af68] — use normal | plan | auto-accept")
+            return "handled"
+        now = set_mode(want)
+        extra = (" [dim](read-only)[/dim]" if now == "plan"
+                 else " [dim](edits auto-applied; destructive floor still active)[/dim]"
+                 if now == "auto-accept" else "")
+        console.print(f"  [green]✓[/green] mode → [bold]{now}[/bold]{extra}")
+        return "handled"
+    console.print(f"  [dim]mode is [bold]{current_mode()}[/bold] · set with "
+                  "[bold]/mode normal|plan|auto-accept[/bold] (or Shift+Tab)[/dim]")
+    return "handled"
+
+
+def _slash_plan(ctx: SlashCtx) -> str:
+    """Enter plan (read-only) mode — explore without mutating. `/mode normal` to leave."""
+    from .prompt_box import set_mode
+    set_mode("plan")
+    ctx.console.print("  [green]✓[/green] [bold]plan mode[/bold] [dim]— read-only; "
+                      "no edits or commands. Leave with [bold]/mode normal[/bold].[/dim]")
+    return "handled"
+
+
 def _slash_theme(ctx: SlashCtx) -> str:
     """Show or switch the code syntax-highlight theme: /theme [name].
 
@@ -793,6 +825,8 @@ SLASH_DISPATCH: dict[str, Callable[[SlashCtx], str]] = {
     "provider": _slash_provider, "providers": _slash_provider,
     "free": _slash_free,
     "role": _slash_role, "roles": _slash_role,
+    "mode": _slash_mode,
+    "plan": _slash_plan,
     "theme": _slash_theme,
     "clear": _slash_clear,
     "undo": _slash_undo,
