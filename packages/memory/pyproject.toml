@@ -1,6 +1,6 @@
 [project]
 name = "ronin-memory"
-version = "1.0.0rc1"
+version = "1.0.0rc2"
 description = "Three-layer memory for Claude agents: short-term (compressed history), long-term (pluggable vector store), user preferences."
 readme = "README.md"
 requires-python = ">=3.11"

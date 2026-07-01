@@ -8,7 +8,7 @@ ronin --help
 ```
 
 ronin is a **uv workspace** that publishes **6 packages together** at the same
-version (currently `1.0.0rc1`). The CLI (`ronin-cli`) pins its 5 siblings by exact
+version (currently `1.0.0rc2`). The CLI (`ronin-cli`) pins its 5 siblings by exact
 version, so **all six must land on PyPI in the same release** or `pip install
 ronin-cli` cannot resolve:
 
@@ -83,13 +83,13 @@ The workflow reads it as `PYPI_TOKEN` (mapped to `UV_PUBLISH_TOKEN`).
 ### 4. Fire the release (tag `vX.Y.Z`)
 
 The workflow triggers on any tag matching `v*`. The version it publishes is whatever
-is in the `pyproject.toml` files (**currently `1.0.0rc1`** in all 6 — keep the tag in
-sync with that). To release the current `1.0.0rc1`:
+is in the `pyproject.toml` files (**currently `1.0.0rc2`** in all 6 — keep the tag in
+sync with that). To release the current `1.0.0rc2`:
 
 ```bash
 cd /Users/rohithkandula/ronin
-git tag v1.0.0-rc.1
-git push origin v1.0.0-rc.1
+git tag v1.0.0-rc.2
+git push origin v1.0.0-rc.2
 ```
 
 The workflow will:
@@ -110,7 +110,7 @@ versions currently in `pyproject.toml`, so still bump versions first for a real 
 # fresh shell, no dev tree:
 pipx install ronin-cli        # or: python -m pip install ronin-cli
 ronin --help
-ronin version                 # -> ronin 1.0.0-rc.1
+ronin version                 # -> ronin 1.0.0-rc.2
 ```
 
 Project pages: `https://pypi.org/project/ronin-cli/` (and the 5 siblings).
@@ -124,7 +124,7 @@ PyPI is immutable — you can never re-upload the same version. For each release
 1. Bump the version in **all 6** `packages/*/pyproject.toml` AND the 5 pinned
    `ronin-*==X.Y.Z` lines in `packages/cli/pyproject.toml`, AND the
    `__version__` in `packages/cli/src/ronin_cli/__init__.py`. (They are currently
-   all `1.0.0rc1` — keep them in lockstep.)
+   all `1.0.0rc2` — keep them in lockstep.)
 2. Commit.
 3. Tag `vX.Y.Z` and push the tag (step 4 above).
 
@@ -195,7 +195,7 @@ uvx twine check dist_release/*
 WORK=$(mktemp -d) && uv venv --seed "$WORK/.venv"
 "$WORK/.venv/bin/python" -m pip install \
   --find-links dist_release \
-  dist_release/ronin_cli-1.0.0rc1-py3-none-any.whl
+  dist_release/ronin_cli-1.0.0rc2-py3-none-any.whl
 
 cd /tmp   # leave the source tree so nothing is shadowed
 "$WORK/.venv/bin/ronin" --help
@@ -221,5 +221,5 @@ rm -rf "$WORK"
 | Required secret           | `PYPI_TOKEN`  (a `pypi-...` API token)                  |
 | Token env var (manual)    | `UV_PUBLISH_TOKEN` (uv) / `TWINE_PASSWORD` (twine)      |
 | Packages published        | all 6 in the table above, same version                 |
-| Current version           | `1.0.0rc1`                                                |
+| Current version           | `1.0.0rc2`                                                |
 | Optional extras           | `[browser]`, `[postgres]`, `[server]`                  |

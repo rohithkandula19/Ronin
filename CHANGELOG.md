@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.0.0-rc.2] — release candidate
+
+Package version `1.0.0rc2` (PEP 440); displays as `v1.0.0-rc.2`. Cut during the 3-day RC validation pass — two documentation/consistency fixes, no feature or behavior changes.
+
+### Fixed
+- **README hero example was a broken invocation** (release blocker, #37). The quickstart showed `ronin "explain @main.py and add tests"`, but ronin has no catch-all default command — a bare quoted prompt errors with `No such command`. Corrected to `ronin code "explain @main.py and add tests"`, matching the actual coding-agent entrypoint. Documentation-only; no CLI behavior changed.
+- **`ronin doctor` printed the raw PEP 440 version** (#38). The diagnostics "ronin version" row showed `1.0.0rc1` while `ronin --version` / `ronin version` showed the friendly `1.0.0-rc.1`. `doctor` now uses `display_version()` for a consistent `v1.0.0-rc.2` everywhere.
+
 ## [1.0.0-rc.1] — release candidate
 
 Package version `1.0.0rc1` (PEP 440); displays as `v1.0.0-rc.1`. First release candidate — see `docs/release/v1_release_notes.md`.

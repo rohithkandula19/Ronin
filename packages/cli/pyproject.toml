@@ -1,6 +1,6 @@
 [project]
 name = "ronin-cli"
-version = "1.0.0rc1"
+version = "1.0.0rc2"
 description = "A masterless Claude-Code-style coding agent for the terminal — provider-agnostic (Claude, Gemini, Cerebras, Groq, Ollama) with MCP, plugins, and evals."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -33,11 +33,11 @@ dependencies = [
     "rich>=13.7,<16",
     "textual>=8.0,<9",
     "tomli-w>=1.0,<2",
-    "ronin-agent-patterns==1.0.0rc1",
-    "ronin-hardening==1.0.0rc1",
-    "ronin-memory==1.0.0rc1",
-    "ronin-mcp-servers==1.0.0rc1",
-    "ronin-eval-suite==1.0.0rc1",
+    "ronin-agent-patterns==1.0.0rc2",
+    "ronin-hardening==1.0.0rc2",
+    "ronin-memory==1.0.0rc2",
+    "ronin-mcp-servers==1.0.0rc2",
+    "ronin-eval-suite==1.0.0rc2",
     "prompt-toolkit>=3.0,<4",
 ]
 

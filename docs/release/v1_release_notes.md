@@ -1,6 +1,6 @@
 # ronin — v1.0 Release Notes (Release-Candidate)
 
-**Recommended tag:** `v1.0.0-rc.1` (release candidate — see "Versioning decision"). **Current version:** 1.0.0rc1 (PEP 440) · displays as v1.0.0-rc.1.
+**Recommended tag:** `v1.0.0-rc.2` (release candidate — see "Versioning decision"). **Current version:** 1.0.0rc2 (PEP 440) · displays as v1.0.0-rc.2.
 
 ronin is a masterless, terminal-native, **provider-agnostic** AI coding agent — Claude-Code-style, but free-first and safety-gated. This document summarizes what's in the v1 line and what remains before a final `v1.0.0`.
 
@@ -23,7 +23,7 @@ See `CHANGELOG.md` for the full per-wave detail.
 
 ## Versioning decision
 
-**Recommendation: cut a release _candidate_ (`v1.0.0-rc.1`), not a final `v1.0.0` yet.** Rationale:
+**Recommendation: cut a release _candidate_ (`v1.0.0-rc.2`), not a final `v1.0.0` yet.** Rationale:
 
 1. **Not on PyPI.** `pip install ronin-cli` / `uv tool install` aren't available until `PYPI_TOKEN` is set and the release workflow publishes. The install path today is the (now-fixed) curl script or `git clone + uv sync`.
 2. **Clean-machine install unverified.** `install.sh` was fixed and syntax-checked, but a real from-scratch curl install on a fresh box hasn't been exercised in this environment.

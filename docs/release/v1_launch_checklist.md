@@ -1,6 +1,6 @@
 # ronin — v1.0 Launch Checklist
 
-Status as of 2026-07-01, version 1.0.0-rc.1. ☑ = done · ☐ = maintainer action.
+Status as of 2026-07-01, version 1.0.0-rc.2. ☑ = done · ☐ = maintainer action.
 
 ## Code & tests
 - ☑ Full test suite green — **3,274 passed** (`uv run --frozen pytest packages apps -q`).
@@ -46,11 +46,11 @@ Nothing below has been run. Exact commands when you're ready:
 #    e.g. edit pyproject versions or use: ronin release --type <patch|minor|major>
 
 # 2. tag a release candidate (recommended first)
-git tag v1.0.0-rc.1
-git push origin v1.0.0-rc.1
+git tag v1.0.0-rc.2
+git push origin v1.0.0-rc.2
 
 # 3. create the GitHub release (after RC soak)
-gh release create v1.0.0-rc.1 --title "v1.0.0-rc.1" --notes-file docs/release/v1_release_notes.md --prerelease
+gh release create v1.0.0-rc.2 --title "v1.0.0-rc.2" --notes-file docs/release/v1_release_notes.md --prerelease
 
 # 4. publish to PyPI (only after setting PYPI_TOKEN) — the release workflow does this on tag,
 #    or manually:  uv build && uv publish

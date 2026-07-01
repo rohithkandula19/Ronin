@@ -23,9 +23,9 @@ def test_display_matches_git_tag_form() -> None:
     # the current package version's display form is what a v<tag> would use
     disp = display_version(__version__)
     assert disp.replace("-", "").replace(".", "") == __version__.replace(".", "")
-    # for the RC, the friendly form is 1.0.0-rc.1
-    if __version__ == "1.0.0rc1":
-        assert disp == "1.0.0-rc.1"
+    # for the RC, the friendly form is 1.0.0-rc.2
+    if __version__ == "1.0.0rc2":
+        assert disp == "1.0.0-rc.2"
 
 
 def test_pyproject_version_matches_dunder() -> None:
