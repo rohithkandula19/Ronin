@@ -90,26 +90,19 @@ def _welcome(console: "Console", config: RoninConfig, root, yolo: bool, *, title
     from rich.text import Text
 
     from . import __version__
-    from .panda_art import PANDA_ACTIVITIES, animate_inline
-    from .theme import MUTE, SOFT, gradient_text
+    from .theme import MUTE
+    from .ui_cards import render_startup_card
 
     is_tty = bool(getattr(console, "is_terminal", False))
-    activity = random.choice(list(PANDA_ACTIVITIES)) if is_tty else "dancing"
     tip = random.choice(_WELCOME_TIPS) if is_tty else _WELCOME_TIPS[0]
-    greeting = _greeting() if is_tty else "ready"
 
-    info = Text()
-    info.append_text(gradient_text("ronin"))   # cyan→teal→mint premium wordmark
-    info.append(f" v{__version__}", style=MUTE)
-    info.append(f"  · {greeting}\n", style=f"italic {SOFT}")
-    info.append(f"{config.provider} · {config.resolved_model()}\n", style=SOFT)
-    info.append(str(_Path(root).resolve()), style=MUTE)
+    # Premium compact product card, generated from real runtime state (cost badge,
+    # provider/model, git workspace, cwd). NO_COLOR + narrow terminals degrade
+    # gracefully inside render_startup_card.
+    render_startup_card(console, config, root, version=__version__)
     if yolo:
-        info.append("  · auto-approve (YOLO)", style="yellow")
-
-    console.print()
-    animate_inline(console, info, activity=activity, loops=3)
-    console.print()
+        console.print(Text("  ⚠ auto-approve (YOLO) — a destructive floor still stands",
+                           style="yellow"))
     console.print(Text(f"  💡 {tip}", style=MUTE))
     console.print()
 

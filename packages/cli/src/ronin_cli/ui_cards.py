@@ -70,6 +70,70 @@ def _render_card(console, *, title: str, rows: list[tuple[str, str]],
                         title_align="left", border_style=border, expand=False))
 
 
+def startup_lines(config, root, *, version: str, mode: str = "code") -> list[str]:
+    """The plain-text content lines of the startup card, from REAL runtime state.
+
+    Pure (one cheap git call): identity, cost badge, provider/model, workspace,
+    cwd, and the hint rows. Used by both the Rich and NO_COLOR renderers and by
+    tests, so the card can't drift from reality."""
+    from pathlib import Path
+
+    from .status import cost_badge, git_state
+    badge = cost_badge(config)[0]
+    g = git_state(root)
+    if g.repo:
+        workspace = f"git:{g.label()}"
+    else:
+        workspace = "LOCAL WORKSPACE"
+    ident = f"🐼 ronin v{version}"
+    if mode and mode != "code":
+        ident += f"  · {mode}"
+    return [
+        ident,
+        f"{badge} · {config.provider}/{config.resolved_model()} · {workspace}",
+        str(Path(root).resolve()),
+        "",
+        "@path adds files · @https:// reads pages · /help for commands",
+        "/provider models · /free on $0 mode · /role agent roles",
+    ]
+
+
+def render_startup_card(console, config, root, *, version: str, mode: str = "code") -> None:
+    """The premium compact product card shown at launch. Real state only; degrades
+    to plain text under NO_COLOR and sheds the hint rows in a narrow terminal."""
+    lines = startup_lines(config, root, version=version, mode=mode)
+    width = _width(console)
+
+    if no_color():
+        console.print("\n".join(lines))
+        return
+
+    from rich.panel import Panel
+    from rich.text import Text
+    from .theme import gradient_text
+
+    body = Text()
+    # line 1 — gradient wordmark + version
+    ident = lines[0]
+    body.append_text(gradient_text("🐼 ronin"))
+    body.append(ident.replace("🐼 ronin", "", 1), style=MUTE)
+    body.append("\n")
+    # line 2 — badge line: colour just the badge word
+    badge_word = lines[1].split(" · ", 1)[0]
+    badge_hex = {"FREE": OK, "LOCAL": ACCENT, "PAID": WARN, "UNKNOWN": MUTE}.get(badge_word, MUTE)
+    body.append(badge_word, style=f"bold {badge_hex}")
+    body.append(lines[1][len(badge_word):], style=SOFT)
+    body.append("\n")
+    body.append(lines[2], style=MUTE)   # cwd
+    if width >= 56:  # hint rows only when there's room
+        body.append("\n\n")
+        body.append(lines[4], style=SOFT)
+        body.append("\n")
+        body.append(lines[5], style=SOFT)
+    console.print()
+    console.print(Panel(body, border_style=ACCENT, expand=False, padding=(0, 2)))
+
+
 def render_shell_approval(console, command: str, root, *, risk: str = "",
                           reason: str = "") -> None:
     """Approval card for a shell command (display only — the caller still asks)."""
