@@ -508,12 +508,31 @@ def truth_table(state: PipelineState) -> dict[str, str]:
         diff_cell = "available"
     else:
         diff_cell = "missing"
-    n = len(state.suites)
-    passed_n = sum(1 for s in state.suites if s.get("status") == "passed")
-    failed_n = sum(1 for s in state.suites if s.get("status") == "failed")
-    suites_cell = f"{n} total, {passed_n} passed, {failed_n} failed" if n else "none"
+    untracked = de.get("untracked_files") or []
+    omitted = de.get("omitted_files") or []
+    if not de.get("captured"):
+        untracked_cell = "unavailable"
+    elif untracked and all(u in omitted for u in untracked):
+        untracked_cell = "omitted"
+    elif untracked:
+        untracked_cell = "included"
+    else:
+        untracked_cell = "none"
+    # required/optional suite breakdown (required flag added in Wave 9)
+    req = [s for s in state.suites if s.get("required", True)]
+    opt = [s for s in state.suites if not s.get("required", True)]
+    req_passed = sum(1 for s in req if s.get("status") == "passed")
+    req_failed = sum(1 for s in req if s.get("status") == "failed")
+    opt_warn = sum(1 for s in opt if s.get("status") in ("failed", "blocked"))
+    opt_passed = sum(1 for s in opt if s.get("status") == "passed")
+    if state.suites:
+        suites_cell = (f"required {req_passed} passed/{req_failed} failed"
+                       + (f", optional {opt_warn} warning/{opt_passed} passed" if opt else ""))
+    else:
+        suites_cell = "none"
     return {
         "diff_evidence": diff_cell,
+        "untracked_evidence": untracked_cell,
         "suites": suites_cell,
         "verify_command": state.verify_source or "not_found",
         "tests_run": tests_run,
@@ -554,6 +573,7 @@ def render_final_verification(console, state: PipelineState) -> None:
     hexc = _VERDICT_HEX.get(t["final_verdict"], "#6b7089")
     console.print("  [bold]Final Verification[/bold]")
     console.print(f"    [dim]Diff evidence:[/dim]      {t['diff_evidence']}", highlight=False)
+    console.print(f"    [dim]Untracked evidence:[/dim] {t['untracked_evidence']}", highlight=False)
     console.print(f"    [dim]Suites run:[/dim]         {t['suites']}", highlight=False)
     console.print(f"    [dim]Verify command:[/dim]     {t['verify_command']}", highlight=False)
     console.print(f"    [dim]Verify result:[/dim]      {t['verify_result']}", highlight=False)

@@ -887,7 +887,7 @@ def test_run_pipeline_multi_suite_failure_fails(tmp_path) -> None:
     assert state.verify_source == "provided"
     assert state.final_verdict == "failed"   # a failing suite fails the run
     t = truth_table(state)
-    assert "2 total, 1 passed, 1 failed" in t["suites"]
+    assert "required 1 passed/1 failed" in t["suites"]
 
 
 def test_truth_table_diff_evidence_cell() -> None:
