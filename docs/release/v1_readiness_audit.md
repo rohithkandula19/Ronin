@@ -1,6 +1,6 @@
 # ronin — v1.0 Launch-Readiness Audit
 
-**Version:** 0.59.0 · **Audited:** 2026-07-01 · **Method:** read-only static audit + live CLI checks.
+**Version:** 1.0.0-rc.1 · **Audited:** 2026-07-01 · **Method:** read-only static audit + live CLI checks.
 
 This audit was produced by a read-only review of the repo (`pyproject.toml`, entrypoints, slash commands, README/docs claims) plus live `uv run ronin …` command checks. Blockers found during the audit have since been **fixed** (see the Status column).
 
@@ -8,10 +8,10 @@ This audit was produced by a read-only review of the repo (`pyproject.toml`, ent
 
 | # | Check | Status | Evidence / Notes |
 |---|---|---|---|
-| 1 | Package metadata correct | ✅ PASS | `pyproject.toml` name `ronin` 0.59.0, `requires-python>=3.11`, MIT; `packages/cli/pyproject.toml` name `ronin-cli` 0.59.0, full classifiers (Beta, 3.11–3.13) + `[project.urls]`. |
+| 1 | Package metadata correct | ✅ PASS | `pyproject.toml` name `ronin` 1.0.0-rc.1, `requires-python>=3.11`, MIT; `packages/cli/pyproject.toml` name `ronin-cli` 1.0.0-rc.1, full classifiers (Beta, 3.11–3.13) + `[project.urls]`. |
 | 2 | Console scripts | ✅ PASS | `[project.scripts]`: `ronin` and `ro` → `ronin_cli.main:app`. |
 | 3 | CLI entrypoints work | ✅ PASS | Live: `ronin --help`, `ronin version`, `ronin --version`, `ronin doctor`, `ronin pipeline --dry-run` all run with exit 0 and sane output. |
-| 4 | `ronin version` / `--version` | ✅ PASS (fixed) | `ronin version` prints `ronin 0.59.0 (<sha>, <branch>)`. `ronin --version` **added** this wave (eager root flag). |
+| 4 | `ronin version` / `--version` | ✅ PASS (fixed) | `ronin version` prints `ronin 1.0.0-rc.1 (<sha>, <branch>)`. `ronin --version` **added** this wave (eager root flag). |
 | 5 | `ronin doctor` | ✅ PASS | Config path, provider, model, base_url, provider-auth (honest present/missing), `--check` live provider ping, services, version. (Does not check Python version — see Follow-ups.) |
 | 6 | `ronin update` | ✅ PASS | Git-checkout updater: fetch origin, refuse dirty tree without `--force`, reset to `origin/main`, `uv sync`. `--check` is non-mutating. Non-git installs handled with reinstall guidance. |
 | 7 | `ronin code` works | ✅ PASS | `@app.command()` with help + docstring; coding agent, gated edits. |

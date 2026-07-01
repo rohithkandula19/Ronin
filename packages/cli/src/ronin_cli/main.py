@@ -5552,7 +5552,7 @@ def version() -> None:
     """Print the ronin version.
 
     For a git checkout this also shows the short commit sha and branch, e.g.
-    "ronin 0.59.0 (a1b2c3d, main)". For a wheel/pip install it prints just the
+    "ronin 1.0.0-rc.1 (a1b2c3d, main)". For a wheel/pip install it prints just the
     version. Git context is computed at runtime and git errors are swallowed.
     """
     from .selfupdate import version_line

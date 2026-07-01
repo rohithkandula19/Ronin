@@ -3,7 +3,7 @@
 > **A masterless, terminal-native Claude agent.** ronin is a **Claude-Code-style AI coding agent**, it reads, edits, and runs your code from the terminal, built on a **provider-agnostic agent framework** with first-class evals, memory, security hardening, and MCP tool integrations. Plug in Claude for top quality, or run it **free** on Gemini / Cerebras / Groq / Ollama.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-v0.59.0-blue)](CHANGELOG.md)
+[![Status](https://img.shields.io/badge/status-v1.0.0--rc.1-blue)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-3274%20passing-brightgreen.svg)](#-whats-under-the-hood)
 [![Providers](https://img.shields.io/badge/providers-Claude%20·%20Gemini%20·%20Cerebras%20·%20Groq%20·%20OpenRouter%20·%20Ollama%20·%20OpenAI-d4a373)](#-supported-providers)
@@ -171,7 +171,7 @@ Plus, on the coding agent itself:
 curl -sSL https://raw.githubusercontent.com/rohithkandula19/Ronin/main/install.sh | bash
 ```
 
-Pin a tag: append `-s -- --ref v0.59.0`. PyPI publish is wired (`.github/workflows/release.yml`) and lands `pip install ronin-cli` once `PYPI_TOKEN` is set as a repo secret.
+Pin a tag: append `-s -- --ref v1.0.0-rc.1`. PyPI publish is wired (`.github/workflows/release.yml`) and lands `pip install ronin-cli` once `PYPI_TOKEN` is set as a repo secret.
 
 For Postgres support after install: `(cd ~/.local/share/ronin && uv pip install psycopg2-binary)`.
 
@@ -194,7 +194,7 @@ cd ~/.local/share/ronin && git fetch origin && git reset --hard origin/main && u
 ```
 
 `ronin version` shows the running version plus the checkout's short sha and
-branch, e.g. `ronin 0.59.0 (a1b2c3d, main)`.
+branch, e.g. `ronin 1.0.0-rc.1 (a1b2c3d, main)`.
 
 ## More surfaces
 
@@ -420,7 +420,7 @@ ronin is MIT-licensed and meant to be picked up by other people. A few notes if 
 - **`--yolo` / auto-accept bypasses the approval gate** and lets the model run shell commands unattended. Only use it in a sandbox or CI you trust: interactive use keeps every mutation gated.
 - **Parallel sub-agents cost real tokens.** `parallel_task` / `isolated_task` / `consensus` / `bench` fan out *N* model runs at once; concurrency is capped (3–4 workers) but spend scales with the number of tasks/models: budget accordingly.
 - **`isolated_task` needs a git repo** (worktrees are a git feature) and returns diffs for review rather than auto-merging: parallel changes stay reviewable.
-- **Pin the installer** for reproducibility: `curl … | bash -s -- --ref v0.59.0`.
+- **Pin the installer** for reproducibility: `curl … | bash -s -- --ref v1.0.0-rc.1`.
 
 ## 🧱 What's under the hood
 

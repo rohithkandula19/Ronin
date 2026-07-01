@@ -11,7 +11,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
-from . import __version__
+from . import __version__, display_version
 
 
 def find_repo_root(start: Optional[Path] = None) -> Optional[Path]:
@@ -62,7 +62,7 @@ def version_line() -> str:
     "ronin X.Y.Z" for a non-checkout install, or
     "ronin X.Y.Z (sha, branch)" for a git checkout.
     """
-    base = f"ronin {__version__}"
+    base = f"ronin {display_version(__version__)}"
     root = find_repo_root()
     if root is None:
         return base

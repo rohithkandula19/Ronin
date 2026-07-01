@@ -1,6 +1,6 @@
 # ronin — v1.0 Evaluation & Benchmark Report
 
-**Version:** 0.59.0 · **Run:** 2026-07-01 · **Environment:** macOS (Darwin 25.5.0), Python 3.14, `uv run --frozen`.
+**Version:** 1.0.0-rc.1 · **Run:** 2026-07-01 · **Environment:** macOS (Darwin 25.5.0), Python 3.14, `uv run --frozen`.
 
 Honesty rules for this report: measured results are labeled **RUN**; anything not executed is labeled **NOT RUN** or **SKIPPED** with the reason. No resolved-rate or benchmark number is published unless it was actually measured here.
 

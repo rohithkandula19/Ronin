@@ -21,12 +21,12 @@ def _init_repo(tmp_path: Path) -> None:
 
 def test_snapshot_clean_repo(tmp_path) -> None:
     _init_repo(tmp_path)
-    snap = git_snapshot(tmp_path, timestamp="2026-01-01", version="0.59.0")
+    snap = git_snapshot(tmp_path, timestamp="2026-01-01", version="1.0.0-rc.1")
     assert snap.is_repo is True
     assert len(snap.git_commit_sha) == 40
     assert snap.git_branch  # e.g. main/master
     assert snap.dirty_state is False and snap.dirty_files == [] and snap.untracked_files == []
-    assert snap.timestamp == "2026-01-01" and snap.ronin_version == "0.59.0"
+    assert snap.timestamp == "2026-01-01" and snap.ronin_version == "1.0.0-rc.1"
 
 
 def test_snapshot_dirty_tracked_file(tmp_path) -> None:

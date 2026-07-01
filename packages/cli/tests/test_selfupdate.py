@@ -21,16 +21,17 @@ runner = CliRunner()
 # ---------- ronin version ----------
 
 def test_version_output_contains_version() -> None:
+    from ronin_cli import __version__, display_version
     r = runner.invoke(app, ["version"])
     assert r.exit_code == 0, r.stdout
-    assert "0.59.0" in r.stdout
+    assert display_version(__version__) in r.stdout   # friendly display (e.g. 1.0.0-rc.1)
     assert "ronin" in r.stdout
 
 
 def test_version_line_plain_when_not_a_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(selfupdate, "find_repo_root", lambda start=None: None)
     line = selfupdate.version_line()
-    assert line == f"ronin {selfupdate.__version__}"
+    assert line == f"ronin {selfupdate.display_version(selfupdate.__version__)}"
     assert "(" not in line
 
 
@@ -38,7 +39,7 @@ def test_version_line_shows_sha_and_branch(monkeypatch: pytest.MonkeyPatch, tmp_
     monkeypatch.setattr(selfupdate, "find_repo_root", lambda start=None: tmp_path)
     monkeypatch.setattr(selfupdate, "git_short_sha", lambda root: "abc1234")
     monkeypatch.setattr(selfupdate, "git_branch", lambda root: "main")
-    assert selfupdate.version_line() == f"ronin {selfupdate.__version__} (abc1234, main)"
+    assert selfupdate.version_line() == f"ronin {selfupdate.display_version(selfupdate.__version__)} (abc1234, main)"
 
 
 # ---------- repo-root walk-up ----------

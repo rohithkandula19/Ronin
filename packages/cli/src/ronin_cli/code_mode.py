@@ -89,7 +89,7 @@ def _welcome(console: "Console", config: RoninConfig, root, yolo: bool, *, title
 
     from rich.text import Text
 
-    from . import __version__
+    from . import __version__, display_version
     from .panda_art import PANDA_ACTIVITIES, animate_inline
     from .theme import MUTE, SOFT, gradient_text
 
@@ -100,7 +100,7 @@ def _welcome(console: "Console", config: RoninConfig, root, yolo: bool, *, title
 
     info = Text()
     info.append_text(gradient_text("ronin"))   # cyan→teal→mint premium wordmark
-    info.append(f" v{__version__}", style=MUTE)
+    info.append(f" v{display_version(__version__)}", style=MUTE)
     info.append(f"  · {greeting}\n", style=f"italic {SOFT}")
     info.append(f"{config.provider} · {config.resolved_model()}\n", style=SOFT)
     info.append(str(_Path(root).resolve()), style=MUTE)

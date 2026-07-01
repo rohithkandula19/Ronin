@@ -2,7 +2,9 @@
 
 All notable changes to this project will be documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.0.0-rc.1] — release candidate
+
+Package version `1.0.0rc1` (PEP 440); displays as `v1.0.0-rc.1`. First release candidate — see `docs/release/v1_release_notes.md`.
 
 ### Terminal UX polish + safety hardening
 - **Destructive floor (safety).** A catastrophic `run_command` — `rm -rf`, `git push --force`, `drop table`, `mkfs`, `dd`, fork bomb — is **never** silently auto-approved, not even under `--yolo` / `--god-mode`. The gate shows a red block card (what · why · a safer alternative) and requires the user to type the phrase `run destructive`; a headless run can never confirm it. Normal commands under yolo are unchanged. Closes the RC security follow-up. Verified live (god-mode `rm -rf /` blocked, `ls -la` auto-approved).

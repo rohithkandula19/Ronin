@@ -1,6 +1,6 @@
 # ronin — v1.0 Release Notes (Release-Candidate)
 
-**Recommended tag:** `v1.0.0-rc.1` (release candidate — see "Versioning decision"). **Current version:** 0.59.0.
+**Recommended tag:** `v1.0.0-rc.1` (release candidate — see "Versioning decision"). **Current version:** 1.0.0rc1 (PEP 440) · displays as v1.0.0-rc.1.
 
 ronin is a masterless, terminal-native, **provider-agnostic** AI coding agent — Claude-Code-style, but free-first and safety-gated. This document summarizes what's in the v1 line and what remains before a final `v1.0.0`.
 

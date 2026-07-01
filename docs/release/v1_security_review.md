@@ -1,6 +1,6 @@
 # ronin — v1.0 Security & Safety Release Review
 
-**Version:** 0.59.0 · **Reviewed:** 2026-07-01 · **Method:** read-only review with file:line citations.
+**Version:** 1.0.0-rc.1 · **Reviewed:** 2026-07-01 · **Method:** read-only review with file:line citations.
 
 ## Summary — zero release-blocking findings
 

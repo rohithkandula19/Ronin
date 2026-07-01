@@ -1,6 +1,6 @@
 # ronin — v1.0 Launch Checklist
 
-Status as of 2026-07-01, version 0.59.0. ☑ = done · ☐ = maintainer action.
+Status as of 2026-07-01, version 1.0.0-rc.1. ☑ = done · ☐ = maintainer action.
 
 ## Code & tests
 - ☑ Full test suite green — **3,274 passed** (`uv run --frozen pytest packages apps -q`).
