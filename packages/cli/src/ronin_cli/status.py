@@ -267,11 +267,16 @@ def chip_strip(config, root, *, edit_mode: str = "normal", role: str | None = No
     read_only = bool(role and role_is_read_only(role))
 
     # (text, drop_priority) — higher priority is kept longer under narrow width.
+    # In god-mode the mode chip says "god-mode" and a safety chip stays pinned:
+    # even here a destructive command needs a typed confirmation (the floor).
+    mode_chip = "god-mode" if full_access else edit_mode
     items: list[tuple[str, int]] = [
         (badge, 100),                                              # cost — always
         (f"{config.provider}:{config.resolved_model()}", 50),     # what's running
-        (edit_mode, 90),                                          # mode — safety
+        (mode_chip, 90),                                          # mode — safety
     ]
+    if full_access:
+        items.append(("DESTRUCTIVE FLOOR ACTIVE", 95))            # safety — never shed
     gate = gate_label(edit_mode, full_access=full_access, read_only=read_only)
     if gate:
         items.append((gate, 85))                                  # gate — safety
@@ -287,9 +292,13 @@ def chip_strip(config, root, *, edit_mode: str = "normal", role: str | None = No
     line = _render(keep)
     if len(line) <= width:
         return line
-    # shed lowest-priority chips (preserving order) until it fits
+    # Shed lowest-priority chips until it fits — but NEVER drop a safety/cost chip
+    # (priority >= 85: cost badge, mode, destructive floor, write-gate). Those are
+    # the trust signals and must survive even an extreme-narrow terminal.
     for i in sorted(keep, key=lambda j: items[j][1]):
         if len(_render(keep)) <= width:
             break
+        if items[i][1] >= 85:
+            continue  # protected: cost + safety chips never disappear
         keep.discard(i)
     return _render(keep)

@@ -199,10 +199,10 @@ def test_chip_strip_read_only_role_shows_read_only_gate() -> None:
 def test_chip_strip_degrades_in_narrow_terminal() -> None:
     cfg = RoninConfig(provider="cerebras")
     g = GitState(repo=True, branch="feature/very-long-branch-name", dirty=True)
-    narrow = chip_strip(cfg, ".", edit_mode="normal", role="debugger", width=28, git=g)
-    # never exceeds the width budget
-    assert len(narrow) <= 28
-    # but the safety + cost signals survive
+    narrow = chip_strip(cfg, ".", edit_mode="normal", role="debugger", width=32, git=g)
+    # fits the width once low-priority chips shed ([FREE] [normal] [write-gated])
+    assert len(narrow) <= 32
+    # the safety + cost signals survive
     assert "[FREE]" in narrow
     assert "[normal]" in narrow
     # lowest-priority chips (role / branch) are the first to be dropped
@@ -223,3 +223,47 @@ def test_gate_label_semantics() -> None:
     assert gate_label("auto-accept") is None
     assert gate_label("normal", full_access=True) is None
     assert gate_label("normal", read_only=True) == "read-only"
+
+
+# --- Phase 6: god-mode + destructive-floor safety chips ----------------------
+
+def test_god_mode_chip_and_destructive_floor() -> None:
+    cfg = RoninConfig(provider="anthropic")
+    strip = chip_strip(cfg, ".", edit_mode="normal", width=120, git=GitState(),
+                       full_access=True)
+    assert "[god-mode]" in strip
+    assert "[DESTRUCTIVE FLOOR ACTIVE]" in strip
+    assert "[PAID]" in strip
+
+
+def test_god_mode_safety_chips_survive_narrow() -> None:
+    cfg = RoninConfig(provider="anthropic")
+    g = GitState(repo=True, branch="feature/really-long-branch-name", dirty=True)
+    narrow = chip_strip(cfg, ".", edit_mode="normal", role="implementer",
+                        width=44, git=g, full_access=True)
+    assert len(narrow) <= 44
+    # cost + god-mode + destructive floor never disappear
+    assert "[PAID]" in narrow
+    assert "[god-mode]" in narrow
+    assert "[DESTRUCTIVE FLOOR ACTIVE]" in narrow
+    # low-priority chips (role / branch) shed first
+    assert "[role:implementer]" not in narrow
+
+
+def test_normal_mode_has_no_god_chips() -> None:
+    cfg = RoninConfig(provider="cerebras")
+    strip = chip_strip(cfg, ".", edit_mode="normal", width=120, git=GitState())
+    assert "god-mode" not in strip
+    assert "DESTRUCTIVE FLOOR" not in strip
+    assert "[write-gated]" in strip  # normal safety chip
+
+
+def test_safety_chips_survive_extreme_narrow() -> None:
+    # even absurdly narrow, cost + safety chips are never dropped (may overflow,
+    # but they must be present — trust over prettiness)
+    cfg = RoninConfig(provider="anthropic")
+    strip = chip_strip(cfg, ".", edit_mode="normal", role="implementer",
+                       width=10, git=GitState(repo=True, branch="main", dirty=True),
+                       full_access=True)
+    assert "[PAID]" in strip and "[god-mode]" in strip
+    assert "[DESTRUCTIVE FLOOR ACTIVE]" in strip
