@@ -4,6 +4,14 @@ All notable changes to this project will be documented here. Format follows [Kee
 
 ## [Unreleased]
 
+### v1.0 launch readiness (Wave 10)
+- **Fixed the installer.** `install.sh` was stale from the `csk → ronin` rename and installed a broken `csk` shim (curl install non-functional). It now installs `ronin` + `ro` shims that exec `uv run ronin`, with corrected header and get-started hints.
+- **`ronin --version`** now works (eager root flag), matching universal CLI convention; `ronin version` unchanged.
+- **Corrected stale docs.** README's test-count badge/prose (2475 / 2,232) were stale and inconsistent — now the measured **3,274 passing**; fixed the manual-update path (`~/.local/share/ronin`).
+- **New user docs**: `docs/providers.md`, `docs/free-mode.md`, `docs/offline.md`, `docs/pipeline.md`, `docs/safety.md`.
+- **Release artifacts** under `docs/release/`: readiness audit, honest eval/benchmark report (measured RUN vs SKIPPED vs NOT-RUN; no faked benchmarks or SWE-bench score), security review (12/12 PASS, zero blockers), demo script, and social/HN/Product-Hunt drafts, plus release notes + launch checklist.
+- **Honest status**: not on PyPI yet; one documented `--god-mode` safety boundary; recommends cutting a **release candidate** (`v1.0.0-rc.1`), not a final `v1.0.0`. No tag/publish/deploy performed.
+
 ### Added — untracked-file evidence, required/optional suites, restore any checkpoint (Wave 9)
 - **Untracked-file diff evidence**: `DiffEvidence` now covers brand-new untracked files alongside tracked changes, captured with `git diff --no-index` — strictly read-only, so **nothing is ever staged** (no `git add -N`) and there is nothing to clean up. Binary or oversized untracked files are recorded as metadata only; any failure lands in `capture_warnings` and the tracked evidence still stands. New fields: `tracked_files`, `untracked_files`, `binary_files`, `omitted_files`, `capture_warnings` (all in `--json`). The semantic check sees untracked evidence automatically.
 - **Required vs optional verification suites**: mark a suite optional with a trailing `?` (`--verify-suite "lint?:ruff check ."`) or via `--required-suite` / `--optional-suite`. A **required** failure fails the run (blocked blocks it); an **optional** failure/block is only a **warning** — it never fails, blocks, or passes the run on its own. `--auto-verify-all` now classifies detected suites (tests/build required; lint/typecheck/format optional) and prints the classification before running. The suite table shows required/optional + the per-suite `verdict_effect`; the truth table shows "required X passed/Y failed, optional A warning/B passed".

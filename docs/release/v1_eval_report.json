@@ -1,0 +1,20 @@
+{
+  "version": "0.59.0",
+  "run_date": "2026-07-01",
+  "environment": {"os": "darwin", "python": "3.14", "runner": "uv run --frozen"},
+  "test_suite": {
+    "status": "run",
+    "command": "uv run --frozen pytest packages apps -q",
+    "result": "3274 passed",
+    "wall_seconds": 44.73,
+    "by_area": {"cli": 2812, "agent-patterns": 188, "hardening": 60, "mcp-servers": 67, "eval-suite": 45, "relay": 35, "memory": 11, "apps/api": 51, "apps/demo": 5},
+    "total": 3274
+  },
+  "eval_suite": {"status": "run", "tests": 45, "note": "LLM-as-judge + SWE-bench execution harness present and tested"},
+  "swebench": {"status": "not_run", "score": null, "note": "harness exists; no resolved-rate measured (needs provider key + dataset); no score published"},
+  "pipeline_dry_run": {"status": "run", "command": "ronin pipeline \"explain this repo\" --dry-run", "result": "plan rendered, exit 0, nothing executed"},
+  "free_provider_smoke": {"status": "skipped", "reason": "no API key in this environment"},
+  "offline_smoke": {"status": "skipped", "reason": "no Ollama daemon / local model in this environment"},
+  "latency_cost": {"test_suite_wall_seconds": 44.73, "per_turn": "not measured (provider-dependent, no keys)"},
+  "bottom_line": "Proven by 3274 offline tests; live provider/offline smokes and SWE-bench score not measured and not claimed."
+}

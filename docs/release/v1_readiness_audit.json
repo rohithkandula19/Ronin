@@ -1,0 +1,36 @@
+{
+  "version": "0.59.0",
+  "audited": "2026-07-01",
+  "method": "read-only static audit + live CLI checks",
+  "checks": [
+    {"id": 1, "name": "Package metadata correct", "status": "pass", "evidence": "ronin 0.59.0, requires-python>=3.11, MIT; ronin-cli classifiers + urls present"},
+    {"id": 2, "name": "Console scripts ronin/ro", "status": "pass", "evidence": "[project.scripts] ronin & ro = ronin_cli.main:app"},
+    {"id": 3, "name": "CLI entrypoints work", "status": "pass", "evidence": "ronin --help/version/--version/doctor/pipeline --dry-run exit 0, live"},
+    {"id": 4, "name": "ronin version / --version", "status": "pass_fixed", "evidence": "version subcommand prints version+sha; --version eager flag added this wave"},
+    {"id": 5, "name": "ronin doctor", "status": "pass", "evidence": "config/provider/model/auth + --check live ping; no python-version check"},
+    {"id": 6, "name": "ronin update", "status": "pass", "evidence": "git checkout updater, dirty-tree guard, --check non-mutating"},
+    {"id": 7, "name": "ronin code", "status": "pass", "evidence": "coding agent, gated edits, help present"},
+    {"id": 8, "name": "ronin pipeline", "status": "pass", "evidence": "role-handoff pipeline; --dry-run verified live"},
+    {"id": 9, "name": "ronin --offline", "status": "pass", "evidence": "root flag; apply_offline forces local brain, strips network tools"},
+    {"id": 10, "name": "/provider /free /theme /role", "status": "pass", "evidence": "all in SLASH_DISPATCH + SLASH_COMMANDS"},
+    {"id": 11, "name": "/help accurate", "status": "pass", "evidence": "all 37 SLASH_COMMANDS map to handlers; voice special-cased"},
+    {"id": 12, "name": "docs match commands", "status": "pass_fixed", "evidence": "claims verified; stale test counts corrected"},
+    {"id": 13, "name": "no stale coming-soon", "status": "pass", "evidence": "no vaporware; TODO hits are the guard feature"},
+    {"id": 14, "name": "no fake benchmarks", "status": "pass", "evidence": "no fabricated resolved-rate; BENCHMARK.md scoped+honest; SWE-bench = harness capability"},
+    {"id": 15, "name": "no fake screenshots", "status": "pass", "evidence": "all README GIF/PNG references resolve to real files"},
+    {"id": 16, "name": "no secret leakage", "status": "pass", "evidence": "only test fixtures + placeholders; .env.local gitignored+untracked"},
+    {"id": 17, "name": "install script works", "status": "pass_fixed", "evidence": "was FAIL (broken csk shim); fixed to install ronin+ro shims execing uv run ronin"}
+  ],
+  "blockers_resolved": [
+    "install.sh installed a broken csk shim (curl install non-functional) — fixed",
+    "README test counts stale/inconsistent (2475 vs 2,232) — corrected to measured 3274"
+  ],
+  "followups": [
+    "not on PyPI yet (pip/uv-tool install unavailable until PYPI_TOKEN set); documented honestly",
+    "ronin doctor does not check python version or uv/git presence",
+    "ronin update always tracks origin/main (ignores pinned --ref)",
+    "pnpm-workspace.yaml has a leftover allowBuilds placeholder"
+  ],
+  "measured_tests": {"total_passing": 3274, "by_area": {"cli": 2812, "agent-patterns": 188, "eval-suite": 45, "hardening": 60, "mcp-servers": 67, "relay": 35, "memory": 11, "apps/api": 51, "apps/demo": 5}},
+  "verdict": "No remaining launch blockers; remaining items are non-blocking follow-ups. Ready for a release candidate."
+}

@@ -1,0 +1,26 @@
+{
+  "version": "0.59.0",
+  "reviewed": "2026-07-01",
+  "method": "read-only review with file:line citations",
+  "checks": [
+    {"id": 1, "name": "No committed secrets", "status": "pass", "evidence": "only synthetic fixtures (sk-ant-FAKEKEYNOTREAL, AWS EXAMPLE key, # ronin:allow-secret); strict OpenAI/GitHub/Slack patterns 0 real hits"},
+    {"id": 2, "name": "Fixtures clearly fake", "status": "pass", "evidence": "strings spell FAKEKEYNOTREAL/FAKETESTKEY; allow-secret markers"},
+    {"id": 3, "name": "Keys local only, no phone-home", "status": "pass", "evidence": "config.py:17-23 local TOML; key_for() 230-243 local+env only; no telemetry in packages/cli/src"},
+    {"id": 4, "name": "Approval default-deny; BLOCK never auto", "status": "pass", "evidence": "approvals.py:357-394; _ask_yes_no default-deny; gate_level payment/destructive -> BLOCK before auto"},
+    {"id": 5, "name": "yolo/full-access loud warning", "status": "pass", "evidence": "main.py:175-177 FULL-ACCESS warning + persistent YOLO badge code_mode.py:107-108"},
+    {"id": 6, "name": "Offline strips network tools", "status": "pass", "evidence": "offline.py:19-24 NETWORK_TOOLS; apply_offline forces ollama; strip_network_tools wired code_mode.py:682-684"},
+    {"id": 7, "name": "No automatic payment path", "status": "pass", "evidence": "PAYMENT_MARKERS approvals.py:83-109 -> BLOCK; act.py:407-451 gates every outward step"},
+    {"id": 8, "name": "No destructive command without approval", "status": "pass_with_boundary", "evidence": "run_command SENSITIVE; DESTRUCTIVE_MARKERS -> BLOCK; boundary 1: yolo coding shell auto-approves unless deny-rule"},
+    {"id": 9, "name": "Pipeline commit/PR gated", "status": "pass", "evidence": "commit_gate pipeline_finish.py:19-43 needs passing verdict; _confirm on each; dry_run no-op"},
+    {"id": 10, "name": "Read-only roles stay read-only", "status": "pass_with_boundary", "evidence": "roles read_only=True filtered to _READONLY_CODE_TOOLS; boundary 2: read-only web tools still added, stripped by offline"},
+    {"id": 11, "name": "Untracked diff capture read-only", "status": "pass", "evidence": "pipeline_diff.py:89-91 git diff --no-index; no git add/write; never raises"},
+    {"id": 12, "name": "Checkpoint restore gated", "status": "pass", "evidence": "main.py:612-666 never automatic; Confirm.ask default=False; decline exits unless --force-resume"}
+  ],
+  "blockers": [],
+  "boundaries": [
+    "Boundary 1 (opt-in): under --yolo/--god-mode, code-mode run_command auto-approves any command incl. rm -rf unless a standing deny-rule exists; the destructive-always-BLOCK guarantee is in the approvals/act outward-action path, not the yolo coding shell. Entered only via explicit flag + loud warning. Follow-up: wire is_destructive() as a hard floor under yolo.",
+    "Boundary 2: read-only roles are no-mutation, not no-network (web_search/fetch_url available; stripped by --offline).",
+    "Boundary 3: provider keys stored in plaintext local TOML, not encrypted at rest."
+  ],
+  "verdict": "Ship-safe. Zero release-blocking findings. One substantive caveat (Boundary 1) is a documented property of an explicitly opt-in mode."
+}
