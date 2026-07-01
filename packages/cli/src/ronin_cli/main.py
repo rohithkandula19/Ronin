@@ -48,9 +48,21 @@ console = Console()
 from .panda_art import PANDA_ACTIVITIES as _PANDA_ACTIVITIES, render_panda as _render_panda
 
 
+def _version_callback(value: bool) -> None:
+    """Eager --version: print the version and exit (before any subcommand runs)."""
+    if value:
+        from .selfupdate import version_line
+        console.print(version_line())
+        raise typer.Exit()
+
+
 @app.callback(invoke_without_command=True)
 def _root(
     ctx: typer.Context,
+    version: bool = typer.Option(
+        False, "--version", callback=_version_callback, is_eager=True,
+        help="Show the ronin version and exit.",
+    ),
     tui: bool = typer.Option(
         False, "--tui",
         help="Open the full-screen TUI (panes + trace) instead of the inline REPL.",

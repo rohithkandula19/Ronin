@@ -1,28 +1,28 @@
 #!/usr/bin/env bash
 #
-# Install csk from source.
+# Install ronin from source.
 #
 # Usage:
 #   curl -sSL https://raw.githubusercontent.com/rohithkandula19/Ronin/main/install.sh | bash
 #
 # Or with a pinned version:
-#   curl -sSL https://raw.githubusercontent.com/rohithkandula19/Ronin/main/install.sh | bash -s -- --ref v0.2.0
+#   curl -sSL https://raw.githubusercontent.com/rohithkandula19/Ronin/main/install.sh | bash -s -- --ref v0.59.0
 #
 # What it does:
 #   1. Installs `uv` (https://github.com/astral-sh/uv) if it's not on PATH.
 #   2. Clones the repo to ~/.local/share/ronin (or updates if it's already there).
 #   3. Runs `uv sync --all-packages` to resolve the workspace.
-#   4. Creates a `csk` shim at ~/.local/bin/csk that invokes the workspace-managed venv.
+#   4. Creates `ronin` and `ro` shims at ~/.local/bin that invoke the workspace-managed venv.
 #   5. Tells you to add ~/.local/bin to PATH if it's not there.
 #
-# This is the bootstrap install. Once `ronin-cli` lands on PyPI, you can
-# switch to `pipx install ronin-cli`.
+# This is the bootstrap install. `ronin-cli` is not on PyPI yet; once it lands
+# you'll be able to `pipx install ronin-cli` / `uv tool install ronin-cli`.
 
 set -euo pipefail
 
 REPO_URL="https://github.com/rohithkandula19/Ronin"
-INSTALL_DIR="${CSK_INSTALL_DIR:-$HOME/.local/share/ronin}"
-BIN_DIR="${CSK_BIN_DIR:-$HOME/.local/bin}"
+INSTALL_DIR="${RONIN_INSTALL_DIR:-${CSK_INSTALL_DIR:-$HOME/.local/share/ronin}}"
+BIN_DIR="${RONIN_BIN_DIR:-${CSK_BIN_DIR:-$HOME/.local/bin}}"
 REF="main"
 
 # --- args ---
@@ -31,7 +31,7 @@ while [[ $# -gt 0 ]]; do
     --ref) REF="$2"; shift 2 ;;
     --dir) INSTALL_DIR="$2"; shift 2 ;;
     -h|--help)
-      sed -n '3,18p' "$0"
+      sed -n '3,20p' "$0"
       exit 0
       ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
@@ -96,17 +96,19 @@ say "Resolving workspace with uv"
 (cd "$INSTALL_DIR" && uv sync --all-packages --quiet)
 ok "workspace synced"
 
-# --- shim ---
-say "Installing csk shim"
+# --- shims (ronin + ro) ---
+say "Installing ronin + ro shims"
 mkdir -p "$BIN_DIR"
-SHIM="$BIN_DIR/csk"
-cat > "$SHIM" <<EOF
+for name in ronin ro; do
+  SHIM="$BIN_DIR/$name"
+  cat > "$SHIM" <<EOF
 #!/usr/bin/env bash
-# csk shim installed by ronin's install.sh
-exec uv --project "$INSTALL_DIR" run csk "\$@"
+# $name shim installed by ronin's install.sh
+exec uv --project "$INSTALL_DIR" run $name "\$@"
 EOF
-chmod +x "$SHIM"
-ok "shim at $SHIM"
+  chmod +x "$SHIM"
+  ok "shim at $SHIM"
+done
 
 # --- PATH check ---
 case ":$PATH:" in
@@ -119,11 +121,12 @@ esac
 
 # --- done ---
 echo
-echo "${C_BOLD}${C_GREEN}csk installed.${C_RESET}"
+echo "${C_BOLD}${C_GREEN}ronin installed.${C_RESET}"
 echo
-echo "Try it now (no API keys required):"
-echo "  ${C_CYAN}csk init --demo -y${C_RESET}"
-echo "  ${C_CYAN}csk briefing${C_RESET}"
+echo "Get started:"
+echo "  ${C_CYAN}ronin${C_RESET}                 # the agent (free-first onboarding on first run)"
+echo "  ${C_CYAN}ronin doctor${C_RESET}          # check provider/model/config"
+echo "  ${C_CYAN}ronin play${C_RESET}            # take a break — the free terminal-game arcade"
 echo
-echo "Update later by re-running this installer."
-echo "Uninstall: rm -rf $INSTALL_DIR $SHIM"
+echo "Update later: ${C_CYAN}ronin update${C_RESET} (or re-run this installer)."
+echo "Uninstall: rm -rf $INSTALL_DIR $BIN_DIR/ronin $BIN_DIR/ro"

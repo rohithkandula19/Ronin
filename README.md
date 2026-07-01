@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-v0.59.0-blue)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-2475%20passing-brightgreen.svg)](#-whats-under-the-hood)
+[![Tests](https://img.shields.io/badge/tests-3274%20passing-brightgreen.svg)](#-whats-under-the-hood)
 [![Providers](https://img.shields.io/badge/providers-Claude%20·%20Gemini%20·%20Cerebras%20·%20Groq%20·%20OpenRouter%20·%20Ollama%20·%20OpenAI-d4a373)](#-supported-providers)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
@@ -44,7 +44,7 @@ Regenerate the walkthrough anytime with [`vhs`](https://github.com/charmbracelet
 
 **One front door:** type **`ronin`** and you get a single agent that reads, writes, and runs code (every edit and shell command gated behind a diff preview and your approval, reads run freely), generates images/video/speech, and queries your connected data, all in one conversation, in plain language. It's **provider-agnostic**: the same agent runs on Claude or on free open models.
 
-It's also a **reference implementation for building agents the right way**. The CLI is a thin wrapper over seven independently-usable packages: agent patterns, evals, memory, hardening, and MCP integrations, backed by **2,232 tests** that run offline in CI. (`ronin code` is the focused coding agent; `ronin chat` is the talk/media surface, both available when you want a single-purpose mode.)
+It's also a **reference implementation for building agents the right way**. The CLI is a thin wrapper over seven independently-usable packages: agent patterns, evals, memory, hardening, and MCP integrations, backed by **3,274 tests** that run offline in CI. (`ronin code` is the focused coding agent; `ronin chat` is the talk/media surface, both available when you want a single-purpose mode.)
 
 ## 🛠 `ronin code` · the coding agent (Claude-Code shaped)
 
@@ -188,7 +188,9 @@ ronin update --check    # report whether an update is available, change nothing
 discard them. Manual fallback:
 
 ```bash
-cd ~/ronin && git fetch origin && git reset --hard origin/main && uv sync --all-packages
+ronin update          # in-place: fetch origin, reset to origin/main, uv sync (refuses a dirty tree without --force)
+# or manually, if you cloned elsewhere:
+cd ~/.local/share/ronin && git fetch origin && git reset --hard origin/main && uv sync --all-packages
 ```
 
 `ronin version` shows the running version plus the checkout's short sha and
@@ -434,7 +436,7 @@ ronin is MIT-licensed and meant to be picked up by other people. A few notes if 
 | `cli` | The `ronin` binary: agent loop, MCP client, web tools, subagents, eval, media, the **26-game arcade** (`ronin play`) | 1882 |
 | `deployment-templates` | Docker Compose, Modal, Vercel, Railway | - |
 
-**2,232 tests** across all packages (incl. the demo/API apps), green on every push (see CI). A `FakeProvider` makes them deterministic, offline, and free: no API calls in CI.
+**3,274 tests** across all packages (incl. the demo/API apps), green on every push (see CI). A `FakeProvider` makes them deterministic, offline, and free: no API calls in CI.
 
 ## Use the modules without the CLI
 
