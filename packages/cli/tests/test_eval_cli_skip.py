@@ -60,6 +60,19 @@ def test_eval_run_uses_configured_model_not_placeholder(monkeypatch, tmp_path):
     assert argv[argv.index("--judge") + 1] == "gpt-oss-120b"
 
 
+def test_eval_run_missing_dataset_errors_gracefully(monkeypatch, tmp_path):
+    # A typo'd dataset path must give a clean error, not a raw traceback.
+    monkeypatch.setattr("ronin_cli.main.load_config",
+                        lambda: _StubConfig(model="gpt-oss-120b", authed=True))
+    called = {}
+    monkeypatch.setattr("ronin_eval_suite.cli.main", _spy(called))
+    r = runner.invoke(app, ["eval", "run", str(tmp_path / "nope.jsonl")])
+    assert r.exit_code == 2, r.output
+    assert "not found" in r.output.lower()
+    assert "Traceback" not in r.output
+    assert "argv" not in called          # never delegated to the suite runner
+
+
 def test_eval_run_explicit_target_and_judge_bypass_auth_skip(monkeypatch, tmp_path):
     # Naming both target and judge explicitly means the user has access; don't
     # skip on the configured provider's auth.
