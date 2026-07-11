@@ -1,6 +1,6 @@
 [project]
 name = "ronin-agent-patterns"
-version = "1.0.0rc2"
+version = "1.0.0rc3"
 description = "Production-grade agent patterns for Claude: ReAct, Planner-Executor, Multi-Agent Supervisor, Reflexion."
 readme = "README.md"
 requires-python = ">=3.11"

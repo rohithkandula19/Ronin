@@ -6,7 +6,7 @@ the existing structure.** No restructuring, no bundling, no duplication.
 ## Why this was needed
 
 Phase 1 RC validation found `pip install <ronin_cli wheel>` fails standalone:
-`No matching distribution found for ronin-agent-patterns==1.0.0rc2`. Root cause
+`No matching distribution found for ronin-agent-patterns==1.0.0rc3`. Root cause
 (see `pypi_dependency_graph.md`): `ronin-cli` correctly declares five internal
 dependencies as version specs, but those packages are not on any index yet, so a
 lone cli wheel can't resolve them.

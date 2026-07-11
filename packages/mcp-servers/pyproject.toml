@@ -1,6 +1,6 @@
 [project]
 name = "ronin-mcp-servers"
-version = "1.0.0rc2"
+version = "1.0.0rc3"
 description = "Reference MCP server templates: Postgres (read-only). Stripe / Linear / Slack / Notion to follow."
 readme = "README.md"
 requires-python = ">=3.11"

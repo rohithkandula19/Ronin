@@ -7,13 +7,13 @@ on `fix/pypi-standalone-packaging` (off main `149d151`).
 
 | Distribution (PyPI name) | Import name | Version | Publishable? | User-facing? |
 |---|---|---|---|---|
-| `ronin-cli` | `ronin_cli` | 1.0.0rc2 | yes (the binary) | yes — `ronin` / `ro` |
-| `ronin-agent-patterns` | `ronin_agent_patterns` | 1.0.0rc2 | yes | yes (usable standalone) |
-| `ronin-eval-suite` | `ronin_eval_suite` | 1.0.0rc2 | yes | yes |
-| `ronin-hardening` | `ronin_hardening` | 1.0.0rc2 | yes | yes |
-| `ronin-memory` | `ronin_memory` | 1.0.0rc2 | yes | yes |
-| `ronin-mcp-servers` | `ronin_mcp_servers` | 1.0.0rc2 | yes | implementation |
-| `ronin-relay` | `ronin_relay` | 1.0.0rc2 | yes | separate feature (NOT a cli dep) |
+| `ronin-cli` | `ronin_cli` | 1.0.0rc3 | yes (the binary) | yes — `ronin` / `ro` |
+| `ronin-agent-patterns` | `ronin_agent_patterns` | 1.0.0rc3 | yes | yes (usable standalone) |
+| `ronin-eval-suite` | `ronin_eval_suite` | 1.0.0rc3 | yes | yes |
+| `ronin-hardening` | `ronin_hardening` | 1.0.0rc3 | yes | yes |
+| `ronin-memory` | `ronin_memory` | 1.0.0rc3 | yes | yes |
+| `ronin-mcp-servers` | `ronin_mcp_servers` | 1.0.0rc3 | yes | implementation |
+| `ronin-relay` | `ronin_relay` | 1.0.0rc3 | yes | separate feature (NOT a cli dep) |
 
 ## Direction (what depends on what)
 
@@ -34,7 +34,7 @@ deployment-templates — not a distribution (templates on disk)
 
 ## Metadata reality (verified against the built wheel)
 
-- `ronin-cli`'s `[project.dependencies]` declares the 5 internal deps as **PEP 440 version specs** (`ronin-agent-patterns==1.0.0rc2`, …), not paths.
+- `ronin-cli`'s `[project.dependencies]` declares the 5 internal deps as **PEP 440 version specs** (`ronin-agent-patterns==1.0.0rc3`, …), not paths.
 - `[tool.uv.sources] { workspace = true }` is **dev-only** and is **stripped from the built wheel** — `Requires-Dist` in the wheel METADATA carries only the version specs. Confirmed: **no `file://` / `@ path` dependency in the artifact.**
 - Optional extras (`browser`, `local`, `postgres`, `server`) are correctly gated with `extra == …` and stay optional.
 - Both console scripts (`ronin`, `ro`) are present in `entry_points.txt`.

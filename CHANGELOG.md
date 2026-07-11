@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.0.0-rc.3] — release candidate
+
+Package version `1.0.0rc3` (PEP 440); displays as `v1.0.0-rc.3`. Folds in the Stage-A hardening and Phase-1 validation fixes and makes the CLI standalone-installable. Supersedes rc.2 (whose tag predates this work). Previous RC tags are not moved. Full notes: `docs/release/v1.0.0-rc.3-notes.md`.
+
+### Security & Safety
+- **Fail-closed cost budget** — unknown model pricing is `UNKNOWN`, never a silent `$0`, so a `max_cost_usd` cap cannot be bypassed.
+- **Relay path-traversal confinement** — `..` / encoded / backslash traversal blocked; request path confined to the target root.
+- **Tool-registry gate-drift guard** — coding session refuses to start if a mutating tool is ungated.
+- **Destructive floor now blocks `git reset --hard` and forced `git clean`** (any flag order) even under `--yolo` / god-mode; branch switches and dry-runs are not flagged.
+
+### Fixed
+- `ronin eval run` no longer uses hardcoded placeholder models; missing auth → **SKIPPED** with a reason (no fake score). Missing dataset now errors gracefully instead of a traceback.
+- **Standalone packaging** — `ronin-cli` installs cleanly outside the repo from the wheel set (proven by `scripts/test_clean_install.sh`, run in CI). No PyPI publish yet.
+- CI: removed echo-no-op Node lint/test gates; added real build + clean-install gates.
+
 ## [1.0.0-rc.2] — release candidate
 
 Package version `1.0.0rc2` (PEP 440); displays as `v1.0.0-rc.2`. Cut during the 3-day RC validation pass — two documentation/consistency fixes, no feature or behavior changes.

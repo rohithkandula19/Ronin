@@ -1,6 +1,6 @@
 [project]
 name = "ronin-hardening"
-version = "1.0.0rc2"
+version = "1.0.0rc3"
 description = "Production hardening for Claude agents: prompt-injection defense, tool guardrails, output validation, observability."
 readme = "README.md"
 requires-python = ">=3.11"
