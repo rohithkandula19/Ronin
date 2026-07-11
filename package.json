@@ -9,8 +9,8 @@
     "pnpm": ">=9"
   },
   "scripts": {
-    "lint": "echo 'no linter wired yet'",
-    "test": "echo 'no tests yet'"
+    "lint": "echo 'No JS linter is wired. This is a Python codebase; CI gates are pytest + uv build.' && exit 0",
+    "test": "echo 'No Node test suite. Run the real tests with: uv run pytest' && exit 0"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
