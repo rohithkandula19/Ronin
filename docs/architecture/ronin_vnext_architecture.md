@@ -3,11 +3,13 @@
 > *proposals*, not shipped architecture. Where the text calls the approval gate
 > + destructive floor the "single outermost authority" holding for "every
 > subsystem," read that as the vNext DESIGN GOAL, not the present reality: this
-> very pass FOUND that the floor is enforced only on the console gate
-> (`_selective_gate`) and is **bypassed under `--yolo`/god-mode on the
+> very pass FOUND that the floor was enforced only on the console gate
+> (`_selective_gate`) and was **bypassed under `--yolo`/god-mode on the
 > `before_tool`/`gate_cb` path used by `ronin --tui` and headless front-ends**
-> (code_mode.py ~844-856). That is a real P1 safety defect, verified in-code and
-> fixed separately (it blocks the final v1.0 tag). Treat every subsystem's
+> (code_mode.py ~844-856). That was a real P1 safety defect, verified in-code.
+> It has since been **fixed and merged to main** (PR #45, `1cac0da`): a shared
+> `_is_floored_command()` now floors both command tools on every gate path
+> before the yolo short-circuit, with +12 tests. Treat every subsystem's
 > "current assessment" as the honest baseline and every "vNext design" as a
 > proposal pending its own gated PR. No code was changed by this discovery pass.
 
