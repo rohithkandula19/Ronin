@@ -6,6 +6,7 @@ from ronin_hardening import (
     BudgetExceededError,
     TokenBudget,
     estimate_cost_usd,
+    pricing_known,
 )
 
 
@@ -16,8 +17,59 @@ def test_estimate_cost_known_model() -> None:
     assert estimate_cost_usd("claude-sonnet-4-6", 1_000_000, 1_000_000) == 18.0
 
 
-def test_estimate_cost_unknown_model_is_zero() -> None:
-    assert estimate_cost_usd("totally-fake", 1_000_000, 1_000_000) == 0.0
+def test_estimate_cost_unknown_model_is_none_not_zero() -> None:
+    # Safety-critical: an unknown model must NOT be silently priced at $0
+    # (that would let a cost cap pass forever). It reports UNKNOWN via None.
+    assert estimate_cost_usd("totally-fake", 1_000_000, 1_000_000) is None
+    assert not pricing_known("totally-fake")
+
+
+def test_estimate_cost_free_and_local_models_are_zero() -> None:
+    # Genuinely-free / local / :free models are known-$0, not unknown.
+    assert estimate_cost_usd("gpt-oss-120b", 1_000_000, 1_000_000) == 0.0
+    assert estimate_cost_usd("ollama", 1_000_000, 1_000_000) == 0.0
+    assert estimate_cost_usd("deepseek/deepseek-v4:free", 1_000_000, 1_000_000) == 0.0
+    assert pricing_known("gpt-oss-120b")
+    assert pricing_known("some-model:free")
+
+
+# ---------- fail-closed cost cap on UNKNOWN pricing (Stage A blocker 0.1) ----------
+
+def test_cost_cap_fails_closed_when_pricing_unknown() -> None:
+    # A $ cap over an unpriced model must halt, not run uncapped at a fake $0.
+    budget = TokenBudget(max_cost_usd=1.0, model="totally-fake")
+    with pytest.raises(BudgetExceededError):
+        budget.check_before()
+    with pytest.raises(BudgetExceededError):
+        budget.charge(input_tokens=1_000_000, output_tokens=1_000_000)
+
+
+def test_cost_cap_unknown_pricing_explicit_optin_runs() -> None:
+    # Explicit opt-in is the documented escape hatch; the token cap still applies.
+    budget = TokenBudget(max_cost_usd=1.0, model="totally-fake", allow_unknown_pricing=True)
+    budget.check_before()          # no raise
+    budget.charge(input_tokens=100, output_tokens=50)  # no raise, cost unenforced
+    assert budget.used_cost_usd == 0.0
+
+
+def test_no_cost_cap_unknown_pricing_is_fine() -> None:
+    # With only a token cap (no $ cap), unknown pricing is not a problem.
+    budget = TokenBudget(max_tokens=10_000, model="totally-fake")
+    budget.check_before()
+    budget.charge(input_tokens=100, output_tokens=50)
+
+
+def test_free_model_never_trips_cost_cap() -> None:
+    budget = TokenBudget(max_cost_usd=0.01, model="gpt-oss-120b")
+    budget.check_before()
+    budget.charge(input_tokens=5_000_000, output_tokens=5_000_000)  # free → no raise
+    assert budget.used_cost_usd == 0.0
+
+
+def test_paid_model_still_trips_cost_cap() -> None:
+    budget = TokenBudget(max_cost_usd=0.01, model="claude-sonnet-4-6")
+    with pytest.raises(BudgetExceededError):
+        budget.charge(input_tokens=1_000_000, output_tokens=1_000_000)  # $18 > $0.01
 
 
 # ---------- charge + accumulation ----------

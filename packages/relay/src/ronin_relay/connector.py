@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import posixpath
 from typing import Protocol
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 import httpx
 import websockets
@@ -30,6 +32,44 @@ from .protocol import (
 )
 
 logger = logging.getLogger("ronin_relay.connector")
+
+
+def resolve_target_url(target_url: str, req_path: str) -> str:
+    """Join a phone-supplied request path onto the fixed target URL, rooted to
+    the target's own path.
+
+    The phone never chooses the host. It may name a sub-path of the configured
+    target, but it must not escape it: ``..`` traversal, percent-encoded
+    traversal/separators (``%2e`` / ``%2f`` / ``%5c``), and backslashes are all
+    rejected, and the normalized result is prefix-confined to the target root.
+    Raises ``ValueError`` on any escape attempt (the caller reports it honestly
+    instead of hitting an unintended endpoint). Symlink escape does not apply:
+    this joins a URL path, not a filesystem path.
+    """
+    parts = urlsplit(target_url)
+    base_path = parts.path.rstrip("/")  # e.g. "/webhooks/agent" (or "" if none)
+
+    # Reject encoded separators / dot-encoding and backslashes before any join.
+    low = req_path.lower()
+    if "\\" in req_path or "%2f" in low or "%5c" in low or "%2e" in low:
+        raise ValueError("encoded path traversal or separators are not allowed")
+
+    p = urlsplit(req_path)  # split off any query/fragment; only the path is joined
+    raw_path = p.path or "/"
+    # Defense in depth: reject a literal parent-dir segment even after decoding.
+    if ".." in unquote(raw_path).replace("\\", "/").split("/"):
+        raise ValueError("path traversal ('..') is not allowed")
+
+    normalized = posixpath.normpath(base_path + "/" + raw_path.lstrip("/"))
+    confined = (
+        normalized == base_path or normalized.startswith(base_path + "/")
+        if base_path
+        else normalized.startswith("/")
+    )
+    if not confined:
+        raise ValueError("resolved path escapes the configured target root")
+
+    return urlunsplit((parts.scheme, parts.netloc, normalized, p.query, p.fragment))
 
 
 class LocalCaller(Protocol):
@@ -61,11 +101,12 @@ async def forward_one(
 
     task = message.request
     # The URL is ALWAYS the configured target plus the request path. The phone
-    # never gets to choose the host. We join carefully so a leading slash on
-    # the path does not escape the configured base.
-    base = config.target_url.rstrip("/")
-    path = task.path if task.path.startswith("/") else "/" + task.path
-    url = base + path
+    # never chooses the host, and cannot traverse out of the target's path root
+    # (see resolve_target_url). An escape attempt raises and is reported below.
+    try:
+        url = resolve_target_url(config.target_url, task.path)
+    except ValueError as exc:
+        return encode(ConnectorReply(id=message.id, status=0, error=f"blocked: {exc}"))
 
     try:
         response = await caller.request(

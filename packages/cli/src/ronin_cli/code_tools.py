@@ -19,8 +19,35 @@ from ronin_agent_patterns import Tool
 from .repo_map import _IGNORE_DIRS as IGNORE_DIRS
 from .repo_map import repo_map as _repo_map
 
-# Tools that must be approved before they run (write + execute).
+# Canonical classification of MUTATING tools: they change files, run shell, or
+# roll the workspace, so they must pass the approval gate before running.
+# ``write_file``/``edit_file``/``multi_edit``/``run_command`` are built here;
+# ``run_background`` is built in bg_processes.py and ``rewind`` in checkpoint.py
+# (see EXTERNAL_SENSITIVE_TOOLS). code_mode.py gates on
+# ``SENSITIVE_TOOLS | {tools flagged .sensitive}``.
 SENSITIVE_TOOLS = {"write_file", "edit_file", "multi_edit", "run_command", "run_background", "rewind"}
+
+# Sensitive tools NOT built by build_code_tools() — defined in sibling modules.
+# Listed so a drift check can tell "built elsewhere" apart from "phantom".
+EXTERNAL_SENSITIVE_TOOLS = frozenset({"run_background", "rewind"})
+
+
+def ungated_mutators(tool_names, gated_names) -> set[str]:
+    """Names of tools present in the toolbelt that are known-mutating yet NOT
+    gated — the dangerous drift direction (a mutator that would bypass approval).
+    Empty set means the gate covers every mutating tool. Fail-closed callers
+    should refuse to run while this is non-empty.
+    """
+    present = set(tool_names)
+    return (present & SENSITIVE_TOOLS) - set(gated_names)
+
+
+def phantom_sensitive(built_names) -> set[str]:
+    """SENSITIVE_TOOLS entries that neither ``built_names`` nor the documented
+    EXTERNAL_SENSITIVE_TOOLS account for — a gated name with no real tool behind
+    it (harmless but a sign of stale config). Empty set means no phantom drift.
+    """
+    return SENSITIVE_TOOLS - set(built_names) - EXTERNAL_SENSITIVE_TOOLS
 
 MAX_READ_BYTES = 100_000
 MAX_LIST_ENTRIES = 500

@@ -18,7 +18,13 @@ from ronin_hardening import InjectionScanner
 
 from pathlib import Path as _Path
 
-from .code_tools import SENSITIVE_TOOLS, build_code_tools, undo_last, unified_diff
+from .code_tools import (
+    SENSITIVE_TOOLS,
+    build_code_tools,
+    undo_last,
+    ungated_mutators,
+    unified_diff,
+)
 from .config import RoninConfig
 from .media import build_image_tool
 from .project_memory import load_project_memory, memory_system_block, write_memory_template
@@ -818,6 +824,14 @@ def run_code_agent(
     # plus any tool that flags itself sensitive=True (MCP writes, user plugins).
     # These used to bypass approval entirely. Read-only MCP tools stay out of it.
     _sensitive_names = set(SENSITIVE_TOOLS) | {t.name for t in tools if getattr(t, "sensitive", False)}
+    # Fail-closed drift guard: a known-mutating tool that reached the toolbelt but
+    # not the gate would bypass approval. Refuse rather than run ungated.
+    _ungated = ungated_mutators({t.name for t in tools}, _sensitive_names)
+    if _ungated:
+        raise RuntimeError(
+            f"refusing to run: mutating tool(s) {sorted(_ungated)} are not gated "
+            "(tool-registry/gate drift) — add them to SENSITIVE_TOOLS or mark them sensitive."
+        )
     _gate_root = _Path(root).resolve()
     if gate_cb is not None:
         # A front-end gate (TUI / headless) handles the human prompt, but the

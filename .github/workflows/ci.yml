@@ -33,11 +33,14 @@ jobs:
       - name: Install Python deps
         run: uv sync --all-packages
 
-      - name: Lint
-        run: pnpm run lint
-
-      - name: Test (Node)
-        run: pnpm run test
+      # No JS linter or Node test suite is wired, so the previous
+      # `pnpm run lint` / `pnpm run test` steps were echo no-ops (they printed
+      # "no linter wired yet" / "no tests yet" and always passed). They are
+      # removed rather than presenting a green gate that checks nothing. The
+      # real gate is the Python test suite below. Secret scanning runs as a
+      # pre-commit hook (`ronin hook`); a repo-wide CI secret gate is deferred
+      # only because the scanner flags its own intentional test fixtures
+      # (see docs/security/secret_rotation_checklist.md).
 
       - name: Install Python deps (with dev groups)
         run: uv sync --all-packages --all-groups
@@ -55,6 +58,9 @@ jobs:
             apps/demo \
             apps/api \
             -q
+
+      - name: Build packages (sdist + wheel)
+        run: uv build --all-packages
 
       - name: Smoke test ronin CLI
         run: |

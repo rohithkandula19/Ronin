@@ -71,3 +71,49 @@ async def test_forward_one_rejects_wrong_kind(connector_config) -> None:
     bad = json.dumps({"kind": "not_a_request", "id": "x", "request": {}})
     with pytest.raises(ValueError):
         await forward_one(bad, connector_config, FakeLocalCaller())
+
+
+# ---------- path-traversal confinement (Stage A blocker 0.2) ----------
+
+_TRAVERSALS = [
+    "/../admin",
+    "/run/../../secret",
+    "/../../../../etc/passwd",
+    "/%2e%2e/admin",          # encoded ..
+    "/%2e%2e%2fadmin",        # encoded ../
+    "/run%2f..%2fsecret",     # encoded separator
+    "\\..\\admin",            # backslash separators
+    "/..%5cadmin",            # encoded backslash
+]
+
+
+@pytest.mark.parametrize("bad_path", _TRAVERSALS)
+@pytest.mark.asyncio
+async def test_forward_one_blocks_path_traversal(connector_config, bad_path) -> None:
+    caller = FakeLocalCaller()
+    raw_reply = await forward_one(_frame(path=bad_path, body=None), connector_config, caller)
+    reply = ConnectorReply.model_validate_json(raw_reply)
+    # No local call was made, and the escape was reported honestly.
+    assert caller.calls == []
+    assert reply.status == 0
+    assert reply.error and "blocked" in reply.error
+
+
+@pytest.mark.asyncio
+async def test_forward_one_allows_legit_subpath(connector_config) -> None:
+    caller = FakeLocalCaller()
+    await forward_one(_frame(path="/run/sub", body=None), connector_config, caller)
+    assert caller.calls[0]["url"] == "http://127.0.0.1:9999/ronin/run/sub"
+
+
+def test_resolve_target_url_confines_and_rejects() -> None:
+    from ronin_relay.connector import resolve_target_url
+
+    base = "http://127.0.0.1:9999/ronin"
+    assert resolve_target_url(base, "/run") == "http://127.0.0.1:9999/ronin/run"
+    assert resolve_target_url(base, "status") == "http://127.0.0.1:9999/ronin/status"
+    # query is preserved; the path stays confined
+    assert resolve_target_url(base, "/run?x=1") == "http://127.0.0.1:9999/ronin/run?x=1"
+    for bad in ["/../admin", "/%2e%2e/x", "/a/../../b", "\\x", "/a%2fb"]:
+        with pytest.raises(ValueError):
+            resolve_target_url(base, bad)
