@@ -1289,8 +1289,12 @@ def eval_default(
 @eval_app.command("run", help="Run a golden dataset against a target model.")
 def eval_run(
     dataset: Path = typer.Argument(..., help="Path to JSONL dataset."),
-    target: str = typer.Option("claude-sonnet-4-6", "--target"),
-    judge: str = typer.Option("claude-opus-4-7", "--judge"),
+    target: Optional[str] = typer.Option(
+        None, "--target",
+        help="Target model. Defaults to the configured provider's model (no hardcoded fallback)."),
+    judge: Optional[str] = typer.Option(
+        None, "--judge",
+        help="LLM-judge model. Defaults to the configured provider's model."),
     criteria: str = typer.Option(
         "task_success,faithfulness,helpfulness,safety", "--criteria",
         help="Comma-separated rubric criteria.",
@@ -1299,9 +1303,26 @@ def eval_run(
     json_out: str = typer.Option("eval-report.json", "--json-out"),
     out: Optional[str] = typer.Option(None, "--out", help="Optional HTML report path."),
 ) -> None:
+    # Do NOT fall back to a hardcoded Anthropic model that 404s without a key.
+    # Resolve target/judge from the configured provider, and SKIP honestly (no
+    # score produced) when the model can't be resolved or there's no auth.
+    config = load_config()
+    resolved_target = target or config.resolved_model()
+    if not resolved_target:
+        console.print("[yellow]SKIPPED[/yellow]: no --target given and no model is configured. "
+                      "Pass --target or run [bold]ronin init[/bold]. (Not run — no score produced.)")
+        raise typer.Exit(3)
+    if not (target and judge) and not config.has_provider_auth():
+        console.print(f"[yellow]SKIPPED[/yellow]: no credentials for [bold]{config.provider}[/bold]. "
+                      "Set a key with [bold]ronin login[/bold], or pass --target/--judge you have "
+                      "access to. (Not run — no score produced.)")
+        raise typer.Exit(3)
+    resolved_judge = judge or resolved_target
+
     from ronin_eval_suite.cli import main as eval_main
 
-    argv = ["run", str(dataset), "--target", target, "--judge", judge, "--criteria", criteria, "--json-out", json_out]
+    argv = ["run", str(dataset), "--target", resolved_target, "--judge", resolved_judge,
+            "--criteria", criteria, "--json-out", json_out]
     if label:
         argv += ["--label", label]
     if out:
