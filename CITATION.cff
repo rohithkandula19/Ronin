@@ -13,7 +13,7 @@ abstract: >-
   memory, security hardening, and MCP tool integrations. It runs on Claude or on
   free models (Gemini, Cerebras, Groq, OpenRouter, Ollama).
 license: MIT
-version: 1.0.0-rc.2
+version: 1.0.0
 date-released: 2026-06-10
 keywords:
   - ai-agent

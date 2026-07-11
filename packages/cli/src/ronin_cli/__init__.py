@@ -3,7 +3,7 @@ import re
 
 # PEP 440 package version (also in pyproject.toml). The friendly display form
 # used in the UI / docs / git tag is derived from this via display_version().
-__version__ = "1.0.0rc3"
+__version__ = "1.0.0"
 
 
 def display_version(v: str = __version__) -> str:

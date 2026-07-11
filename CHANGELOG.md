@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.0.0]
+
+Package version `1.0.0` (PEP 440); displays as `v1.0.0`. The 1.0.0 line is rc.3 plus two release-readiness fixes. It carries forward all of the RC-series hardening (fail-closed budget, relay traversal confinement, tool-gate drift guard, destructive-floor coverage of `git reset --hard` / forced `git clean`), the honesty fixes (eval skips, graceful errors, deterministic offline eval), and standalone packaging (proven clean-install, run in CI). Full notes: `docs/release/v1.0.0-notes.md`.
+
+### Fixed
+- `ronin doctor --check` now exits non-zero when the live provider check fails or cannot be verified (was silently exit 0); the status row still shows the honest reason.
+- README provider table + `/model` example synced to `config.py` presets (`gemini-2.5-flash`, groq `openai/gpt-oss-20b`, openrouter `qwen/qwen3-coder:free`).
+
+### Notes
+- Not marketed as production-hardened or benchmarked — see the honest limitations in the release notes. No PyPI publish is bundled with this version; that remains a separate, gated step.
+
 ## [1.0.0-rc.3] — release candidate
 
 Package version `1.0.0rc3` (PEP 440); displays as `v1.0.0-rc.3`. Folds in the Stage-A hardening and Phase-1 validation fixes and makes the CLI standalone-installable. Supersedes rc.2 (whose tag predates this work). Previous RC tags are not moved. Full notes: `docs/release/v1.0.0-rc.3-notes.md`.

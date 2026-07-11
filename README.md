@@ -3,9 +3,9 @@
 > **A masterless, terminal-native Claude agent.** ronin is a **Claude-Code-style AI coding agent**, it reads, edits, and runs your code from the terminal, built on a **provider-agnostic agent framework** with first-class evals, memory, security hardening, and MCP tool integrations. Plug in Claude for top quality, or run it **free** on Gemini / Cerebras / Groq / Ollama.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-v1.0.0--rc.2-blue)](CHANGELOG.md)
+[![Status](https://img.shields.io/badge/status-v1.0.0-blue)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-3274%20passing-brightgreen.svg)](#-whats-under-the-hood)
+[![Tests](https://img.shields.io/badge/tests-3355%20passing-brightgreen.svg)](#-whats-under-the-hood)
 [![Providers](https://img.shields.io/badge/providers-Claude%20·%20Gemini%20·%20Cerebras%20·%20Groq%20·%20OpenRouter%20·%20Ollama%20·%20OpenAI-d4a373)](#-supported-providers)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
@@ -44,7 +44,7 @@ Regenerate the walkthrough anytime with [`vhs`](https://github.com/charmbracelet
 
 **One front door:** type **`ronin`** and you get a single agent that reads, writes, and runs code (every edit and shell command gated behind a diff preview and your approval, reads run freely), generates images/video/speech, and queries your connected data, all in one conversation, in plain language. It's **provider-agnostic**: the same agent runs on Claude or on free open models.
 
-It's also a **reference implementation for building agents the right way**. The CLI is a thin wrapper over seven independently-usable packages: agent patterns, evals, memory, hardening, and MCP integrations, backed by **3,274 tests** that run offline in CI. (`ronin code` is the focused coding agent; `ronin chat` is the talk/media surface, both available when you want a single-purpose mode.)
+It's also a **reference implementation for building agents the right way**. The CLI is a thin wrapper over seven independently-usable packages: agent patterns, evals, memory, hardening, and MCP integrations, backed by **3,355 tests** that run offline in CI. (`ronin code` is the focused coding agent; `ronin chat` is the talk/media surface, both available when you want a single-purpose mode.)
 
 ## 🛠 `ronin code` · the coding agent (Claude-Code shaped)
 
@@ -171,7 +171,7 @@ Plus, on the coding agent itself:
 curl -sSL https://raw.githubusercontent.com/rohithkandula19/Ronin/main/install.sh | bash
 ```
 
-Pin a tag: append `-s -- --ref v1.0.0-rc.2`. PyPI publish is wired (`.github/workflows/release.yml`) and lands `pip install ronin-cli` once the packages are published (approval-gated; `PYPI_TOKEN` must be set). Until then, a standalone install works from the built wheel set — `uv build --all-packages` then `pip install --find-links dist/ ronin-cli` in a clean environment (verified by `scripts/test_clean_install.sh`; see `docs/release/pypi_packaging_decision.md`). Editable/source-checkout installs are for development only, not a substitute for the standalone path.
+Pin a tag: append `-s -- --ref v1.0.0`. PyPI publish is wired (`.github/workflows/release.yml`) and lands `pip install ronin-cli` once the packages are published (approval-gated; `PYPI_TOKEN` must be set). Until then, a standalone install works from the built wheel set — `uv build --all-packages` then `pip install --find-links dist/ ronin-cli` in a clean environment (verified by `scripts/test_clean_install.sh`; see `docs/release/pypi_packaging_decision.md`). Editable/source-checkout installs are for development only, not a substitute for the standalone path.
 
 For Postgres support after install: `(cd ~/.local/share/ronin && uv pip install psycopg2-binary)`.
 
@@ -194,7 +194,7 @@ cd ~/.local/share/ronin && git fetch origin && git reset --hard origin/main && u
 ```
 
 `ronin version` shows the running version plus the checkout's short sha and
-branch, e.g. `ronin 1.0.0-rc.2 (a1b2c3d, main)`.
+branch, e.g. `ronin 1.0.0 (a1b2c3d, main)`.
 
 ## More surfaces
 
@@ -420,7 +420,7 @@ ronin is MIT-licensed and meant to be picked up by other people. A few notes if 
 - **`--yolo` / auto-accept bypasses the approval gate** and lets the model run shell commands unattended. Only use it in a sandbox or CI you trust: interactive use keeps every mutation gated.
 - **Parallel sub-agents cost real tokens.** `parallel_task` / `isolated_task` / `consensus` / `bench` fan out *N* model runs at once; concurrency is capped (3–4 workers) but spend scales with the number of tasks/models: budget accordingly.
 - **`isolated_task` needs a git repo** (worktrees are a git feature) and returns diffs for review rather than auto-merging: parallel changes stay reviewable.
-- **Pin the installer** for reproducibility: `curl … | bash -s -- --ref v1.0.0-rc.2`.
+- **Pin the installer** for reproducibility: `curl … | bash -s -- --ref v1.0.0`.
 
 ## 🧱 What's under the hood
 
@@ -436,7 +436,7 @@ ronin is MIT-licensed and meant to be picked up by other people. A few notes if 
 | `cli` | The `ronin` binary: agent loop, MCP client, web tools, subagents, eval, media, the **26-game arcade** (`ronin play`) | 1882 |
 | `deployment-templates` | Docker Compose, Modal, Vercel, Railway | - |
 
-**3,274 tests** across all packages (incl. the demo/API apps), green on every push (see CI). A `FakeProvider` makes them deterministic, offline, and free: no API calls in CI.
+**3,355 tests** across all packages (incl. the demo/API apps), green on every push (see CI). A `FakeProvider` makes them deterministic, offline, and free: no API calls in CI.
 
 ## Use the modules without the CLI
 

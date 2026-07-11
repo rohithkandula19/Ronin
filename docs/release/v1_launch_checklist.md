@@ -46,11 +46,11 @@ Nothing below has been run. Exact commands when you're ready:
 #    e.g. edit pyproject versions or use: ronin release --type <patch|minor|major>
 
 # 2. tag a release candidate (recommended first)
-git tag v1.0.0-rc.2
-git push origin v1.0.0-rc.2
+git tag v1.0.0
+git push origin v1.0.0
 
 # 3. create the GitHub release (after RC soak)
-gh release create v1.0.0-rc.2 --title "v1.0.0-rc.2" --notes-file docs/release/v1_release_notes.md --prerelease
+gh release create v1.0.0 --title "v1.0.0" --notes-file docs/release/v1_release_notes.md --prerelease
 
 # 4. publish to PyPI (only after setting PYPI_TOKEN) — the release workflow does this on tag,
 #    or manually:  uv build && uv publish

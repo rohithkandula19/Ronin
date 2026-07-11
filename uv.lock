@@ -2282,12 +2282,12 @@ wheels = [
 
 [[package]]
 name = "ronin"
-version = "1.0.0rc3"
+version = "1.0.0"
 source = { virtual = "." }
 
 [[package]]
 name = "ronin-agent-patterns"
-version = "1.0.0rc3"
+version = "1.0.0"
 source = { editable = "packages/agent-patterns" }
 dependencies = [
     { name = "anthropic" },
@@ -2363,7 +2363,7 @@ dev = [
 
 [[package]]
 name = "ronin-cli"
-version = "1.0.0rc3"
+version = "1.0.0"
 source = { editable = "packages/cli" }
 dependencies = [
     { name = "anthropic" },
@@ -2466,7 +2466,7 @@ dev = [
 
 [[package]]
 name = "ronin-eval-suite"
-version = "1.0.0rc3"
+version = "1.0.0"
 source = { editable = "packages/eval-suite" }
 dependencies = [
     { name = "anthropic" },
@@ -2489,7 +2489,7 @@ dev = [{ name = "pytest", specifier = ">=7.0" }]
 
 [[package]]
 name = "ronin-hardening"
-version = "1.0.0rc3"
+version = "1.0.0"
 source = { editable = "packages/hardening" }
 dependencies = [
     { name = "anthropic" },
@@ -2512,7 +2512,7 @@ dev = [{ name = "pytest", specifier = ">=7.0" }]
 
 [[package]]
 name = "ronin-mcp-servers"
-version = "1.0.0rc3"
+version = "1.0.0"
 source = { editable = "packages/mcp-servers" }
 dependencies = [
     { name = "httpx" },
@@ -2546,7 +2546,7 @@ dev = [{ name = "pytest", specifier = ">=7.0" }]
 
 [[package]]
 name = "ronin-memory"
-version = "1.0.0rc3"
+version = "1.0.0"
 source = { editable = "packages/memory" }
 dependencies = [
     { name = "anthropic" },
@@ -2576,7 +2576,7 @@ dev = [{ name = "pytest", specifier = ">=7.0" }]
 
 [[package]]
 name = "ronin-relay"
-version = "1.0.0rc3"
+version = "1.0.0"
 source = { editable = "packages/relay" }
 dependencies = [
     { name = "fastapi" },
