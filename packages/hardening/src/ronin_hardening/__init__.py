@@ -28,7 +28,12 @@ from .secret_scanner import (
     SecretLeakScanner,
     SecretScanResult,
 )
-from .token_budget import BudgetExceededError, TokenBudget, estimate_cost_usd
+from .token_budget import (
+    BudgetExceededError,
+    TokenBudget,
+    estimate_cost_usd,
+    pricing_known,
+)
 from .tracing import TraceEmitter, redact_pii
 from .validation import OutputValidator, ValidationFailure
 
@@ -52,6 +57,7 @@ __all__ = [
     "TraceEmitter",
     "ValidationFailure",
     "estimate_cost_usd",
+    "pricing_known",
     "extract_symbols",
     "redact_pii",
     "sources_from_trace",
