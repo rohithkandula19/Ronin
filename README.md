@@ -91,10 +91,10 @@ A coding agent that reads, edits, and runs your code: every write and shell comm
 | Provider | Free? | Default model | Notes |
 |---|---|---|---|
 | **Anthropic** | - | `claude-sonnet-4-6` | top quality; native SDK |
-| **Gemini** | ✅ free tier | `gemini-flash-latest` | generous free RPM; key at aistudio.google.com |
+| **Gemini** | ✅ free tier | `gemini-2.5-flash` | generous free RPM; key at aistudio.google.com |
 | **Cerebras** | ✅ free tier | `gpt-oss-120b` | very fast / high throughput |
-| **Groq** | ✅ free tier | `llama-3.3-70b-versatile` | 30 req/min free |
-| **OpenRouter** | ✅ free models | `deepseek/deepseek-v4-flash:free` | one key, many models |
+| **Groq** | ✅ free tier | `openai/gpt-oss-20b` | 30 req/min free |
+| **OpenRouter** | ✅ free models | `qwen/qwen3-coder:free` | one key, many models |
 | **Ollama** | ✅ local | `llama3.1` | runs on your machine, no key |
 | **OpenAI** | - | `gpt-4o-mini` | - |
 | **Custom** | - | (you specify) | any OpenAI-compatible endpoint |
@@ -104,7 +104,7 @@ ronin                       # then, in-session:
 /login gemini               # paste a free key at the masked prompt
 /provider                   # see all providers · free/paid · which have keys
 /free on                    # switch to a $0 provider you can run right now
-/model gemini-flash-latest  # or switch models without re-entering the key
+/model gemini-2.5-flash  # or switch models without re-entering the key
 /models                     # list what the current provider offers
 ```
 

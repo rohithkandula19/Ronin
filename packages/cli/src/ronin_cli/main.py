@@ -1179,6 +1179,11 @@ def doctor(
         console.print(live.remedy)
     if not check:
         console.print("[dim]tip: run [bold]ronin doctor --check[/bold] to verify the key + model actually work.[/dim]")
+    # --check is a verification gate: if the live check could not confirm the
+    # provider works (bad/missing key, unreachable model), exit non-zero so a
+    # script/CI sees the failure. The row already states the honest reason.
+    if live is not None and not live.ok:
+        raise typer.Exit(1)
 
 
 # ---------- saved queries ----------

@@ -136,3 +136,28 @@ def test_doctor_check_flag_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         r = runner.invoke(app, ["doctor", "--check"])
     assert r.exit_code == 0
     assert "live check" in r.stdout
+
+
+def test_doctor_check_exits_nonzero_when_live_check_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # --check is a verification gate: a failed/unverifiable live check (bad or
+    # missing key, unreachable model) must exit non-zero, not silently return 0.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+    runner.invoke(app, ["init", "--demo", "-y"])
+    fail = _LiveCheck(status="no key configured", remedy="Fix: set a key", ok=False)
+    with patch.object(cli_main, "_provider_live_check", return_value=fail):
+        r = runner.invoke(app, ["doctor", "--check"])
+    assert r.exit_code == 1, r.stdout          # the P2 fix
+    assert "live check" in r.stdout            # still shows the honest reason row
+
+
+def test_doctor_without_check_exits_zero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Static doctor (no --check) only reports key presence — always exit 0.
+    monkeypatch.chdir(tmp_path)
+    runner.invoke(app, ["init", "--demo", "-y"])
+    r = runner.invoke(app, ["doctor"])
+    assert r.exit_code == 0, r.stdout
