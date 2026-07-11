@@ -1,6 +1,6 @@
 [project]
 name = "ronin-eval-suite"
-version = "1.0.0rc2"
+version = "1.0.0rc3"
 description = "LLM-as-a-judge eval suite with golden datasets, drift detection, and HTML reports."
 readme = "README.md"
 requires-python = ">=3.11"
