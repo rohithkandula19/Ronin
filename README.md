@@ -171,7 +171,7 @@ Plus, on the coding agent itself:
 curl -sSL https://raw.githubusercontent.com/rohithkandula19/Ronin/main/install.sh | bash
 ```
 
-Pin a tag: append `-s -- --ref v1.0.0-rc.2`. PyPI publish is wired (`.github/workflows/release.yml`) and lands `pip install ronin-cli` once `PYPI_TOKEN` is set as a repo secret.
+Pin a tag: append `-s -- --ref v1.0.0-rc.2`. PyPI publish is wired (`.github/workflows/release.yml`) and lands `pip install ronin-cli` once the packages are published (approval-gated; `PYPI_TOKEN` must be set). Until then, a standalone install works from the built wheel set — `uv build --all-packages` then `pip install --find-links dist/ ronin-cli` in a clean environment (verified by `scripts/test_clean_install.sh`; see `docs/release/pypi_packaging_decision.md`). Editable/source-checkout installs are for development only, not a substitute for the standalone path.
 
 For Postgres support after install: `(cd ~/.local/share/ronin && uv pip install psycopg2-binary)`.
 

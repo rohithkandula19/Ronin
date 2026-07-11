@@ -62,6 +62,9 @@ jobs:
       - name: Build packages (sdist + wheel)
         run: uv build --all-packages
 
+      - name: Standalone clean-install smoke (outside the repo, no source tree)
+        run: bash scripts/test_clean_install.sh
+
       - name: Smoke test ronin CLI
         run: |
           mkdir -p /tmp/ronin-smoke && cd /tmp/ronin-smoke
