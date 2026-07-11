@@ -50,6 +50,7 @@ adds friction).
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Mapping, Optional
 
 # ---------------------------------------------------------------------------
@@ -268,11 +269,35 @@ def is_destructive(action: Any) -> bool:
     return any(marker in _haystack(normalize(action)) for marker in DESTRUCTIVE_MARKERS)
 
 
+def _git_destructive(c: str) -> bool:
+    """Git subcommands that irrecoverably discard working-tree / untracked work.
+    Handled here (not as flat markers) because the danger is order-dependent — a
+    plain substring can't express "``git clean`` AND a force flag", and the flags
+    reorder freely (``-fdx`` / ``-xfd`` / ``-df``). ``c`` is already lower-cased.
+
+    Deliberately narrow to avoid false positives: a branch switch
+    (``git checkout main``) and a dry-run (``git clean -n``) are NOT flagged.
+    """
+    if "git reset --hard" in c:            # discards all uncommitted changes
+        return True
+    idx = c.find("git clean")
+    if idx != -1:
+        # git clean only deletes WITH force; a forced clean nukes untracked
+        # (and with -x, git-ignored) files, which git keeps no record of. The
+        # force flag can sit anywhere in a combined cluster (-fdx / -xfd / -df),
+        # so scan the flags after "git clean" for a '-...f...' short flag or --force.
+        after = c[idx + len("git clean"):]
+        if "--force" in after or re.search(r"(?:^|\s)-[a-z]*f", after):
+            return True
+    return False
+
+
 def is_destructive_command(command: str) -> bool:
     """True if a raw shell command string matches a destructive marker. Pure —
-    the destructive floor's check for ``run_command``."""
+    the destructive floor's check for ``run_command`` (enforced even under
+    ``--yolo`` / god-mode)."""
     c = (command or "").lower()
-    return any(marker in c for marker in DESTRUCTIVE_MARKERS)
+    return _git_destructive(c) or any(marker in c for marker in DESTRUCTIVE_MARKERS)
 
 
 def _escalate(a: str, b: str) -> str:
