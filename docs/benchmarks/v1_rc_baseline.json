@@ -1,0 +1,76 @@
+{
+  "baseline": "v1.0.0-rc.2 hardening",
+  "branch": "hardening/rc-phase0",
+  "commit": "08110f1",
+  "note": "Only real, measured results. Anything not run is marked skipped/not-run with a reason. No live-provider or SWE-bench score is claimed.",
+  "environment": {
+    "os": "macOS (darwin)",
+    "python": "3.14.4",
+    "runner": "uv run --frozen pytest",
+    "provider_keys_present": false
+  },
+  "tests": {
+    "status": "run",
+    "result": "passed",
+    "total_passed": 3325,
+    "total_failed": 0,
+    "duration_seconds": 48.88,
+    "warnings": 45,
+    "per_package": {
+      "agent-patterns": 188,
+      "eval-suite": 45,
+      "memory": 11,
+      "hardening": 66,
+      "mcp-servers": 67,
+      "cli": 2847,
+      "relay": 45,
+      "apps/demo+apps/api": "included in total"
+    }
+  },
+  "affected_tests": {
+    "status": "run",
+    "result": "passed",
+    "note": "Packages touched in Phase 0 (hardening, relay, cli) all green.",
+    "hardening": 66,
+    "relay": 45,
+    "cli_gate_permission_approval_subset": 170,
+    "new_tests_added_this_phase": {
+      "token_budget_fail_closed": 8,
+      "relay_path_traversal": 9,
+      "tool_gate_drift": 5
+    }
+  },
+  "package_build": {
+    "status": "run",
+    "result": "passed",
+    "command": "uv build --all-packages",
+    "note": "sdist + wheel built for all workspace packages."
+  },
+  "install_smoke": {
+    "status": "partial",
+    "result": "build-verified",
+    "note": "uv build succeeded; a full clean wheel-install smoke is scheduled for Phase 2 (PyPI readiness). CI also runs a ronin init/tools/doctor/version smoke."
+  },
+  "startup_timing": {
+    "status": "run",
+    "command": "ronin --version",
+    "warm_seconds": 0.54
+  },
+  "fakeprovider_eval": {
+    "status": "run",
+    "result": "passed",
+    "note": "eval-suite's 45 tests run deterministically offline with the FakeProvider (no network, $0). This is a correctness gate, not a model-quality score."
+  },
+  "pipeline_dry_run": {
+    "status": "not-run",
+    "reason": "A pipeline dry-run exercises the planner, which calls a model; omitted from this offline $0 baseline to avoid provider calls. Exercised live in Phase 1 RC validation."
+  },
+  "live_provider_eval": {
+    "status": "skipped",
+    "reason": "No provider API key configured in this environment; a live coding-quality eval (ronin eval / ronin bench against a real model) was not run. No score is claimed."
+  },
+  "swebench": {
+    "status": "not-run",
+    "reason": "SWE-bench was not executed (no dataset + repo checkout provisioned; the local executor is Docker-less single-checkout). No resolved-rate is claimed. Ronin ships the harness, not a published score."
+  }
+}
