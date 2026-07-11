@@ -292,12 +292,80 @@ def _git_destructive(c: str) -> bool:
     return False
 
 
+def _rm_destructive(c: str) -> bool:
+    """An ``rm`` that is BOTH recursive and forced, in any flag spelling or order
+    (``-rf`` / ``-fr`` / ``-r -f`` / ``-f -r`` / ``--recursive --force``). A flat
+    substring marker can only catch the exact ``rm -rf`` spelling; the shell
+    treats ``rm  -rf`` (extra spaces), ``rm -r -f`` (split flags) and the long
+    options as identical, so the floor must too. ``c`` is lowercased +
+    whitespace-collapsed. Single-file force (``rm -f x``) and a bare recursive
+    (``rm -r dir``) are deliberately NOT flagged — the catastrophic case is
+    recursive AND forced, matching the original ``rm -rf`` intent."""
+    for m in re.finditer(r"(?:^|[;&|]|\s)rm\s+(.*?)(?=[;&|]|$)", c):
+        seg = m.group(1)
+        recursive = bool(re.search(r"(?:^|\s)-[a-z]*r|--recursive", seg))
+        force = bool(re.search(r"(?:^|\s)-[a-z]*f|--force", seg))
+        if recursive and force:
+            return True
+    return False
+
+
+def _fs_catastrophic(c: str) -> bool:
+    """Other clearly-catastrophic filesystem / raw-disk ops that reorder or space
+    out in ways the flat markers miss. ``c`` is lowercased + whitespace-collapsed.
+    Deliberately narrow to avoid flagging ordinary usage:
+    - ``find ... -delete`` / ``find ... -exec rm`` (mass deletion), but not a
+      plain ``find . -name '*.py'``;
+    - a write that overwrites a raw block device (``> /dev/sda``, ``of=/dev/nvme0n1``),
+      but not a redirect to a normal file;
+    - a recursive ``chmod`` / ``chown`` of the root or home dir (``chmod -R 000 /``),
+      but not ``chmod -R 755 ./build``."""
+    if re.search(r"\bfind\b.*\s-delete\b", c):
+        return True
+    if re.search(r"\bfind\b.*-exec\s+rm\b", c):
+        return True
+    if re.search(r"(?:>|\bof=)\s*/dev/(?:sd|nvme|hd|disk|vd|mmcblk)", c):
+        return True
+    if re.search(r"\bch(?:mod|own)\b.*(?:-[a-z]*r|--recursive).*\s(?:/|~)(?:\s|$)", c):
+        return True
+    return False
+
+
 def is_destructive_command(command: str) -> bool:
-    """True if a raw shell command string matches a destructive marker. Pure —
-    the destructive floor's check for ``run_command`` (enforced even under
-    ``--yolo`` / god-mode)."""
-    c = (command or "").lower()
-    return _git_destructive(c) or any(marker in c for marker in DESTRUCTIVE_MARKERS)
+    """True if a raw shell command string is catastrophically destructive. Pure —
+    the destructive floor's check for shell-command tools (enforced even under
+    ``--yolo`` / god-mode).
+
+    Robust to the shell-equivalent reformatting a naive substring match misses:
+    whitespace is collapsed first (so ``rm  -rf`` == ``rm -rf``), and the
+    reorder-prone families (``rm`` recursive+force, ``git`` history/clean,
+    ``find -delete``, raw-disk writes, recursive ``chmod`` of ``/``) are matched
+    structurally, not as fixed substrings."""
+    c = " ".join((command or "").lower().split())  # collapse whitespace runs
+    return (
+        _git_destructive(c)
+        or _rm_destructive(c)
+        or _fs_catastrophic(c)
+        or any(marker in c for marker in DESTRUCTIVE_MARKERS)
+    )
+
+
+# Tool names whose calls carry a raw shell command the destructive floor must
+# vet. The floor gates these even under --yolo/god-mode, on EVERY gate path.
+FLOORED_COMMAND_TOOLS = ("run_command", "run_background")
+
+
+def is_floored_tool_call(name: str, args: Any) -> bool:
+    """True when a tool call must be gated by the destructive floor even under
+    ``--yolo`` / god-mode: a shell-command tool (:data:`FLOORED_COMMAND_TOOLS`)
+    whose command string is destructive. The single definition of "floored",
+    shared by every gate path (code mode, investigate mode, front-ends) so no
+    path can auto-approve a catastrophic command. Fail-closed: a non-mapping or
+    missing ``command`` yields an empty string, which is not destructive."""
+    if name not in FLOORED_COMMAND_TOOLS:
+        return False
+    cmd = args.get("command", "") if isinstance(args, Mapping) else ""
+    return is_destructive_command(str(cmd or ""))
 
 
 def _escalate(a: str, b: str) -> str:
