@@ -1307,6 +1307,11 @@ def eval_run(
     # Resolve target/judge from the configured provider, and SKIP honestly (no
     # score produced) when the model can't be resolved or there's no auth.
     config = load_config()
+    if not Path(dataset).exists():
+        # Graceful error instead of a raw traceback from the downstream reader.
+        console.print(f"[red]✗[/red] dataset not found: [bold]{dataset}[/bold] — "
+                      "pass a path to an existing JSONL dataset.")
+        raise typer.Exit(2)
     resolved_target = target or config.resolved_model()
     if not resolved_target:
         console.print("[yellow]SKIPPED[/yellow]: no --target given and no model is configured. "
