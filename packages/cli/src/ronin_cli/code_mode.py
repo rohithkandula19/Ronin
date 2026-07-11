@@ -459,6 +459,19 @@ def _render_diff(console: Console, diff: str, path: str | None = None) -> None:
                            style="#3b4261"))
 
 
+def _is_floored_command(name: str, args: dict) -> bool:
+    """True if a tool call is a catastrophic shell command that the destructive
+    floor must gate even under ``--yolo`` / god-mode. Covers BOTH command tools
+    (``run_command`` + ``run_background``). This is the single source of the
+    floor decision, shared by the console gate and the front-end (gate_cb) gate
+    so neither path can auto-approve a catastrophic command under yolo.
+    """
+    if name not in ("run_command", "run_background"):
+        return False
+    from .approvals import is_destructive_command
+    return is_destructive_command(str(args.get("command", "")))
+
+
 def _selective_gate(
     console: Console | None, yolo: bool, root: _Path,
     *, extra_gated: set[str] | None = None, rules: "PermissionRules | None" = None,
@@ -493,27 +506,25 @@ def _selective_gate(
         # drop table, mkfs, fork bomb…) is NEVER silently auto-approved, not even
         # under --yolo / --god-mode. It always requires an explicit typed
         # confirmation (default-deny), with a block card + a safer alternative.
-        if name == "run_command":
-            from .approvals import is_destructive_command
+        if _is_floored_command(name, args):
             _cmd = str(args.get("command", ""))
-            if is_destructive_command(_cmd):
-                if console is None:
-                    return ("blocked: destructive command refused — the safety floor "
-                            "needs an interactive typed confirmation, unavailable here.")
-                from .input_queue import pause_capture
-                from .ui_cards import DESTRUCTIVE_CONFIRM_PHRASE, render_destructive_block
-                render_destructive_block(console, _cmd, root)
-                console.print(f"    [red]type [bold]{DESTRUCTIVE_CONFIRM_PHRASE}[/bold] to "
-                              "proceed — anything else cancels:[/red] ", end="")
-                try:
-                    with pause_capture():
-                        _typed = input().strip().lower()
-                except (EOFError, KeyboardInterrupt):
-                    return "blocked: destructive command cancelled (no confirmation)."
-                if _typed != DESTRUCTIVE_CONFIRM_PHRASE:
-                    return ("blocked: destructive command not confirmed — pick a safer "
-                            "approach (the safer alternative was shown above).")
-                return True  # explicitly, deliberately confirmed
+            if console is None:
+                return ("blocked: destructive command refused — the safety floor "
+                        "needs an interactive typed confirmation, unavailable here.")
+            from .input_queue import pause_capture
+            from .ui_cards import DESTRUCTIVE_CONFIRM_PHRASE, render_destructive_block
+            render_destructive_block(console, _cmd, root)
+            console.print(f"    [red]type [bold]{DESTRUCTIVE_CONFIRM_PHRASE}[/bold] to "
+                          "proceed — anything else cancels:[/red] ", end="")
+            try:
+                with pause_capture():
+                    _typed = input().strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                return "blocked: destructive command cancelled (no confirmation)."
+            if _typed != DESTRUCTIVE_CONFIRM_PHRASE:
+                return ("blocked: destructive command not confirmed — pick a safer "
+                        "approach (the safer alternative was shown above).")
+            return True  # explicitly, deliberately confirmed
         if yolo:
             return True
         # A standing allow short-circuits the prompt (the cure for approval fatigue).
@@ -849,6 +860,13 @@ def run_code_agent(
                         ".ronin/settings.json — do not retry; choose another approach.")
             if name not in _sensitive_names:
                 return True
+            # DESTRUCTIVE FLOOR — a catastrophic shell command is NEVER auto-approved
+            # by --yolo/god-mode on the front-end (TUI/headless) path either; force it
+            # to the human gate. Mirrors the console _selective_gate floor, which runs
+            # before the yolo short-circuit. (Prior to this, ronin --tui --god-mode
+            # auto-approved rm -rf / git reset --hard at the yolo line below.)
+            if _is_floored_command(name, args):
+                return gate_cb(name, args)
             if yolo:
                 return True
             if _fe_rules.check(name, args) == "allow":
