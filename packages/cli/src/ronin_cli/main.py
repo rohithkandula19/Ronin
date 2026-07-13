@@ -6329,6 +6329,86 @@ def radius(
         raise typer.Exit(proc.returncode)
 
 
+# ---------- graph / architecture (Phase 6 repo cognition) ----------
+
+@app.command()
+def graph(
+    path: Path = typer.Argument(Path("."), help="Repository root to analyze."),
+    format: str = typer.Option("text", "--format", "-f", help="text | json | mermaid"),
+    cycles_only: bool = typer.Option(False, "--cycles", help="Only report circular imports."),
+    strict: bool = typer.Option(False, "--strict", help="Exit non-zero if any circular import exists (CI gate)."),
+    max_nodes: int = typer.Option(60, "--max-nodes", help="Max nodes in a mermaid diagram."),
+) -> None:
+    """🕸  Build the repository's module-level import graph (stdlib AST, no LLM).
+
+    Maps intra-repo imports into a dependency graph, then reports fan-in/fan-out,
+    the most depended-on modules, and circular imports. Render as text, JSON, or a
+    Mermaid diagram. ``--strict`` exits non-zero on any cycle so CI can gate on it.
+    """
+    from . import repo_graph as rg
+
+    g = rg.build_import_graph(path)
+    if not g.modules():
+        console.print("[#e0af68]no Python modules found[/#e0af68]")
+        raise typer.Exit(2)
+
+    if cycles_only:
+        cyc = rg.find_cycles(g)
+        if not cyc:
+            console.print("[#9ece6a]no circular imports[/#9ece6a]")
+        else:
+            console.print(f"[#f7768e]{len(cyc)} circular import group(s):[/#f7768e]")
+            for c in cyc:
+                console.print("  " + " → ".join(c) + " → " + c[0])
+        raise typer.Exit(1 if (cyc and strict) else 0)
+
+    fmt = format.lower()
+    if fmt == "json":
+        console.print_json(rg.to_json(g))
+    elif fmt == "mermaid":
+        console.print(rg.to_mermaid(g, max_nodes=max_nodes))
+    else:
+        console.print(rg.to_text(g))
+    if strict and rg.find_cycles(g):
+        raise typer.Exit(1)
+
+
+@app.command()
+def architecture(
+    path: Path = typer.Argument(Path("."), help="Repository root to analyze."),
+    format: str = typer.Option("text", "--format", "-f", help="text | json | mermaid"),
+) -> None:
+    """🏛  Architecture overview: detected stack + package structure + dependency
+    shape (stdlib AST, no LLM). ``--format mermaid`` emits a package-level diagram.
+    """
+    from . import repo_graph as rg
+
+    g = rg.build_import_graph(path)
+    stack = rg.detect_stack(path, g)
+    pkgs = rg.top_packages(g)
+    m = rg.metrics(g)
+
+    if format.lower() == "json":
+        console.print_json(data={
+            "stack": stack, "packages": pkgs,
+            "modules": m["modules"], "edges": m["edges"], "cycles": m["cycles"],
+        })
+        return
+    if format.lower() == "mermaid":
+        console.print(rg.to_mermaid(g))
+        return
+
+    console.print("[bold]stack[/bold]")
+    console.print("  languages/build: " + (", ".join(stack["manifests"]) or "—"))
+    console.print("  frameworks:      " + (", ".join(stack["frameworks"]) or "—"))
+    console.print("\n[bold]packages[/bold] (modules each)")
+    for name, n in list(pkgs.items())[:15]:
+        console.print(f"  {n:>4}  {name}")
+    console.print(f"\n[bold]shape[/bold]  modules {m['modules']} · edges {m['edges']} · cycles {m['cycles']}")
+    if m["cycles"]:
+        console.print("  [#e0af68]run `ronin graph --cycles` to see the circular imports[/#e0af68]")
+
+
 # ---------- smell (AST-based code-smell detector) ----------
 
 @app.command()
