@@ -6409,6 +6409,126 @@ def architecture(
         console.print("  [#e0af68]run `ronin graph --cycles` to see the circular imports[/#e0af68]")
 
 
+# ---------- impact / changed / why (Phase 6 change intelligence) ----------
+
+@app.command()
+def impact(
+    target: str = typer.Argument(..., help="A module (pkg.mod) or file path to analyze."),
+    root: Path = typer.Option(Path("."), "--root", help="Repository root."),
+    format: str = typer.Option("text", "--format", "-f", help="text | json"),
+) -> None:
+    """💥 Blast radius: what transitively imports TARGET — what could break if you
+    change it. Reverse-reachability over the import graph (stdlib AST, no LLM).
+    """
+    from . import repo_graph as rg
+
+    g = rg.build_import_graph(root)
+    mod = rg.resolve_target(g, target)
+    if mod is None:
+        cands = rg.candidates(g, target)
+        hint = f" — did you mean: {', '.join(cands[:8])}?" if cands else ""
+        console.print(f"[#f7768e]could not resolve '{target}'[/#f7768e]{hint}")
+        raise typer.Exit(2)
+
+    direct = sorted(rg.reverse_edges(g).get(mod, set()))
+    trans = rg.transitive_dependents(g, mod)
+    if format.lower() == "json":
+        console.print_json(data={
+            "module": mod,
+            "direct_dependents": direct,
+            "transitive_dependents": sorted(trans),
+            "blast_radius": len(trans),
+        })
+        return
+    console.print(f"[bold]{mod}[/bold]  blast radius: {len(trans)} module(s)")
+    console.print(f"  direct dependents ({len(direct)}):")
+    for d in direct:
+        console.print(f"    {d}")
+    extra = sorted(trans - set(direct))
+    if extra:
+        console.print(f"  transitive-only ({len(extra)}):")
+        for d in extra[:40]:
+            console.print(f"    {d}")
+        if len(extra) > 40:
+            console.print(f"    … +{len(extra) - 40} more")
+    if not trans:
+        console.print("  [#9ece6a]nothing imports it — safe to change in isolation[/#9ece6a]")
+
+
+@app.command()
+def why(
+    target: str = typer.Argument(..., help="A module (pkg.mod) or file path."),
+    root: Path = typer.Option(Path("."), "--root", help="Repository root."),
+) -> None:
+    """🧭 Explain a module's place: what it imports, what imports it, fan-in/out,
+    and whether it sits in a circular-import group.
+    """
+    from . import repo_graph as rg
+
+    g = rg.build_import_graph(root)
+    mod = rg.resolve_target(g, target)
+    if mod is None:
+        cands = rg.candidates(g, target)
+        hint = f" — did you mean: {', '.join(cands[:8])}?" if cands else ""
+        console.print(f"[#f7768e]could not resolve '{target}'[/#f7768e]{hint}")
+        raise typer.Exit(2)
+
+    deps = sorted(g.edges.get(mod, set()))
+    users = sorted(rg.reverse_edges(g).get(mod, set()))
+    in_cycle = next((c for c in rg.find_cycles(g) if mod in c), None)
+    console.print(f"[bold]{mod}[/bold]  [dim]({g.files.get(mod, '?')})[/dim]")
+    console.print(f"  imports {len(deps)} · imported by {len(users)}")
+    if deps:
+        console.print("  depends on: " + ", ".join(deps[:12]) + (" …" if len(deps) > 12 else ""))
+    if users:
+        console.print("  used by:    " + ", ".join(users[:12]) + (" …" if len(users) > 12 else ""))
+    if in_cycle:
+        console.print("  [#e0af68]⟲ in a circular-import group of "
+                      f"{len(in_cycle)}: " + " → ".join(in_cycle) + "[/#e0af68]")
+
+
+@app.command()
+def changed(
+    ref: str = typer.Argument("HEAD", help="Git ref to diff against (default: HEAD = working tree)."),
+    root: Path = typer.Option(Path("."), "--root", help="Repository root."),
+    show_impact: bool = typer.Option(False, "--impact", help="Also show each changed module's blast radius."),
+) -> None:
+    """🔎 Changed Python modules (git diff vs REF) and — with --impact — their
+    blast radius. Answers 'what did I touch and what does it affect'.
+    """
+    import subprocess
+
+    from . import repo_graph as rg
+
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(root), "diff", "--name-only", ref],
+            capture_output=True, text=True, check=True,
+        ).stdout
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        console.print("[#f7768e]not a git repository (or git unavailable)[/#f7768e]")
+        raise typer.Exit(2)
+
+    changed_py = [ln for ln in out.splitlines() if ln.endswith(".py")]
+    if not changed_py:
+        console.print(f"[#9ece6a]no changed Python files vs {ref}[/#9ece6a]")
+        return
+
+    g = rg.build_import_graph(root)
+    rel_to_mod = {rel: mod for mod, rel in g.files.items()}
+    console.print(f"[bold]changed vs {ref}[/bold] ({len(changed_py)} .py file(s))")
+    for rel in changed_py:
+        mod = rel_to_mod.get(rel)
+        if mod is None:
+            console.print(f"  {rel}  [dim](not an importable module)[/dim]")
+            continue
+        if show_impact:
+            n = len(rg.transitive_dependents(g, mod))
+            console.print(f"  {rel}  [dim]->[/dim] {mod}  [#e0af68](blast radius {n})[/#e0af68]")
+        else:
+            console.print(f"  {rel}  [dim]->[/dim] {mod}")
+
+
 # ---------- smell (AST-based code-smell detector) ----------
 
 @app.command()
