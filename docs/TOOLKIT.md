@@ -51,7 +51,21 @@ ronin toc README.md              # Markdown table of contents (GitHub anchors)
 ronin count @file                # lines / words / chars / bytes
 ```
 
-## 🔐 Security & hygiene (offline)
+## 🗺️ Repository cognition (offline)
+
+Module-level import graph and architecture overview, built from source with the
+stdlib AST — no LLM, no network. Composes with `ronin index` / `ronin map`
+(file-level search) by adding the *relationship* layer.
+
+```bash
+ronin graph                      # import graph: fan-in/out, most depended-on, cycles
+ronin graph --cycles             # only the circular-import groups
+ronin graph --strict             # exit non-zero if any cycle exists (CI gate)
+ronin graph --format mermaid     # a Mermaid dependency diagram (high-degree nodes)
+ronin graph --format json        # machine-readable graph + metrics + cycles
+ronin architecture               # detected stack + package structure + shape
+ronin architecture --format mermaid   # package-level architecture diagram
+```
 
 ```bash
 ronin redact @app.log            # mask emails, IPs, API keys, tokens, JWTs -> [REDACTED-*]
