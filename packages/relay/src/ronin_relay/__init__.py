@@ -8,4 +8,4 @@ calls the local Ronin gateway, and the response travels back the same path.
 The laptop never opens an inbound port. Every endpoint requires a shared token.
 """
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
