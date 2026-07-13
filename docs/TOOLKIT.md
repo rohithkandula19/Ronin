@@ -65,7 +65,16 @@ ronin graph --format mermaid     # a Mermaid dependency diagram (high-degree nod
 ronin graph --format json        # machine-readable graph + metrics + cycles
 ronin architecture               # detected stack + package structure + shape
 ronin architecture --format mermaid   # package-level architecture diagram
+ronin impact pkg.mod             # blast radius: what transitively imports it
+ronin impact path/to/file.py --format json
+ronin why pkg.mod                # what it imports / imports it / cycle membership
+ronin changed                    # changed .py modules vs git HEAD
+ronin changed main --impact      # changed vs a ref, with each module's blast radius
 ```
+
+`impact`/`why` accept a module name (`pkg.mod`), a repo-relative file path, or a
+unique bare name. `changed` maps `git diff` output onto modules, so a one-line
+edit shows exactly which modules — and how much of the tree — it can affect.
 
 ```bash
 ronin redact @app.log            # mask emails, IPs, API keys, tokens, JWTs -> [REDACTED-*]

@@ -113,3 +113,22 @@ def test_unparseable_file_is_skipped(tmp_path: Path):
     _mk(tmp_path, "pkg/bad.py", "def broken( : this is not python\n")
     g = rg.build_import_graph(tmp_path)  # must not raise
     assert "pkg.good" in g.modules()
+
+
+def test_reverse_edges_and_reachability(sample: Path):
+    g = rg.build_import_graph(sample)
+    rev = rg.reverse_edges(g)
+    assert "pkg.a" in rev["pkg.b"]          # a imports b -> a depends on b
+    dep_e = rg.transitive_dependents(g, "pkg.e")
+    assert {"pkg.a", "pkg.b", "pkg.c"} <= dep_e   # all reach e via a (through the cycle)
+    deps_of_a = rg.transitive_dependencies(g, "pkg.a")
+    assert "pkg.e" in deps_of_a
+
+
+def test_resolve_target_forms(sample: Path):
+    g = rg.build_import_graph(sample)
+    assert rg.resolve_target(g, "pkg.a") == "pkg.a"      # module name
+    assert rg.resolve_target(g, "pkg/a.py") == "pkg.a"   # repo-relative path
+    assert rg.resolve_target(g, "a") == "pkg.a"          # unique leaf stem
+    assert rg.resolve_target(g, "does.not.exist") is None
+    assert "pkg.a" in rg.candidates(g, "a")

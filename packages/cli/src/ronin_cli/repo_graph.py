@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import ast
 import json
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -339,3 +339,61 @@ def to_text(g: ImportGraph, *, cycles: bool = True) -> str:
         else:
             lines.append("circular imports: none")
     return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------- #
+# Reachability & resolution (Ronin v1.1 — impact / changed / why)
+# --------------------------------------------------------------------------- #
+
+def reverse_edges(g: ImportGraph) -> dict[str, set[str]]:
+    """``rev[m]`` = the set of modules that directly import ``m`` (its dependents)."""
+    rev: dict[str, set[str]] = defaultdict(set)
+    for src, deps in g.edges.items():
+        for d in deps:
+            rev[d].add(src)
+    return rev
+
+
+def _reachable(adj: dict[str, set[str]], start: str) -> set[str]:
+    """All nodes reachable from ``start`` via ``adj`` (excluding ``start`` itself)."""
+    seen: set[str] = set()
+    queue = deque(adj.get(start, ()))
+    while queue:
+        n = queue.popleft()
+        if n in seen or n == start:
+            continue
+        seen.add(n)
+        queue.extend(adj.get(n, ()))
+    return seen
+
+
+def transitive_dependents(g: ImportGraph, target: str) -> set[str]:
+    """Every module that imports ``target`` directly or transitively — the blast
+    radius of a change to ``target``."""
+    return _reachable(reverse_edges(g), target)
+
+
+def transitive_dependencies(g: ImportGraph, target: str) -> set[str]:
+    """Every module ``target`` imports directly or transitively."""
+    return _reachable(g.edges, target)
+
+
+def candidates(g: ImportGraph, target: str) -> list[str]:
+    """Modules whose leaf name (or full name) matches ``target`` — used to offer a
+    'did you mean' when a bare name is ambiguous."""
+    stem = Path(target.replace("\\", "/")).stem
+    return sorted({m for m in g.modules() if m == target or m.split(".")[-1] == stem})
+
+
+def resolve_target(g: ImportGraph, target: str) -> str | None:
+    """Map a user-supplied module name OR file path to a single module key, or
+    ``None`` if it can't be resolved unambiguously."""
+    if target in g.files:
+        return target
+    t = target.replace("\\", "/").lstrip("./")
+    for mod, rel in g.files.items():
+        rel_n = rel.replace("\\", "/")
+        if t == rel_n or rel_n.endswith("/" + t) or rel_n == t:
+            return mod
+    cands = candidates(g, target)
+    return cands[0] if len(cands) == 1 else None
