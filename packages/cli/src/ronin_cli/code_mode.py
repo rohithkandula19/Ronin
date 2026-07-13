@@ -466,10 +466,8 @@ def _is_floored_command(name: str, args: dict) -> bool:
     floor decision, shared by the console gate and the front-end (gate_cb) gate
     so neither path can auto-approve a catastrophic command under yolo.
     """
-    if name not in ("run_command", "run_background"):
-        return False
-    from .approvals import is_destructive_command
-    return is_destructive_command(str(args.get("command", "")))
+    from .approvals import is_floored_tool_call
+    return is_floored_tool_call(name, args)
 
 
 def _selective_gate(

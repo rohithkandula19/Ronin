@@ -81,14 +81,23 @@ def build_investigate_tools(config: RoninConfig, root: Path | str) -> list[Tool]
 
 
 def _gate(console: Console | None, yolo: bool):
+    from .approvals import is_floored_tool_call
+
     def gate(name: str, args: dict) -> bool:
         if name not in _INVESTIGATE_SENSITIVE:
             return True
-        if yolo:
+        # Destructive floor: a catastrophic shell command is NEVER auto-approved
+        # under --yolo/god-mode — it always drops to an interactive human
+        # confirmation (headless denies). Only a non-floored command may skip the
+        # prompt under yolo. This mirrors the code-mode gate so `ronin investigate`
+        # cannot become a floor bypass.
+        floored = is_floored_tool_call(name, args)
+        if yolo and not floored:
             return True
         if console is None:
             return False
-        console.print(f"[yellow]?[/yellow] run [cyan]{args.get('command')}[/cyan]? [y/N] ", end="")
+        label = "[red]destructive[/red] " if floored else ""
+        console.print(f"[yellow]?[/yellow] run {label}[cyan]{args.get('command')}[/cyan]? [y/N] ", end="")
         try:
             return input().strip().lower() in ("y", "yes")
         except (EOFError, KeyboardInterrupt):
