@@ -271,3 +271,29 @@ def run_in_backend(
         timeout=timeout,
     )
     return proc.returncode, (proc.stdout or ""), (proc.stderr or "")
+
+
+def requested_backend() -> str | None:
+    """The sandbox backend requested via ``RONIN_BACKEND``, or ``None`` for host.
+
+    Unset / empty / ``"local"`` means "run on the host on purpose"; any other value
+    is a request to CONTAIN, and a failure to honor it must fail CLOSED — see
+    :func:`sandbox_refusal`."""
+    import os
+    spec = os.environ.get("RONIN_BACKEND", "").strip()
+    return spec if spec and spec.lower() != "local" else None
+
+
+def sandbox_refusal(spec: str, reason: str) -> str:
+    """The message a tool returns when a requested sandbox cannot run a command.
+
+    Ronin refuses rather than falling back to the host: a command the user asked to
+    contain must never silently execute on their real machine (Phase A: 'never
+    silently execute outside the requested sandbox')."""
+    return (
+        f"blocked: RONIN_BACKEND requested the sandbox {spec!r}, but it could not "
+        f"run this command ({reason}). Refusing to run on the host — a command you "
+        "asked to contain must not silently escape to your real machine. Fix the "
+        "backend (is Docker / the container running?), or unset RONIN_BACKEND to run "
+        "on the host on purpose."
+    )
