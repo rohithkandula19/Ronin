@@ -27,16 +27,98 @@ from pathlib import Path
 PROTOCOL_VERSION = "2024-11-05"
 _ACTIVE: list["MCPClient"] = []
 
+# Operational environment variables an MCP subprocess legitimately needs to run
+# (find its interpreter, its home, its temp dir, its locale). Everything OUTSIDE
+# this set — every API key, token, and cloud credential in the parent shell — is
+# withheld unless the server explicitly declares it needs it (``passEnv``). Before
+# this, MCP servers were spawned with ``{**os.environ, ...}``, so an arbitrary
+# ``npx -y <third-party-package>`` from the catalog inherited ANTHROPIC_API_KEY,
+# AWS creds, GITHUB_TOKEN — every secret the user had exported.
+# The 13 POSIX locale categories. An EXPLICIT set, not a `startswith("LC_")` — an
+# open prefix would forward a smuggled var like `LC_MYTOKEN` (some SSH configs
+# AcceptEnv `LC_*`, so a token can ride in as a locale) to every spawned server.
+_LC_VARS = frozenset({
+    "LC_ALL", "LC_CTYPE", "LC_NUMERIC", "LC_TIME", "LC_COLLATE", "LC_MONETARY",
+    "LC_MESSAGES", "LC_PAPER", "LC_NAME", "LC_ADDRESS", "LC_TELEPHONE",
+    "LC_MEASUREMENT", "LC_IDENTIFICATION",
+})
+
+_BASE_ENV_ALLOW = frozenset({
+    "PATH", "HOME", "USER", "LOGNAME", "SHELL", "PWD", "LANG", "LANGUAGE",
+    "TZ", "TERM", "TMPDIR", "TEMP", "TMP", "COLORTERM", "XDG_RUNTIME_DIR",
+    "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME",
+    # TLS trust config + proxy routing: values are FILE PATHS / URLs, not key
+    # material, and withholding them breaks servers behind a corporate proxy or a
+    # private CA. (SSH_AUTH_SOCK is deliberately NOT here — it forwards live
+    # ssh-agent access, i.e. the user's keys, to an arbitrary server.)
+    "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS", "REQUESTS_CA_BUNDLE",
+    "CURL_CA_BUNDLE", "GIT_SSL_CAINFO", "PIP_CERT",
+    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "FTP_PROXY",
+    # Windows operational vars (os.environ upper-cases these on Windows)
+    "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "PATHEXT", "COMSPEC", "APPDATA",
+    "LOCALAPPDATA", "PROGRAMDATA", "PROGRAMFILES", "PROGRAMFILES(X86)",
+    "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "USERNAME", "NUMBER_OF_PROCESSORS",
+    "PROCESSOR_ARCHITECTURE",
+})
+
+
+def _base_env() -> dict[str, str]:
+    """The non-secret operational subset of the parent environment. Case-insensitive
+    match on the name (Windows varies case; proxy vars are conventionally lower)."""
+    out: dict[str, str] = {}
+    for k, v in os.environ.items():
+        ku = k.upper()
+        if ku in _BASE_ENV_ALLOW or ku in _LC_VARS:
+            out[k] = v
+    return out
+
+
+def scoped_env(pass_env: list[str] | None, explicit: dict[str, str] | None) -> dict[str, str]:
+    """The environment an MCP subprocess is spawned with — NOT ``os.environ``.
+
+    Three layers, least to most specific:
+
+    1. :func:`_base_env` — operational vars only (PATH/HOME/temp/locale). No secrets.
+    2. ``pass_env`` — parent vars the server DECLARED it needs (its catalog ``env``
+       names, or ``passEnv`` in its config). Resolved from the parent at spawn time,
+       so ``export GITHUB_TOKEN=… ; ronin`` still reaches the github server — the
+       "set it later" UX ``mcp install`` documents — WITHOUT leaking anything the
+       server didn't ask for. A declared-but-unset var is simply omitted.
+    3. ``explicit`` — ``KEY=VALUE`` pairs written into the server's ``env`` block.
+    """
+    env = _base_env()
+    for name in pass_env or []:
+        if name in os.environ:
+            env[name] = os.environ[name]
+    if explicit:
+        env.update({k: v for k, v in explicit.items() if v is not None})
+    return env
+
+
+def _catalog_pass_env(server_name: str) -> list[str]:
+    """The env-var names a catalog server declares it needs — used to migrate
+    servers installed before ``passEnv`` existed, so an old mcp.json entry for
+    ``github`` still receives GITHUB_PERSONAL_ACCESS_TOKEN (and nothing else)."""
+    try:
+        from .mcp_catalog import resolve
+        entry = resolve(server_name)
+        return list(entry.env) if entry else []
+    except Exception:  # noqa: BLE001
+        return []
+
 
 class MCPClient:
     """A live connection to one MCP server over stdio."""
 
     def __init__(self, name: str, command: str, args: list[str] | None = None,
-                 env: dict[str, str] | None = None) -> None:
+                 env: dict[str, str] | None = None,
+                 pass_env: list[str] | None = None) -> None:
         self.name = name
         self.command = command
         self.args = args or []
         self.env = env or {}
+        # Parent env-var names this server is allowed to inherit (see scoped_env).
+        self.pass_env = pass_env or []
         self.proc: subprocess.Popen | None = None
         self.tools: list[dict] = []
         self._id = 0
@@ -48,7 +130,9 @@ class MCPClient:
         self.proc = subprocess.Popen(
             [self.command, *self.args],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-            text=True, bufsize=1, env={**os.environ, **self.env},
+            # NOT {**os.environ}: a spawned server (often an arbitrary third-party
+            # npx package) gets only operational vars + what it explicitly declared.
+            text=True, bufsize=1, env=scoped_env(self.pass_env, self.env),
         )
         threading.Thread(target=self._read_loop, daemon=True).start()
         self._request("initialize", {
@@ -127,6 +211,17 @@ def mcp_config_path(root: str | Path = ".") -> Path:
     return Path(root) / ".ronin" / "mcp.json"
 
 
+def _trust_config(path: Path) -> None:
+    """Trust an mcp.json the user just wrote through the CLI — their edit is the
+    consent (mirrors plugin auto-trust). Any CLI write also RE-trusts, since the
+    content hash changed and would otherwise strand the remaining servers."""
+    try:
+        from .plugin_trust import trust
+        trust(path)
+    except Exception:  # noqa: BLE001 — an unwritable trust store must not break `mcp add`
+        pass
+
+
 def load_mcp_servers(root: str | Path = ".") -> dict:
     p = mcp_config_path(root)
     if not p.is_file():
@@ -138,7 +233,8 @@ def load_mcp_servers(root: str | Path = ".") -> dict:
 
 
 def add_mcp_server(name: str, command: str, args: list[str], root: str | Path = ".",
-                   env: dict[str, str] | None = None) -> Path:
+                   env: dict[str, str] | None = None,
+                   pass_env: list[str] | None = None) -> Path:
     p = mcp_config_path(root)
     p.parent.mkdir(parents=True, exist_ok=True)
     data = {"mcpServers": {}}
@@ -151,8 +247,13 @@ def add_mcp_server(name: str, command: str, args: list[str], root: str | Path = 
     spec: dict = {"command": command, "args": args}
     if env:
         spec["env"] = env
+    if pass_env:
+        # Parent env-var names this server may inherit (resolved at spawn, so a key
+        # exported after install is still picked up — without leaking every secret).
+        spec["passEnv"] = list(pass_env)
     data["mcpServers"][name] = spec
     p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    _trust_config(p)   # the user adding a server via the CLI IS the consent
     return p
 
 
@@ -173,12 +274,17 @@ def add_remote_mcp_server(name: str, url: str, root: str | Path = ".",
         spec["headers"] = headers
     data["mcpServers"][name] = spec
     p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    _trust_config(p)   # the user adding a server via the CLI IS the consent
     return p
 
 
 def parse_env_pairs(pairs: list[str]) -> dict[str, str]:
     """Parse ``KEY=VALUE`` strings into a dict. A bare ``KEY`` (no ``=``) inherits
-    the value from the current environment, so secrets needn't be typed. Pure-ish."""
+    the value from the current environment, so secrets needn't be typed. Pure-ish.
+
+    Kept for callers that want eager resolution; new code should prefer
+    :func:`split_env_spec`, which passes a bare ``KEY`` through by NAME (resolved at
+    spawn) rather than baking its current value."""
     out: dict[str, str] = {}
     for item in pairs or []:
         if "=" in item:
@@ -189,6 +295,26 @@ def parse_env_pairs(pairs: list[str]) -> dict[str, str]:
             if k:
                 out[k] = os.environ.get(k, "")
     return out
+
+
+def split_env_spec(pairs: list[str]) -> tuple[dict[str, str], list[str]]:
+    """Split ``--env`` items into (explicit ``KEY=VALUE`` map, passthrough names).
+
+    ``KEY=VALUE`` is a literal the user typed → stored in the server's ``env``.
+    A bare ``KEY`` is a request to inherit that ONE parent var → a ``passEnv`` name,
+    resolved at spawn (so a key exported later is still picked up, and an unset one
+    is simply omitted rather than baked as an empty string that would shadow it)."""
+    env_map: dict[str, str] = {}
+    pass_env: list[str] = []
+    for item in pairs or []:
+        if "=" in item:
+            k, v = item.split("=", 1)
+            env_map[k.strip()] = v
+        else:
+            k = item.strip()
+            if k:
+                pass_env.append(k)
+    return env_map, pass_env
 
 
 def remove_mcp_server(name: str, root: str | Path = ".") -> bool:
@@ -205,6 +331,7 @@ def remove_mcp_server(name: str, root: str | Path = ".") -> bool:
         return False
     del servers[name]
     p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    _trust_config(p)   # the file changed; re-trust so the remaining servers still load
     return True
 
 
@@ -236,9 +363,30 @@ def _wrap_tool(client: MCPClient, spec: dict):
 
 def build_mcp_tools(root: str | Path = ".", *, console=None) -> list:
     """Connect to every server in ``.ronin/mcp.json`` and return their tools as
-    ronin Tools. Per-server failures are reported and skipped, never fatal."""
+    ronin Tools. Per-server failures are reported and skipped, never fatal.
+
+    TRUST GATE. ``.ronin/mcp.json`` lives inside the repository, and each server's
+    ``command`` is spawned at startup — before any tool call — so a repo-committed
+    config is arbitrary code execution (run ``npx -y evil``) AND secret exfil (a
+    server declaring ``passEnv`` receives the named key). Exactly like
+    ``.ronin/plugins/``, ronin refuses to start servers from a config the user has
+    not trusted. ``ronin mcp add`` / ``install`` trust it on write; a repo you
+    cloned does not."""
+    servers = load_mcp_servers(root)
+    if not servers:
+        return []
+    from .plugin_trust import is_trusted
+    cfg = mcp_config_path(root)
+    if not is_trusted(cfg):
+        if console:
+            console.print(
+                f"[#e0af68]⚠ untrusted .ronin/mcp.json — {len(servers)} server(s) "
+                "NOT started (each would run its command at launch). Review it, "
+                "then: [bold]ronin mcp trust[/bold][/#e0af68]")
+        return []
+
     tools: list = []
-    for name, spec in load_mcp_servers(root).items():
+    for name, spec in servers.items():
         # Remote (hosted) servers carry a "url"; local ones carry a "command".
         if spec.get("url"):
             from .mcp_remote import MCPRemoteClient
@@ -247,7 +395,12 @@ def build_mcp_tools(root: str | Path = ".", *, console=None) -> list:
             command = spec.get("command")
             if not command:
                 continue
-            client = MCPClient(name, command, spec.get("args"), spec.get("env"))
+            # A server declares which parent vars it may inherit via `passEnv`.
+            # Old configs (pre-passEnv) fall back to the catalog's declared names,
+            # so an existing `github` entry keeps working WITHOUT the old blanket
+            # os.environ leak.
+            pass_env = spec.get("passEnv") or _catalog_pass_env(name)
+            client = MCPClient(name, command, spec.get("args"), spec.get("env"), pass_env)
         try:
             discovered = client.start()
         except Exception as e:  # noqa: BLE001
