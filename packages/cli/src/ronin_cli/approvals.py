@@ -331,6 +331,28 @@ def _fs_catastrophic(c: str) -> bool:
     return False
 
 
+# The SQL members of DESTRUCTIVE_MARKERS. They are real signals inside an actual
+# SQL statement, but as a plain substring inside a SHELL command they are a
+# false-positive factory: `git commit -m "fix delete from cart"` and
+# `grep -r "drop table" .` are not destroying anything, and a floor that blocks
+# commit messages and greps is a floor people switch off.
+_SQL_MARKERS = frozenset({"drop table", "drop database", "truncate table", "delete from"})
+
+# Commands that handle TEXT rather than execute SQL. When one of these is the
+# binary, a SQL marker in the command line is data (a message, a search pattern,
+# a printed string) — not a statement being run.
+_TEXT_TOOLS = frozenset({
+    "git", "grep", "rg", "ack", "ag", "echo", "printf", "cat", "less", "more",
+    "sed", "awk", "head", "tail", "diff", "comm", "sort", "uniq",
+})
+
+
+def _leading_binary(c: str) -> str:
+    """The program a command invokes (``/usr/bin/git commit`` -> ``git``)."""
+    parts = c.split()
+    return parts[0].rsplit("/", 1)[-1] if parts else ""
+
+
 def is_destructive_command(command: str) -> bool:
     """True if a raw shell command string is catastrophically destructive. Pure —
     the destructive floor's check for shell-command tools (enforced even under
@@ -340,14 +362,41 @@ def is_destructive_command(command: str) -> bool:
     whitespace is collapsed first (so ``rm  -rf`` == ``rm -rf``), and the
     reorder-prone families (``rm`` recursive+force, ``git`` history/clean,
     ``find -delete``, raw-disk writes, recursive ``chmod`` of ``/``) are matched
-    structurally, not as fixed substrings."""
+    structurally, not as fixed substrings.
+
+    SQL markers are suppressed when the binary is a text tool (see
+    :data:`_TEXT_TOOLS`), so ``git commit -m "delete from cart"`` and
+    ``grep "drop table"`` are not floored — while ``psql -c "DROP TABLE users"``
+    still is.
+
+    RESIDUAL: a *shell* marker quoted inside a text-tool command
+    (``git commit -m "rm -rf"``) still trips the floor. It costs one confirmation,
+    never data, so it is left rather than risk suppressing a real
+    ``git commit -m x && rm -rf /``.
+    """
     c = " ".join((command or "").lower().split())  # collapse whitespace runs
+    markers = DESTRUCTIVE_MARKERS
+    if _leading_binary(c) in _TEXT_TOOLS:
+        markers = tuple(m for m in DESTRUCTIVE_MARKERS if m not in _SQL_MARKERS)
     return (
         _git_destructive(c)
         or _rm_destructive(c)
         or _fs_catastrophic(c)
-        or any(marker in c for marker in DESTRUCTIVE_MARKERS)
+        or any(marker in c for marker in markers)
     )
+
+
+def is_destructive_sql(statement: str) -> bool:
+    """True if a SQL statement destroys data. Pure.
+
+    Anchored per statement, NOT a substring scan: a ``SELECT`` whose text merely
+    mentions ``drop table`` (a log query, an audit search) destroys nothing, and
+    flooring it would be a false positive. Multi-statement strings are split on
+    ``;`` so ``SELECT 1; DROP TABLE users`` is still caught.
+    """
+    s = " ".join((statement or "").lower().split())
+    pattern = r"^(drop\s+(table|database|schema|index)|truncate\s+table|delete\s+from)\b"
+    return any(re.match(pattern, part.strip()) for part in s.split(";") if part.strip())
 
 
 # The built-in shell tools. Kept as an explicit list because their payload always
@@ -366,20 +415,61 @@ FLOORED_COMMAND_TOOLS = ("run_command", "run_background")
 # ``path``, ``diff``): writing a file that *mentions* ``rm -rf`` is not running it,
 # and floadding those would make the floor a false-positive nuisance on ordinary
 # edits — which is how a safety gate gets disabled.
-EXECUTABLE_ARG_KEYS = frozenset({
+SHELL_ARG_KEYS = frozenset({
     "command", "cmd", "commands", "script", "shell", "bash", "sh",
-    "exec", "execute", "run", "query", "sql", "statement",
+    "exec", "execute", "run",
 })
+SQL_ARG_KEYS = frozenset({"query", "sql", "statement"})
+EXECUTABLE_ARG_KEYS = SHELL_ARG_KEYS | SQL_ARG_KEYS
+
+_MAX_ARG_DEPTH = 8
 
 
-def _payload_strings(value: Any) -> list[str]:
-    """Every string inside an argument value (str, or a list/tuple of them).
-    A tool taking ``commands: ["ls", "rm -rf /"]`` must be floored on the second."""
+def _payload_strings(value: Any, _depth: int = 0) -> list[str]:
+    """Every string under an argument value, however it is nested."""
+    if _depth > _MAX_ARG_DEPTH:
+        return []
     if isinstance(value, str):
         return [value]
+    out: list[str] = []
     if isinstance(value, (list, tuple)):
-        return [v for v in value if isinstance(v, str)]
-    return []
+        for v in value:
+            out += _payload_strings(v, _depth + 1)
+    elif isinstance(value, Mapping):
+        for v in value.values():
+            out += _payload_strings(v, _depth + 1)
+    return out
+
+
+def _executable_payloads(args: Any, _depth: int = 0) -> tuple[list[str], list[str]]:
+    """(shell payloads, sql payloads) found ANYWHERE in the argument tree.
+
+    Walks nested containers, because MCP tools routinely nest their arguments:
+    ``{"params": {"command": "rm -rf /"}}`` and ``{"steps": [{"cmd": "..."}]}``
+    are ordinary shapes. Scanning only top-level keys — which is what this did at
+    first — left exactly that bypass open.
+    """
+    shell: list[str] = []
+    sql: list[str] = []
+    if _depth > _MAX_ARG_DEPTH:
+        return shell, sql
+
+    if isinstance(args, Mapping):
+        for key, value in args.items():
+            k = str(key).strip().lower()
+            if k in SHELL_ARG_KEYS:
+                shell += _payload_strings(value)
+            elif k in SQL_ARG_KEYS:
+                sql += _payload_strings(value)
+            s, q = _executable_payloads(value, _depth + 1)   # keep descending
+            shell += s
+            sql += q
+    elif isinstance(args, (list, tuple)):
+        for value in args:
+            s, q = _executable_payloads(value, _depth + 1)
+            shell += s
+            sql += q
+    return shell, sql
 
 
 def is_floored_tool_call(name: str, args: Any) -> bool:
@@ -413,12 +503,10 @@ def is_floored_tool_call(name: str, args: Any) -> bool:
         if is_destructive_command(str(args.get("command", "") or "")):
             return True
 
-    for key, value in args.items():
-        if str(key).strip().lower() in EXECUTABLE_ARG_KEYS:
-            for payload in _payload_strings(value):
-                if is_destructive_command(payload):
-                    return True
-    return False
+    shell, sql = _executable_payloads(args)
+    if any(is_destructive_command(p) for p in shell):
+        return True
+    return any(is_destructive_sql(p) for p in sql)
 
 
 def _escalate(a: str, b: str) -> str:

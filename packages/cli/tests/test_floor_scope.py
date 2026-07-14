@@ -94,3 +94,83 @@ def test_investigate_gate_floors_non_shell_payload_under_yolo():
     # investigate only routes run_command, but the floor decision itself must agree
     assert is_floored_tool_call("run_command", {"command": "rm -rf /"}) is True
     assert gate("run_command", {"command": "rm -rf /"}) is not True
+
+
+# ---------------------------------------------------------------------------
+# Round 2 — three defects found by adversarially attacking my own first fix.
+# ---------------------------------------------------------------------------
+
+# (1) NESTED payloads. The first version scanned only TOP-LEVEL arg keys, so any
+# MCP tool that nests its arguments — which is an ordinary shape — walked straight
+# through the "fixed" floor.
+NESTED_FLOORED = [
+    ("mcp_tool", {"params": {"command": "rm -rf /"}}),
+    ("mcp_tool", {"arguments": {"cmd": "git reset --hard"}}),
+    ("mcp_tool", {"steps": [{"cmd": "rm -rf /"}]}),
+    ("mcp_tool", {"a": {"b": {"c": {"sql": "DROP TABLE t"}}}}),
+    ("mcp_tool", {"batch": [{"name": "ok", "run": "ls"}, {"name": "bad", "run": "rm -rf ~"}]}),
+]
+
+
+@pytest.mark.parametrize("name,args", NESTED_FLOORED)
+def test_nested_payload_is_floored(name, args):
+    assert is_floored_tool_call(name, args) is True, f"nested payload escaped: {args}"
+
+
+# (2) FALSE POSITIVES. A floor that blocks commit messages and greps is a floor
+# people switch off — so the SQL markers must not fire on text tools.
+EVERYDAY_NOT_FLOORED = [
+    ("run_command", {"command": "git commit -m 'fix delete from cart flow'"}),
+    ("run_command", {"command": "git commit -m 'add drop table migration'"}),
+    ("run_command", {"command": "grep -r 'drop table' ."}),
+    ("run_command", {"command": "rg 'delete from' src/"}),
+    ("run_command", {"command": "echo 'delete from t'"}),
+    ("postgres_query", {"query": "SELECT * FROM audit WHERE action = 'drop table'"}),
+    ("postgres_query", {"query": "SELECT * FROM users LIMIT 10"}),
+    ("run_command", {"command": "pytest -q"}),
+    ("run_command", {"command": "npm test"}),
+]
+
+
+@pytest.mark.parametrize("name,args", EVERYDAY_NOT_FLOORED)
+def test_everyday_call_is_not_floored(name, args):
+    assert is_floored_tool_call(name, args) is False, f"false positive: {args}"
+
+
+# …but a shell command that ACTUALLY executes destructive SQL still is.
+REAL_SQL_EXECUTION_FLOORED = [
+    ("run_command", {"command": 'psql -c "DROP TABLE users"'}),
+    ("run_command", {"command": "mysql -e 'TRUNCATE TABLE orders'"}),
+    ("postgres_query", {"query": "DROP TABLE users"}),
+    ("postgres_query", {"query": "SELECT 1; DROP TABLE users"}),   # multi-statement
+    ("db", {"sql": "delete from accounts"}),
+]
+
+
+@pytest.mark.parametrize("name,args", REAL_SQL_EXECUTION_FLOORED)
+def test_real_sql_destruction_is_still_floored(name, args):
+    assert is_floored_tool_call(name, args) is True, f"floor missed real SQL: {args}"
+
+
+def test_is_destructive_sql_is_anchored_not_a_substring_scan():
+    from ronin_cli.approvals import is_destructive_sql
+    assert is_destructive_sql("DROP TABLE users") is True
+    assert is_destructive_sql("TRUNCATE TABLE t") is True
+    assert is_destructive_sql("SELECT 1; DROP TABLE users") is True
+    # a SELECT that merely MENTIONS it destroys nothing
+    assert is_destructive_sql("SELECT * FROM audit WHERE a = 'drop table'") is False
+    assert is_destructive_sql("SELECT * FROM users") is False
+
+
+# (3) The THIRD gate. I fixed the ordering in code_mode's two gates and missed
+# investigate_mode's, which kept auto-approving anything outside its sensitive set.
+def test_investigate_gate_floors_a_non_shell_payload_under_yolo():
+    gate = investigate_mode._gate(None, True)
+    r = gate("postgres_query", {"query": "DROP TABLE users"})
+    assert r is not True, "investigate gate auto-approved DROP TABLE under --yolo"
+
+
+def test_investigate_gate_still_allows_safe_tools():
+    gate = investigate_mode._gate(None, True)
+    assert gate("read_file", {"path": "x"}) is True
+    assert gate("run_command", {"command": "ls -la"}) is True
