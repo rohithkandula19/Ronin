@@ -86,3 +86,43 @@ def test_non_git_directory_is_refused(tmp_path: Path):
 
     assert "not a git repository" in str(e.value)
     assert (plain / "important.txt").exists()
+
+
+# ---------------------------------------------------------------------------
+# git-ignored files: `git status --porcelain` does NOT list them, but
+# `git clean -fdx` deletes them. A real .env reads as a clean tree — found by
+# adversarially attacking the first version of this guard.
+# ---------------------------------------------------------------------------
+
+def test_ignored_env_is_refused_and_survives(repo: Path):
+    (repo / ".gitignore").write_text(".env\n")
+    _git(repo, "add", ".gitignore")
+    _git(repo, "commit", "-qm", "ignore env")
+    (repo / ".env").write_text("SECRET_KEY=real-production-secret")
+
+    # porcelain sees a clean tree here — the guard must look deeper
+    with pytest.raises(DirtyWorkingTreeError) as e:
+        make_local_git_evaluator(repo)
+    assert ".env" in str(e.value)
+    assert (repo / ".env").read_text() == "SECRET_KEY=real-production-secret"
+
+
+def test_regenerable_ignored_dirs_are_allowed(repo: Path):
+    (repo / ".gitignore").write_text(".venv/\nnode_modules/\n__pycache__/\n")
+    _git(repo, "add", ".gitignore")
+    _git(repo, "commit", "-qm", "ignore caches")
+    for d in (".venv", "node_modules", "__pycache__"):
+        (repo / d).mkdir()
+        (repo / d / "junk").write_text("x")
+    # these are what a benchmark clone is SUPPOSED to wipe — not a refusal
+    ev = make_local_git_evaluator(repo)
+    assert ev is not None
+
+
+def test_allow_dirty_overrides_ignored_files_too(repo: Path):
+    (repo / ".gitignore").write_text(".env\n")
+    _git(repo, "add", ".gitignore")
+    _git(repo, "commit", "-qm", "ignore env")
+    (repo / ".env").write_text("throwaway")
+    ev = make_local_git_evaluator(repo, allow_dirty=True)
+    assert ev is not None

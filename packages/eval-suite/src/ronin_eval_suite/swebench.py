@@ -452,16 +452,56 @@ class DirtyWorkingTreeError(RuntimeError):
     """Raised when the benchmark would destroy uncommitted work."""
 
 
+# Top-level names that ``git clean -fdx`` will remove but which are regenerable —
+# a benchmark clone is SUPPOSED to wipe these, and refusing on them would make the
+# guard fire on almost every real repo. Anything OUTSIDE this set that clean would
+# remove (a ``.env``, a data file, notes) is treated as "you would lose it".
+_REGENERABLE = frozenset({
+    ".venv", "venv", "env", "node_modules", "__pycache__", ".pytest_cache",
+    ".mypy_cache", ".ruff_cache", ".tox", ".nox", "dist", "build", ".eggs",
+    ".next", "target", "htmlcov", ".coverage", ".cache", ".gradle", "vendor",
+})
+
+
+def _ignored_at_risk(root: Path) -> list[str]:
+    """Git-IGNORED files that ``git clean -fdx`` would delete and that are not
+    obviously regenerable — the gap ``git status --porcelain`` misses entirely
+    (it does not list ignored files, so a real ``.env`` reads as a clean tree).
+    """
+    proc = subprocess.run(
+        ["git", "-C", str(root), "clean", "-fdxn"],   # -n = dry run, deletes nothing
+        capture_output=True, text=True,
+    )
+    at_risk: list[str] = []
+    for line in proc.stdout.splitlines():
+        if not line.startswith("Would remove "):
+            continue
+        path = line[len("Would remove "):].strip()
+        top = path.strip("/").split("/", 1)[0]
+        if top not in _REGENERABLE and not top.endswith(".egg-info"):
+            at_risk.append(path)
+    return at_risk
+
+
 def _assert_disposable(root: Path, allow_dirty: bool) -> None:
     """Refuse to hard-reset a working tree that has anything to lose.
 
     ``evaluate()`` runs ``git reset --hard`` + ``git clean -fdx``, which discards
-    uncommitted changes AND untracked files. The docstring used to just *warn*
-    ("point it at a disposable clone") — but a warning is not a guard, and nothing
-    stopped you pointing this at the repo you actually work in and losing it.
+    uncommitted changes, untracked files, AND git-ignored files. The docstring used
+    to just *warn* ("point it at a disposable clone") — but a warning is not a
+    guard, and nothing stopped you pointing this at the repo you actually work in
+    and losing it.
 
     On a CLEAN tree those commands destroy nothing, so gate exactly on that: if the
-    tree is clean, proceed; if it has work in it, refuse and say what would die.
+    tree is clean, proceed; if it has anything to lose, refuse and say what would
+    die. Two sources of loss, because ``git status --porcelain`` catches only one:
+
+    - tracked/untracked changes (porcelain), and
+    - **git-ignored** files ``clean -fdx`` still deletes — a real ``.env`` reads as
+      a clean tree to porcelain but is very much something you would lose. Only
+      genuinely regenerable ignored paths (``.venv`` / ``node_modules`` / caches,
+      see :data:`_REGENERABLE`) are allowed through.
+
     ``allow_dirty=True`` is the explicit, deliberate override.
 
     Checked once at construction, not per task — after the first task the tree is
@@ -492,6 +532,18 @@ def _assert_disposable(root: Path, allow_dirty: bool) -> None:
             f"{shown}{more}\n"
             "Point it at a disposable clone, or pass allow_dirty=True if you really "
             "mean to throw this work away."
+        )
+
+    at_risk = _ignored_at_risk(root)
+    if at_risk:
+        shown = "\n".join(f"    {p}" for p in at_risk[:10])
+        more = f"\n    … and {len(at_risk) - 10} more" if len(at_risk) > 10 else ""
+        raise DirtyWorkingTreeError(
+            f"refusing to benchmark against {root}: `git clean -fdx` would delete "
+            f"{len(at_risk)} git-ignored file(s) that are not regenerable — a "
+            "porcelain-clean tree can still hide a real .env or data file here:\n"
+            f"{shown}{more}\n"
+            "Point it at a disposable clone, or pass allow_dirty=True to override."
         )
 
 
