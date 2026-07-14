@@ -22,9 +22,6 @@ dependencies = [
     "pydantic>=2.5",
 ]
 
-[project.optional-dependencies]
-chromadb = ["chromadb>=0.5"]
-
 [project.urls]
 Homepage = "https://github.com/rohithkandula19/Ronin"
 Repository = "https://github.com/rohithkandula19/Ronin"
