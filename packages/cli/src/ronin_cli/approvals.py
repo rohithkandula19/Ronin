@@ -350,22 +350,75 @@ def is_destructive_command(command: str) -> bool:
     )
 
 
-# Tool names whose calls carry a raw shell command the destructive floor must
-# vet. The floor gates these even under --yolo/god-mode, on EVERY gate path.
+# The built-in shell tools. Kept as an explicit list because their payload always
+# lives under ``command``.
 FLOORED_COMMAND_TOOLS = ("run_command", "run_background")
+
+# Argument names that carry an EXECUTABLE payload — a shell command, a script, or
+# a SQL statement — no matter which tool receives them. The floor inspects these on
+# EVERY tool, because a tool's *name* proves nothing: an MCP server can expose
+# ``execute``/``query``, and a plugin can expose anything at all. Gating only
+# ``run_command``/``run_background`` meant a postgres MCP call carrying
+# ``DROP TABLE users``, or an MCP shell tool carrying ``rm -rf /``, auto-approved
+# under --yolo without ever meeting the floor.
+#
+# Deliberately EXCLUDES content-carrying keys (``content``, ``text``, ``body``,
+# ``path``, ``diff``): writing a file that *mentions* ``rm -rf`` is not running it,
+# and floadding those would make the floor a false-positive nuisance on ordinary
+# edits — which is how a safety gate gets disabled.
+EXECUTABLE_ARG_KEYS = frozenset({
+    "command", "cmd", "commands", "script", "shell", "bash", "sh",
+    "exec", "execute", "run", "query", "sql", "statement",
+})
+
+
+def _payload_strings(value: Any) -> list[str]:
+    """Every string inside an argument value (str, or a list/tuple of them).
+    A tool taking ``commands: ["ls", "rm -rf /"]`` must be floored on the second."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, (list, tuple)):
+        return [v for v in value if isinstance(v, str)]
+    return []
 
 
 def is_floored_tool_call(name: str, args: Any) -> bool:
     """True when a tool call must be gated by the destructive floor even under
-    ``--yolo`` / god-mode: a shell-command tool (:data:`FLOORED_COMMAND_TOOLS`)
-    whose command string is destructive. The single definition of "floored",
-    shared by every gate path (code mode, investigate mode, front-ends) so no
-    path can auto-approve a catastrophic command. Fail-closed: a non-mapping or
-    missing ``command`` yields an empty string, which is not destructive."""
-    if name not in FLOORED_COMMAND_TOOLS:
+    ``--yolo`` / god-mode.
+
+    Two ways a call gets floored:
+
+    1. It is a built-in shell tool (:data:`FLOORED_COMMAND_TOOLS`) whose
+       ``command`` is destructive.
+    2. It is **any tool at all** — built-in, MCP, or plugin — carrying an
+       executable payload (:data:`EXECUTABLE_ARG_KEYS`) that is destructive. The
+       floor cannot trust a tool's name: MCP servers and plugins choose their own,
+       and a ``postgres.query`` of ``DROP TABLE users`` destroys just as much as
+       ``rm -rf``.
+
+    The single definition of "floored", shared by every gate path (code mode,
+    investigate mode, front-ends), so no path can auto-approve a catastrophic
+    action. Fail-closed: a non-mapping args yields no payload, hence no
+    auto-approval decision based on it.
+
+    RESIDUAL (documented honestly): a tool that destroys something *without*
+    exposing its payload as an argument — an opaque MCP ``delete_everything()`` —
+    cannot be floored by inspection. Such tools are still gated normally; only
+    ``--yolo`` waives that. Inspection can only reach what is inspectable.
+    """
+    if not isinstance(args, Mapping):
         return False
-    cmd = args.get("command", "") if isinstance(args, Mapping) else ""
-    return is_destructive_command(str(cmd or ""))
+
+    if name in FLOORED_COMMAND_TOOLS:
+        if is_destructive_command(str(args.get("command", "") or "")):
+            return True
+
+    for key, value in args.items():
+        if str(key).strip().lower() in EXECUTABLE_ARG_KEYS:
+            for payload in _payload_strings(value):
+                if is_destructive_command(payload):
+                    return True
+    return False
 
 
 def _escalate(a: str, b: str) -> str:

@@ -18,8 +18,13 @@ from ronin_cli.code_mode import _is_floored_command, _selective_gate
     ("run_command", "ls -la", False),
     ("run_command", "git status", False),
     ("run_background", "npm run dev", False),
-    ("write_file", "rm -rf /", False),                     # not a command tool
-    ("read_file", "anything", False),
+    # The floor is PAYLOAD-based, not name-based (see test_floor_scope.py): a
+    # tool's name proves nothing, since MCP servers and plugins choose their own.
+    # So ANY tool handed an executable `command` that is destructive is floored —
+    # deliberately fail-safe. (A realistic write_file carries path/content, which
+    # are NOT executable keys and are never floored.)
+    ("write_file", "rm -rf /", True),
+    ("read_file", "anything", False),                      # not a destructive payload
 ])
 def test_is_floored_command(name, cmd, floored):
     assert _is_floored_command(name, {"command": cmd}) is floored

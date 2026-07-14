@@ -88,8 +88,13 @@ def test_is_floored_tool_call_is_the_shared_floor():
     assert is_floored_tool_call("run_background", {"command": "find / -delete"}) is True
     # Safe command → not floored.
     assert is_floored_tool_call("run_command", {"command": "ls -la"}) is False
-    # Non-command tool is never floored (its args aren't a shell command).
-    assert is_floored_tool_call("write_file", {"command": "rm -rf /"}) is False
+    # The floor is PAYLOAD-based, not name-based (see test_floor_scope.py): a tool's
+    # name proves nothing (MCP/plugins pick their own), so ANY tool handed a
+    # destructive executable payload is floored — fail-safe.
+    assert is_floored_tool_call("write_file", {"command": "rm -rf /"}) is True
+    # But a REALISTIC write_file carries path/content, which are not executable
+    # keys: writing a file that MENTIONS rm -rf is not running it.
+    assert is_floored_tool_call("write_file", {"path": "x.sh", "content": "rm -rf /"}) is False
     # Fail-closed on malformed args → not a command → not destructive (empty).
     assert is_floored_tool_call("run_command", {}) is False
     assert is_floored_tool_call("run_command", None) is False
