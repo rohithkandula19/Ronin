@@ -236,9 +236,18 @@ def seatbelt_profile(
     that read system/config files; the guarantee here is "can't damage your machine
     or files outside the project", not "can't see anything".
     """
+    ws = os.path.realpath(workspace)
+    # A sandbox rooted at "/" would allow writes EVERYWHERE — a silent no-op sandbox,
+    # worse than none because the user believes they are contained. Refuse it
+    # (fail-closed → the selection turns this into a refusal, never a host run).
+    if ws in ("/", ""):
+        raise ValueError(
+            "refusing a seatbelt sandbox rooted at '/': it would allow writes "
+            "everywhere. cd into a specific project directory."
+        )
     home = os.path.expanduser("~")
     writes = [
-        os.path.realpath(workspace),
+        ws,
         os.path.realpath(tempfile.gettempdir()),
         os.path.join(home, ".cache"),
         os.path.join(home, "Library", "Caches"),

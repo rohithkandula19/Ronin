@@ -124,3 +124,11 @@ def test_no_network_mode_blocks_the_net(tmp_path):
         "python3 -c 'import socket; socket.create_connection((\"1.1.1.1\",80),2)'",
         {"type": "seatbelt", "allow_network": False}, cwd=str(tmp_path))
     assert net_code != 0, "network was reachable under a no-network sandbox"
+
+
+def test_refuses_root_workspace():
+    # A sandbox rooted at "/" allows writes everywhere — a silent no-op sandbox.
+    # It must fail closed (adversarial-pass finding).
+    import pytest as _pytest
+    with _pytest.raises(ValueError, match="rooted at '/'"):
+        seatbelt_profile("/")
