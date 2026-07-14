@@ -129,6 +129,16 @@ def build_background_tools(root: str | Path = ".") -> list[Tool]:
     mgr = get_manager()
 
     def run_background(command: str) -> str:
+        # Fail-closed: run_background starts the process on the HOST, so it cannot
+        # honor a requested sandbox. If the user asked to contain (RONIN_BACKEND),
+        # refuse rather than silently starting a long-running process outside the
+        # sandbox — the same invariant run_command enforces.
+        from .backends import requested_backend, sandbox_refusal
+        _bspec = requested_backend()
+        if _bspec:
+            return sandbox_refusal(
+                _bspec, "run_background starts the process on the host and cannot "
+                "sandbox it; use run_command inside the backend, or unset RONIN_BACKEND")
         pid = mgr.start(command, cwd=root)
         return (f"started background process #{pid}: {command}\n"
                 f"use background_logs(id={pid}) to read its output, "

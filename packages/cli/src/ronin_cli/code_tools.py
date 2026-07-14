@@ -344,19 +344,28 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None,
     def run_command(command: str) -> str:
         # Opt-in sandboxed execution: set RONIN_BACKEND=docker:<container> or
         # ssh:<user@host[:port]> to run the agent's shell INSIDE an isolated
-        # backend instead of on the host. Unset/"local" → unchanged behaviour;
-        # any backend error falls back to local so a turn never dies here.
-        import os as _os
-        _bspec = _os.environ.get("RONIN_BACKEND")
-        if _bspec and _bspec.strip().lower() != "local":
+        # backend instead of on the host. Unset/"local" → run on the host.
+        #
+        # FAIL-CLOSED. Setting RONIN_BACKEND *is* the request to contain, so if the
+        # backend can't run the command (bad spec, Docker not installed/running,
+        # container gone, timeout) we REFUSE — we do NOT fall back to the host. The
+        # old `except: pass` silently ran a command the user asked to contain on
+        # their real machine, which defeats the entire point of a sandbox.
+        from .backends import requested_backend, sandbox_refusal
+        _bspec = requested_backend()
+        if _bspec:
             try:
                 from .backends import parse_backend, run_in_backend
+                backend = parse_backend(_bspec)
+            except Exception as e:  # noqa: BLE001 — invalid spec: refuse, don't run local
+                return sandbox_refusal(_bspec, f"invalid backend spec: {e}")
+            try:
                 code, out_s, err_s = run_in_backend(
-                    command, parse_backend(_bspec), cwd=str(root_path), timeout=_timeout)
-                return (f"exit={code}\n--- stdout ---\n{(out_s or '')[:_out_cap]}\n"
-                        f"--- stderr ---\n{(err_s or '')[:_err_cap]}")
-            except Exception:  # noqa: BLE001 - fall back to local execution
-                pass
+                    command, backend, cwd=str(root_path), timeout=_timeout)
+            except Exception as e:  # noqa: BLE001 — backend unreachable: refuse
+                return sandbox_refusal(_bspec, f"{type(e).__name__}: {e}")
+            return (f"exit={code}\n--- stdout ---\n{(out_s or '')[:_out_cap]}\n"
+                    f"--- stderr ---\n{(err_s or '')[:_err_cap]}")
         proc = subprocess.run(
             command,
             shell=True,

@@ -1156,6 +1156,21 @@ def doctor(
     table.add_row("model", config.resolved_model())
     if config.resolved_base_url():
         table.add_row("base_url", config.resolved_base_url() or "")
+    # Which sandbox the agent's shell runs in (RONIN_BACKEND). Surfacing it makes
+    # containment observable — you can see whether commands run on the host or in a
+    # backend, and that a backend failure fails closed rather than escaping to host.
+    from .backends import parse_backend, requested_backend
+    _bk = requested_backend()
+    if _bk is None:
+        table.add_row("sandbox", "[dim]host — commands run locally (set RONIN_BACKEND to contain)[/dim]")
+    else:
+        try:
+            parse_backend(_bk)
+            table.add_row("sandbox", f"[green]{_bk}[/green] "
+                          "[dim](fail-closed: a backend failure refuses, never runs on host)[/dim]")
+        except Exception as e:  # noqa: BLE001
+            table.add_row("sandbox", f"[red]{_bk} — invalid spec: {e}[/red] "
+                          "[dim](commands will be refused)[/dim]")
     # Static check only confirms a key is *present* — say so honestly. The local
     # providers (local = in-process, ollama = local server) need no key at all.
     if config.provider in ("local", "ollama"):
