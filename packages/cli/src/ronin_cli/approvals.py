@@ -124,7 +124,9 @@ DESTRUCTIVE_MARKERS = (
     "git push -f",
     "force-push",
     "force push",
-    "format ",        # "format disk" — trailing space avoids "format string"
+    # NB: bare "format" is NOT a marker — it matched `npm run format`, `make
+    # format`, every formatter task. Drive-format is caught structurally in
+    # _fs_catastrophic (`format c:` / `format /dev/…`) instead.
     "mkfs",
     "dd if=",
     "shred ",
@@ -324,6 +326,11 @@ def _fs_catastrophic(c: str) -> bool:
         return True
     if re.search(r"\bfind\b.*-exec\s+rm\b", c):
         return True
+    # Disk format: the Windows `format c:` / `format /dev/…` command — but NOT
+    # `npm run format`, `make format`, or any formatter task (the reason bare
+    # "format" was removed from the flat markers).
+    if re.search(r"\bformat\s+([a-z]:|/dev/)", c):
+        return True
     if re.search(r"(?:>|\bof=)\s*/dev/(?:sd|nvme|hd|disk|vd|mmcblk)", c):
         return True
     if re.search(r"\bch(?:mod|own)\b.*(?:-[a-z]*r|--recursive).*\s(?:/|~)(?:\s|$)", c):
@@ -375,15 +382,27 @@ def is_destructive_command(command: str) -> bool:
     ``git commit -m x && rm -rf /``.
     """
     c = " ".join((command or "").lower().split())  # collapse whitespace runs
-    markers = DESTRUCTIVE_MARKERS
-    if _leading_binary(c) in _TEXT_TOOLS:
-        markers = tuple(m for m in DESTRUCTIVE_MARKERS if m not in _SQL_MARKERS)
-    return (
-        _git_destructive(c)
-        or _rm_destructive(c)
-        or _fs_catastrophic(c)
-        or any(marker in c for marker in markers)
-    )
+
+    # Non-SQL families are structural/substring and apply to the whole line.
+    if _git_destructive(c) or _rm_destructive(c) or _fs_catastrophic(c):
+        return True
+    non_sql = tuple(m for m in DESTRUCTIVE_MARKERS if m not in _SQL_MARKERS)
+    if any(m in c for m in non_sql):
+        return True
+
+    # SQL markers are text-tool-sensitive, but PER SEGMENT, not per line. Judging
+    # by the leading binary of the WHOLE line let `echo x && psql -c "DROP TABLE"`
+    # through — `echo` is a text tool, so the real `psql DROP TABLE` after `&&` was
+    # waved past. Split on shell separators and decide each segment on its own
+    # leading binary: a SQL word under `git`/`grep`/`echo` is data; the same word
+    # under `psql`/`mysql`/anything else is an executed statement.
+    for seg in re.split(r"&&|\|\||;|\||\n", c):
+        seg = seg.strip()
+        if not seg or _leading_binary(seg) in _TEXT_TOOLS:
+            continue
+        if any(m in seg for m in _SQL_MARKERS):
+            return True
+    return False
 
 
 def is_destructive_sql(statement: str) -> bool:
@@ -393,10 +412,34 @@ def is_destructive_sql(statement: str) -> bool:
     mentions ``drop table`` (a log query, an audit search) destroys nothing, and
     flooring it would be a false positive. Multi-statement strings are split on
     ``;`` so ``SELECT 1; DROP TABLE users`` is still caught.
+
+    Before anchoring, each statement's leading SQL comments (``/* … */``, ``-- …``)
+    and ``EXPLAIN [ANALYZE] [(…)]`` wrapper are stripped: ``/* migration */ DROP
+    TABLE`` and ``EXPLAIN ANALYZE DELETE FROM users`` both really execute the
+    destructive statement (EXPLAIN ANALYZE runs its inner DML in Postgres), so
+    anchoring on the raw ``^`` would have missed them.
     """
-    s = " ".join((statement or "").lower().split())
-    pattern = r"^(drop\s+(table|database|schema|index)|truncate\s+table|delete\s+from)\b"
-    return any(re.match(pattern, part.strip()) for part in s.split(";") if part.strip())
+    # `--` comments run to end of LINE, so strip them on the RAW text before
+    # newlines are collapsed — otherwise a leading `-- note` line would swallow the
+    # DROP on the next line.
+    raw = re.sub(r"--[^\n]*", " ", (statement or "").lower())
+    s = " ".join(raw.split())
+    verb = re.compile(
+        r"(drop\s+(table|database|schema|index)\b"
+        r"|truncate\s+(table\s+)?[a-z_\"'`]"   # TABLE keyword is optional in PG/MySQL
+        r"|delete\s+from\b)"
+    )
+    for part in s.split(";"):
+        part = part.strip()
+        prev = None
+        while prev != part:   # peel any stack of leading /* */ comments / EXPLAIN wrappers
+            prev = part
+            part = re.sub(r"^/\*.*?\*/\s*", "", part)
+            part = re.sub(r"^explain\s+(analyze\s+)?(\([^)]*\)\s*)?", "", part)
+            part = part.strip()
+        if verb.match(part):
+            return True
+    return False
 
 
 # The built-in shell tools. Kept as an explicit list because their payload always

@@ -174,3 +174,70 @@ def test_investigate_gate_still_allows_safe_tools():
     gate = investigate_mode._gate(None, True)
     assert gate("read_file", {"path": "x"}) is True
     assert gate("run_command", {"command": "ls -la"}) is True
+
+
+# ---------------------------------------------------------------------------
+# Round 3 — two regressions my own round-2 false-positive fix introduced, plus
+# the over-broad "format" marker. All found by the adversarial pass.
+# ---------------------------------------------------------------------------
+
+# R2: SQL suppression was by the LEADING binary of the whole line, so a chained
+# `echo x && psql -c "DROP TABLE"` slipped through (echo is a text tool). Now
+# judged per shell segment.
+CHAINED_SHELL_SQL_FLOORED = [
+    'echo "migrating" && psql -c "DROP TABLE users"',
+    'git log -1 && psql $DB -c "DROP DATABASE prod"',
+    'true; mysql -e "TRUNCATE TABLE orders"',
+    'cat schema.sql | psql -c "DELETE FROM users"',
+]
+
+# …while the text-tool false positives the suppression was FOR stay safe.
+TEXT_TOOL_SQL_SAFE = [
+    "git commit -m 'fix delete from cart flow'",
+    "git commit -m 'add drop table migration'",
+    "grep -r 'drop table' .",
+    "rg 'delete from' src/",
+    "echo 'delete from t'",
+    "pytest -q && echo 'ran drop table tests'",
+]
+
+
+@pytest.mark.parametrize("cmd", CHAINED_SHELL_SQL_FLOORED)
+def test_chained_shell_sql_is_floored(cmd):
+    from ronin_cli.approvals import is_destructive_command
+    assert is_destructive_command(cmd) is True, f"chained SQL slipped: {cmd!r}"
+
+
+@pytest.mark.parametrize("cmd", TEXT_TOOL_SQL_SAFE)
+def test_text_tool_sql_mention_stays_safe(cmd):
+    from ronin_cli.approvals import is_destructive_command
+    assert is_destructive_command(cmd) is False, f"false positive: {cmd!r}"
+
+
+# R1: SQL anchoring missed comment- and EXPLAIN-prefixed statements.
+def test_sql_comment_and_explain_prefixes_are_caught():
+    from ronin_cli.approvals import is_destructive_sql
+    assert is_destructive_sql("/* migration 003 */ DROP TABLE users") is True
+    assert is_destructive_sql("EXPLAIN ANALYZE DELETE FROM users") is True   # executes in PG
+    assert is_destructive_sql("-- note\n drop database prod") is True
+    assert is_destructive_sql("TRUNCATE users") is True                      # TABLE optional
+    # …but a SELECT that merely mentions it is still safe
+    assert is_destructive_sql("SELECT * FROM audit WHERE a = 'drop table'") is False
+    assert is_destructive_sql("UPDATE t SET x = 1 WHERE id = 2") is False
+
+
+# The "format" marker matched every `format` task. Now drive-format only.
+FORMAT_DRIVE_FLOORED = ["format c:", "format /dev/sda", "format d: /fs:ntfs"]
+FORMAT_TASK_SAFE = ["npm run format", "make format lint test", "black --format", "cargo fmt"]
+
+
+@pytest.mark.parametrize("cmd", FORMAT_DRIVE_FLOORED)
+def test_drive_format_is_floored(cmd):
+    from ronin_cli.approvals import is_destructive_command
+    assert is_destructive_command(cmd) is True, cmd
+
+
+@pytest.mark.parametrize("cmd", FORMAT_TASK_SAFE)
+def test_format_task_is_not_floored(cmd):
+    from ronin_cli.approvals import is_destructive_command
+    assert is_destructive_command(cmd) is False, f"false positive: {cmd!r}"
