@@ -448,11 +448,59 @@ def render_swebench_markdown(
     return "\n".join(lines) + "\n"
 
 
+class DirtyWorkingTreeError(RuntimeError):
+    """Raised when the benchmark would destroy uncommitted work."""
+
+
+def _assert_disposable(root: Path, allow_dirty: bool) -> None:
+    """Refuse to hard-reset a working tree that has anything to lose.
+
+    ``evaluate()`` runs ``git reset --hard`` + ``git clean -fdx``, which discards
+    uncommitted changes AND untracked files. The docstring used to just *warn*
+    ("point it at a disposable clone") — but a warning is not a guard, and nothing
+    stopped you pointing this at the repo you actually work in and losing it.
+
+    On a CLEAN tree those commands destroy nothing, so gate exactly on that: if the
+    tree is clean, proceed; if it has work in it, refuse and say what would die.
+    ``allow_dirty=True`` is the explicit, deliberate override.
+
+    Checked once at construction, not per task — after the first task the tree is
+    *legitimately* dirty (the evaluator applied the patches itself), so a per-task
+    check would refuse to run task 2.
+    """
+    if allow_dirty:
+        return
+
+    proc = subprocess.run(
+        ["git", "-C", str(root), "status", "--porcelain"],
+        capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        raise DirtyWorkingTreeError(
+            f"{root} is not a git repository (or git failed) — refusing to run "
+            "`git reset --hard` / `git clean -fdx` there."
+        )
+
+    dirty = [ln for ln in proc.stdout.splitlines() if ln.strip()]
+    if dirty:
+        shown = "\n".join(f"    {ln}" for ln in dirty[:10])
+        more = f"\n    … and {len(dirty) - 10} more" if len(dirty) > 10 else ""
+        raise DirtyWorkingTreeError(
+            f"refusing to benchmark against {root}: it has {len(dirty)} uncommitted "
+            "or untracked change(s), and this evaluator runs `git reset --hard` + "
+            "`git clean -fdx` before every task — which would destroy them:\n"
+            f"{shown}{more}\n"
+            "Point it at a disposable clone, or pass allow_dirty=True if you really "
+            "mean to throw this work away."
+        )
+
+
 def make_local_git_evaluator(
     repo_root: str | Path,
     *,
     test_command: list[str] | None = None,
     timeout: int = 1800,
+    allow_dirty: bool = False,
 ) -> Evaluator:
     """Reference evaluator over a **local git checkout** — no Docker.
 
@@ -461,10 +509,19 @@ def make_local_git_evaluator(
     the task's tests with ``test_command`` (default: ``python -m pytest``), and
     parses pytest node-id PASSED/FAILED results.
 
-    ⚠️ This mutates ``repo_root`` (it runs ``git reset --hard`` + ``git clean``).
-    Point it at a disposable clone, never a working tree with changes you want.
+    ⚠️ This mutates ``repo_root``: it runs ``git reset --hard`` + ``git clean -fdx``
+    before every task. That is fine on a disposable clone and catastrophic on a tree
+    you were working in, so it is now **enforced, not merely documented**: if
+    ``repo_root`` has uncommitted or untracked changes this raises
+    :class:`DirtyWorkingTreeError` instead of destroying them. Pass
+    ``allow_dirty=True`` to override deliberately.
+
+    Note ``git clean -fdx`` also removes git-ignored files (``.env``, ``.venv``).
+    That is the benchmark's intended clean slate, but it is another reason to run
+    this against a throwaway checkout.
     """
     root = Path(repo_root)
+    _assert_disposable(root, allow_dirty)   # before we take ownership of the tree
     base_cmd = test_command or ["python", "-m", "pytest"]
 
     def _git(*args: str) -> subprocess.CompletedProcess[str]:
