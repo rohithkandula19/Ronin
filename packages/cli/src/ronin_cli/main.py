@@ -1623,13 +1623,14 @@ def mcp_add(
     args: Optional[list[str]] = typer.Argument(None, help="Args for the server command (flags like -y are passed through)."),
     env: Optional[list[str]] = typer.Option(None, "--env", "-e", help="Env var for the server, KEY=VALUE (repeatable). Bare KEY inherits from your shell — good for secrets like tokens."),
 ) -> None:
-    from .mcp_client import add_mcp_server, parse_env_pairs
-    env_map = parse_env_pairs(list(env or []))
-    path = add_mcp_server(name, command, list(args or []), ".", env=env_map or None)
+    from .mcp_client import add_mcp_server, split_env_spec
+    env_map, pass_env = split_env_spec(list(env or []))
+    path = add_mcp_server(name, command, list(args or []), ".",
+                          env=env_map or None, pass_env=pass_env or None)
     console.print(f"[green]✓[/green] added MCP server [bold]{name}[/bold] → [cyan]{path}[/cyan]")
-    if env_map:
-        shown = ", ".join(f"{k}={'•••' if v else '(from shell)'}" for k, v in env_map.items())
-        console.print(f"[dim]env: {shown}[/dim]")
+    if env_map or pass_env:
+        parts = [f"{k}=•••" for k in env_map] + [f"{k}=(from shell)" for k in pass_env]
+        console.print(f"[dim]env: {', '.join(parts)}[/dim]")
     console.print("[dim]its tools load automatically next time you run [bold]ronin[/bold]. "
                   "Verify now with [bold]ronin mcp list[/bold].[/dim]")
 
@@ -1663,14 +1664,14 @@ def mcp_install(
         console.print(f"[yellow]'{name}' isn't in the catalog[/yellow] — see "
                       "[bold]ronin mcp catalog[/bold], or use [bold]ronin mcp add[/bold] for any server.")
         raise typer.Exit(1)
-    # Capture each required env var from the shell IF set. We deliberately omit
-    # unset ones rather than writing "" — an empty value in the spec would
-    # override (shadow) the real value the user exports later, since the server
-    # is launched with {**os.environ, **spec_env}.
-    present = {k: os.environ[k] for k in server.env if os.environ.get(k)}
+    # The server declares which env vars it needs (server.env). Record them as
+    # passEnv NAMES — the server inherits exactly those from the parent at spawn,
+    # and nothing else. A key exported AFTER install is still picked up (resolved
+    # at spawn), and an unset one is simply omitted. The server is no longer
+    # launched with the whole environment, so unrelated secrets never reach it.
     missing = [k for k in server.env if not os.environ.get(k)]
     path = add_mcp_server(server.key, server.command, list(server.args), ".",
-                          env=present or None)
+                          pass_env=list(server.env) or None)
     console.print(f"[green]✓[/green] installed [bold]{server.key}[/bold] [dim]{server.blurb}[/dim] "
                   f"→ [cyan]{path}[/cyan]")
     if server.note:
