@@ -45,18 +45,55 @@ def load_memories() -> list[dict]:
 
 
 def _save(memories: list[dict]) -> None:
+    """Persist facts to the user-global memory file, owner-readable only.
+
+    The file holds durable facts the user chose to store — never secrets:
+    :func:`add_memory` refuses anything the secret scanner flags, so a key cannot
+    reach this write. It is still user data on disk, so the file is created 0600
+    (owner read/write) rather than inheriting a permissive umask.
+    """
     p = _memory_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     try:
+        # CodeQL reports py/clear-text-storage-sensitive-data here. It is a false
+        # positive, and it appeared only because of the guard that makes it one:
+        # add_memory() calls the secret scanner, which taints the fact text as
+        # "sensitive" for CodeQL's dataflow — and it then traces that text into
+        # this (long-standing, unchanged) write. In reality the guard REFUSES any
+        # scanner-flagged secret before it can ever reach this line, so the flow
+        # CodeQL describes cannot occur. What does land here is what the user
+        # deliberately asked ronin to remember ("I use Groq"), which is user data,
+        # not a credential — and it is written 0600, owner-only.
+        # Do not "fix" this by moving the secret check out of add_memory: the
+        # floor is in the store on purpose, so the agent's own `remember` tool is
+        # covered too, not just the CLI.
+        # codeql[py/clear-text-storage-sensitive-data]
         p.write_text(json.dumps({"memories": memories[-_MAX_STORED:]}, indent=2), encoding="utf-8")
+        os.chmod(p, 0o600)
     except OSError:
         pass
 
 
+def secret_labels(text: str) -> list[str]:
+    """The kinds of secret detected in ``text`` (e.g. ``['anthropic-key']``), empty
+    when clean. Obvious placeholders (``EXAMPLE`` / ``REDACTED``) are not secrets."""
+    from .secret_guard import scan_secrets
+    return scan_secrets(text)
+
+
 def add_memory(text: str) -> bool:
-    """Save a durable fact. Returns False if blank or a near-duplicate."""
+    """Save a durable fact. Returns False if blank, a near-duplicate, or if the
+    text carries a secret.
+
+    The secret floor lives HERE, at the store, not only in the CLI — every caller
+    (the ``ronin remember`` command *and* the agent's own ``remember`` tool) is
+    covered. This matters because memories are injected into the system prompt on
+    every future run: a stored key would be re-sent to the provider forever.
+    """
     text = " ".join(text.split()).strip()
     if not text:
+        return False
+    if secret_labels(text):
         return False
     memories = load_memories()
     if any(m.get("text", "").lower() == text.lower() for m in memories):

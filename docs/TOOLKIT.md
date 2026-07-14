@@ -76,6 +76,23 @@ ronin changed main --impact      # changed vs a ref, with each module's blast ra
 unique bare name. `changed` maps `git diff` output onto modules, so a one-line
 edit shows exactly which modules — and how much of the tree — it can affect.
 
+## 🧠 Memory (user-global, cross-session)
+
+```bash
+ronin remember I use Groq and prefer tabs   # store a durable fact
+ronin forget Groq                            # forget facts matching a phrase
+ronin forget --all                           # forget everything
+ronin timeline                               # facts in the order ronin learned them
+ronin timeline --format json -n 50
+```
+
+**ronin never stores secrets.** Remembered facts are injected into the agent's
+system prompt on *every* future run, so a stored key would be re-sent to the
+provider forever. `add_memory` therefore refuses anything the secret scanner
+flags (an API key, token, or AWS id) — the floor is in the store itself, so the
+agent's own `remember` tool is covered too, not just the CLI. Documented
+placeholders (`EXAMPLE` / `REDACTED`) are not treated as secrets.
+
 ```bash
 ronin redact @app.log            # mask emails, IPs, API keys, tokens, JWTs -> [REDACTED-*]
 ronin env-example --write        # safe .env.example from .env (blanks secret values)
