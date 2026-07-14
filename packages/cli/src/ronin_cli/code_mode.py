@@ -470,6 +470,25 @@ def _is_floored_command(name: str, args: dict) -> bool:
     return is_floored_tool_call(name, args)
 
 
+def _floored_payload(args: dict) -> str:
+    """The destructive string that actually tripped the floor, for the block card.
+
+    It does not necessarily live under ``command``: an MCP/plugin tool can carry it
+    as ``query`` / ``sql`` / ``script``. Showing the user the wrong (or an empty)
+    string in the block card would make the refusal unreadable.
+    """
+    from .approvals import EXECUTABLE_ARG_KEYS, _payload_strings, is_destructive_command
+
+    if not isinstance(args, dict):
+        return ""
+    for key, value in args.items():
+        if str(key).strip().lower() in EXECUTABLE_ARG_KEYS:
+            for payload in _payload_strings(value):
+                if is_destructive_command(payload):
+                    return payload
+    return ""
+
+
 def _selective_gate(
     console: Console | None, yolo: bool, root: _Path,
     *, extra_gated: set[str] | None = None, rules: "PermissionRules | None" = None,
@@ -498,14 +517,19 @@ def _selective_gate(
         if deny is not None:
             return (f"blocked by a standing deny-rule ({deny!r}) in "
                     ".ronin/settings.json — do not retry; choose another approach.")
-        if name not in SENSITIVE_TOOLS and name not in gated:
-            return True  # reads + media generation run freely
-        # DESTRUCTIVE FLOOR — a catastrophic shell command (rm -rf, force-push,
-        # drop table, mkfs, fork bomb…) is NEVER silently auto-approved, not even
-        # under --yolo / --god-mode. It always requires an explicit typed
-        # confirmation (default-deny), with a block card + a safer alternative.
+        # DESTRUCTIVE FLOOR — a catastrophic payload (rm -rf, force-push, drop
+        # table, mkfs, fork bomb…) is NEVER silently auto-approved, not even under
+        # --yolo / --god-mode. It always requires an explicit typed confirmation
+        # (default-deny), with a block card + a safer alternative.
+        #
+        # This MUST precede the "not sensitive → run freely" short-circuit below.
+        # It used to sit after it, which meant the floor was only ever reached by
+        # tools that had already been CLASSIFIED sensitive: any tool outside that
+        # set — an MCP server's `execute`, a plugin's own tool — skipped the floor
+        # entirely, gate or no gate. A classification lookup is not allowed to
+        # decide whether the outermost safety authority runs.
         if _is_floored_command(name, args):
-            _cmd = str(args.get("command", ""))
+            _cmd = str(args.get("command", "") or _floored_payload(args))
             if console is None:
                 return ("blocked: destructive command refused — the safety floor "
                         "needs an interactive typed confirmation, unavailable here.")
@@ -523,6 +547,9 @@ def _selective_gate(
                 return ("blocked: destructive command not confirmed — pick a safer "
                         "approach (the safer alternative was shown above).")
             return True  # explicitly, deliberately confirmed
+        if name not in SENSITIVE_TOOLS and name not in gated:
+            return True  # reads + media generation run freely (never destructive:
+            #              the floor above already had its say on every tool)
         if yolo:
             return True
         # A standing allow short-circuits the prompt (the cure for approval fatigue).
@@ -856,15 +883,18 @@ def run_code_agent(
             if deny is not None:
                 return (f"blocked by a standing deny-rule ({deny!r}) in "
                         ".ronin/settings.json — do not retry; choose another approach.")
-            if name not in _sensitive_names:
-                return True
-            # DESTRUCTIVE FLOOR — a catastrophic shell command is NEVER auto-approved
-            # by --yolo/god-mode on the front-end (TUI/headless) path either; force it
-            # to the human gate. Mirrors the console _selective_gate floor, which runs
-            # before the yolo short-circuit. (Prior to this, ronin --tui --god-mode
-            # auto-approved rm -rf / git reset --hard at the yolo line below.)
+            # DESTRUCTIVE FLOOR — a catastrophic payload is NEVER auto-approved by
+            # --yolo/god-mode on the front-end (TUI/headless) path either; force it
+            # to the human gate. Mirrors the console _selective_gate floor.
+            #
+            # Like that gate, this MUST precede the "not sensitive → True"
+            # short-circuit: otherwise the floor is only reached by tools already
+            # CLASSIFIED sensitive, so an MCP/plugin tool outside that set skips it
+            # entirely. The floor is the outermost authority or it is not a floor.
             if _is_floored_command(name, args):
                 return gate_cb(name, args)
+            if name not in _sensitive_names:
+                return True
             if yolo:
                 return True
             if _fe_rules.check(name, args) == "allow":

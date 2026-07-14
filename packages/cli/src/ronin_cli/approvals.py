@@ -124,7 +124,9 @@ DESTRUCTIVE_MARKERS = (
     "git push -f",
     "force-push",
     "force push",
-    "format ",        # "format disk" — trailing space avoids "format string"
+    # NB: bare "format" is NOT a marker — it matched `npm run format`, `make
+    # format`, every formatter task. Drive-format is caught structurally in
+    # _fs_catastrophic (`format c:` / `format /dev/…`) instead.
     "mkfs",
     "dd if=",
     "shred ",
@@ -324,11 +326,38 @@ def _fs_catastrophic(c: str) -> bool:
         return True
     if re.search(r"\bfind\b.*-exec\s+rm\b", c):
         return True
+    # Disk format: the Windows `format c:` / `format /dev/…` command — but NOT
+    # `npm run format`, `make format`, or any formatter task (the reason bare
+    # "format" was removed from the flat markers).
+    if re.search(r"\bformat\s+([a-z]:|/dev/)", c):
+        return True
     if re.search(r"(?:>|\bof=)\s*/dev/(?:sd|nvme|hd|disk|vd|mmcblk)", c):
         return True
     if re.search(r"\bch(?:mod|own)\b.*(?:-[a-z]*r|--recursive).*\s(?:/|~)(?:\s|$)", c):
         return True
     return False
+
+
+# The SQL members of DESTRUCTIVE_MARKERS. They are real signals inside an actual
+# SQL statement, but as a plain substring inside a SHELL command they are a
+# false-positive factory: `git commit -m "fix delete from cart"` and
+# `grep -r "drop table" .` are not destroying anything, and a floor that blocks
+# commit messages and greps is a floor people switch off.
+_SQL_MARKERS = frozenset({"drop table", "drop database", "truncate table", "delete from"})
+
+# Commands that handle TEXT rather than execute SQL. When one of these is the
+# binary, a SQL marker in the command line is data (a message, a search pattern,
+# a printed string) — not a statement being run.
+_TEXT_TOOLS = frozenset({
+    "git", "grep", "rg", "ack", "ag", "echo", "printf", "cat", "less", "more",
+    "sed", "awk", "head", "tail", "diff", "comm", "sort", "uniq",
+})
+
+
+def _leading_binary(c: str) -> str:
+    """The program a command invokes (``/usr/bin/git commit`` -> ``git``)."""
+    parts = c.split()
+    return parts[0].rsplit("/", 1)[-1] if parts else ""
 
 
 def is_destructive_command(command: str) -> bool:
@@ -340,32 +369,187 @@ def is_destructive_command(command: str) -> bool:
     whitespace is collapsed first (so ``rm  -rf`` == ``rm -rf``), and the
     reorder-prone families (``rm`` recursive+force, ``git`` history/clean,
     ``find -delete``, raw-disk writes, recursive ``chmod`` of ``/``) are matched
-    structurally, not as fixed substrings."""
+    structurally, not as fixed substrings.
+
+    SQL markers are suppressed when the binary is a text tool (see
+    :data:`_TEXT_TOOLS`), so ``git commit -m "delete from cart"`` and
+    ``grep "drop table"`` are not floored — while ``psql -c "DROP TABLE users"``
+    still is.
+
+    RESIDUAL: a *shell* marker quoted inside a text-tool command
+    (``git commit -m "rm -rf"``) still trips the floor. It costs one confirmation,
+    never data, so it is left rather than risk suppressing a real
+    ``git commit -m x && rm -rf /``.
+    """
     c = " ".join((command or "").lower().split())  # collapse whitespace runs
-    return (
-        _git_destructive(c)
-        or _rm_destructive(c)
-        or _fs_catastrophic(c)
-        or any(marker in c for marker in DESTRUCTIVE_MARKERS)
+
+    # Non-SQL families are structural/substring and apply to the whole line.
+    if _git_destructive(c) or _rm_destructive(c) or _fs_catastrophic(c):
+        return True
+    non_sql = tuple(m for m in DESTRUCTIVE_MARKERS if m not in _SQL_MARKERS)
+    if any(m in c for m in non_sql):
+        return True
+
+    # SQL markers are text-tool-sensitive, but PER SEGMENT, not per line. Judging
+    # by the leading binary of the WHOLE line let `echo x && psql -c "DROP TABLE"`
+    # through — `echo` is a text tool, so the real `psql DROP TABLE` after `&&` was
+    # waved past. Split on shell separators and decide each segment on its own
+    # leading binary: a SQL word under `git`/`grep`/`echo` is data; the same word
+    # under `psql`/`mysql`/anything else is an executed statement.
+    for seg in re.split(r"&&|\|\||;|\||\n", c):
+        seg = seg.strip()
+        if not seg or _leading_binary(seg) in _TEXT_TOOLS:
+            continue
+        if any(m in seg for m in _SQL_MARKERS):
+            return True
+    return False
+
+
+def is_destructive_sql(statement: str) -> bool:
+    """True if a SQL statement destroys data. Pure.
+
+    Anchored per statement, NOT a substring scan: a ``SELECT`` whose text merely
+    mentions ``drop table`` (a log query, an audit search) destroys nothing, and
+    flooring it would be a false positive. Multi-statement strings are split on
+    ``;`` so ``SELECT 1; DROP TABLE users`` is still caught.
+
+    Before anchoring, each statement's leading SQL comments (``/* … */``, ``-- …``)
+    and ``EXPLAIN [ANALYZE] [(…)]`` wrapper are stripped: ``/* migration */ DROP
+    TABLE`` and ``EXPLAIN ANALYZE DELETE FROM users`` both really execute the
+    destructive statement (EXPLAIN ANALYZE runs its inner DML in Postgres), so
+    anchoring on the raw ``^`` would have missed them.
+    """
+    # `--` comments run to end of LINE, so strip them on the RAW text before
+    # newlines are collapsed — otherwise a leading `-- note` line would swallow the
+    # DROP on the next line.
+    raw = re.sub(r"--[^\n]*", " ", (statement or "").lower())
+    s = " ".join(raw.split())
+    verb = re.compile(
+        r"(drop\s+(table|database|schema|index)\b"
+        r"|truncate\s+(table\s+)?[a-z_\"'`]"   # TABLE keyword is optional in PG/MySQL
+        r"|delete\s+from\b)"
     )
+    for part in s.split(";"):
+        part = part.strip()
+        prev = None
+        while prev != part:   # peel any stack of leading /* */ comments / EXPLAIN wrappers
+            prev = part
+            part = re.sub(r"^/\*.*?\*/\s*", "", part)
+            part = re.sub(r"^explain\s+(analyze\s+)?(\([^)]*\)\s*)?", "", part)
+            part = part.strip()
+        if verb.match(part):
+            return True
+    return False
 
 
-# Tool names whose calls carry a raw shell command the destructive floor must
-# vet. The floor gates these even under --yolo/god-mode, on EVERY gate path.
+# The built-in shell tools. Kept as an explicit list because their payload always
+# lives under ``command``.
 FLOORED_COMMAND_TOOLS = ("run_command", "run_background")
+
+# Argument names that carry an EXECUTABLE payload — a shell command, a script, or
+# a SQL statement — no matter which tool receives them. The floor inspects these on
+# EVERY tool, because a tool's *name* proves nothing: an MCP server can expose
+# ``execute``/``query``, and a plugin can expose anything at all. Gating only
+# ``run_command``/``run_background`` meant a postgres MCP call carrying
+# ``DROP TABLE users``, or an MCP shell tool carrying ``rm -rf /``, auto-approved
+# under --yolo without ever meeting the floor.
+#
+# Deliberately EXCLUDES content-carrying keys (``content``, ``text``, ``body``,
+# ``path``, ``diff``): writing a file that *mentions* ``rm -rf`` is not running it,
+# and floadding those would make the floor a false-positive nuisance on ordinary
+# edits — which is how a safety gate gets disabled.
+SHELL_ARG_KEYS = frozenset({
+    "command", "cmd", "commands", "script", "shell", "bash", "sh",
+    "exec", "execute", "run",
+})
+SQL_ARG_KEYS = frozenset({"query", "sql", "statement"})
+EXECUTABLE_ARG_KEYS = SHELL_ARG_KEYS | SQL_ARG_KEYS
+
+_MAX_ARG_DEPTH = 8
+
+
+def _payload_strings(value: Any, _depth: int = 0) -> list[str]:
+    """Every string under an argument value, however it is nested."""
+    if _depth > _MAX_ARG_DEPTH:
+        return []
+    if isinstance(value, str):
+        return [value]
+    out: list[str] = []
+    if isinstance(value, (list, tuple)):
+        for v in value:
+            out += _payload_strings(v, _depth + 1)
+    elif isinstance(value, Mapping):
+        for v in value.values():
+            out += _payload_strings(v, _depth + 1)
+    return out
+
+
+def _executable_payloads(args: Any, _depth: int = 0) -> tuple[list[str], list[str]]:
+    """(shell payloads, sql payloads) found ANYWHERE in the argument tree.
+
+    Walks nested containers, because MCP tools routinely nest their arguments:
+    ``{"params": {"command": "rm -rf /"}}`` and ``{"steps": [{"cmd": "..."}]}``
+    are ordinary shapes. Scanning only top-level keys — which is what this did at
+    first — left exactly that bypass open.
+    """
+    shell: list[str] = []
+    sql: list[str] = []
+    if _depth > _MAX_ARG_DEPTH:
+        return shell, sql
+
+    if isinstance(args, Mapping):
+        for key, value in args.items():
+            k = str(key).strip().lower()
+            if k in SHELL_ARG_KEYS:
+                shell += _payload_strings(value)
+            elif k in SQL_ARG_KEYS:
+                sql += _payload_strings(value)
+            s, q = _executable_payloads(value, _depth + 1)   # keep descending
+            shell += s
+            sql += q
+    elif isinstance(args, (list, tuple)):
+        for value in args:
+            s, q = _executable_payloads(value, _depth + 1)
+            shell += s
+            sql += q
+    return shell, sql
 
 
 def is_floored_tool_call(name: str, args: Any) -> bool:
     """True when a tool call must be gated by the destructive floor even under
-    ``--yolo`` / god-mode: a shell-command tool (:data:`FLOORED_COMMAND_TOOLS`)
-    whose command string is destructive. The single definition of "floored",
-    shared by every gate path (code mode, investigate mode, front-ends) so no
-    path can auto-approve a catastrophic command. Fail-closed: a non-mapping or
-    missing ``command`` yields an empty string, which is not destructive."""
-    if name not in FLOORED_COMMAND_TOOLS:
+    ``--yolo`` / god-mode.
+
+    Two ways a call gets floored:
+
+    1. It is a built-in shell tool (:data:`FLOORED_COMMAND_TOOLS`) whose
+       ``command`` is destructive.
+    2. It is **any tool at all** — built-in, MCP, or plugin — carrying an
+       executable payload (:data:`EXECUTABLE_ARG_KEYS`) that is destructive. The
+       floor cannot trust a tool's name: MCP servers and plugins choose their own,
+       and a ``postgres.query`` of ``DROP TABLE users`` destroys just as much as
+       ``rm -rf``.
+
+    The single definition of "floored", shared by every gate path (code mode,
+    investigate mode, front-ends), so no path can auto-approve a catastrophic
+    action. Fail-closed: a non-mapping args yields no payload, hence no
+    auto-approval decision based on it.
+
+    RESIDUAL (documented honestly): a tool that destroys something *without*
+    exposing its payload as an argument — an opaque MCP ``delete_everything()`` —
+    cannot be floored by inspection. Such tools are still gated normally; only
+    ``--yolo`` waives that. Inspection can only reach what is inspectable.
+    """
+    if not isinstance(args, Mapping):
         return False
-    cmd = args.get("command", "") if isinstance(args, Mapping) else ""
-    return is_destructive_command(str(cmd or ""))
+
+    if name in FLOORED_COMMAND_TOOLS:
+        if is_destructive_command(str(args.get("command", "") or "")):
+            return True
+
+    shell, sql = _executable_payloads(args)
+    if any(is_destructive_command(p) for p in shell):
+        return True
+    return any(is_destructive_sql(p) for p in sql)
 
 
 def _escalate(a: str, b: str) -> str:

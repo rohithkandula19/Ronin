@@ -84,14 +84,17 @@ def _gate(console: Console | None, yolo: bool):
     from .approvals import is_floored_tool_call
 
     def gate(name: str, args: dict) -> bool:
-        if name not in _INVESTIGATE_SENSITIVE:
-            return True
-        # Destructive floor: a catastrophic shell command is NEVER auto-approved
-        # under --yolo/god-mode — it always drops to an interactive human
-        # confirmation (headless denies). Only a non-floored command may skip the
-        # prompt under yolo. This mirrors the code-mode gate so `ronin investigate`
-        # cannot become a floor bypass.
+        # Destructive floor FIRST — before the "not sensitive → run freely"
+        # short-circuit, exactly as in code_mode's two gates. Checking sensitivity
+        # first meant the floor was only ever reached by tools already CLASSIFIED
+        # sensitive, so any other tool (an MCP `query` carrying DROP TABLE, a
+        # plugin tool carrying rm -rf) skipped it entirely. A classification lookup
+        # does not get to decide whether the outermost safety authority runs.
         floored = is_floored_tool_call(name, args)
+        if not floored and name not in _INVESTIGATE_SENSITIVE:
+            return True
+        # A catastrophic payload is NEVER auto-approved under --yolo/god-mode: it
+        # always drops to an interactive human confirmation (headless denies).
         if yolo and not floored:
             return True
         if console is None:
