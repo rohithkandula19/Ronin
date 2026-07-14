@@ -1472,7 +1472,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.110" },
     { name = "psycopg2-binary", marker = "extra == 'postgres'", specifier = ">=2.9" },
     { name = "pydantic", specifier = ">=2.5" },
-    { name = "pydantic", extras = ["email"], specifier = ">=2.5" },
+    { name = "pydantic", extras = ["email"], specifier = ">=2.13.4" },
     { name = "pydantic-settings", specifier = ">=2.0" },
     { name = "ronin-agent-patterns", editable = "packages/agent-patterns" },
     { name = "ronin-cli", editable = "packages/cli" },
