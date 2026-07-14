@@ -3,8 +3,11 @@
 Layers:
 - ``ShortTermMemory`` — conversation turns with smart compression (summarize older,
   keep recent verbatim).
-- ``LongTermMemory`` — pluggable vector-store wrapper. Default backend is in-memory
-  with Jaccard scoring; install the ``chromadb`` extra for production.
+- ``LongTermMemory`` — pluggable vector-store wrapper. The default backend is
+  in-memory with Jaccard scoring; the ``LongTermMemory`` interface accepts any
+  backend you supply. (A ``chromadb`` extra was dropped: it was unused, and
+  chromadb ships an unpatched pre-auth code-injection advisory — do not add it back
+  until a fixed release exists.)
 - ``UserPreferenceMemory`` — namespaced key-value store with Claude-driven fact
   extraction from free-form messages.
 """
