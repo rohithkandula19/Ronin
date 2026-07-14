@@ -34,11 +34,26 @@ _ACTIVE: list["MCPClient"] = []
 # this, MCP servers were spawned with ``{**os.environ, ...}``, so an arbitrary
 # ``npx -y <third-party-package>`` from the catalog inherited ANTHROPIC_API_KEY,
 # AWS creds, GITHUB_TOKEN — every secret the user had exported.
+# The 13 POSIX locale categories. An EXPLICIT set, not a `startswith("LC_")` — an
+# open prefix would forward a smuggled var like `LC_MYTOKEN` (some SSH configs
+# AcceptEnv `LC_*`, so a token can ride in as a locale) to every spawned server.
+_LC_VARS = frozenset({
+    "LC_ALL", "LC_CTYPE", "LC_NUMERIC", "LC_TIME", "LC_COLLATE", "LC_MONETARY",
+    "LC_MESSAGES", "LC_PAPER", "LC_NAME", "LC_ADDRESS", "LC_TELEPHONE",
+    "LC_MEASUREMENT", "LC_IDENTIFICATION",
+})
+
 _BASE_ENV_ALLOW = frozenset({
     "PATH", "HOME", "USER", "LOGNAME", "SHELL", "PWD", "LANG", "LANGUAGE",
     "TZ", "TERM", "TMPDIR", "TEMP", "TMP", "COLORTERM", "XDG_RUNTIME_DIR",
-    "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "SSL_CERT_FILE",
-    "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS",
+    "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME",
+    # TLS trust config + proxy routing: values are FILE PATHS / URLs, not key
+    # material, and withholding them breaks servers behind a corporate proxy or a
+    # private CA. (SSH_AUTH_SOCK is deliberately NOT here — it forwards live
+    # ssh-agent access, i.e. the user's keys, to an arbitrary server.)
+    "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS", "REQUESTS_CA_BUNDLE",
+    "CURL_CA_BUNDLE", "GIT_SSL_CAINFO", "PIP_CERT",
+    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "FTP_PROXY",
     # Windows operational vars (os.environ upper-cases these on Windows)
     "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "PATHEXT", "COMSPEC", "APPDATA",
     "LOCALAPPDATA", "PROGRAMDATA", "PROGRAMFILES", "PROGRAMFILES(X86)",
@@ -49,11 +64,11 @@ _BASE_ENV_ALLOW = frozenset({
 
 def _base_env() -> dict[str, str]:
     """The non-secret operational subset of the parent environment. Case-insensitive
-    match on the name (Windows varies case), plus any ``LC_*`` locale var."""
+    match on the name (Windows varies case; proxy vars are conventionally lower)."""
     out: dict[str, str] = {}
     for k, v in os.environ.items():
         ku = k.upper()
-        if ku in _BASE_ENV_ALLOW or ku.startswith("LC_"):
+        if ku in _BASE_ENV_ALLOW or ku in _LC_VARS:
             out[k] = v
     return out
 
@@ -196,6 +211,17 @@ def mcp_config_path(root: str | Path = ".") -> Path:
     return Path(root) / ".ronin" / "mcp.json"
 
 
+def _trust_config(path: Path) -> None:
+    """Trust an mcp.json the user just wrote through the CLI — their edit is the
+    consent (mirrors plugin auto-trust). Any CLI write also RE-trusts, since the
+    content hash changed and would otherwise strand the remaining servers."""
+    try:
+        from .plugin_trust import trust
+        trust(path)
+    except Exception:  # noqa: BLE001 — an unwritable trust store must not break `mcp add`
+        pass
+
+
 def load_mcp_servers(root: str | Path = ".") -> dict:
     p = mcp_config_path(root)
     if not p.is_file():
@@ -227,6 +253,7 @@ def add_mcp_server(name: str, command: str, args: list[str], root: str | Path = 
         spec["passEnv"] = list(pass_env)
     data["mcpServers"][name] = spec
     p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    _trust_config(p)   # the user adding a server via the CLI IS the consent
     return p
 
 
@@ -247,6 +274,7 @@ def add_remote_mcp_server(name: str, url: str, root: str | Path = ".",
         spec["headers"] = headers
     data["mcpServers"][name] = spec
     p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    _trust_config(p)   # the user adding a server via the CLI IS the consent
     return p
 
 
@@ -303,6 +331,7 @@ def remove_mcp_server(name: str, root: str | Path = ".") -> bool:
         return False
     del servers[name]
     p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    _trust_config(p)   # the file changed; re-trust so the remaining servers still load
     return True
 
 
@@ -334,9 +363,30 @@ def _wrap_tool(client: MCPClient, spec: dict):
 
 def build_mcp_tools(root: str | Path = ".", *, console=None) -> list:
     """Connect to every server in ``.ronin/mcp.json`` and return their tools as
-    ronin Tools. Per-server failures are reported and skipped, never fatal."""
+    ronin Tools. Per-server failures are reported and skipped, never fatal.
+
+    TRUST GATE. ``.ronin/mcp.json`` lives inside the repository, and each server's
+    ``command`` is spawned at startup — before any tool call — so a repo-committed
+    config is arbitrary code execution (run ``npx -y evil``) AND secret exfil (a
+    server declaring ``passEnv`` receives the named key). Exactly like
+    ``.ronin/plugins/``, ronin refuses to start servers from a config the user has
+    not trusted. ``ronin mcp add`` / ``install`` trust it on write; a repo you
+    cloned does not."""
+    servers = load_mcp_servers(root)
+    if not servers:
+        return []
+    from .plugin_trust import is_trusted
+    cfg = mcp_config_path(root)
+    if not is_trusted(cfg):
+        if console:
+            console.print(
+                f"[#e0af68]⚠ untrusted .ronin/mcp.json — {len(servers)} server(s) "
+                "NOT started (each would run its command at launch). Review it, "
+                "then: [bold]ronin mcp trust[/bold][/#e0af68]")
+        return []
+
     tools: list = []
-    for name, spec in load_mcp_servers(root).items():
+    for name, spec in servers.items():
         # Remote (hosted) servers carry a "url"; local ones carry a "command".
         if spec.get("url"):
             from .mcp_remote import MCPRemoteClient

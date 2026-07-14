@@ -1615,6 +1615,58 @@ def mcp_remove(name: str = typer.Argument(..., help="The server name to remove."
         console.print(f"[yellow]no MCP server named[/yellow] [bold]{name}[/bold] [yellow]configured.[/yellow]")
 
 
+@mcp_app.command("trust", help="Trust .ronin/mcp.json so its servers may start (they run at launch).")
+def mcp_trust_cmd(
+    root: Path = typer.Option(Path("."), "--root", help="Project root."),
+) -> None:
+    """🔐 Approve this repo's MCP config.
+
+    Each server's command is executed at startup — before any tool call — so a
+    repo-committed mcp.json is arbitrary code execution and, via ``passEnv``, secret
+    exfiltration. ronin refuses to start servers from a config you have not trusted.
+    Trusting it is equivalent to agreeing to run the commands shown below; review
+    them first.
+    """
+    from .mcp_client import load_mcp_servers, mcp_config_path
+    from .plugin_trust import is_trusted, trust
+
+    cfg = mcp_config_path(root)
+    if not cfg.is_file():
+        console.print("[dim]no .ronin/mcp.json here[/dim]")
+        raise typer.Exit(1)
+    if is_trusted(cfg):
+        console.print("[#9ece6a]✓ already trusted.[/#9ece6a]")
+        return
+
+    servers = load_mcp_servers(root)
+    console.print(f"[bold]this will let {len(servers)} server(s) run at launch:[/bold]")
+    for name, spec in servers.items():
+        if spec.get("url"):
+            console.print(f"  [cyan]{name}[/cyan]  → {spec['url']} [dim](remote)[/dim]")
+        else:
+            passenv = spec.get("passEnv") or []
+            secret = f"  [#f7768e](inherits: {', '.join(passenv)})[/#f7768e]" if passenv else ""
+            console.print(f"  [cyan]{name}[/cyan]  {spec.get('command','')} "
+                          f"{' '.join(spec.get('args', []))}{secret}")
+    trust(cfg)
+    console.print("[#9ece6a]✓[/#9ece6a] trusted — servers load next time you run ronin.")
+
+
+@mcp_app.command("untrust", help="Revoke trust so .ronin/mcp.json servers stop starting.")
+def mcp_untrust_cmd(
+    root: Path = typer.Option(Path("."), "--root", help="Project root."),
+) -> None:
+    """🔒 Revoke this repo's MCP config — its servers will not start again."""
+    from .mcp_client import mcp_config_path
+    from .plugin_trust import untrust
+
+    cfg = mcp_config_path(root)
+    if untrust(cfg):
+        console.print("[#9ece6a]✓[/#9ece6a] revoked — mcp.json servers will not start.")
+    else:
+        console.print("[dim].ronin/mcp.json was not trusted[/dim]")
+
+
 @mcp_app.command("add", help="Add an MCP server: ronin mcp add NAME COMMAND [ARGS...]",
                  context_settings={"ignore_unknown_options": True})
 def mcp_add(
