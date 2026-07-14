@@ -913,8 +913,12 @@ def run_code_agent(
     on_reset = on_reset_cb or (renderer.on_reset if renderer is not None else None)
 
     # user-defined hooks (auto-format/test after edits, etc.) from .ronin/hooks.json
-    from .hooks import build_after_tool, load_hooks
+    from .hooks import build_after_tool, load_hooks, untrusted_present
     _hooks = load_hooks(root)
+    if not _hooks and untrusted_present(root):
+        console.print("[#e0af68]⚠ untrusted .ronin/hooks.json — hooks NOT run "
+                      "(each runs a shell command). Review it, then: "
+                      "[bold]ronin hooks trust[/bold][/#e0af68]")
     after_tool = build_after_tool(_hooks, root, console=console) if _hooks else None
 
     # Faithfulness edit guard: score every proposed write/edit against the files

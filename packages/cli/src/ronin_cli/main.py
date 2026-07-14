@@ -2780,6 +2780,70 @@ hook_app = typer.Typer(help="Manage ronin's git pre-commit secret-scan hook.")
 app.add_typer(hook_app, name="hook")
 
 
+# Tool-event hooks (.ronin/hooks.json) — distinct from the git pre-commit `hook`.
+hooks_app = typer.Typer(help="Trust/list .ronin/hooks.json — shell commands ronin runs on tool events.")
+app.add_typer(hooks_app, name="hooks")
+
+
+@hooks_app.command("list", help="Show the hooks declared in .ronin/hooks.json and whether they're trusted.")
+def hooks_list(root: Path = typer.Option(Path("."), "--root", help="Project root.")) -> None:
+    from .hooks import hooks_config_path, load_hooks
+    from .plugin_trust import is_trusted
+
+    cfg = hooks_config_path(root)
+    if not cfg.is_file():
+        console.print("[dim]no .ronin/hooks.json here[/dim]")
+        return
+    trusted = is_trusted(cfg)
+    hooks = load_hooks(root, require_trust=False)
+    state = "[#9ece6a]trusted[/#9ece6a]" if trusted else "[#f7768e]UNTRUSTED — not run[/#f7768e]"
+    console.print(f"[bold].ronin/hooks.json[/bold] ({state}) — {len(hooks)} hook(s):")
+    for h in hooks:
+        console.print(f"  [cyan]{h.get('event','?')}[/cyan]  {h.get('command','')}")
+    if not trusted:
+        console.print("[dim]review the commands above, then: ronin hooks trust[/dim]")
+
+
+@hooks_app.command("trust", help="Trust .ronin/hooks.json so its hooks run (each is a shell command).")
+def hooks_trust(root: Path = typer.Option(Path("."), "--root", help="Project root.")) -> None:
+    """🔐 Approve this repo's tool-event hooks.
+
+    Each hook runs a shell command when the agent edits a file or runs a command,
+    so a repo-committed hooks.json is arbitrary code execution. ronin refuses to run
+    hooks from a config you have not trusted. Trusting it is equivalent to agreeing
+    to run the commands shown; review them first.
+    """
+    from .hooks import hooks_config_path, load_hooks
+    from .plugin_trust import is_trusted, trust
+
+    cfg = hooks_config_path(root)
+    if not cfg.is_file():
+        console.print("[dim]no .ronin/hooks.json here[/dim]")
+        raise typer.Exit(1)
+    if is_trusted(cfg):
+        console.print("[#9ece6a]✓ already trusted.[/#9ece6a]")
+        return
+    hooks = load_hooks(root, require_trust=False)
+    console.print(f"[bold]this will let {len(hooks)} hook(s) run shell commands on tool events:[/bold]")
+    for h in hooks:
+        console.print(f"  [cyan]{h.get('event','?')}[/cyan]  {h.get('command','')}")
+    trust(cfg)
+    console.print("[#9ece6a]✓[/#9ece6a] trusted — hooks run next time you use ronin here.")
+
+
+@hooks_app.command("untrust", help="Revoke trust so .ronin/hooks.json hooks stop running.")
+def hooks_untrust(root: Path = typer.Option(Path("."), "--root", help="Project root.")) -> None:
+    """🔒 Revoke this repo's tool-event hooks — they will not run again."""
+    from .hooks import hooks_config_path
+    from .plugin_trust import untrust
+
+    cfg = hooks_config_path(root)
+    if untrust(cfg):
+        console.print("[#9ece6a]✓[/#9ece6a] revoked — .ronin/hooks.json hooks will not run.")
+    else:
+        console.print("[dim].ronin/hooks.json was not trusted[/dim]")
+
+
 @hook_app.command("install")
 def hook_install(root: Path = typer.Option(Path("."), "--root", help="Repo root.")) -> None:
     """Install the pre-commit hook that blocks commits containing secrets."""
