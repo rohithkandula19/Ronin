@@ -20,6 +20,7 @@ displayed as they fire. A failing or hanging hook can never break the agent.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 from typing import Callable
@@ -27,9 +28,38 @@ from typing import Callable
 _EDIT_TOOLS = {"write_file", "edit_file", "multi_edit"}
 
 
-def load_hooks(root: str | Path = ".") -> list[dict]:
-    p = Path(root) / ".ronin" / "hooks.json"
+def hooks_config_path(root: str | Path = ".") -> Path:
+    return Path(root) / ".ronin" / "hooks.json"
+
+
+def _is_trusted(p: Path) -> bool:
+    """Fail-closed: any error resolving trust means NOT trusted."""
+    try:
+        from .plugin_trust import is_trusted
+        return is_trusted(p)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def untrusted_present(root: str | Path = ".") -> bool:
+    """True if a hooks.json exists but is not trusted — so its hooks won't fire and
+    the caller should say so instead of the user's hooks silently vanishing."""
+    p = hooks_config_path(root)
+    return p.is_file() and not _is_trusted(p)
+
+
+def load_hooks(root: str | Path = ".", *, require_trust: bool = True) -> list[dict]:
+    """The hooks declared in ``.ronin/hooks.json`` — but ONLY if the user trusted it.
+
+    A hook is a shell command run on tool events, so ``.ronin/hooks.json`` (which
+    lives in the repo) is arbitrary code execution: a cloned repo shipping one runs
+    its commands as soon as the agent edits a file. Untrusted configs yield no
+    hooks. ``require_trust=False`` is for this module's own unit tests only.
+    """
+    p = hooks_config_path(root)
     if not p.is_file():
+        return []
+    if require_trust and not _is_trusted(p):
         return []
     try:
         hooks = json.loads(p.read_text(encoding="utf-8")).get("hooks", [])
@@ -57,12 +87,21 @@ def build_after_tool(hooks: list[dict], root: str | Path, *, console=None) -> Ca
         if event is None:
             return
         target = str(args.get("path", "")) if event == "post_edit" else ""
+        # Pass the edited path as an ENVIRONMENT VARIABLE, never string-substituted
+        # into the shell command. A repo can contain a file whose NAME is a shell
+        # injection (`$(rm -rf ~).py`, `a.py; …`). String substitution — even
+        # shlex.quote'd — is unsafe, because shlex.quote only protects an UNQUOTED
+        # position: a hook author who idiomatically writes `ruff format "$FILE"`
+        # would re-expose the `$(...)` inside their own quotes. Passed as an env
+        # var, the shell expands `$FILE` WITHOUT re-scanning the value for command
+        # substitution or separators, so a hostile filename can never run a command.
+        hook_env = {**os.environ, "FILE": target, "RONIN_FILE": target}
         for h in hooks:
             if h.get("event") != event:
                 continue
-            cmd = str(h["command"]).replace("$FILE", target)
+            cmd = str(h["command"])   # $FILE stays literal; the shell expands it from env
             try:
-                r = subprocess.run(cmd, shell=True, cwd=str(root_path),
+                r = subprocess.run(cmd, shell=True, cwd=str(root_path), env=hook_env,
                                    capture_output=True, text=True, timeout=120)
             except Exception as e:  # noqa: BLE001
                 if console:
