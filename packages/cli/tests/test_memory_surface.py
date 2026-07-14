@@ -1,0 +1,114 @@
+"""Ronin v1.1 / Phase 6 — the memory surface (`remember` / `forget` / `timeline`)
+and, more importantly, the SECRET FLOOR on the memory store.
+
+Memories are injected into the agent's system prompt on every future run, so a
+stored key would be re-sent to the provider forever. The floor therefore lives in
+``memory_store.add_memory`` itself — not just the CLI — so the agent's own
+``remember`` tool cannot persist a secret either.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+from typer.testing import CliRunner
+
+from ronin_cli import memory_store
+from ronin_cli.main import app
+
+runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def isolated_memory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    # memory_store honors RONIN_HOME — never touch the real ~/.ronin in tests.
+    monkeypatch.setenv("RONIN_HOME", str(tmp_path))
+    return tmp_path
+
+
+# ---------- the secret floor (the point of this change) ----------
+
+SECRETS = [
+    "my token is ghp_a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8",
+    "key sk-ant-api03-a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8g9h0",
+    "AKIA2E0A8F3B5C7D9E1F",
+]
+
+
+@pytest.mark.parametrize("secret", SECRETS)
+def test_remember_refuses_a_secret(secret: str):
+    r = runner.invoke(app, ["remember", secret])
+    assert r.exit_code == 1, r.output
+    assert "looks like a secret" in r.output
+    assert memory_store.list_memories() == []      # nothing persisted
+
+
+@pytest.mark.parametrize("secret", SECRETS)
+def test_store_layer_refuses_secret_not_just_the_cli(secret: str):
+    # defense in depth: the agent's own `remember` tool calls add_memory directly.
+    assert memory_store.add_memory(secret) is False
+    assert memory_store.list_memories() == []
+
+
+def test_placeholder_is_not_treated_as_a_secret():
+    # a documented placeholder is not a key — don't block legitimate facts
+    assert memory_store.add_memory("set sk-ant-REDACTED-EXAMPLE in .env") is True
+
+
+# ---------- remember / forget / timeline ----------
+
+def test_remember_stores_a_fact():
+    r = runner.invoke(app, ["remember", "I", "use", "Groq"])
+    assert r.exit_code == 0, r.output
+    assert "remembered" in r.output
+    assert "I use Groq" in memory_store.list_memories()
+
+
+def test_remember_dedups():
+    runner.invoke(app, ["remember", "I", "use", "Groq"])
+    r = runner.invoke(app, ["remember", "I", "use", "Groq"])
+    assert r.exit_code == 0
+    assert "already known" in r.output
+    assert memory_store.list_memories().count("I use Groq") == 1
+
+
+def test_forget_matching():
+    runner.invoke(app, ["remember", "I", "use", "Groq"])
+    r = runner.invoke(app, ["forget", "Groq"])
+    assert r.exit_code == 0, r.output
+    assert "forgot 1" in r.output
+    assert memory_store.list_memories() == []
+
+
+def test_forget_all():
+    runner.invoke(app, ["remember", "one", "fact"])
+    runner.invoke(app, ["remember", "another", "fact"])
+    r = runner.invoke(app, ["forget", "--all"])
+    assert r.exit_code == 0, r.output
+    assert memory_store.list_memories() == []
+
+
+def test_forget_without_pattern_exits_2():
+    r = runner.invoke(app, ["forget"])
+    assert r.exit_code == 2
+
+
+def test_timeline_is_chronological():
+    runner.invoke(app, ["remember", "first", "fact"])
+    runner.invoke(app, ["remember", "second", "fact"])
+    r = runner.invoke(app, ["timeline"])
+    assert r.exit_code == 0, r.output
+    assert r.output.index("first fact") < r.output.index("second fact")
+
+
+def test_timeline_empty():
+    r = runner.invoke(app, ["timeline"])
+    assert r.exit_code == 0
+    assert "nothing remembered yet" in r.output
+
+
+def test_timeline_json():
+    runner.invoke(app, ["remember", "I", "use", "Groq"])
+    r = runner.invoke(app, ["timeline", "--format", "json"])
+    assert r.exit_code == 0, r.output
+    assert '"facts"' in r.output and "I use Groq" in r.output
