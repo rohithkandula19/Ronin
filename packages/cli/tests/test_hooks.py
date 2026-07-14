@@ -55,16 +55,27 @@ def test_no_file_is_not_untrusted(tmp_path: Path) -> None:
 
 # ---------- $FILE injection into shell=True ----------
 
-def test_file_arg_is_shell_quoted(tmp_path: Path) -> None:
-    # a repo can contain a file whose NAME is a shell injection. Even for a trusted
-    # hook, $FILE must be quoted so it can't run a second command.
+@pytest.mark.parametrize("hook_cmd", [
+    "echo $FILE",       # unquoted
+    'echo "$FILE"',     # double-quoted — the IDIOMATIC form; the one shlex.quote broke
+    "echo '$FILE'",     # single-quoted
+])
+@pytest.mark.parametrize("evil_name", [
+    "a.py; touch {m}",          # command separator
+    "$(touch {m}).py",          # command substitution — fired 3/3 under shlex.quote
+    "`touch {m}`.py",           # backtick substitution
+    "a.py && touch {m}",        # chain
+])
+def test_hostile_filename_cannot_inject(tmp_path: Path, hook_cmd: str, evil_name: str) -> None:
+    # A repo file whose NAME is a shell injection must not run a command through a
+    # hook, in ANY quoting style the author used. $FILE is passed as an env var, so
+    # the shell never re-scans the value for $()/backticks/separators.
     marker = tmp_path / "PWNED"
-    evil_name = f"a.py; touch {marker}"
+    name = evil_name.format(m=marker)
     (tmp_path / "a.py").write_text("x=1")
-    hooks = [{"event": "post_edit", "command": "echo formatting $FILE"}]
-    after = build_after_tool(hooks, tmp_path)
-    after("write_file", {"path": evil_name}, "ok", False)
-    assert not marker.exists(), "an injected filename ran a command through a hook"
+    after = build_after_tool([{"event": "post_edit", "command": hook_cmd}], tmp_path)
+    after("write_file", {"path": name}, "ok", False)
+    assert not marker.exists(), f"injection via {hook_cmd!r} + filename {name!r}"
 
 
 # ---------- behavior (with trust; the original contract) ----------

@@ -20,7 +20,7 @@ displayed as they fire. A failing or hanging hook can never break the agent.
 from __future__ import annotations
 
 import json
-import shlex
+import os
 import subprocess
 from pathlib import Path
 from typing import Callable
@@ -87,16 +87,21 @@ def build_after_tool(hooks: list[dict], root: str | Path, *, console=None) -> Ca
         if event is None:
             return
         target = str(args.get("path", "")) if event == "post_edit" else ""
-        # $FILE goes into a shell=True string, so a path with shell metacharacters
-        # (a repo can contain a file literally named `x; rm -rf ~`) would inject a
-        # command even into a trusted hook. Quote it so it is always ONE argument.
-        safe_target = shlex.quote(target)
+        # Pass the edited path as an ENVIRONMENT VARIABLE, never string-substituted
+        # into the shell command. A repo can contain a file whose NAME is a shell
+        # injection (`$(rm -rf ~).py`, `a.py; …`). String substitution — even
+        # shlex.quote'd — is unsafe, because shlex.quote only protects an UNQUOTED
+        # position: a hook author who idiomatically writes `ruff format "$FILE"`
+        # would re-expose the `$(...)` inside their own quotes. Passed as an env
+        # var, the shell expands `$FILE` WITHOUT re-scanning the value for command
+        # substitution or separators, so a hostile filename can never run a command.
+        hook_env = {**os.environ, "FILE": target, "RONIN_FILE": target}
         for h in hooks:
             if h.get("event") != event:
                 continue
-            cmd = str(h["command"]).replace("$FILE", safe_target)
+            cmd = str(h["command"])   # $FILE stays literal; the shell expands it from env
             try:
-                r = subprocess.run(cmd, shell=True, cwd=str(root_path),
+                r = subprocess.run(cmd, shell=True, cwd=str(root_path), env=hook_env,
                                    capture_output=True, text=True, timeout=120)
             except Exception as e:  # noqa: BLE001
                 if console:
