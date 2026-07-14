@@ -6409,6 +6409,90 @@ def architecture(
         console.print("  [#e0af68]run `ronin graph --cycles` to see the circular imports[/#e0af68]")
 
 
+# ---------- remember / forget / timeline (Phase 6 memory surface) ----------
+
+@app.command()
+def remember(
+    fact: list[str] = typer.Argument(..., help='The fact, e.g. `ronin remember I use Groq`.'),
+) -> None:
+    """🧠 Remember a durable fact about you (user-global, across every session).
+
+    Refuses anything that looks like a secret: memories are injected into the
+    agent's system prompt on every future run, so a stored key would be re-sent
+    to the provider forever. ronin never stores keys.
+    """
+    from .memory_store import add_memory, secret_labels
+
+    text = " ".join(fact).strip()
+    if not text:
+        console.print("[#f7768e]nothing to remember[/#f7768e]")
+        raise typer.Exit(2)
+
+    labels = secret_labels(text)
+    if labels:
+        kinds = ", ".join(sorted(set(labels)))
+        console.print(f"[#f7768e]refused — that looks like a secret ({kinds}).[/#f7768e]")
+        console.print("[dim]memory is injected into every future prompt; ronin never stores keys.[/dim]")
+        raise typer.Exit(1)
+
+    if add_memory(text):
+        console.print(f"[#9ece6a]✓[/#9ece6a] remembered: {text}")
+    else:
+        console.print("[dim]already known — nothing added[/dim]")
+
+
+@app.command()
+def forget(
+    pattern: list[str] = typer.Argument(None, help="Forget facts matching this phrase."),
+    forget_everything: bool = typer.Option(False, "--all", help="Forget everything."),
+) -> None:
+    """🧽 Forget remembered facts matching a phrase (or ``--all``)."""
+    from .memory_store import forget as _forget_matching
+    from .memory_store import forget_all
+
+    if forget_everything:
+        n = forget_all()
+        console.print(f"[#9ece6a]✓[/#9ece6a] forgot {n} fact(s).")
+        return
+
+    text = " ".join(pattern or []).strip()
+    if not text:
+        console.print("[#f7768e]give a phrase to forget, or --all[/#f7768e]")
+        raise typer.Exit(2)
+    n = _forget_matching(text)
+    if n:
+        console.print(f"[#9ece6a]✓[/#9ece6a] forgot {n} fact(s) matching {text!r}.")
+    else:
+        console.print(f"[dim]nothing matched {text!r}[/dim]")
+
+
+@app.command()
+def timeline(
+    limit: int = typer.Option(20, "--limit", "-n", help="How many facts to show (newest last)."),
+    format: str = typer.Option("text", "--format", "-f", help="text | json"),
+) -> None:
+    """🕰  What ronin learned about you, in the order it learned it."""
+    from datetime import datetime
+
+    from .memory_store import load_memories
+
+    mems = load_memories()
+    if not mems:
+        console.print("[dim]nothing remembered yet — try `ronin remember ...`[/dim]")
+        return
+
+    recent = mems[-limit:]
+    if format.lower() == "json":
+        console.print_json(data={"count": len(mems), "facts": recent})
+        return
+
+    console.print(f"[bold]memory timeline[/bold] [dim]({len(mems)} fact(s), showing {len(recent)})[/dim]")
+    for m in recent:
+        ts = m.get("ts")
+        when = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M") if ts else "—"
+        console.print(f"  [dim]{when}[/dim]  {m.get('text', '')}")
+
+
 # ---------- impact / changed / why (Phase 6 change intelligence) ----------
 
 @app.command()

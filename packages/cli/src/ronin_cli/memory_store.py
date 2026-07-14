@@ -53,10 +53,26 @@ def _save(memories: list[dict]) -> None:
         pass
 
 
+def secret_labels(text: str) -> list[str]:
+    """The kinds of secret detected in ``text`` (e.g. ``['anthropic-key']``), empty
+    when clean. Obvious placeholders (``EXAMPLE`` / ``REDACTED``) are not secrets."""
+    from .secret_guard import scan_secrets
+    return scan_secrets(text)
+
+
 def add_memory(text: str) -> bool:
-    """Save a durable fact. Returns False if blank or a near-duplicate."""
+    """Save a durable fact. Returns False if blank, a near-duplicate, or if the
+    text carries a secret.
+
+    The secret floor lives HERE, at the store, not only in the CLI — every caller
+    (the ``ronin remember`` command *and* the agent's own ``remember`` tool) is
+    covered. This matters because memories are injected into the system prompt on
+    every future run: a stored key would be re-sent to the provider forever.
+    """
     text = " ".join(text.split()).strip()
     if not text:
+        return False
+    if secret_labels(text):
         return False
     memories = load_memories()
     if any(m.get("text", "").lower() == text.lower() for m in memories):
