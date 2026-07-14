@@ -129,3 +129,14 @@ def test_timeline_json():
     r = runner.invoke(app, ["timeline", "--format", "json"])
     assert r.exit_code == 0, r.output
     assert '"facts"' in r.output and "I use Groq" in r.output
+
+
+def test_memory_file_is_owner_only(isolated_memory: Path):
+    """The memory file is user data on disk — create it 0600, not whatever the
+    umask happens to allow."""
+    import os
+
+    assert memory_store.add_memory("I use Groq") is True
+    p = isolated_memory / "memory.json"
+    assert p.is_file()
+    assert (p.stat().st_mode & 0o777) == 0o600, oct(p.stat().st_mode & 0o777)

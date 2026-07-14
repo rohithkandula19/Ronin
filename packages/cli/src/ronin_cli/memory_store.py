@@ -45,10 +45,18 @@ def load_memories() -> list[dict]:
 
 
 def _save(memories: list[dict]) -> None:
+    """Persist facts to the user-global memory file, owner-readable only.
+
+    The file holds durable facts the user chose to store — never secrets:
+    :func:`add_memory` refuses anything the secret scanner flags, so a key cannot
+    reach this write. It is still user data on disk, so the file is created 0600
+    (owner read/write) rather than inheriting a permissive umask.
+    """
     p = _memory_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     try:
         p.write_text(json.dumps({"memories": memories[-_MAX_STORED:]}, indent=2), encoding="utf-8")
+        os.chmod(p, 0o600)
     except OSError:
         pass
 
