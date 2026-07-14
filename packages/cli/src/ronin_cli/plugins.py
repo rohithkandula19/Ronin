@@ -35,6 +35,16 @@ from ronin_agent_patterns import Tool
 PLUGIN_DIR_NAME = "plugins"
 
 
+def _is_trusted(py_file: Path) -> bool:
+    """Local import so the loader keeps working if the trust store is unreadable —
+    but fail CLOSED: any error means 'not trusted', never 'trusted'."""
+    try:
+        from .plugin_trust import is_trusted
+        return is_trusted(py_file)
+    except Exception:  # noqa: BLE001 — an unusable trust store must not grant trust
+        return False
+
+
 @dataclass
 class PluginLoadResult:
     name: str
@@ -48,12 +58,24 @@ def find_plugin_dir() -> Path:
     return Path(".ronin") / PLUGIN_DIR_NAME
 
 
-def load_plugins(plugin_dir: Path | None = None) -> list[PluginLoadResult]:
+def load_plugins(
+    plugin_dir: Path | None = None, *, require_trust: bool = True
+) -> list[PluginLoadResult]:
     """Discover and load every plugin in ``plugin_dir``.
 
     Each ``.py`` file (not starting with ``_``) is imported; if it defines
     ``register_tools() -> list[Tool]`` that function is called. Errors in one
     plugin do not abort loading the others — they are captured on the result.
+
+    **Untrusted files are never imported.** ``.ronin/plugins/`` lives inside the
+    repository, and importing a file executes it — before any tool call, so the
+    approval gate and destructive floor never see it. A cloned repo carrying a
+    plugin would otherwise be remote code execution. Only files the user has
+    explicitly trusted (``ronin plugin trust``, or installed themselves via
+    ``plugin new`` / ``add`` / ``from-api``) are imported; see :mod:`plugin_trust`.
+
+    ``require_trust=False`` skips that check and is for the loader's own unit
+    tests only — never pass it on a path reachable from a repository.
     """
     plugin_dir = plugin_dir or find_plugin_dir()
     results: list[PluginLoadResult] = []
@@ -62,6 +84,14 @@ def load_plugins(plugin_dir: Path | None = None) -> list[PluginLoadResult]:
 
     for py_file in sorted(plugin_dir.glob("*.py")):
         if py_file.name.startswith("_"):
+            continue
+        if require_trust and not _is_trusted(py_file):
+            # Do NOT import it. Reporting the file is safe; executing it is not.
+            results.append(PluginLoadResult(
+                py_file.stem, py_file, [],
+                "untrusted — not loaded. Review the file, then: "
+                f"ronin plugin trust {py_file.name}",
+            ))
             continue
         module_name = f"_csk_plugin_{py_file.stem}"
         try:
@@ -97,11 +127,15 @@ def load_plugins(plugin_dir: Path | None = None) -> list[PluginLoadResult]:
     return results
 
 
-def load_plugin_tools(plugin_dir: Path | None = None) -> list[Tool]:
-    """Convenience: just the tools from successful loads."""
+def load_plugin_tools(
+    plugin_dir: Path | None = None, *, require_trust: bool = True
+) -> list[Tool]:
+    """Convenience: just the tools from successful loads. Untrusted files are not
+    imported (see :func:`load_plugins`); ``require_trust=False`` is for the
+    loader's own unit tests only."""
     tools: list[Tool] = []
     seen: set[str] = set()
-    for result in load_plugins(plugin_dir):
+    for result in load_plugins(plugin_dir, require_trust=require_trust):
         for tool in result.tools:
             if tool.name in seen:
                 continue

@@ -1366,6 +1366,7 @@ def plugin_new(
     root: Path = typer.Option(Path("."), "--root", help="Project root (writes to <root>/.ronin/plugins/)."),
 ) -> None:
     from .plugin_scaffold import write_plugin
+    from .plugin_trust import trust as _trust
     try:
         path = write_plugin(name, root, description=desc, overwrite=force)
     except ValueError as e:
@@ -1374,6 +1375,7 @@ def plugin_new(
     except FileExistsError as e:
         console.print(f"[yellow]already exists:[/yellow] {e} [dim](use --force to overwrite)[/dim]")
         raise typer.Exit(1)
+    _trust(path)   # the user creating it IS the consent; repo-committed files are not
     console.print(f"[green]✓[/green] scaffolded plugin [bold]{name}[/bold] → [cyan]{path}[/cyan]")
     console.print(f"  [dim]edit the [bold]{name}()[/bold] function to call your API/logic, then run "
                   "[bold]ronin[/bold] — the agent picks it up automatically.[/dim]")
@@ -1417,8 +1419,11 @@ def plugin_update(
     if not targets:
         console.print("[green]✓ all installed library plugins are up to date.[/green]")
         return
+    from .plugin_trust import trust as _trust
     for n in targets:
-        (pdir / f"{n}.py").write_text(LIBRARY[n].source, encoding="utf-8")
+        dest = pdir / f"{n}.py"
+        dest.write_text(LIBRARY[n].source, encoding="utf-8")
+        _trust(dest)   # rewriting from the shipped library changes the digest; re-trust it
         console.print(f"[green]✓[/green] updated [bold]{n}[/bold]")
     console.print(f"[dim]refreshed {len(targets)} plugin(s) — live next time you run ronin.[/dim]")
 
@@ -1446,6 +1451,8 @@ def plugin_from_api(
         console.print(f"[yellow]already exists:[/yellow] {path} [dim](use --force)[/dim]")
         raise typer.Exit(1)
     path.write_text(src, encoding="utf-8")
+    from .plugin_trust import trust as _trust
+    _trust(path)   # user-generated from a URL they supplied — that is the consent
     from .plugin_from_api import url_params
     params = url_params(url)
     console.print(f"[green]✓[/green] generated tool [bold]{name}[/bold] → [cyan]{path}[/cyan]")
@@ -1491,9 +1498,69 @@ def plugin_add(
         console.print(f"[yellow]already exists:[/yellow] {path} [dim](use --force)[/dim]")
         raise typer.Exit(1)
     path.write_text(entry.source, encoding="utf-8")
+    from .plugin_trust import trust as _trust
+    _trust(path)   # installed from the shipped library on the user's command
     console.print(f"[green]✓[/green] installed plugin [bold]{entry.name}[/bold] "
                   f"[dim]{entry.blurb}[/dim] → [cyan]{path}[/cyan]")
     console.print("  [dim]live in the agent next time you run [bold]ronin[/bold].[/dim]")
+
+
+@plugin_app.command("trust", help="Trust a plugin file so ronin may import it: ronin plugin trust weather")
+def plugin_trust_cmd(
+    name: str = typer.Argument(None, help="Plugin name or file (default: show what is untrusted)."),
+    root: Path = typer.Option(Path("."), "--root", help="Project root."),
+    all_: bool = typer.Option(False, "--all", help="Trust every untrusted plugin in this repo."),
+) -> None:
+    """🔐 Approve a plugin for import.
+
+    `.ronin/plugins/` lives inside the repository, and importing a plugin EXECUTES
+    it — before any tool call, so the approval gate never sees it. ronin therefore
+    refuses to import a plugin file it has not been told to trust. Read the file
+    first; trusting it is equivalent to running it.
+    """
+    from .plugin_trust import trust as _trust
+    from .plugin_trust import untrusted_in
+
+    pdir = Path(root) / ".ronin" / "plugins"
+    pending = untrusted_in(pdir)
+
+    if not name and not all_:
+        if not pending:
+            console.print("[#9ece6a]✓ every plugin in this repo is trusted.[/#9ece6a]")
+            return
+        console.print(f"[#e0af68]{len(pending)} untrusted plugin(s) — not imported:[/#e0af68]")
+        for f in pending:
+            console.print(f"  {f}")
+        console.print("[dim]review the file, then: ronin plugin trust <name> (or --all)[/dim]")
+        return
+
+    targets = pending if all_ else [pdir / (name if name.endswith(".py") else f"{name}.py")]
+    n = 0
+    for f in targets:
+        if not f.is_file():
+            console.print(f"[#f7768e]no such plugin: {f}[/#f7768e]")
+            raise typer.Exit(2)
+        _trust(f)
+        console.print(f"[#9ece6a]✓[/#9ece6a] trusted {f.name}")
+        n += 1
+    if n:
+        console.print("[dim]it will be imported next time you run ronin.[/dim]")
+
+
+@plugin_app.command("untrust", help="Revoke trust so ronin stops importing a plugin.")
+def plugin_untrust_cmd(
+    name: str = typer.Argument(..., help="Plugin name or file."),
+    root: Path = typer.Option(Path("."), "--root", help="Project root."),
+) -> None:
+    """🔒 Revoke a plugin's trust — ronin will refuse to import it again."""
+    from .plugin_trust import untrust as _untrust
+
+    pdir = Path(root) / ".ronin" / "plugins"
+    f = pdir / (name if name.endswith(".py") else f"{name}.py")
+    if _untrust(f):
+        console.print(f"[#9ece6a]✓[/#9ece6a] revoked trust for {f.name} — it will not be imported.")
+    else:
+        console.print(f"[dim]{f.name} was not trusted[/dim]")
 
 
 @plugin_app.command("remove", help="Delete a plugin file: ronin plugin remove weather")
