@@ -48,7 +48,10 @@ def test_profile_can_deny_network():
     assert "(allow network*)" in seatbelt_profile("/x", allow_network=True)
 
 
-def test_wrap_command_builds_sandbox_exec_argv(tmp_path):
+def test_wrap_command_builds_sandbox_exec_argv(tmp_path, monkeypatch):
+    # The argv shape is pure logic — fake macOS so it is testable on any OS
+    # (Linux CI included), without needing a real sandbox-exec.
+    monkeypatch.setattr("ronin_cli.backends.platform.system", lambda: "Darwin")
     argv = wrap_command("echo hi", {"type": "seatbelt", "workspace": str(tmp_path)})
     assert argv[0] == "sandbox-exec" and argv[1] == "-p"
     assert argv[-3:] == ["/bin/sh", "-c", "echo hi"]    # command carried as ONE element
