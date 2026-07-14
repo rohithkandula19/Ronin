@@ -1914,7 +1914,10 @@ def run_unified_session(
     # at launch; Claude Code doesn't announce its tool wiring either).
     mcp_tools = build_mcp_tools(root, console=None)  # tools from .ronin/mcp.json servers
     from .plugins import build_plugin_tools
-    plugin_tools = build_plugin_tools(root, console=None)  # user tools from .ronin/plugins/
+    # Pass the real console: build_plugin_tools prints ONLY on error, so this adds
+    # no launch chrome — but an untrusted plugin (refused import, see plugin_trust)
+    # must not fail silently, or the user's plugin just mysteriously stops working.
+    plugin_tools = build_plugin_tools(root, console=console)  # user tools from .ronin/plugins/
     from .bg_processes import build_background_tools
     from .checkpoint import build_checkpoint_tools
     from .embeddings import build_semantic_tools

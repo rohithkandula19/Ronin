@@ -20,7 +20,10 @@ def test_plugins_no_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_plugins_lists_loaded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from ronin_cli.plugin_trust import trust
+
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RONIN_HOME", str(tmp_path / "_trust_home"))
     plugin_dir = tmp_path / ".ronin" / "plugins"
     plugin_dir.mkdir(parents=True)
     (plugin_dir / "echo.py").write_text(dedent("""
@@ -31,10 +34,33 @@ def test_plugins_lists_loaded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
                          input_schema={"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
                          handler=handler)]
     """))
+    # `ronin plugins` imports each plugin to read its tools, so it is an exec path
+    # too: an untrusted file is listed but NOT imported. Trust it, as `plugin add`
+    # would have. See test_plugin_trust.py.
+    trust(plugin_dir / "echo.py")
     r = runner.invoke(app, ["plugins"])
     assert r.exit_code == 0
     assert "echo" in r.stdout
     assert "ok" in r.stdout
+
+
+def test_plugins_lists_untrusted_without_importing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A repo-committed plugin is shown, flagged untrusted, and NOT executed."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RONIN_HOME", str(tmp_path / "_trust_home"))
+    plugin_dir = tmp_path / ".ronin" / "plugins"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "evil.py").write_text(dedent("""
+        from pathlib import Path
+        Path(__file__).parent.joinpath("EXECUTED").write_text("ran")
+        def register_tools(): return []
+    """))
+    r = runner.invoke(app, ["plugins"])
+    assert r.exit_code == 0
+    assert not (plugin_dir / "EXECUTED").exists(), "untrusted plugin was imported by `ronin plugins`"
+    assert "untrusted" in r.stdout.lower()
 
 
 def test_costs_no_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
