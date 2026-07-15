@@ -109,12 +109,14 @@ successful train you didn't run.
 ## Run Ronin WITH the fine-tuned adapter
 
 The embedded provider loads a trained LoRA adapter on top of the 4-bit base model
-(mlx engine / Apple Silicon only). The recommended checkpoint is **iter-150** (the
-val-loss minimum — iter-300 overtrains; see `reports/finetune_comparison.md`).
+(mlx engine / Apple Silicon only). The recommended checkpoint is **v2 iter-150**
+(best protocol-eval score, 36/91 — full checkpoint sweep and the reasoning in
+`reports/model_comparison.md`; note protocol evals peak at iter-150 even though
+val loss bottoms at iter-300).
 
 ```bash
 # point Ronin's local provider at the adapter (env var), then use provider "local"
-export RONIN_ADAPTER=training/adapters/ronin_1.5b_iter150
+export RONIN_ADAPTER=training/adapters/ronin_1.5b_v2_ck/i150
 ronin --provider local "read pyproject.toml and tell me the package name"
 ```
 
