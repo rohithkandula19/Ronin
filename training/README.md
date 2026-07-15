@@ -106,6 +106,42 @@ LoRA are real options the config exposes, but they will likely OOM on an 8 GB M2
 `memory_warnings()` says so, and the 0.5B model is the fallback. Nothing here claims a
 successful train you didn't run.
 
+## Run Ronin WITH the fine-tuned adapter
+
+The embedded provider loads a trained LoRA adapter on top of the 4-bit base model
+(mlx engine / Apple Silicon only). The recommended checkpoint is **iter-150** (the
+val-loss minimum — iter-300 overtrains; see `reports/finetune_comparison.md`).
+
+```bash
+# point Ronin's local provider at the adapter (env var), then use provider "local"
+export RONIN_ADAPTER=training/adapters/ronin_1.5b_iter150
+ronin --provider local "read pyproject.toml and tell me the package name"
+```
+
+or programmatically:
+
+```python
+from ronin_cli.embedded_provider import EmbeddedProvider
+provider = EmbeddedProvider(
+    model="mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit",
+    adapter_path="training/adapters/ronin_1.5b_iter150",
+)
+```
+
+Adapters are **not committed** (binary); reproduce from seed 0 with the commands in
+`reports/finetune_comparison.md`. The provider fails loudly — a missing adapter dir
+raises instead of silently serving the base model, and the llama-cpp engine rejects
+`adapter_path` outright. Tool calls are parsed ONLY from well-formed
+`<tool_call>` blocks; a call the model merely quotes as bare JSON in prose is never
+executed (that strictness is a safety property, verified by a live probe where a
+model "refused" `rm -rf ~` while echoing the call JSON in its refusal text).
+
+Live smoke test (opt-in, loads real weights):
+
+```bash
+RONIN_ADAPTER_SMOKE=1 uv run pytest packages/cli/tests/test_adapter_smoke_live.py -q
+```
+
 ## Layout
 
 | path | what |

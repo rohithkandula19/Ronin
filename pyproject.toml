@@ -33,3 +33,6 @@ members = [
 asyncio_mode = "auto"
 testpaths = ["packages", "apps"]
 faulthandler_timeout = 90
+markers = [
+    "adapter_smoke: LIVE fine-tuned-adapter smoke tests (need mlx-lm + a trained adapter; skipped elsewhere)",
+]

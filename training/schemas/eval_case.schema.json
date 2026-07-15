@@ -15,6 +15,20 @@
     "source_volume": {"type": "string"},
     "system": {"type": "string"},
     "prompt": {"type": "string"},
+    "messages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["role"],
+        "additionalProperties": false,
+        "properties": {
+          "role": {"type": "string", "enum": ["user", "assistant", "tool"]},
+          "content": {"type": "string"},
+          "tool_call_id": {"type": "string"},
+          "tool_calls": {"type": "array"}
+        }
+      }
+    },
     "hidden_context": {"type": "object"},
     "must_include": {"type": "array", "items": {"type": "string"}},
     "must_not_include": {"type": "array", "items": {"type": "string"}},

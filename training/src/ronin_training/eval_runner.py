@@ -116,17 +116,22 @@ def run_evals(cases: list[dict], provider: Provider) -> EvalReport:
 
 # Ronin's tool calls surface as JSON objects in the model's output. The eval only
 # needs the tool NAMES that were requested, so extract them without executing.
-# A call is only counted in its call SHAPE — a name key followed by an arguments
-# key — so a tool merely named in prose (or a JSON example quoted in an answer
-# without arguments) isn't miscounted as a call.
+#
+# RUNTIME PARITY: extraction mirrors the EmbeddedProvider's parser exactly — a
+# call counts ONLY inside a ``<tool_call>...</tool_call>`` block AND in call shape
+# (a name key followed by an arguments key). Ronin's runtime refuses to execute a
+# call the model merely quoted as bare JSON in prose (a live probe showed a model
+# "refusing" rm -rf ~ while echoing the call JSON in its refusal — executing that
+# would be catastrophic), so the eval must not award credit for output the runtime
+# would not consume.
 _TOOLCALL = re.compile(r'\{\s*"name"\s*:\s*"([a-z_]+)"\s*,\s*"arguments"')
 
 
 def extract_all_call_names(raw: str) -> list[str]:
-    """Every call-shaped tool name in the output, INCLUDING names not in Ronin's
-    registry — used to detect hallucinated tools."""
+    """Every wrapper-enclosed, call-shaped tool name in the output, INCLUDING names
+    not in Ronin's registry — used to detect hallucinated tools."""
     names: list[str] = []
-    for chunk in re.findall(r"<tool_call>(.*?)</tool_call>", raw, re.DOTALL) or [raw]:
+    for chunk in re.findall(r"<tool_call>(.*?)</tool_call>", raw, re.DOTALL):
         names.extend(_TOOLCALL.findall(chunk))
     return names
 
@@ -179,19 +184,32 @@ def mlx_provider(model_path: str, *, adapter_path: str | None = None,
     tools = ronin_tools_for_template()
 
     def _provider(case: dict) -> ProviderResponse:  # pragma: no cover - needs a model
-        system = case.get("system", "You are Ronin.")
-        prompt = case.get("prompt", "")
-        messages = [{"role": "system", "content": system},
-                    {"role": "user", "content": prompt}]
         text = generate(
             model, tokenizer,
             prompt=tokenizer.apply_chat_template(
-                messages, tools=tools, add_generation_prompt=True),
+                case_messages(case), tools=tools, add_generation_prompt=True),
             max_tokens=max_tokens, verbose=False,
         )
         return ProviderResponse(text=text, tool_calls=extract_tool_names(text))
 
     return _provider
+
+
+def case_messages(case: dict) -> list[dict]:
+    """The chat-template message list for a case. PURE.
+
+    Single-turn: system + prompt. Multi-turn: a case may carry ``messages`` — a
+    scripted PRIOR conversation (user/assistant/tool turns, mid-session) — and the
+    model is asked for the next reply after it; ``prompt`` (when non-empty) is
+    appended as the final user turn. This is how multi-turn stability is actually
+    exercised instead of asserted about."""
+    system = case.get("system", "You are Ronin.")
+    msgs: list[dict] = [{"role": "system", "content": system}]
+    msgs.extend(case.get("messages") or [])
+    prompt = case.get("prompt", "")
+    if prompt:
+        msgs.append({"role": "user", "content": prompt})
+    return msgs
 
 
 def write_report(report: EvalReport, path: str | Path, *, title: str = "Protocol Eval") -> None:
