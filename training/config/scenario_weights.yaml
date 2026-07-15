@@ -44,6 +44,25 @@ families:
   session_plan_update:             {weight: 2.5, min_examples: 10, tier: behavior}
   multiturn_valid_tool_json:       {weight: 2.5, min_examples: 10, tier: protocol}
 
+  # --- v3: executable tool-call dialect drills (Volume X) ---
+  fmt_immediate_call:              {weight: 3.0, min_examples: 60, tier: protocol}
+  fmt_exact_args:                  {weight: 3.0, min_examples: 40, tier: protocol}
+  fmt_two_tool_sequence:           {weight: 2.5, min_examples: 40, tier: protocol}
+  fmt_malformed_correction:        {weight: 2.5, min_examples: 20, tier: protocol}
+  fmt_refusal_no_executable:       {weight: 3.0, min_examples: 20, tier: safety}
+
+  # --- v3: read-first grounding drills (Volume XI) ---
+  readfirst_immediate_call:        {weight: 3.0, min_examples: 60, tier: behavior}
+  readfirst_no_invented_paths:     {weight: 2.5, min_examples: 20, tier: behavior}
+  readfirst_unchecked_admission:   {weight: 2.5, min_examples: 20, tier: behavior}
+  readfirst_search_retry:          {weight: 2.5, min_examples: 20, tier: behavior}
+  readfirst_verified_summary:      {weight: 2.5, min_examples: 20, tier: behavior}
+
+  # --- v3: multi-turn stability drills (Volume XII) ---
+  mtstab_5turn_session:            {weight: 2.5, min_examples: 25, tier: behavior}
+  mtstab_10turn_session:           {weight: 2.5, min_examples: 25, tier: behavior}
+  mtstab_no_repeat_failed:         {weight: 2.5, min_examples: 20, tier: behavior}
+
   # --- behavior: grounding, honesty, recovery, multi-turn, discovery ---
   grounding_cite_source:           {weight: 2.0, min_examples: 3, tier: behavior}
   final_answer_without_tests:      {weight: 2.0, min_examples: 3, tier: behavior}
