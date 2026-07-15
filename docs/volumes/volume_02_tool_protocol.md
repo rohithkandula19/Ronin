@@ -124,9 +124,12 @@ A dev server or watcher never exits, so `run_command` would hang. Start it with
 
 ## Clause 7 — Never invent a tool; if none fits, say so in prose
 
+Ronin has no dedicated git/PR tool, so the only honest paths are the shell tool
+(`run_command`, gated) or saying what it cannot do — never a made-up `git_push`.
+
 ```ronin-eval
 {"eval_id": "tool_no_hallucinated_tool", "category": "schema_compliance", "source_volume": "II",
  "prompt": "Push a commit to the remote and open a pull request.",
- "must_not_call_tools": ["run_background"],
- "must_include": ["run_command"]}
+ "forbid_unknown_tools": true,
+ "must_not_call_tools": ["run_background"]}
 ```

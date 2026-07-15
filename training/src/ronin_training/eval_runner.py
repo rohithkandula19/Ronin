@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Callable
 
@@ -40,25 +41,44 @@ class CaseResult:
     failures: list[str] = field(default_factory=list)
 
 
+def _normalize(s: str) -> str:
+    """Casefolded text with typographic apostrophes straightened and contractions
+    expanded (n't → not), so \"haven't run\" satisfies a required \"not run\" and a
+    curly-quoted \"we’re good\" still matches a straight-quoted ban. Markers are
+    semantic, not literal — an audit showed correct answers failing on contraction
+    variance alone."""
+    s = s.replace("’", "'")
+    s = re.sub(r"n't\b", " not", s, flags=re.IGNORECASE)
+    return s.casefold()
+
+
 def score_case(case: dict, resp: ProviderResponse) -> CaseResult:
-    """Check one response against one case's assertions. Text checks are
-    case-insensitive (markers are semantic, not literal); tool checks are exact."""
-    text = resp.text.casefold()
+    """Check one response against one case's assertions. Text checks are normalized
+    (case, apostrophes, contractions); tool checks are exact names."""
+    text = _normalize(resp.text)
     called = list(resp.tool_calls)
     failures: list[str] = []
 
     for needle in case.get("must_include") or []:
-        if needle.casefold() not in text:
+        if _normalize(needle) not in text:
             failures.append(f"missing required phrase {needle!r}")
     for needle in case.get("must_not_include") or []:
-        if needle.casefold() in text:
+        if _normalize(needle) in text:
             failures.append(f"contains banned phrase {needle!r}")
     for tool in case.get("must_call_tools") or []:
         if tool not in called:
             failures.append(f"did not call required tool {tool!r}")
+    any_of = case.get("must_call_any_of") or []
+    if any_of and not any(t in called for t in any_of):
+        failures.append(f"called none of the acceptable tools {any_of!r}")
     for tool in case.get("must_not_call_tools") or []:
         if tool in called:
             failures.append(f"called forbidden tool {tool!r}")
+    if case.get("forbid_unknown_tools"):
+        unknown = [n for n in extract_all_call_names(resp.text)
+                   if n not in _registry_names()]
+        if unknown:
+            failures.append(f"called hallucinated tool(s) {unknown!r}")
 
     return CaseResult(case["eval_id"], case.get("category", "?"), not failures, failures)
 
@@ -96,12 +116,49 @@ def run_evals(cases: list[dict], provider: Provider) -> EvalReport:
 
 # Ronin's tool calls surface as JSON objects in the model's output. The eval only
 # needs the tool NAMES that were requested, so extract them without executing.
-_TOOLCALL = re.compile(r'"name"\s*:\s*"([a-z_]+)"')
+# A call is only counted in its call SHAPE — a name key followed by an arguments
+# key — so a tool merely named in prose (or a JSON example quoted in an answer
+# without arguments) isn't miscounted as a call.
+_TOOLCALL = re.compile(r'\{\s*"name"\s*:\s*"([a-z_]+)"\s*,\s*"arguments"')
+
+
+def extract_all_call_names(raw: str) -> list[str]:
+    """Every call-shaped tool name in the output, INCLUDING names not in Ronin's
+    registry — used to detect hallucinated tools."""
+    names: list[str] = []
+    for chunk in re.findall(r"<tool_call>(.*?)</tool_call>", raw, re.DOTALL) or [raw]:
+        names.extend(_TOOLCALL.findall(chunk))
+    return names
 
 
 def extract_tool_names(raw: str) -> list[str]:
-    """Best-effort extraction of tool names the model asked to call, from raw text."""
-    return _TOOLCALL.findall(raw)
+    """Call-shaped tool names restricted to Ronin's real registry (the names the
+    tool assertions check against)."""
+    real = set(_registry_names())
+    return [n for n in extract_all_call_names(raw) if n in real]
+
+
+@lru_cache(maxsize=1)
+def _registry() -> dict:
+    reg = Path(__file__).resolve().parents[2] / "config" / "tool_registry.json"
+    return json.loads(reg.read_text(encoding="utf-8"))
+
+
+def _registry_names() -> tuple[str, ...]:
+    return tuple(t["name"] for t in _registry()["tools"])
+
+
+def ronin_tools_for_template() -> list[dict]:
+    """Ronin's real tools in the OpenAI function format a chat template expects.
+
+    Ronin always runs with these available, so an honest protocol eval must present
+    them too — otherwise the model has no way to emit the tool calls the eval checks."""
+    return [
+        {"type": "function", "function": {
+            "name": t["name"], "description": t["description"], "parameters": t["parameters"],
+        }}
+        for t in _registry()["tools"]
+    ]
 
 
 # ------------------------------------------------------------------ optional MLX adapter
@@ -119,6 +176,7 @@ def mlx_provider(model_path: str, *, adapter_path: str | None = None,
         ) from e
 
     model, tokenizer = load(model_path, adapter_path=adapter_path)  # pragma: no cover
+    tools = ronin_tools_for_template()
 
     def _provider(case: dict) -> ProviderResponse:  # pragma: no cover - needs a model
         system = case.get("system", "You are Ronin.")
@@ -127,7 +185,8 @@ def mlx_provider(model_path: str, *, adapter_path: str | None = None,
                     {"role": "user", "content": prompt}]
         text = generate(
             model, tokenizer,
-            prompt=tokenizer.apply_chat_template(messages, add_generation_prompt=True),
+            prompt=tokenizer.apply_chat_template(
+                messages, tools=tools, add_generation_prompt=True),
             max_tokens=max_tokens, verbose=False,
         )
         return ProviderResponse(text=text, tool_calls=extract_tool_names(text))
@@ -150,3 +209,38 @@ def write_report(report: EvalReport, path: str | Path, *, title: str = "Protocol
         for r in fails:
             lines.append(f"- **{r.eval_id}** ({r.category}): {'; '.join(r.failures)}")
     Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Evaluate a real model (base or adapter) against the protocol eval set.
+
+    Requires mlx-lm + a model; there is no stub provider, so this never prints a
+    fabricated score. Example:
+        python -m ronin_training.eval_runner \
+            --model mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit \
+            --evals training/data/evals/ronin_protocol_eval.jsonl \
+            --out training/reports/base_eval.md --title "Base 1.5B"
+    """
+    import argparse
+    ap = argparse.ArgumentParser(description="Run Ronin protocol evals against a model.")
+    ap.add_argument("--model", required=True)
+    ap.add_argument("--adapter", default=None, help="path to a trained LoRA adapter")
+    ap.add_argument("--evals", default="training/data/evals/ronin_protocol_eval.jsonl")
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--title", default="Protocol Eval")
+    ap.add_argument("--max-tokens", type=int, default=512)
+    a = ap.parse_args(argv)
+
+    provider = mlx_provider(a.model, adapter_path=a.adapter, max_tokens=a.max_tokens)
+    cases = load_cases(a.evals)
+    report = run_evals(cases, provider)
+    write_report(report, a.out, title=a.title)
+    print(f"{a.title}: {report.passed}/{report.total} passed "
+          f"({report.pass_rate:.1%}) → {a.out}")
+    for cat, (p, t) in report.by_category().items():
+        print(f"  {cat}: {p}/{t}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

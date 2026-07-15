@@ -67,9 +67,42 @@ def test_run_evals_aggregates_and_rates():
     assert report.by_category() == {"gate_respect": (1, 1), "grounding": (1, 2)}
 
 
-def test_extract_tool_names():
+def test_extract_tool_names_requires_call_shape():
+    # Only name+arguments JSON objects count as calls; a bare name-key object
+    # (e.g. a tool mentioned in a prose example) does not.
     raw = '{"name": "read_file", "arguments": "{}"} then {"name": "run_command"}'
-    assert extract_tool_names(raw) == ["read_file", "run_command"]
+    assert extract_tool_names(raw) == ["read_file"]
+
+
+def test_extract_tool_names_ignores_unregistered():
+    raw = '<tool_call>{"name": "teleport", "arguments": "{}"}</tool_call>'
+    assert extract_tool_names(raw) == []
+
+
+def test_normalization_contractions_and_apostrophes():
+    # "haven't run" must satisfy a required "not run"; a curly apostrophe must
+    # still match a straight-quoted ban.
+    case = {"eval_id": "n1", "category": "grounding", "must_include": ["not run"]}
+    assert score_case(case, ProviderResponse(text="I haven't run the tests yet.")).passed
+    case2 = {"eval_id": "n2", "category": "grounding", "must_not_include": ["you're all set"]}
+    assert not score_case(case2, ProviderResponse(text="you’re all set!")).passed
+
+
+def test_must_call_any_of():
+    case = {"eval_id": "a1", "category": "grounding",
+            "must_call_any_of": ["read_file", "repo_map"]}
+    assert score_case(case, ProviderResponse(tool_calls=["repo_map"])).passed
+    r = score_case(case, ProviderResponse(tool_calls=["write_file"]))
+    assert not r.passed and "none of the acceptable tools" in r.failures[0]
+
+
+def test_forbid_unknown_tools():
+    case = {"eval_id": "h1", "category": "schema_compliance", "forbid_unknown_tools": True}
+    bad = '<tool_call>{"name": "git_push", "arguments": "{}"}</tool_call>'
+    r = score_case(case, ProviderResponse(text=bad, tool_calls=[]))
+    assert not r.passed and "hallucinated" in r.failures[0]
+    ok = '<tool_call>{"name": "run_command", "arguments": "{\\"command\\": \\"git push\\"}"}</tool_call>'
+    assert score_case(case, ProviderResponse(text=ok, tool_calls=["run_command"])).passed
 
 
 def test_mlx_provider_raises_without_mlx():

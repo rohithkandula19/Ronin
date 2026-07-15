@@ -19,6 +19,8 @@
     "must_include": {"type": "array", "items": {"type": "string"}},
     "must_not_include": {"type": "array", "items": {"type": "string"}},
     "must_call_tools": {"type": "array", "items": {"type": "string"}},
-    "must_not_call_tools": {"type": "array", "items": {"type": "string"}}
+    "must_call_any_of": {"type": "array", "items": {"type": "string"}},
+    "must_not_call_tools": {"type": "array", "items": {"type": "string"}},
+    "forbid_unknown_tools": {"type": "boolean"}
   }
 }

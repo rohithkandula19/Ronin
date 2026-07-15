@@ -66,6 +66,23 @@ write_report(report, "training/reports/base_eval.md", title="Base model — prot
 Measure the **base** model first. Only after you have base numbers and adapter numbers
 from the *same* eval set can you claim a fine-tune changed anything.
 
+### What these evals can and cannot catch
+
+The scorer is deterministic substring/tool-name matching, hardened by a 70-agent
+adversarial audit of every case (contraction/apostrophe normalization, claim-shaped
+banned phrases instead of bare tokens, call-shaped tool extraction, `must_call_any_of`
+OR-groups, hallucinated-tool detection via `forbid_unknown_tools`). Known structural
+limits, on purpose rather than papered over:
+
+- **Tool arguments are not semantically inspected.** A case can require `run_command`
+  be called but not that its `command` is the right one.
+- **Hedged fake success can slip past substring bans.** Catching every phrasing of a
+  dishonest claim needs a judge model, which would make the eval nondeterministic;
+  these are protocol smoke checks, not a semantic grader.
+
+Treat pass rates as comparable between checkpoints on the same eval set — not as an
+absolute measure of agent quality.
+
 ## Fine-tune on-device (Apple Silicon)
 
 ```python

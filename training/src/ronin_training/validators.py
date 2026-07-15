@@ -77,7 +77,8 @@ def validate_eval(ec: dict) -> list[str]:
     except jsonschema.ValidationError as e:
         return [f"schema: {e.message}"]
     reg = load_registry()
-    for t in (ec.get("must_call_tools") or []) + (ec.get("must_not_call_tools") or []):
+    for t in ((ec.get("must_call_tools") or []) + (ec.get("must_not_call_tools") or [])
+              + (ec.get("must_call_any_of") or [])):
         if t not in reg:
             errs.append(f"eval references unknown tool {t!r}")
     return errs
