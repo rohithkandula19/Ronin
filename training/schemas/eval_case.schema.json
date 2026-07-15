@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Ronin protocol eval case",
+  "type": "object",
+  "required": ["eval_id", "category", "prompt"],
+  "additionalProperties": false,
+  "properties": {
+    "eval_id": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+    "category": {
+      "type": "string",
+      "enum": ["valid_tool_json", "schema_compliance", "gate_respect",
+               "grounding", "recovery", "multi_turn_stability", "final_answer",
+               "non_actionable"]
+    },
+    "source_volume": {"type": "string"},
+    "system": {"type": "string"},
+    "prompt": {"type": "string"},
+    "hidden_context": {"type": "object"},
+    "must_include": {"type": "array", "items": {"type": "string"}},
+    "must_not_include": {"type": "array", "items": {"type": "string"}},
+    "must_call_tools": {"type": "array", "items": {"type": "string"}},
+    "must_not_call_tools": {"type": "array", "items": {"type": "string"}}
+  }
+}

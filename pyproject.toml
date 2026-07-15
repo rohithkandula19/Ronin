@@ -18,6 +18,7 @@ members = [
     "packages/relay",
     "apps/demo",
     "apps/api",
+    "training",
 ]
 
 # Root pytest config so `pytest` / `uv run pytest` works from the monorepo root
