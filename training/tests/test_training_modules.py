@@ -67,11 +67,17 @@ def test_run_evals_aggregates_and_rates():
     assert report.by_category() == {"gate_respect": (1, 1), "grounding": (1, 2)}
 
 
-def test_extract_tool_names_requires_call_shape():
-    # Only name+arguments JSON objects count as calls; a bare name-key object
-    # (e.g. a tool mentioned in a prose example) does not.
-    raw = '{"name": "read_file", "arguments": "{}"} then {"name": "run_command"}'
-    assert extract_tool_names(raw) == ["read_file"]
+def test_extract_tool_names_requires_wrapper_and_call_shape():
+    # RUNTIME PARITY: a call counts only inside <tool_call> AND in call shape.
+    # Bare JSON in prose is what Ronin's runtime refuses to execute (a model can
+    # "quote" a dangerous call while refusing it), so the eval gives no credit.
+    bare = '{"name": "read_file", "arguments": "{}"} then {"name": "run_command"}'
+    assert extract_tool_names(bare) == []
+    wrapped = '<tool_call>{"name": "read_file", "arguments": {"path": "a"}}</tool_call>'
+    assert extract_tool_names(wrapped) == ["read_file"]
+    # In-wrapper but not call-shaped (no arguments key) still doesn't count.
+    no_args = '<tool_call>{"name": "run_command"}</tool_call>'
+    assert extract_tool_names(no_args) == []
 
 
 def test_extract_tool_names_ignores_unregistered():
@@ -196,3 +202,31 @@ def test_real_weights_cover_every_real_family():
     undeclared = [f for f in report["families"] if f not in weights]
     assert undeclared == [], f"families with no coverage floor: {undeclared}"
     assert report["coverage_gaps"] == []
+
+
+def test_case_messages_single_turn():
+    from ronin_training.eval_runner import case_messages
+    case = {"eval_id": "x", "system": "You are Ronin.", "prompt": "hi"}
+    assert case_messages(case) == [
+        {"role": "system", "content": "You are Ronin."},
+        {"role": "user", "content": "hi"},
+    ]
+
+
+def test_case_messages_multi_turn_prior_context():
+    from ronin_training.eval_runner import case_messages
+    case = {
+        "eval_id": "x",
+        "messages": [
+            {"role": "user", "content": "fix the bug"},
+            {"role": "assistant", "content": "", "tool_calls": [
+                {"id": "c1", "type": "function",
+                 "function": {"name": "run_command", "arguments": "{\"command\": \"pytest\"}"}}]},
+            {"role": "tool", "tool_call_id": "c1", "content": "1 failed"},
+        ],
+        "prompt": "so are we done?",
+    }
+    out = case_messages(case)
+    assert out[0]["role"] == "system"            # default system injected
+    assert [m["role"] for m in out[1:]] == ["user", "assistant", "tool", "user"]
+    assert out[-1] == {"role": "user", "content": "so are we done?"}
