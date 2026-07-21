@@ -73,3 +73,32 @@ export const api = {
   setSchedule: (body: { cron?: string; slack_channel?: string; enabled?: boolean }) =>
     request<ScheduleOut>("/briefings/schedule", { method: "POST", body: JSON.stringify(body) }),
 };
+
+// ---------- Ronin AI OS v1 ----------
+
+export interface World {
+  id: string;
+  name: string;
+  description: string;
+  status: string;
+  risk_level: string;
+  roles: string[];
+  countries: string[];
+  languages: string[];
+  default_adapter: string | null;
+  allowed_capabilities: string[];
+  allowed_tools: string[];
+  blocked_capabilities: string[];
+}
+
+export interface WorldsResponse {
+  worlds: World[];
+  discovery_errors: Record<string, string>;
+}
+
+export const aios = {
+  // World Navigator data. Read-only, no auth required to browse.
+  listWorlds: (includeDisabled = true) =>
+    request<WorldsResponse>(`/api/v1/worlds?include_disabled=${includeDisabled}`),
+  getWorld: (id: string) => request<World>(`/api/v1/worlds/${id}`),
+};
