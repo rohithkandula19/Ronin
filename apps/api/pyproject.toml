@@ -16,6 +16,8 @@ dependencies = [
     "apscheduler>=3.10",
     "ronin-cli",
     "ronin-agent-patterns",
+    "ronin-industry-sdk",
+    "ronin-vault",
 ]
 
 [project.optional-dependencies]
@@ -30,6 +32,8 @@ dev = [
 [tool.uv.sources]
 ronin-cli = { workspace = true }
 ronin-agent-patterns = { workspace = true }
+ronin-industry-sdk = { workspace = true }
+ronin-vault = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]
