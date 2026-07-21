@@ -16,6 +16,7 @@ members = [
     "ronin-demo",
     "ronin-eval-suite",
     "ronin-hardening",
+    "ronin-industry-sdk",
     "ronin-mcp-servers",
     "ronin-memory",
     "ronin-relay",
@@ -1746,6 +1747,28 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=7.0" }]
+
+[[package]]
+name = "ronin-industry-sdk"
+version = "0.1.0"
+source = { editable = "packages/industry-sdk" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "pyyaml" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.5" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
+]
+provides-extras = ["dev"]
 
 [[package]]
 name = "ronin-mcp-servers"
