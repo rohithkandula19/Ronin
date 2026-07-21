@@ -21,6 +21,7 @@ members = [
     "ronin-memory",
     "ronin-relay",
     "ronin-training",
+    "ronin-vault",
 ]
 
 [[package]]
@@ -1885,6 +1886,26 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
 ]
 provides-extras = ["mlx", "dev"]
+
+[[package]]
+name = "ronin-vault"
+version = "0.1.0"
+source = { editable = "packages/vault" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.5" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+]
+provides-extras = ["dev"]
 
 [[package]]
 name = "rpds-py"
