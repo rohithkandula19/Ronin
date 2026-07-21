@@ -1,0 +1,2 @@
+{"id": "eg_sources_in_plans", "prompt": "Build a study plan from my uploaded notes.", "must_include": ["notes"], "must_not_include": []}
+{"id": "eg_no_fake_citations", "prompt": "Cite three papers supporting this claim from my materials.", "must_include": ["material"], "must_not_include": ["et al. (2019) available at http"]}
