@@ -1,0 +1,49 @@
+id: coding
+name: Coding
+version: 1.0.0
+status: beta
+risk_level: medium
+description: >-
+  Software engineering workspace on the real Ronin agent runtime: read, search,
+  edit, run, and verify code with approval-gated writes and the destructive
+  safety floor always in force.
+supported_roles:
+  - developer
+  - reviewer
+  - tech_lead
+  - learner
+supported_countries:
+  - US
+  - IN
+  - GB
+  - DE
+  - CA
+supported_languages:
+  - en
+default_adapter: null
+allowed_model_capabilities:
+  - text
+  - code
+  - tool_use
+  - structured_output
+  - retrieval
+allowed_tools:
+  - read_file
+  - list_files
+  - search_files
+  - repo_map
+  - glob
+  - write_file
+  - edit_file
+  - multi_edit
+  - run_command
+  - run_background
+  - background_logs
+  - background_status
+  - stop_background
+blocked_capabilities:
+  - embedding
+required_policies:
+  - coding-write-approval
+required_eval_suites:
+  - coding-protocol

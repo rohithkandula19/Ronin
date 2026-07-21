@@ -1,0 +1,17 @@
+id: minor-data-protection
+version: 1.0.0
+description: >-
+  Data that may concern minors gets the strictest handling defaults.
+rules:
+  - id: no-training-by-default
+    effect: deny
+    applies_to: adding education-world conversations or uploads to training datasets
+    rationale: training eligibility requires explicit, separate consent — never inferred
+  - id: memory-isolation
+    effect: deny
+    applies_to: education memory appearing in other worlds without explicit transfer
+  - id: no-ability-claims
+    effect: refuse
+    applies_to: unsupported claims about a student's ability or diagnosis of learning disorders
+disclosures:
+  - Privacy mode and memory usage are visible in the workspace trust panel.

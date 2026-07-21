@@ -1,0 +1,30 @@
+# FUTURE WORLD — validated manifest, deliberately disabled.
+# This pack stays disabled until its policies, datasets, and evaluations are
+# complete. Do not enable by editing status alone; see docs/industries/.
+id: government
+name: Government
+version: 0.1.0
+status: disabled
+risk_level: high
+description: >-
+  Government world (planned). Disabled: policies, datasets, and evaluation
+  suites for this industry are not yet complete.
+supported_roles:
+  - member
+supported_countries:
+  - US
+supported_languages:
+  - en
+default_adapter: null
+allowed_model_capabilities:
+  - text
+  - retrieval
+  - structured_output
+allowed_tools: []
+blocked_capabilities:
+  - tool_use
+required_policies:
+  - government-safety
+required_eval_suites:
+  - government-grounding
+  - government-safety
