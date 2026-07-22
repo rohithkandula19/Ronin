@@ -2753,6 +2753,9 @@ def changelog(
 @app.command()
 def scan(
     staged: bool = typer.Option(False, "--staged", help="Scan only files staged for commit."),
+    history: bool = typer.Option(False, "--history", help="Scan the whole git history (git log -p), not just the working tree — catches secrets committed and later removed."),
+    since: str = typer.Option("", "--since", help="With --history: only commits since this date/ref (git --since), e.g. '3 months ago'."),
+    max_commits: int = typer.Option(0, "--max-commits", help="With --history: cap the number of commits walked (0 = all)."),
     quiet: bool = typer.Option(False, "--quiet", help="No output; just the exit code (for hooks)."),
     root: Path = typer.Option(Path("."), "--root", help="Directory to scan."),
 ) -> None:
@@ -2760,8 +2763,30 @@ def scan(
     report each as [bold]file:line + kind[/bold] — the secret value is NEVER
     printed, only a masked hint. Exits non-zero if any are found, so it can also
     back a pre-commit hook ([bold]ronin hook install[/bold]).
+
+    [bold]--history[/bold] walks every commit and flags secrets on added lines,
+    catching keys that were committed and later deleted but still live in the
+    git history. Cap large repos with [bold]--since[/bold] / [bold]--max-commits[/bold].
     """
     from .secret_scan import find_secrets, render_findings, scan_repo
+
+    if history:
+        from .secret_scan import scan_git_history
+        hits = scan_git_history(root, max_commits=max_commits, since=since)
+        if not quiet:
+            if not hits:
+                console.print("[green]✓ no secrets found in git history[/green]")
+            else:
+                console.print(f"[bold #f7768e]✗ {len(hits)} secret(s) found in git history:[/bold #f7768e]")
+                for h in hits:
+                    console.print(
+                        f"  [red]{h['commit'][:10]}[/red] "
+                        f"[cyan]{h['path']}:{h['line']}[/cyan] "
+                        f"[dim]{h['kind']} ({h['hint']})[/dim]"
+                    )
+        if hits:
+            raise typer.Exit(1)
+        return
 
     if staged:
         # Line-level scan of just the files staged for commit. Reuse the staged-

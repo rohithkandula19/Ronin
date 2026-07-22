@@ -183,7 +183,7 @@ _FAST_TOOLS = {"read_file", "list_files", "search_files", "glob", "write_file",
 # CONCURRENTLY (Claude-Code-style parallel tool use). Never includes writes,
 # commands, or anything with side effects.
 _PARALLEL_TOOLS = {"read_file", "list_files", "search_files", "glob",
-                   "git_status", "git_diff", "git_log", "web_search", "fetch_url",
+                   "git_status", "git_diff", "git_log", "git_blame", "web_search", "fetch_url",
                    "semantic_search", "definition", "references", "diagnostics"}
 
 
@@ -1358,7 +1358,7 @@ _TOOL_GROUPS: list[tuple[str, list[str]]] = [
     ("📖  read & search", ["read_file", "list_files", "search_files", "glob"]),
     ("✏️  edit", ["write_file", "edit_file", "multi_edit"]),
     ("🖥️  run", ["run_command"]),
-    ("🔀  git", ["git_status", "git_diff", "git_log"]),
+    ("🔀  git", ["git_status", "git_diff", "git_log", "git_blame"]),
     ("🌐  web", ["web_search", "fetch_url"]),
     ("🧠  code intelligence", ["definition", "references", "diagnostics"]),
     ("📋  plan", ["update_todos"]),
