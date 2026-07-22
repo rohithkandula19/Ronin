@@ -1,0 +1,207 @@
+/**
+ * RONIN DESIGN SYSTEM (RDS 1.0) — runtime token layer.
+ *
+ * Every value here mirrors src/tokens.ts. Semantic role variables
+ * (--rds-bg, --rds-text, --rds-accent, …) are re-pointed per theme via the
+ * [data-theme] attribute on <html>. Raw ramps stay constant across themes.
+ *
+ * Load this ONCE, before any Tailwind layers, so the custom properties are
+ * available to utilities that reference var(--rds-*).
+ */
+
+:root {
+  /* raw palette — constant across themes */
+  --rds-paper-0: #ffffff;
+  --rds-paper-50: #fafaf9;
+  --rds-paper-100: #f5f4f2;
+  --rds-paper-200: #ecebe7;
+  --rds-paper-300: #e7e5e4;
+  --rds-paper-400: #d6d3cd;
+  --rds-ink-300: #9b9793;
+  --rds-ink-400: #6b6b6b;
+  --rds-ink-500: #4a4744;
+  --rds-ink-700: #2a2724;
+  --rds-ink-900: #1a1a1a;
+  --rds-ink-950: #0f0e0d;
+  --rds-clay-100: #efe3d6;
+  --rds-clay-300: #d4a373;
+  --rds-clay-500: #a98467;
+  --rds-clay-700: #8a6a4f;
+  --rds-clay-900: #5f4838;
+
+  --rds-success: #4f7a5b;
+  --rds-success-soft: #e4ede4;
+  --rds-warn: #b8863b;
+  --rds-warn-soft: #f3e7cf;
+  --rds-danger: #b4462f;
+  --rds-danger-soft: #f2ddd6;
+  --rds-info: #4a6b82;
+  --rds-info-soft: #dde7ee;
+
+  /* typography */
+  --rds-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, "Helvetica Neue", Arial, sans-serif;
+  --rds-font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Monaco, "Cascadia Code", monospace;
+  --rds-font-serif: ui-serif, "Iowan Old Style", Georgia, "Times New Roman", serif;
+
+  /* spacing */
+  --rds-space-1: 4px;
+  --rds-space-2: 8px;
+  --rds-space-3: 12px;
+  --rds-space-4: 16px;
+  --rds-space-5: 20px;
+  --rds-space-6: 24px;
+  --rds-space-8: 32px;
+  --rds-space-10: 40px;
+  --rds-space-12: 48px;
+  --rds-space-16: 64px;
+  --rds-space-20: 80px;
+  --rds-space-24: 96px;
+
+  /* radius */
+  --rds-radius-sm: 6px;
+  --rds-radius-md: 10px;
+  --rds-radius-lg: 14px;
+  --rds-radius-xl: 20px;
+  --rds-radius-2xl: 28px;
+  --rds-radius-full: 9999px;
+
+  /* motion */
+  --rds-duration-instant: 80ms;
+  --rds-duration-fast: 140ms;
+  --rds-duration-base: 220ms;
+  --rds-duration-slow: 360ms;
+  --rds-duration-deliberate: 500ms;
+  --rds-ease-standard: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --rds-ease-entrance: cubic-bezier(0, 0, 0.2, 1);
+  --rds-ease-exit: cubic-bezier(0.4, 0, 1, 1);
+
+  /* layers */
+  --rds-z-nav: 40;
+  --rds-z-panel: 50;
+  --rds-z-overlay: 100;
+  --rds-z-command: 200;
+  --rds-z-toast: 300;
+
+  /* layout */
+  --rds-rail-collapsed: 72px;
+  --rds-rail-expanded: 260px;
+  --rds-right-panel: 360px;
+  --rds-content-reading: 1200px;
+  --rds-content-app: 1440px;
+
+  /* ── semantic roles: LIGHT (default) ── */
+  --rds-bg: var(--rds-paper-50);
+  --rds-surface: var(--rds-paper-0);
+  --rds-surface-raised: var(--rds-paper-0);
+  --rds-surface-sunken: var(--rds-paper-100);
+  --rds-border: var(--rds-paper-300);
+  --rds-border-strong: var(--rds-paper-400);
+  --rds-text: var(--rds-ink-900);
+  --rds-text-dim: var(--rds-ink-400);
+  --rds-text-faint: var(--rds-ink-300);
+  --rds-accent: var(--rds-clay-500);
+  --rds-accent-soft: var(--rds-clay-300);
+  --rds-accent-deep: var(--rds-clay-700);
+  --rds-accent-tint: var(--rds-clay-100);
+  --rds-on-accent: var(--rds-paper-0);
+
+  --rds-e0: none;
+  --rds-e1: 0 1px 2px rgba(26, 24, 22, 0.06);
+  --rds-e2: 0 4px 16px rgba(26, 24, 22, 0.08);
+  --rds-e3: 0 12px 40px rgba(26, 24, 22, 0.12);
+
+  /* subtle ring color for focus & selection */
+  --rds-ring: color-mix(in srgb, var(--rds-accent) 55%, transparent);
+  --rds-selection: var(--rds-clay-300);
+}
+
+/* ── DARK (sumi) ── */
+[data-theme="dark"] {
+  --rds-bg: var(--rds-ink-950);
+  --rds-surface: var(--rds-ink-900);
+  --rds-surface-raised: #211f1c;
+  --rds-surface-sunken: #141311;
+  --rds-border: #322f2b;
+  --rds-border-strong: #423e39;
+  --rds-text: var(--rds-paper-100);
+  --rds-text-dim: #a19c96;
+  --rds-text-faint: #746f69;
+  --rds-accent: var(--rds-clay-300);
+  --rds-accent-soft: #e2bd93;
+  --rds-accent-deep: var(--rds-clay-500);
+  --rds-accent-tint: #2e2620;
+  --rds-on-accent: var(--rds-ink-950);
+  --rds-success-soft: #1c2a20;
+  --rds-warn-soft: #2e2515;
+  --rds-danger-soft: #2e1a15;
+  --rds-info-soft: #16232c;
+  --rds-e1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --rds-e2: 0 4px 16px rgba(0, 0, 0, 0.5);
+  --rds-e3: 0 12px 40px rgba(0, 0, 0, 0.6);
+  --rds-selection: #4a3b2a;
+}
+
+/* ── OLED (true black) ── */
+[data-theme="oled"] {
+  --rds-bg: #000000;
+  --rds-surface: #0a0908;
+  --rds-surface-raised: #141311;
+  --rds-surface-sunken: #000000;
+  --rds-border: #26231f;
+  --rds-border-strong: #383430;
+  --rds-text: #f2f0ed;
+  --rds-text-dim: #9a958f;
+  --rds-text-faint: #6c6862;
+  --rds-accent: var(--rds-clay-300);
+  --rds-accent-soft: #e2bd93;
+  --rds-accent-deep: var(--rds-clay-500);
+  --rds-accent-tint: #211a14;
+  --rds-on-accent: #000000;
+  --rds-e1: 0 1px 2px rgba(0, 0, 0, 0.6);
+  --rds-e2: 0 4px 16px rgba(0, 0, 0, 0.7);
+  --rds-e3: 0 12px 40px rgba(0, 0, 0, 0.8);
+  --rds-selection: #3a2e20;
+}
+
+/* ── HIGH CONTRAST ── */
+[data-theme="hc"] {
+  --rds-bg: #ffffff;
+  --rds-surface: #ffffff;
+  --rds-surface-raised: #ffffff;
+  --rds-surface-sunken: #f2f2f2;
+  --rds-border: #000000;
+  --rds-border-strong: #000000;
+  --rds-text: #000000;
+  --rds-text-dim: #1a1a1a;
+  --rds-text-faint: #333333;
+  --rds-accent: #7a4f28;
+  --rds-accent-soft: #8a6a4f;
+  --rds-accent-deep: #5f3a1c;
+  --rds-accent-tint: #f0e6da;
+  --rds-on-accent: #ffffff;
+  --rds-ring: #000000;
+  --rds-e1: 0 0 0 1px #000000;
+  --rds-e2: 0 0 0 2px #000000;
+  --rds-e3: 0 0 0 2px #000000;
+}
+
+/* System dark preference maps to sumi when no explicit theme is set. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --rds-bg: var(--rds-ink-950);
+    --rds-surface: var(--rds-ink-900);
+    --rds-surface-raised: #211f1c;
+    --rds-surface-sunken: #141311;
+    --rds-border: #322f2b;
+    --rds-border-strong: #423e39;
+    --rds-text: var(--rds-paper-100);
+    --rds-text-dim: #a19c96;
+    --rds-text-faint: #746f69;
+    --rds-accent: var(--rds-clay-300);
+    --rds-accent-soft: #e2bd93;
+    --rds-accent-deep: var(--rds-clay-500);
+    --rds-accent-tint: #2e2620;
+    --rds-on-accent: var(--rds-ink-950);
+    --rds-selection: #4a3b2a;
+  }
+}

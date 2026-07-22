@@ -118,17 +118,17 @@ export default function LandingPage() {
 
           <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
             <Link
-              href="/worlds"
+              href="/os"
               className="btn btn-primary rounded-lg px-6 py-3 text-base shadow-sm transition hover:shadow-md"
             >
-              Enter a world →
+              Enter Ronin →
             </Link>
-            <a
-              href="https://github.com/rohithkandula19/Ronin"
+            <Link
+              href="/worlds"
               className="btn btn-secondary rounded-lg px-6 py-3 text-base"
             >
-              View on GitHub
-            </a>
+              Browse worlds
+            </Link>
           </div>
 
           <div className="mt-10 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm text-dim">
@@ -303,8 +303,8 @@ export default function LandingPage() {
           keep ownership of your data, your spend and your guardrails.
         </p>
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-          <Link href="/worlds" className="btn btn-primary rounded-lg px-6 py-3 text-base">
-            Browse worlds →
+          <Link href="/os" className="btn btn-primary rounded-lg px-6 py-3 text-base">
+            Enter Ronin →
           </Link>
           <Link href="/coding" className="btn btn-secondary rounded-lg px-6 py-3 text-base">
             Open Coding

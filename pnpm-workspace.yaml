@@ -1,5 +1,6 @@
 packages:
   - "packages/agent-patterns"
+  - "packages/design-system"
   - "apps/*"
 allowBuilds:
   unrs-resolver: set this to true or false

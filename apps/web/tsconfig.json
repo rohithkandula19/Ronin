@@ -25,6 +25,12 @@
     "paths": {
       "@/*": [
         "./*"
+      ],
+      "@ronin/design-system": [
+        "../../packages/design-system/src/index.ts"
+      ],
+      "@ronin/design-system/tokens": [
+        "../../packages/design-system/src/tokens.ts"
       ]
     }
   },
@@ -32,6 +38,8 @@
     "next-env.d.ts",
     "**/*.ts",
     "**/*.tsx",
+    "../../packages/design-system/src/**/*.ts",
+    "../../packages/design-system/src/**/*.tsx",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"
   ],
