@@ -1,6 +1,7 @@
 """Agent execution glue — wraps ReActAgent + the configured tool set + the configured LLM provider."""
 from __future__ import annotations
 
+import os
 import sys
 from dataclasses import dataclass, field
 from typing import Any
@@ -159,9 +160,13 @@ def build_single_provider(config: RoninConfig) -> LLMProvider:
 
     if config.provider == "local":
         # Embedded in-process model — no API key, no daemon. Engine (mlx-lm /
-        # llama-cpp-python) is imported lazily inside the provider.
+        # llama-cpp-python) is imported lazily inside the provider. RONIN_ADAPTER
+        # points at a trained LoRA adapter dir (e.g. training/adapters/ronin_1.5b)
+        # so ronin runs with its own fine-tuned protocol model (mlx engine only).
         from .embedded_provider import EmbeddedProvider
-        return EmbeddedProvider(model=model)
+        return EmbeddedProvider(
+            model=model, adapter_path=os.environ.get("RONIN_ADAPTER", "")
+        )
 
     api_key = config.key_for(config.provider)
     if config.provider == "ollama" and not api_key:

@@ -16,8 +16,22 @@ members = [
     "packages/hardening",
     "packages/cli",
     "packages/relay",
+    "packages/industry-sdk",
+    "packages/vault",
+    "packages/artifacts",
+    "packages/research",
+    "packages/tasks",
+    "packages/inference",
+    "packages/platform",
+    "packages/identity",
+    "packages/storage",
+    "packages/billing",
+    "packages/jobs",
+    "packages/observability",
+    "packages/support",
     "apps/demo",
     "apps/api",
+    "training",
 ]
 
 # Root pytest config so `pytest` / `uv run pytest` works from the monorepo root
@@ -32,3 +46,6 @@ members = [
 asyncio_mode = "auto"
 testpaths = ["packages", "apps"]
 faulthandler_timeout = 90
+markers = [
+    "adapter_smoke: LIVE fine-tuned-adapter smoke tests (need mlx-lm + a trained adapter; skipped elsewhere)",
+]

@@ -27,7 +27,7 @@ export default function SignInPage() {
   return (
     <main className="min-h-screen flex items-center justify-center px-6">
       <div className="card w-full max-w-md">
-        <h1 className="text-2xl font-bold mb-1">Sign in to csk</h1>
+        <h1 className="text-2xl font-bold mb-1">Sign in to Ronin</h1>
         <p className="text-sm text-dim mb-6">
           Email-only. We send a one-time API token you can rotate any time. No password to remember.
         </p>

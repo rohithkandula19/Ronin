@@ -41,8 +41,10 @@ caches the model on first use, and runs generation in-process.
 """
 from __future__ import annotations
 
+import json
 import os
 import platform
+import re
 import sys
 from pathlib import Path
 from typing import Any, Literal
@@ -51,7 +53,12 @@ from pydantic import PrivateAttr
 
 # These are intentionally imported at module top — they are LIGHT (ronin's own
 # agent-patterns types), so the module stays importable with the engine absent.
-from ronin_agent_patterns.providers.base import LLMProvider, LLMResponse, Message
+from ronin_agent_patterns.providers.base import (
+    LLMProvider,
+    LLMResponse,
+    Message,
+    ToolCall,
+)
 from ronin_agent_patterns.types import Tool
 
 Engine = Literal["mlx", "llama_cpp"]
@@ -203,46 +210,132 @@ def model_cache_dir() -> Path:
 # --------------------------------------------------------------------------- #
 # PURE: message → chat-template input
 # --------------------------------------------------------------------------- #
-def messages_to_chat(system: str, messages: list[Message]) -> list[dict[str, str]]:
+def messages_to_chat(
+    system: str, messages: list[Message], *, native_tool_role: bool = False
+) -> list[dict[str, Any]]:
     """Flatten ronin's neutral ``Message`` list into the ``[{role, content}, ...]``
-    shape every coder tokenizer's chat template expects. PURE — no model, no I/O.
+    shape a coder tokenizer's chat template expects. PURE — no model, no I/O.
 
-    * A non-empty ``system`` becomes the leading ``{"role": "system", ...}`` turn.
-    * ``user`` / ``assistant`` turns pass through with their text.
-    * ``tool`` result turns are folded into a ``user`` turn (these small local coder
-      models don't reliably consume a separate ``tool`` role; presenting the result
-      as user text is the robust degrade), prefixed so the model sees it's a result.
-    * Empty-content turns are skipped (the template would otherwise emit blank turns).
+    Two dialects, because the runtime conversation must look like what the model
+    was trained on:
+
+    * ``native_tool_role=False`` (default, llama-cpp path): ``tool`` result turns
+      are folded into a ``user`` turn (small base models don't reliably consume a
+      separate ``tool`` role), and assistant turns that were pure tool-calls are
+      skipped.
+    * ``native_tool_role=True`` (mlx/Qwen path — REQUIRED for a Ronin fine-tuned
+      adapter): ``tool`` turns keep ``role="tool"`` and assistant tool-calls pass
+      through as OpenAI-shaped ``tool_calls`` for the template to render as
+      ``<tool_call>`` blocks — the exact dialect the adapter's training data used.
+      Presenting tool results as user text to an adapter trained on the native
+      role would be a train/serve mismatch.
     """
-    chat: list[dict[str, str]] = []
+    chat: list[dict[str, Any]] = []
     if system and system.strip():
         chat.append({"role": "system", "content": system})
     for m in messages:
         if m.role == "tool":
-            label = f"[tool result{f' for {m.name}' if m.name else ''}]"
-            text = f"{label}\n{m.content}".strip()
-            if text:
-                chat.append({"role": "user", "content": text})
+            if native_tool_role:
+                chat.append({"role": "tool", "content": m.content or ""})
+            else:
+                label = f"[tool result{f' for {m.name}' if m.name else ''}]"
+                text = f"{label}\n{m.content}".strip()
+                if text:
+                    chat.append({"role": "user", "content": text})
             continue
         content = m.content or ""
+        if m.role == "assistant" and m.tool_calls and native_tool_role:
+            chat.append({
+                "role": "assistant",
+                "content": content,
+                "tool_calls": [
+                    {"id": c.id, "type": "function",
+                     "function": {"name": c.name,
+                                  "arguments": json.dumps(c.arguments, ensure_ascii=False)}}
+                    for c in m.tool_calls
+                ],
+            })
+            continue
         # An assistant turn that was pure tool-calls (no text) carries no content
-        # the local model can use — skip it rather than emit an empty assistant turn.
+        # a non-native model can use — skip it rather than emit an empty turn.
         if not content.strip():
             continue
         chat.append({"role": m.role, "content": content})
     return chat
 
 
-def render_prompt(tokenizer: Any, chat: list[dict[str, str]]) -> str:
+def tools_to_openai(tools: list[Tool]) -> list[dict[str, Any]]:
+    """ronin ``Tool``s → the OpenAI function format chat templates expect for their
+    ``tools=`` argument (Qwen renders these into its ``<tools>`` system block).
+    PURE — no I/O."""
+    return [
+        {"type": "function", "function": {
+            "name": t.name, "description": t.description, "parameters": t.input_schema,
+        }}
+        for t in tools
+    ]
+
+
+# Qwen-Coder emits one JSON object per <tool_call> block:
+#   <tool_call>\n{"name": "...", "arguments": {...}}\n</tool_call>
+_TOOL_CALL_BLOCK = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
+
+
+def parse_tool_calls(text: str) -> tuple[str, list[ToolCall]]:
+    """Extract ``<tool_call>`` blocks from generated text into ``ToolCall``s.
+    PURE — no I/O.
+
+    Returns ``(clean_text, calls)`` where ``clean_text`` is the text with parsed
+    blocks removed. A block whose body isn't a JSON object with a string ``name``
+    stays in the text verbatim — a malformed call is surfaced, never silently
+    dropped or "repaired" into a call the model didn't make. ``arguments`` may be
+    a JSON object or (per some templates) a JSON-encoded string of one.
+    """
+    calls: list[ToolCall] = []
+    kept: list[str] = []
+    cursor = 0
+    for m in _TOOL_CALL_BLOCK.finditer(text):
+        kept.append(text[cursor:m.start()])
+        cursor = m.end()
+        try:
+            obj = json.loads(m.group(1))
+        except json.JSONDecodeError:
+            kept.append(m.group(0))  # malformed: keep visible in the text
+            continue
+        name = obj.get("name") if isinstance(obj, dict) else None
+        if not isinstance(name, str) or not name:
+            kept.append(m.group(0))
+            continue
+        args = obj.get("arguments", {})
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except json.JSONDecodeError:
+                kept.append(m.group(0))
+                continue
+        if not isinstance(args, dict):
+            kept.append(m.group(0))
+            continue
+        calls.append(ToolCall(id=f"embedded_{len(calls)}", name=name, arguments=args))
+    kept.append(text[cursor:])
+    return "".join(kept).strip(), calls
+
+
+def render_prompt(
+    tokenizer: Any, chat: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None = None,
+) -> str:
     """Apply the model's own chat template to ``chat`` (ChatML for Qwen-Coder),
-    adding the generation prompt. Kept tiny + separate so the formatting seam is
-    obvious; ``tokenizer`` is the loaded HF/MLX tokenizer (impure caller supplies
-    it). Falls back to a plain ChatML render if the tokenizer has no template."""
+    adding the generation prompt; ``tools`` (OpenAI function format) are handed to
+    the template so it can render its native tool block. Falls back to a plain
+    ChatML render (tools omitted) if the tokenizer has no template."""
     apply = getattr(tokenizer, "apply_chat_template", None)
     if apply is not None:
+        if tools:
+            return apply(chat, tools=tools, tokenize=False, add_generation_prompt=True)
         return apply(chat, tokenize=False, add_generation_prompt=True)
     # Defensive fallback — emit ChatML by hand (Qwen-Coder's native format).
-    parts = [f"<|im_start|>{m['role']}\n{m['content']}<|im_end|>" for m in chat]
+    parts = [f"<|im_start|>{m['role']}\n{m.get('content', '')}<|im_end|>" for m in chat]
     parts.append("<|im_start|>assistant\n")
     return "\n".join(parts)
 
@@ -260,12 +353,19 @@ class EmbeddedProvider(LLMProvider):
     ``model`` may be left empty/``"local"`` — it's auto-selected from RAM + engine on
     first use. Pass an explicit HF repo id to pin one.
 
-    Tool-calling: these small local models don't emit structured tool calls, so
-    ``complete`` returns ``tool_calls=[]``; plain Q&A and edits work, tool loops
-    degrade gracefully (they don't crash). ``usage`` is best-effort token counts.
+    ``adapter_path`` (mlx engine only) loads a trained LoRA adapter on top of the
+    base model — this is how Ronin runs with its own fine-tuned protocol adapter
+    (see ``training/``). Set it explicitly or via the ``RONIN_ADAPTER`` env var.
+
+    Tool-calling: tools are rendered into the prompt via the model's own chat
+    template, and ``<tool_call>`` blocks in the output are parsed into structured
+    ``ToolCall``s. The BASE models only occasionally emit well-formed calls; the
+    Ronin fine-tuned adapter is trained to. Malformed call blocks stay visible in
+    the text — never silently repaired. ``usage`` is best-effort token counts.
     """
 
     model: str = ""  # "" / "local" → auto-pick by RAM; else an explicit HF repo id
+    adapter_path: str = ""  # trained LoRA adapter dir (mlx only); "" → base model
     max_tokens_default: int = 1024
 
     # Loaded lazily on first complete() and cached for the process lifetime.
@@ -322,10 +422,25 @@ class EmbeddedProvider(LLMProvider):
             from mlx_lm import load  # lazy: heavy + Apple-Silicon-only
         except ImportError as e:  # engine not installed
             raise MissingEngineError("mlx", e) from e
+        adapter = (self.adapter_path or "").strip() or None
+        if adapter and not Path(adapter).is_dir():
+            raise FileNotFoundError(
+                f"adapter_path {adapter!r} is not a directory — expected a trained "
+                "LoRA adapter dir (adapter_config.json + adapters.safetensors), e.g. "
+                "training/adapters/ronin_1.5b"
+            )
         # First call downloads + caches the 4-bit weights from the HF Hub (no key).
-        self._model_obj, self._tokenizer = load(repo)
+        self._model_obj, self._tokenizer = load(repo, adapter_path=adapter)
 
     def _load_llama_cpp(self, repo: str, cache: Path) -> None:
+        if (self.adapter_path or "").strip():
+            # Guard BEFORE the heavy import: safetensors LoRA adapters are an
+            # mlx-lm feature; failing quietly here would silently serve the base
+            # model while claiming the fine-tune.
+            raise ValueError(
+                "adapter_path is only supported on the mlx engine (Apple Silicon); "
+                "the llama-cpp engine cannot load a safetensors LoRA adapter."
+            )
         try:
             from llama_cpp import Llama  # lazy: heavy, may compile from source
         except ImportError as e:
@@ -353,12 +468,15 @@ class EmbeddedProvider(LLMProvider):
         max_tokens: int = 4096,
     ) -> LLMResponse:
         self._ensure_loaded()
-        chat = messages_to_chat(system, messages)
         engine = self._engine_choice()
+        # mlx (Qwen) gets the NATIVE dialect — tool role + structured tool_calls —
+        # matching the fine-tuned adapter's training data; llama-cpp keeps the
+        # flattened degrade.
+        chat = messages_to_chat(system, messages, native_tool_role=(engine == "mlx"))
         n = max_tokens or self.max_tokens_default
 
         if engine == "mlx":
-            text, usage = self._generate_mlx(chat, n)
+            text, usage = self._generate_mlx(chat, n, tools)
         else:
             text, usage = self._generate_llama_cpp(chat, n)
 
@@ -366,19 +484,22 @@ class EmbeddedProvider(LLMProvider):
         # so callers (and the UI) get clean text.
         for _tok in ("<|im_end|>", "<|im_start|>", "<|endoftext|>"):
             text = text.replace(_tok, "")
-        text = text.strip()
 
+        text, calls = parse_tool_calls(text.strip())
         return LLMResponse(
             text=text,
-            tool_calls=[],          # small local models: no structured tool calls
-            stop_reason="end_turn",
+            tool_calls=calls,
+            stop_reason="tool_use" if calls else "end_turn",
             usage=usage,
         )
 
-    def _generate_mlx(self, chat: list[dict[str, str]], n: int) -> tuple[str, dict[str, int]]:
+    def _generate_mlx(
+        self, chat: list[dict[str, Any]], n: int, tools: list[Tool] | None = None
+    ) -> tuple[str, dict[str, int]]:
         from mlx_lm import generate  # lazy (already importable past _ensure_loaded)
 
-        prompt = render_prompt(self._tokenizer, chat)
+        prompt = render_prompt(self._tokenizer, chat,
+                               tools=tools_to_openai(tools) if tools else None)
         text = generate(
             self._model_obj, self._tokenizer,
             prompt=prompt, max_tokens=n, verbose=False,

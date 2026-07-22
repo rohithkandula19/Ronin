@@ -104,3 +104,22 @@ ronin license mit "Your Name" --write   # generate a LICENSE
 Many of these also exist as **plugins** (so the agent can call them mid-chat) —
 see [INTEGRATIONS.md](INTEGRATIONS.md) for the 200-plugin library, MCP servers,
 and writing your own tools.
+
+## 🧰 OS sandbox (macOS Seatbelt)
+
+Run the agent's shell inside a real OS sandbox so a command physically cannot
+write outside your project — defense-in-depth beneath the approval gate and
+destructive floor.
+
+```bash
+RONIN_BACKEND=seatbelt ronin code          # confine writes to the project + temp + caches
+RONIN_BACKEND=seatbelt:no-network ronin     # also cut network (blocks read-then-exfil)
+RONIN_BACKEND=docker:<container> ronin      # or run inside a container
+ronin doctor                                # shows the active sandbox
+```
+
+Fail-closed: if the requested sandbox can't run a command it is **refused**, never
+silently run on the host. Seatbelt confines writes/destruction (a command can't
+touch `$HOME`, `/etc`, `/usr`, or another project); it does **not** confine reads,
+so use `seatbelt:no-network` when running untrusted code. macOS only today; Linux
+containment is via a container backend.

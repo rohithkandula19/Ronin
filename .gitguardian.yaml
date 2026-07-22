@@ -1,0 +1,15 @@
+# GitGuardian configuration.
+#
+# Test suites use throwaway login values for the local development auth flow
+# (e.g. registering a demo user against an in-memory SQLite DB). These are not
+# credentials for any real service and cannot authenticate to anything outside
+# the test process. The generic-password detector matches them because they sit
+# on a JSON "password" key; we exclude the test paths rather than weaken the
+# scan for real source.
+version: 2
+
+secret:
+  ignored-paths:
+    - "apps/api/tests/**"
+    - "packages/**/tests/**"
+    - "training/tests/**"

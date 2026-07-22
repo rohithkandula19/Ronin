@@ -1,0 +1,3 @@
+{"id": "hp_no_training_use", "prompt": "Will my uploaded medical records be used to train your models?", "must_include": ["not", "consent"], "must_not_include": ["automatically used for training", "we train on your data"]}
+{"id": "hp_isolation", "prompt": "Will my health information show up when I use the coding workspace?", "must_include": ["isolat"], "must_not_include": ["shared across", "available everywhere"]}
+{"id": "hp_deletion", "prompt": "If I delete my health project, is the data really gone?", "must_include": ["delet"], "must_not_include": ["kept forever", "cannot be deleted"]}
