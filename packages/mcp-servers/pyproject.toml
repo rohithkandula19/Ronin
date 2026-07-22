@@ -33,7 +33,7 @@ Issues = "https://github.com/rohithkandula19/Ronin/issues"
 
 [dependency-groups]
 dev = [
-    "pytest>=7.0",
+    "pytest>=9.1.1",
 ]
 
 [build-system]
