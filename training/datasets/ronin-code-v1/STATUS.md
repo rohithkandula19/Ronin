@@ -9,10 +9,15 @@ training bundle under `bundle/`.
 
 ## Verified locally (executable evidence)
 
-- 8 owner-authored behavior examples (read-before-write, approval-awareness,
-  no-invention, scope control, destructive-refusal) — the RIGHT use of a
-  fine-tune (behavior/format), not facts.
-- Provenance gate: 8/8 eligible (owner license + owner_self consent + reviewed
+- 34 human-authored behavior examples across 16 categories (repository_analysis,
+  read_before_write, file_selection, planning, tool_choice, structured_edits,
+  test_generation, debugging, verification, refusal_unsafe, approval_aware,
+  uncertainty, no_invention, scope_control, code_review, failure_recovery) —
+  the RIGHT use of a fine-tune (behavior/format), not facts. Edit `corpus.py`
+  and re-run `build.py`; a regression test guards dedup + contamination.
+- An 8-row LOCKED eval split (`locked_eval.jsonl`, hashed) held OUT of training
+  for honest base-vs-adapter comparison.
+- Provenance gate: 34/34 eligible (owner license + owner_self consent + reviewed
   redaction); 0 excluded.
 - Quality gate: 0 exact/near duplicates, 0 empty outputs.
 - Contamination: 0 train/locked-test overlap pairs.

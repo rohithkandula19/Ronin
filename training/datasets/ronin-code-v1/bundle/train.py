@@ -10,7 +10,7 @@ CMD = [
     "--model", "mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit",
     "--train", "--data", ".",
     "--fine-tune-type", "lora",
-    "--iters", "300",
+    "--iters", "400",
     "--batch-size", "1",
     "--num-layers", "8",
     "--learning-rate", "1e-05",
