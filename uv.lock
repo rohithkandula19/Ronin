@@ -13,17 +13,23 @@ members = [
     "ronin-agent-patterns",
     "ronin-api",
     "ronin-artifacts",
+    "ronin-billing",
     "ronin-cli",
     "ronin-demo",
     "ronin-eval-suite",
     "ronin-hardening",
+    "ronin-identity",
     "ronin-industry-sdk",
     "ronin-inference",
+    "ronin-jobs",
     "ronin-mcp-servers",
     "ronin-memory",
+    "ronin-observability",
     "ronin-platform",
     "ronin-relay",
     "ronin-research",
+    "ronin-storage",
+    "ronin-support",
     "ronin-tasks",
     "ronin-training",
     "ronin-vault",
@@ -1632,6 +1638,26 @@ requires-dist = [
 provides-extras = ["dev"]
 
 [[package]]
+name = "ronin-billing"
+version = "0.1.0"
+source = { editable = "packages/billing" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.5" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+]
+provides-extras = ["dev"]
+
+[[package]]
 name = "ronin-cli"
 version = "1.0.0"
 source = { editable = "packages/cli" }
@@ -1781,6 +1807,26 @@ requires-dist = [
 dev = [{ name = "pytest", specifier = ">=7.0" }]
 
 [[package]]
+name = "ronin-identity"
+version = "0.1.0"
+source = { editable = "packages/identity" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.5" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+]
+provides-extras = ["dev"]
+
+[[package]]
 name = "ronin-industry-sdk"
 version = "0.1.0"
 source = { editable = "packages/industry-sdk" }
@@ -1806,6 +1852,26 @@ provides-extras = ["dev"]
 name = "ronin-inference"
 version = "0.1.0"
 source = { editable = "packages/inference" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.5" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+]
+provides-extras = ["dev"]
+
+[[package]]
+name = "ronin-jobs"
+version = "0.1.0"
+source = { editable = "packages/jobs" }
 dependencies = [
     { name = "pydantic" },
 ]
@@ -1880,6 +1946,26 @@ requires-dist = [
 dev = [{ name = "pytest", specifier = ">=7.0" }]
 
 [[package]]
+name = "ronin-observability"
+version = "0.1.0"
+source = { editable = "packages/observability" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.5" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+]
+provides-extras = ["dev"]
+
+[[package]]
 name = "ronin-platform"
 version = "0.1.0"
 source = { editable = "packages/platform" }
@@ -1936,6 +2022,46 @@ dev = [
 name = "ronin-research"
 version = "0.1.0"
 source = { editable = "packages/research" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.5" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+]
+provides-extras = ["dev"]
+
+[[package]]
+name = "ronin-storage"
+version = "0.1.0"
+source = { editable = "packages/storage" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.5" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+]
+provides-extras = ["dev"]
+
+[[package]]
+name = "ronin-support"
+version = "0.1.0"
+source = { editable = "packages/support" }
 dependencies = [
     { name = "pydantic" },
 ]

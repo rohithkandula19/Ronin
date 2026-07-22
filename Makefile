@@ -43,6 +43,9 @@ verify: test test-frontend security
 verify-public-beta: test test-frontend security
 	@echo "--- beta control packages (cost/quota/flags/access/env) ---"
 	uv run --frozen pytest packages/inference packages/platform -q
+	@echo "--- beta platform packages (identity/storage/billing/jobs/observability/support) ---"
+	uv run --frozen pytest packages/identity packages/storage packages/billing \
+		packages/jobs packages/observability packages/support -q
 	@echo "verify-public-beta: local scope complete (staging/deploy = BLOCKED_CREDENTIALS)"
 
 clean:
