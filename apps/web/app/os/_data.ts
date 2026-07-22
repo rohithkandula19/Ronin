@@ -28,7 +28,7 @@ export const WORLDS: World[] = [
     tagline: "Read, reason about, and change codebases — behind approval gates.",
     icon: "code",
     risk: "review",
-    href: "/coding",
+    href: "/os/code",
     status: "available",
   },
   {
