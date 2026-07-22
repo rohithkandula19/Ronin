@@ -18,8 +18,10 @@ members = [
     "ronin-eval-suite",
     "ronin-hardening",
     "ronin-industry-sdk",
+    "ronin-inference",
     "ronin-mcp-servers",
     "ronin-memory",
+    "ronin-platform",
     "ronin-relay",
     "ronin-research",
     "ronin-tasks",
@@ -1801,6 +1803,26 @@ requires-dist = [
 provides-extras = ["dev"]
 
 [[package]]
+name = "ronin-inference"
+version = "0.1.0"
+source = { editable = "packages/inference" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.5" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+]
+provides-extras = ["dev"]
+
+[[package]]
 name = "ronin-mcp-servers"
 version = "1.0.0"
 source = { editable = "packages/mcp-servers" }
@@ -1856,6 +1878,26 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=7.0" }]
+
+[[package]]
+name = "ronin-platform"
+version = "0.1.0"
+source = { editable = "packages/platform" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.5" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+]
+provides-extras = ["dev"]
 
 [[package]]
 name = "ronin-relay"

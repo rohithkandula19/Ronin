@@ -37,5 +37,13 @@ security:
 verify: test test-frontend security
 	@echo "verify complete"
 
+# Public-beta verification. External staging/deploy/GPU/live-billing steps are
+# intentionally NOT run here — they are credential/hardware-gated and labeled
+# in docs/audits/ronin-ai-os-public-beta-final-report.md, never faked.
+verify-public-beta: test test-frontend security
+	@echo "--- beta control packages (cost/quota/flags/access/env) ---"
+	uv run --frozen pytest packages/inference packages/platform -q
+	@echo "verify-public-beta: local scope complete (staging/deploy = BLOCKED_CREDENTIALS)"
+
 clean:
 	find . -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true

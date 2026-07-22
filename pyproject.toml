@@ -21,6 +21,8 @@ members = [
     "packages/artifacts",
     "packages/research",
     "packages/tasks",
+    "packages/inference",
+    "packages/platform",
     "apps/demo",
     "apps/api",
     "training",
