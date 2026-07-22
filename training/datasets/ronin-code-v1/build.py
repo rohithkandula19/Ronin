@@ -16,7 +16,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from corpus import LOCKED_EVAL, TRAIN  # noqa: E402
+from corpus import LOCKED_EVAL, MULTI_TURN, MULTI_TURN_EVAL, TRAIN  # noqa: E402
 
 from ronin_training.forge import BundleConfig, JobState, generate_bundle  # noqa: E402
 from ronin_training.provenance import (  # noqa: E402
@@ -31,11 +31,18 @@ from ronin_training.redaction import redact  # noqa: E402
 
 
 def _items(rows, prefix):
+    """rows are 3-tuples (cat, instruction, output) or 4-tuples
+    (cat, prior_context, instruction, output); the context becomes `input`."""
     out = []
-    for i, (cat, instr, ans) in enumerate(rows):
-        r = redact(instr + " " + ans)
+    for i, row in enumerate(rows):
+        if len(row) == 4:
+            cat, context, instr, ans = row
+        else:
+            cat, instr, ans = row
+            context = ""
+        r = redact(context + " " + instr + " " + ans)
         out.append(DatasetItem(
-            id=f"{prefix}-{cat}-{i:03d}", instruction=instr, output=ans,
+            id=f"{prefix}-{cat}-{i:03d}", instruction=instr, input=context, output=ans,
             source_type=SourceType.human_reviewed, owner="ronin-maintainers",
             license="owner", consent=Consent.owner_self,
             redaction=RedactionState.clean_reviewed if r.clean else RedactionState.redacted_reviewed,
@@ -51,8 +58,10 @@ def _sha(path: Path) -> str:
 
 
 def main() -> int:
-    train_items = _items(TRAIN, "train")
-    eval_items = _items(LOCKED_EVAL, "eval")
+    train_items = _items(TRAIN, "train") + _items(MULTI_TURN, "mt")
+    eval_items = _items(LOCKED_EVAL, "eval") + _items(MULTI_TURN_EVAL, "mteval")
+    n_mt = len(MULTI_TURN)
+    print(f"multi-turn training rows: {n_mt}; multi-turn eval probes: {len(MULTI_TURN_EVAL)}")
 
     ds = ProvenanceDataset(train_items)
     elig = ds.eligible()
@@ -87,12 +96,16 @@ def main() -> int:
     print(f"bundle: job.state={job.state.value} trained={job.trained}")
     print(f"dataset sha256={_sha(bundle_dir / 'dataset.jsonl')[:16]}...")
 
-    # category balance report
+    # category balance report (single-turn + multi-turn)
     bal: dict[str, int] = {}
-    for cat, *_ in TRAIN:
-        bal[cat] = bal.get(cat, 0) + 1
+    for row in TRAIN:
+        bal[row[0]] = bal.get(row[0], 0) + 1
+    for row in MULTI_TURN:
+        bal[row[0]] = bal.get(row[0], 0) + 1
     print("categories:", ", ".join(f"{k}={v}" for k, v in sorted(bal.items())))
-    print(f"TOTAL train={len(train_items)} locked_eval={len(eval_items)} categories={len(bal)}")
+    n_with_input = sum(1 for it in train_items if it.input)
+    print(f"TOTAL train={len(train_items)} (with prior-turn context: {n_with_input}) "
+          f"locked_eval={len(eval_items)} categories={len(bal)}")
     return 0
 
 

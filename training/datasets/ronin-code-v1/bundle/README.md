@@ -4,7 +4,7 @@
 runnable bundle. Training is a separate manual step on hardware you provide.
 
 - base model: `mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit`
-- training rows (eligible only): 34
+- training rows (eligible only): 44
 - seed: 0 (reproducible)
 
 ## Estimates (heuristic, not guarantees)
