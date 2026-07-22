@@ -41,12 +41,12 @@ Changelog = "https://github.com/rohithkandula19/Ronin/blob/main/CHANGELOG.md"
 
 [dependency-groups]
 dev = [
-    "pytest>=7.0",
+    "pytest>=9.1.1",
     "pytest-asyncio>=0.23",
 ]
 
 [build-system]
-requires = ["hatchling>=1.26"]
+requires = ["hatchling>=1.31.0"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]

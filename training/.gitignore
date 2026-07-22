@@ -1,0 +1,6 @@
+# Generated, reproducible from the volumes — not source.
+data/
+adapters/
+reports/dataset_report.md
+reports/base_eval.md
+reports/adapter_eval.md

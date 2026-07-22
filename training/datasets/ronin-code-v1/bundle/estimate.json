@@ -1,0 +1,7 @@
+{
+  "note": "rough heuristic estimates, not a guarantee",
+  "min_vram_gb_qlora_1_5b": 6,
+  "recommended_ram_gb": 16,
+  "approx_wallclock_minutes": 20,
+  "approx_cost_usd_cloud_gpu": 1.5
+}

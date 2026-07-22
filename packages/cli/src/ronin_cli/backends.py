@@ -68,8 +68,11 @@ SAFETY NOTES (read before changing)
 """
 from __future__ import annotations
 
+import os
+import platform
 import re
 import subprocess
+import tempfile
 
 __all__ = [
     "DEFAULT_BACKEND",
@@ -176,8 +179,96 @@ def wrap_command(cmd: str, backend: dict) -> list[str]:
         argv += [host, cmd]
         return argv
 
+    if btype == "seatbelt":
+        # macOS-native OS sandbox via Seatbelt (sandbox-exec). Confines the
+        # command's WRITES to the workspace + temp (+ cache dirs), denies
+        # everything else by default. Reads/process/network stay allowed so real
+        # build/test commands run. See :func:`seatbelt_profile`.
+        if platform.system() != "Darwin":
+            raise ValueError(
+                "seatbelt backend requires macOS (Seatbelt / sandbox-exec); "
+                "on Linux use a container/landlock backend"
+            )
+        workspace = backend.get("workspace") or os.getcwd()
+        profile = seatbelt_profile(
+            workspace,
+            allow_network=bool(backend.get("allow_network", True)),
+            extra_writes=backend.get("extra_writes"),
+        )
+        # -p passes the profile inline (no temp file → wrap_command stays pure);
+        # the command is one argv element so it can't break out of the wrapper.
+        return ["sandbox-exec", "-p", profile, "/bin/sh", "-c", cmd]
+
     raise ValueError(
-        f"unknown backend type {btype!r}: expected 'local', 'docker', or 'ssh'"
+        f"unknown backend type {btype!r}: expected 'local', 'docker', 'ssh', or 'seatbelt'"
+    )
+
+
+def _sb_quote(path: str) -> str:
+    """Escape a path for a double-quoted Seatbelt string literal."""
+    return path.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def seatbelt_profile(
+    workspace: str,
+    *,
+    allow_network: bool = True,
+    extra_writes: list[str] | None = None,
+) -> str:
+    """A macOS Seatbelt (.sb) profile that CONFINES WRITES to ``workspace`` + the
+    per-user temp dir + standard cache dirs, and denies everything else. PURE.
+
+    Design: ``(deny default)`` then re-allow only what a real coding command needs
+    — process fork/exec, reading anywhere (compilers read system libs; reads are
+    low-risk), and WRITING only under the workspace, ``$TMPDIR`` and package-manager
+    caches (so ``uv`` / ``pip`` / ``npm`` still work). The result blocks the moves
+    that matter: writing to ``$HOME`` (``~/.ssh``, dotfiles), ``/etc``, ``/usr``,
+    or any other project. ``allow_network=False`` also cuts the network.
+
+    Returned as a single line so it can be passed inline via ``sandbox-exec -p``.
+
+    LIMITATION (stated honestly, not overclaimed): this profile confines WRITES and
+    process damage. It does NOT confine READS — a sandboxed command can still read
+    files (``~/.ssh``, ``~/.aws``) — and by default the network is open, so a
+    malicious command could read a secret and exfiltrate it. Use
+    ``allow_network=False`` (``RONIN_BACKEND=seatbelt:no-network``) to also cut the
+    network. Full read-confinement is not offered because it breaks ordinary tools
+    that read system/config files; the guarantee here is "can't damage your machine
+    or files outside the project", not "can't see anything".
+    """
+    ws = os.path.realpath(workspace)
+    # A sandbox rooted at "/" would allow writes EVERYWHERE — a silent no-op sandbox,
+    # worse than none because the user believes they are contained. Refuse it
+    # (fail-closed → the selection turns this into a refusal, never a host run).
+    if ws in ("/", ""):
+        raise ValueError(
+            "refusing a seatbelt sandbox rooted at '/': it would allow writes "
+            "everywhere. cd into a specific project directory."
+        )
+    home = os.path.expanduser("~")
+    writes = [
+        ws,
+        os.path.realpath(tempfile.gettempdir()),
+        os.path.join(home, ".cache"),
+        os.path.join(home, "Library", "Caches"),
+        os.path.join(home, ".npm"),
+        os.path.join(home, ".cargo", "registry"),
+    ]
+    for p in extra_writes or []:
+        writes.append(os.path.realpath(p))
+    seen: set[str] = set()
+    uniq = [p for p in writes if p and not (p in seen or seen.add(p))]
+    write_rules = " ".join(f'(subpath "{_sb_quote(p)}")' for p in uniq)
+    net = "(allow network*)" if allow_network else "(deny network*)"
+    return (
+        "(version 1) (deny default) (allow process*) (allow file-read*) "
+        "(allow file-ioctl) (allow sysctl-read) (allow mach*) (allow ipc-posix*) "
+        "(allow signal (target self)) "
+        f"(allow file-write* {write_rules}) "
+        '(allow file-write-data (literal "/dev/null") (literal "/dev/tty") '
+        '(literal "/dev/stdout") (literal "/dev/stderr") (literal "/dev/dtracehelper") '
+        '(literal "/dev/random") (literal "/dev/urandom")) '
+        f"{net}"
     )
 
 
@@ -208,6 +299,12 @@ def parse_backend(spec: str) -> dict:
 
     if head == "local":
         return {"type": "local"}
+
+    if head == "seatbelt":
+        # "seatbelt" (network allowed) or "seatbelt:no-network" / ":strict" (cut net).
+        opt = rest.strip().lower()
+        allow_net = opt not in ("no-network", "no-net", "nonet", "strict")
+        return {"type": "seatbelt", "allow_network": allow_net}
 
     if head == "docker":
         container = rest.strip()
@@ -262,6 +359,10 @@ def run_in_backend(
     timeout raises ``subprocess.TimeoutExpired``, matching ``subprocess`` norms,
     so callers can distinguish "command failed" from "command hung".
     """
+    # Seatbelt confines writes to a workspace; default it to where we run (cwd),
+    # i.e. the project root, so the profile is generated for the right directory.
+    if backend.get("type") == "seatbelt" and not backend.get("workspace"):
+        backend = {**backend, "workspace": cwd or os.getcwd()}
     argv = wrap_command(cmd, backend)
     proc = subprocess.run(
         argv,

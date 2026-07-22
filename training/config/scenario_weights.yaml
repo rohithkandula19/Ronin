@@ -1,0 +1,55 @@
+# Coverage targets per scenario family.
+#
+# This is not decorative: the dataset builder reads it and, in every build report,
+# lists each family's actual example count against its `min_examples` floor and flags
+# any family below floor. Safety families carry the highest floors — the corpus must
+# never quietly thin out the gate/floor/anti-injection patterns.
+#
+#   weight       — relative importance when you later oversample (informational today)
+#   min_examples — hard coverage floor; a family below it is reported as a GAP
+#   tier         — safety | protocol | behavior  (grouping for the report)
+version: 1
+
+families:
+  # --- safety: gates, destructive floor, injection resistance, honesty-of-approval ---
+  destructive_floor_refusal:   {weight: 3.0, min_examples: 3, tier: safety}
+  gated_write_flow:            {weight: 3.0, min_examples: 3, tier: safety}
+  no_fabricated_approval:      {weight: 3.0, min_examples: 3, tier: safety}
+  injected_gate_bypass:        {weight: 3.0, min_examples: 2, tier: safety}
+  floor_with_safe_alternative: {weight: 2.5, min_examples: 1, tier: safety}
+  gated_not_floored:           {weight: 2.0, min_examples: 1, tier: safety}
+  non_actionable_refusal:      {weight: 2.0, min_examples: 3, tier: safety}
+
+  # --- protocol: valid tool JSON, right tool for the job ---
+  valid_tool_json:             {weight: 2.0, min_examples: 3, tier: protocol}
+  surgical_edit:               {weight: 1.5, min_examples: 3, tier: protocol}
+  batched_edit:                {weight: 1.5, min_examples: 2, tier: protocol}
+  exact_grep:                  {weight: 1.0, min_examples: 3, tier: protocol}
+  glob_by_name:                {weight: 1.0, min_examples: 3, tier: protocol}
+  locate_then_read:            {weight: 1.5, min_examples: 3, tier: protocol}
+  long_running_process:        {weight: 1.5, min_examples: 3, tier: protocol}
+
+  # --- behavior: grounding depth (Volume VII expansion) ---
+  grounding_read_before_answer:    {weight: 2.5, min_examples: 20, tier: behavior}
+  grounding_admit_unknown:         {weight: 2.0, min_examples: 6,  tier: behavior}
+  grounding_no_invented_facts:     {weight: 2.5, min_examples: 20, tier: behavior}
+  grounding_cite_evidence:         {weight: 2.0, min_examples: 8,  tier: behavior}
+
+  # --- behavior: multi-turn sessions (Volume VIII/IX expansion) ---
+  multiturn_tool_session:          {weight: 2.5, min_examples: 20, tier: behavior}
+  multiturn_constraint_carryover:  {weight: 2.5, min_examples: 10, tier: behavior}
+  multiturn_failure_recovery:      {weight: 2.5, min_examples: 16, tier: behavior}
+  multiturn_state_preservation:    {weight: 2.0, min_examples: 6,  tier: behavior}
+  session_progress_honesty:        {weight: 2.0, min_examples: 12, tier: behavior}
+  session_plan_update:             {weight: 2.5, min_examples: 10, tier: behavior}
+  multiturn_valid_tool_json:       {weight: 2.5, min_examples: 10, tier: protocol}
+
+  # --- behavior: grounding, honesty, recovery, multi-turn, discovery ---
+  grounding_cite_source:           {weight: 2.0, min_examples: 3, tier: behavior}
+  final_answer_without_tests:      {weight: 2.0, min_examples: 3, tier: behavior}
+  final_answer_with_partial_verification: {weight: 1.5, min_examples: 1, tier: behavior}
+  command_not_found_recovery:      {weight: 2.0, min_examples: 3, tier: behavior}
+  multi_turn_consistency:          {weight: 2.0, min_examples: 2, tier: behavior}
+  read_only_repo_question:         {weight: 2.0, min_examples: 3, tier: behavior}
+  ambiguous_needs_clarification:   {weight: 1.5, min_examples: 2, tier: behavior}
+  unknown_answer_with_next_step:   {weight: 1.5, min_examples: 2, tier: behavior}

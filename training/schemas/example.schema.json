@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Ronin SFT training example (internal form; MLX export keeps only messages/tools)",
+  "type": "object",
+  "required": ["id", "family", "source_volume", "license", "messages"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+    "family": {"type": "string"},
+    "source_volume": {"type": "string"},
+    "license": {"type": "string", "enum": ["project-owned", "public-permissive"]},
+    "messages": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["role"],
+        "additionalProperties": false,
+        "properties": {
+          "role": {"type": "string", "enum": ["system", "user", "assistant", "tool"]},
+          "content": {"type": "string"},
+          "tool_call_id": {"type": "string"},
+          "tool_calls": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "type", "function"],
+              "properties": {
+                "id": {"type": "string"},
+                "type": {"type": "string", "enum": ["function"]},
+                "function": {
+                  "type": "object",
+                  "required": ["name", "arguments"],
+                  "properties": {
+                    "name": {"type": "string"},
+                    "arguments": {"type": "string"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "tools": {"type": "array"}
+  }
+}

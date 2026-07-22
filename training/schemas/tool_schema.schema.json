@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Ronin tool registry entry",
+  "type": "object",
+  "required": ["name", "risk", "description", "parameters"],
+  "properties": {
+    "name": {"type": "string", "pattern": "^[a-z_]+$"},
+    "risk": {"type": "string", "enum": ["read", "write", "execute", "network", "secret", "destructive", "deploy"]},
+    "gated": {"type": "boolean"},
+    "description": {"type": "string"},
+    "parameters": {
+      "type": "object",
+      "required": ["type", "properties"],
+      "properties": {
+        "type": {"type": "string", "enum": ["object"]},
+        "properties": {"type": "object"},
+        "required": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

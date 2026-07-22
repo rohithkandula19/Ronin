@@ -109,6 +109,9 @@ def current_user(
 
 def make_app() -> FastAPI:
     settings = get_settings()
+    # Import v1 models before init_db so their aios_* tables are created too.
+    from . import v1 as _v1  # noqa: F401
+    from .v1.models import AiosUser  # noqa: F401  (registers all aios_* tables)
     init_db()
     app = FastAPI(
         title="ronin — hosted briefings API",
@@ -333,6 +336,11 @@ def make_app() -> FastAPI:
             raise HTTPException(status_code=400, detail=f"bad payload: {exc}")
         message = apply_webhook_event(session, event)
         return {"ok": True, "message": message}
+
+    # ---------- Ronin AI OS API v1 (additive, mounted under /api/v1) ----------
+    from .v1 import build_v1_router
+
+    app.include_router(build_v1_router())
 
     return app
 

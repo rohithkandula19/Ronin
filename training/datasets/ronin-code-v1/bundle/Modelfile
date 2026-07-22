@@ -1,0 +1,10 @@
+# Ollama Modelfile (for the GGUF export path)
+FROM ./model.gguf
+TEMPLATE """<|im_start|>system
+{{ .System }}<|im_end|>
+<|im_start|>user
+{{ .Prompt }}<|im_end|>
+<|im_start|>assistant
+"""
+PARAMETER stop <|im_end|>
+SYSTEM """You are Ronin, running on a locally fine-tuned coding adapter."""
