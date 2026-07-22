@@ -21,9 +21,12 @@ from ..db import session_scope as _session_scope_dep
 # The db module exposes session_scope as a FastAPI dependency generator; wrap it
 # once as a real context manager for the imperative call sites in this module.
 session_scope = contextlib.contextmanager(_session_scope_dep)
+from ronin_artifacts import ArtifactKind, ArtifactLinks
 from ronin_industry_sdk import ActivationError
 from ronin_vault import IsolationError, MemoryItem, MemoryScope, Sensitivity
 from . import context as ctx
+from . import workflows
+from .demo import DEMO_HEALTHCARE_DOC, DEMO_STUDY_NOTES, demo_banner
 from .models import (
     AiosAuditEvent,
     AiosSession,
@@ -93,6 +96,18 @@ class RecallIn(BaseModel):
     query: str
     world: str
     workspace_kind: str = "personal"
+
+
+class StudyPlanIn(BaseModel):
+    topic: str
+    goal: str
+    notes: str
+    weeks: int = 3
+
+
+class HealthSummaryIn(BaseModel):
+    document_text: str
+    country: str = "US"
 
 
 # ------------------------------------------------------------- auth dep
@@ -347,5 +362,120 @@ def build_v1_router() -> APIRouter:
             ]}
 
     router.include_router(audit_router)
+
+    # -------------------------------------------------------- artifacts
+    art = APIRouter(prefix="/artifacts", tags=["artifacts"])
+
+    @art.get("")
+    def list_artifacts(user: AiosUser = Depends(_current_user), world: str | None = None) -> dict:
+        items = ctx.artifacts().list_for(str(user.id), world=world)
+        return {"artifacts": [
+            {"id": a.id, "kind": a.kind.value, "world": a.world, "title": a.title,
+             "versions": len(a.versions)} for a in items
+        ]}
+
+    @art.get("/{artifact_id}")
+    def get_artifact(artifact_id: str, user: AiosUser = Depends(_current_user)) -> dict:
+        a = ctx.artifacts().get(artifact_id)
+        if a is None or a.owner != str(user.id):
+            raise HTTPException(status_code=404, detail="artifact not found")
+        v = a.current
+        return {"id": a.id, "kind": a.kind.value, "world": a.world,
+                "title": v.title, "version": v.version, "content": v.content,
+                "links": v.links.model_dump(mode="json")}
+
+    router.include_router(art)
+
+    # -------------------------------------------------------- education
+    edu = APIRouter(prefix="/education", tags=["education"])
+
+    @edu.post("/study-plan", status_code=201)
+    def make_study_plan(body: StudyPlanIn, user: AiosUser = Depends(_current_user)) -> dict:
+        try:
+            content = workflows.build_study_plan(
+                topic=body.topic, goal=body.goal, notes=body.notes, weeks=body.weeks)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        artifact = ctx.artifacts().create(
+            kind=ArtifactKind.study_plan, owner=str(user.id), world="education",
+            title=f"Study plan: {body.topic}", content=content, created=_now(),
+            links=ArtifactLinks(source_ids=("uploaded-notes",)),
+        )
+        with session_scope() as db:
+            _audit(db, user_id=user.id, action="education.study_plan", world="education")
+        return {"artifact_id": artifact.id, "content": content}
+
+    router.include_router(edu)
+
+    # -------------------------------------------------------- healthcare
+    hc = APIRouter(prefix="/healthcare", tags=["healthcare"])
+
+    @hc.get("/limitations")
+    def limitations() -> dict:
+        return {
+            "disclosures": workflows.HEALTHCARE_DISCLOSURES,
+            "blocked": ["autonomous_diagnosis", "prescription_change",
+                        "medication_dosage_change", "emergency_dispatch"],
+        }
+
+    @hc.post("/summary", status_code=201)
+    def health_summary(body: HealthSummaryIn, user: AiosUser = Depends(_current_user)) -> dict:
+        if workflows.refuses_diagnosis(body.document_text):
+            raise HTTPException(
+                status_code=422,
+                detail="This world does not diagnose. Ask a clinician; I can help "
+                       "you prepare questions.",
+            )
+        try:
+            content = workflows.build_health_summary(
+                document_text=body.document_text, country=body.country)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        # Store the document reference in ISOLATED, health-sensitive, non-training memory.
+        ctx.vault().add(MemoryItem(
+            scope=MemoryScope.industry, owner=str(user.id), world="healthcare",
+            sensitivity=Sensitivity.health, text=body.document_text[:500],
+            source="healthcare-upload", created=_now(),
+        ))
+        artifact = ctx.artifacts().create(
+            kind=ArtifactKind.medical_summary, owner=str(user.id), world="healthcare",
+            title="Health information summary", content=content, created=_now(),
+            links=ArtifactLinks(source_ids=("uploaded-document",)),
+        )
+        with session_scope() as db:
+            _audit(db, user_id=user.id, action="healthcare.summary", world="healthcare")
+        return {"artifact_id": artifact.id, "content": content}
+
+    @hc.delete("/project/{artifact_id}")
+    def delete_health_project(artifact_id: str, user: AiosUser = Depends(_current_user)) -> dict:
+        art_store = ctx.artifacts()
+        a = art_store.get(artifact_id)
+        if a is None or a.owner != str(user.id):
+            raise HTTPException(status_code=404, detail="not found")
+        art_store.delete(artifact_id, owner=str(user.id))
+        # also purge isolated healthcare memory for this user
+        purged = 0
+        v = ctx.vault()
+        for item in v.list_items(str(user.id), scope=MemoryScope.industry):
+            if item.world == "healthcare":
+                v.delete(item.id)
+                purged += 1
+        with session_scope() as db:
+            _audit(db, user_id=user.id, action="healthcare.delete", world="healthcare",
+                   detail=f"artifact+{purged} memory items")
+        return {"ok": True, "deleted_memory_items": purged}
+
+    router.include_router(hc)
+
+    # ------------------------------------------------------------- demo
+    demo = APIRouter(prefix="/demo", tags=["demo"])
+
+    @demo.get("")
+    def demo_info() -> dict:
+        return {**demo_banner(),
+                "fixtures": {"healthcare_document": DEMO_HEALTHCARE_DOC,
+                             "study_notes": DEMO_STUDY_NOTES}}
+
+    router.include_router(demo)
 
     return router

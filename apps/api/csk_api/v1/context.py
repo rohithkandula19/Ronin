@@ -18,6 +18,7 @@ from ronin_industry_sdk.model_registry import (
     seed_default_models,
     seed_known_adapters,
 )
+from ronin_artifacts import ArtifactStore
 from ronin_vault import VaultStore
 
 
@@ -65,7 +66,13 @@ def vault() -> VaultStore:
     return VaultStore(_data_dir() / "vault.json")
 
 
+@functools.lru_cache(maxsize=1)
+def artifacts() -> ArtifactStore:
+    return ArtifactStore(_data_dir() / "artifacts.json")
+
+
 def reset_context_for_tests() -> None:
     """Clear the memoized singletons so a test's env/temp dirs take effect."""
-    for fn in (pack_registry, suite_registry, model_registry, adapter_registry, vault):
+    for fn in (pack_registry, suite_registry, model_registry, adapter_registry,
+               vault, artifacts):
         fn.cache_clear()
