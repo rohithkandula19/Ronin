@@ -1,0 +1,22 @@
+# Policy: coding-write-approval
+# Enforced by: Ronin Core approval gates (packages/cli approvals + permissions).
+# This file declares the world-level contract; the runtime code is the enforcement.
+id: coding-write-approval
+version: 1.0.0
+description: >-
+  All mutating actions in the Coding world flow through the existing Ronin
+  approval system. The web surface may never bypass what the terminal enforces.
+rules:
+  - id: gated-writes
+    effect: require_approval
+    applies_to_tools: [write_file, edit_file, multi_edit, run_command, run_background]
+    rationale: These are the SENSITIVE_TOOLS of the existing runtime; parity is mandatory.
+  - id: destructive-floor
+    effect: deny_without_explicit_human_approval
+    applies_to: destructive shell commands (rm -rf, force push, reset --hard, ...)
+    rationale: The existing destructive safety floor applies even under auto-accept modes.
+  - id: untrusted-hooks
+    effect: deny
+    applies_to: repo-committed hooks/plugins/mcp.json not in the trust store
+    rationale: Content-hash trust gate from the existing runtime; never auto-execute.
+disclosures: []

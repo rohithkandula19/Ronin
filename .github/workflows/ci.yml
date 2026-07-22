@@ -57,6 +57,7 @@ jobs:
             packages/relay \
             apps/demo \
             apps/api \
+            training \
             -q
 
       - name: Build packages (sdist + wheel)

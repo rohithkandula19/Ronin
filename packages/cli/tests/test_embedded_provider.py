@@ -258,3 +258,144 @@ def test_module_imports_without_engine_installed() -> None:
     assert prov.model == ""
     # No engine loaded just by constructing.
     assert prov._model_obj is None
+
+
+# --------------------------------------------------------------------------- #
+# Adapter integration (fine-tuned LoRA) — pure/guard paths only, no model load.
+# --------------------------------------------------------------------------- #
+def test_adapter_on_llama_cpp_engine_is_rejected_before_import() -> None:
+    # The guard must fire BEFORE the llama_cpp import: a quiet fallback would
+    # silently serve the base model while claiming the fine-tune.
+    prov = E.EmbeddedProvider(
+        model="Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF", adapter_path="/tmp/adapter"
+    )
+    prov._engine = "llama_cpp"
+    with pytest.raises(ValueError, match="mlx engine"):
+        prov._load_llama_cpp("Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF", E.model_cache_dir())
+
+
+def test_adapter_missing_dir_raises_clear_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys as _sys
+    import types as _types
+    # Stub mlx_lm so the check under test is the adapter-dir validation, not the
+    # engine import.
+    fake = _types.ModuleType("mlx_lm")
+    fake.load = lambda *a, **k: (object(), object())
+    monkeypatch.setitem(_sys.modules, "mlx_lm", fake)
+    prov = E.EmbeddedProvider(adapter_path="/nonexistent/adapter/dir")
+    prov._engine = "mlx"
+    with pytest.raises(FileNotFoundError, match="adapter_path"):
+        prov._load_mlx("mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit")
+
+
+def test_adapter_path_is_passed_to_mlx_load(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    import sys as _sys
+    import types as _types
+    seen: dict = {}
+
+    def fake_load(repo, adapter_path=None):
+        seen["repo"] = repo
+        seen["adapter_path"] = adapter_path
+        return object(), object()
+
+    fake = _types.ModuleType("mlx_lm")
+    fake.load = fake_load
+    monkeypatch.setitem(_sys.modules, "mlx_lm", fake)
+    adapter = tmp_path / "ronin_adapter"
+    adapter.mkdir()
+    prov = E.EmbeddedProvider(
+        model="mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit",
+        adapter_path=str(adapter),
+    )
+    prov._engine = "mlx"
+    prov._load_mlx(prov._resolve_repo())
+    assert seen["adapter_path"] == str(adapter)
+
+
+# --------------------------------------------------------------------------- #
+# parse_tool_calls — the output side of the trained tool protocol.
+# --------------------------------------------------------------------------- #
+def test_parse_tool_calls_single_block() -> None:
+    text = 'Let me check.\n<tool_call>\n{"name": "read_file", "arguments": {"path": "a.py"}}\n</tool_call>'
+    clean, calls = E.parse_tool_calls(text)
+    assert clean == "Let me check."
+    assert len(calls) == 1
+    assert calls[0].name == "read_file"
+    assert calls[0].arguments == {"path": "a.py"}
+    assert calls[0].id == "embedded_0"
+
+
+def test_parse_tool_calls_multiple_blocks_and_string_arguments() -> None:
+    text = (
+        '<tool_call>{"name": "glob", "arguments": {"pattern": "**/*.py"}}</tool_call>'
+        '<tool_call>{"name": "read_file", "arguments": "{\\"path\\": \\"b.py\\"}"}</tool_call>'
+    )
+    clean, calls = E.parse_tool_calls(text)
+    assert clean == ""
+    assert [c.name for c in calls] == ["glob", "read_file"]
+    assert calls[1].arguments == {"path": "b.py"}
+    assert [c.id for c in calls] == ["embedded_0", "embedded_1"]
+
+
+def test_parse_tool_calls_malformed_block_stays_in_text() -> None:
+    text = 'Trying:\n<tool_call>{not valid json}</tool_call>'
+    clean, calls = E.parse_tool_calls(text)
+    assert calls == []
+    assert "<tool_call>" in clean  # surfaced, not silently dropped
+
+
+def test_parse_tool_calls_missing_name_stays_in_text() -> None:
+    text = '<tool_call>{"arguments": {"path": "a.py"}}</tool_call>'
+    clean, calls = E.parse_tool_calls(text)
+    assert calls == [] and "<tool_call>" in clean
+
+
+def test_parse_tool_calls_plain_text_untouched() -> None:
+    clean, calls = E.parse_tool_calls("Just an answer, no calls.")
+    assert clean == "Just an answer, no calls." and calls == []
+
+
+# --------------------------------------------------------------------------- #
+# Native tool-role chat dialect (mlx path) vs flattened degrade (llama-cpp path).
+# --------------------------------------------------------------------------- #
+def test_messages_to_chat_native_keeps_tool_role_and_calls() -> None:
+    from ronin_agent_patterns.providers.base import ToolCall
+    msgs = [
+        Message(role="user", content="run it"),
+        Message(role="assistant", content="",
+                tool_calls=[ToolCall(id="c1", name="run_command",
+                                     arguments={"command": "pytest -q"})]),
+        Message(role="tool", content="1 passed", tool_call_id="c1", name="run_command"),
+    ]
+    chat = E.messages_to_chat("sys", msgs, native_tool_role=True)
+    roles = [m["role"] for m in chat]
+    assert roles == ["system", "user", "assistant", "tool"]
+    call = chat[2]["tool_calls"][0]
+    assert call["function"]["name"] == "run_command"
+    assert "pytest -q" in call["function"]["arguments"]
+    assert chat[3] == {"role": "tool", "content": "1 passed"}
+
+
+def test_messages_to_chat_default_flattens_as_before() -> None:
+    msgs = [
+        Message(role="user", content="run it"),
+        Message(role="tool", content="1 passed", tool_call_id="c1", name="run_command"),
+    ]
+    chat = E.messages_to_chat("", msgs)
+    assert [m["role"] for m in chat] == ["user", "user"]
+    assert chat[1]["content"].startswith("[tool result for run_command]")
+
+
+def test_tools_to_openai_shape() -> None:
+    from ronin_agent_patterns.types import Tool
+    t = Tool(name="read_file", description="Read a file.",
+             input_schema={"type": "object", "properties": {"path": {"type": "string"}},
+                           "required": ["path"]},
+             handler=lambda path: "")
+    out = E.tools_to_openai([t])
+    assert out == [{"type": "function", "function": {
+        "name": "read_file", "description": "Read a file.",
+        "parameters": {"type": "object",
+                       "properties": {"path": {"type": "string"}},
+                       "required": ["path"]},
+    }}]

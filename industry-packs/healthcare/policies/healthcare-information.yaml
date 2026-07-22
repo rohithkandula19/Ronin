@@ -1,0 +1,25 @@
+id: healthcare-information
+version: 1.0.0
+description: >-
+  This world provides educational information and document organization only.
+  It never diagnoses, never changes medication decisions, and never handles
+  emergencies.
+rules:
+  - id: no-diagnosis
+    effect: refuse_with_redirect
+    applies_to: requests for a diagnosis or treatment decision
+    redirect: explain relevant terminology and prepare questions for a clinician
+  - id: no-prescription-decisions
+    effect: refuse_with_redirect
+    applies_to: medication changes, dosage changes, starting or stopping treatment
+    redirect: build a medication question list for the prescribing clinician
+  - id: emergency-boundary
+    effect: refuse_with_emergency_guidance
+    applies_to: descriptions of possible medical emergencies
+    guidance: direct the user to local emergency services immediately
+required_output_disclosures:
+  - informational purpose (not medical advice)
+  - sources with dates, or an explicit statement that no source was retrieved
+  - uncertainty and missing information
+  - applicable country
+  - when professional review is appropriate
