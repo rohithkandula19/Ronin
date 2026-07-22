@@ -13,6 +13,13 @@ import {
 
 type LoadState = "loading" | "ready" | "error" | "offline";
 
+// Worlds whose workspace UI exists. Others show "in progress" until built.
+const WORLD_ROUTES: Record<string, string> = {
+  coding: "/coding",
+  education: "/education",
+  healthcare: "/healthcare",
+};
+
 const TONE_CLASS: Record<string, string> = {
   danger: "bg-red-50 text-red-700 border-red-200",
   warn: "bg-amber-50 text-amber-700 border-amber-200",
@@ -154,10 +161,17 @@ export default function WorldNavigator() {
                 )}
 
                 <div className="mt-4">
-                  {enterable ? (
-                    <button className="btn rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white">
+                  {enterable && WORLD_ROUTES[w.id] ? (
+                    <a
+                      href={WORLD_ROUTES[w.id]}
+                      className="btn inline-block rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white"
+                    >
                       Enter {w.name}
-                    </button>
+                    </a>
+                  ) : enterable ? (
+                    <span className="text-xs font-medium text-neutral-400">
+                      Workspace UI in progress
+                    </span>
                   ) : (
                     <span className="text-xs font-medium text-neutral-400">
                       In preparation — policies, datasets, and evaluations pending
