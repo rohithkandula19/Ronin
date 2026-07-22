@@ -1,0 +1,11 @@
+{
+  "base_model": "mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit",
+  "batch_size": 1,
+  "industry": "coding",
+  "iters": 400,
+  "learning_rate": 1e-05,
+  "lora_layers": 8,
+  "max_seq_length": 3072,
+  "method": "qlora",
+  "seed": 0
+}

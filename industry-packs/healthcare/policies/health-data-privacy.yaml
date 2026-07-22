@@ -1,0 +1,20 @@
+id: health-data-privacy
+version: 1.0.0
+description: >-
+  Health data is isolated by default: it never leaves the healthcare world's
+  memory scope and never enters training data automatically.
+rules:
+  - id: training-exclusion
+    effect: deny
+    applies_to: adding healthcare conversations, uploads, or memory to any training dataset
+    rationale: training eligibility for health data is never inferred from use
+  - id: cross-world-isolation
+    effect: deny
+    applies_to: healthcare memory appearing in any other world without an explicit,
+      previewed user transfer
+  - id: deletion
+    effect: require
+    applies_to: user deletion requests for healthcare projects and documents
+    rationale: deletion must remove the data from vault storage and memory indices
+disclosures:
+  - Data isolation status is visible in the workspace trust panel.

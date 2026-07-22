@@ -1,0 +1,39 @@
+id: education
+name: Education
+version: 1.0.0
+status: beta
+risk_level: medium
+description: >-
+  Learning workspace for students, teachers, tutors, and parents: guided
+  tutoring, study plans, quizzes, and source-grounded research support that
+  aids learning rather than substituting for assessed work.
+supported_roles:
+  - student
+  - teacher
+  - tutor
+  - parent
+  - researcher
+supported_countries:
+  - US
+  - IN
+  - GB
+  - CA
+supported_languages:
+  - en
+default_adapter: null
+allowed_model_capabilities:
+  - text
+  - retrieval
+  - structured_output
+  - vision
+allowed_tools:
+  - document_parser
+  - research_search
+blocked_capabilities:
+  - tool_use
+required_policies:
+  - academic-integrity
+  - minor-data-protection
+required_eval_suites:
+  - education-grounding
+  - education-integrity
