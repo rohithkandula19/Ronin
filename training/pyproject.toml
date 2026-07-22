@@ -12,7 +12,7 @@ dependencies = [
 # On-device Apple-Silicon training. Optional: the dataset builder + evals run
 # without it. `pip install -e 'training[mlx]'` on an Apple Silicon Mac.
 mlx = ["mlx-lm>=0.20"]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=9.1.1"]
 
 [build-system]
 requires = ["hatchling"]
