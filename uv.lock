@@ -12,14 +12,17 @@ members = [
     "ronin",
     "ronin-agent-patterns",
     "ronin-api",
+    "ronin-artifacts",
     "ronin-cli",
     "ronin-demo",
     "ronin-eval-suite",
     "ronin-hardening",
+    "ronin-industry-sdk",
     "ronin-mcp-servers",
     "ronin-memory",
     "ronin-relay",
     "ronin-training",
+    "ronin-vault",
 ]
 
 [[package]]
@@ -1560,6 +1563,8 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "ronin-agent-patterns" },
     { name = "ronin-cli" },
+    { name = "ronin-industry-sdk" },
+    { name = "ronin-vault" },
     { name = "sqlalchemy" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -1587,6 +1592,8 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.0" },
     { name = "ronin-agent-patterns", editable = "packages/agent-patterns" },
     { name = "ronin-cli", editable = "packages/cli" },
+    { name = "ronin-industry-sdk", editable = "packages/industry-sdk" },
+    { name = "ronin-vault", editable = "packages/vault" },
     { name = "sqlalchemy", specifier = ">=2.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]
@@ -1597,6 +1604,26 @@ dev = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "pytest", specifier = ">=7.0" },
 ]
+
+[[package]]
+name = "ronin-artifacts"
+version = "0.1.0"
+source = { editable = "packages/artifacts" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.5" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+]
+provides-extras = ["dev"]
 
 [[package]]
 name = "ronin-cli"
@@ -1748,6 +1775,28 @@ requires-dist = [
 dev = [{ name = "pytest", specifier = ">=7.0" }]
 
 [[package]]
+name = "ronin-industry-sdk"
+version = "0.1.0"
+source = { editable = "packages/industry-sdk" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "pyyaml" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.5" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
+]
+provides-extras = ["dev"]
+
+[[package]]
 name = "ronin-mcp-servers"
 version = "1.0.0"
 source = { editable = "packages/mcp-servers" }
@@ -1862,6 +1911,26 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
 ]
 provides-extras = ["mlx", "dev"]
+
+[[package]]
+name = "ronin-vault"
+version = "0.1.0"
+source = { editable = "packages/vault" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.5" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+]
+provides-extras = ["dev"]
 
 [[package]]
 name = "rpds-py"

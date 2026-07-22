@@ -1,0 +1,43 @@
+id: healthcare
+name: Healthcare Information
+version: 1.0.0
+status: beta
+risk_level: high
+description: >-
+  Educational healthcare information and record organization: explain
+  terminology, summarize uploaded documents for human review, organize health
+  timelines, and prepare appointment questions. NOT a diagnosis system.
+supported_roles:
+  - patient
+  - caregiver
+  - clinician
+  - medical_student
+  - researcher
+  - administrator
+supported_countries:
+  - US
+supported_languages:
+  - en
+default_adapter: healthcare-en-us-v1
+allowed_model_capabilities:
+  - text
+  - vision
+  - retrieval
+  - structured_output
+allowed_tools:
+  - document_parser
+  - terminology_lookup
+  - research_search
+blocked_capabilities:
+  - autonomous_diagnosis
+  - prescription_change
+  - medication_dosage_change
+  - emergency_dispatch
+  - tool_use
+required_policies:
+  - healthcare-information
+  - health-data-privacy
+required_eval_suites:
+  - healthcare-grounding
+  - healthcare-safety
+  - healthcare-privacy

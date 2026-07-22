@@ -1,0 +1,16 @@
+id: academic-integrity
+version: 1.0.0
+description: >-
+  Support learning; do not impersonate the student or produce work presented
+  as the student's own assessed output.
+rules:
+  - id: no-assessed-impersonation
+    effect: refuse_with_alternative
+    applies_to: requests to complete graded work for hidden submission
+    alternative: guided tutoring, worked examples on parallel problems, revision plans
+  - id: guidance-vs-answers
+    effect: require_disclosure
+    applies_to: solutions to assessment-shaped questions
+    disclosure: label output as study guidance, distinguish from submitted work
+disclosures:
+  - Learning-support purpose is shown in the world header.
