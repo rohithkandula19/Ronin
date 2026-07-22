@@ -328,3 +328,97 @@ def scan_repo(root: str | os.PathLike[str]) -> list[dict[str, Any]]:
 
     findings.sort(key=lambda f: (f["path"], f["line"]))
     return findings
+
+
+# --------------------------------------------------------------------------- #
+# Git-history scan — catch secrets committed anywhere in history, even if a
+# later commit removed them (they still live in the pack and can be recovered).
+#   scan_history(diff_text) -> list[dict]   PURE parser over `git log -p` output.
+#   scan_git_history(root)  -> list[dict]   IMPURE — runs git, then parses.
+# A finding is {commit, path, line, kind, hint} — same masking/safety contract
+# as find_secrets (the value is never emitted).
+# --------------------------------------------------------------------------- #
+
+_COMMIT_RE = re.compile(r"^commit ([0-9a-f]{7,40})\b")
+_HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+
+
+def scan_history(diff_text: str) -> list[dict[str, Any]]:
+    """Parse ``git log -p`` output and flag secrets on *added* (`+`) lines.
+
+    Pure and fully testable — no I/O. Tracks the current commit, the current
+    post-image file (from ``+++ b/<path>``), and the new-file line number (from
+    each ``@@`` hunk header, advancing on context and added lines). Each added
+    line is run through :func:`find_secrets`; hits are returned as
+    ``{commit, path, line, kind, hint}`` sorted by (commit, path, line, kind).
+    """
+    findings: list[dict[str, Any]] = []
+    commit = ""
+    path = ""
+    new_line = 0
+    for raw in diff_text.splitlines():
+        m = _COMMIT_RE.match(raw)
+        if m:
+            commit = m.group(1)
+            path = ""
+            new_line = 0
+            continue
+        if raw.startswith("+++ "):
+            p = raw[4:].strip()
+            path = p[2:] if p.startswith("b/") else ("" if p == "/dev/null" else p)
+            continue
+        if raw.startswith("--- ") or raw.startswith("diff --git"):
+            continue
+        hm = _HUNK_RE.match(raw)
+        if hm:
+            new_line = int(hm.group(1))
+            continue
+        if new_line == 0 or not path:
+            continue
+        if raw.startswith("+"):
+            content = raw[1:]
+            for hit in find_secrets(content, path):
+                findings.append({
+                    "commit": commit,
+                    "path": path,
+                    "line": new_line,
+                    "kind": hit["kind"],
+                    "hint": hit["hint"],
+                })
+            new_line += 1
+        elif raw.startswith("-"):
+            pass  # removed line — does not advance the new-file counter
+        else:
+            new_line += 1  # context line
+    findings.sort(key=lambda f: (f["commit"], f["path"], f["line"], f["kind"]))
+    return findings
+
+
+def scan_git_history(
+    root: str | os.PathLike[str] = ".",
+    *,
+    max_commits: int = 0,
+    since: str = "",
+) -> list[dict[str, Any]]:
+    """Run ``git log -p`` over the repo and scan every added line for secrets.
+
+    ``max_commits`` (``-n``) and ``since`` (``--since``) cap the walk on large
+    repos. Returns [] when git is unavailable or the path is not a repo — this
+    is a best-effort protective sweep, never a hard dependency.
+    """
+    import subprocess
+
+    cmd = ["git", "-C", str(root), "log", "-p", "--no-color", "--no-merges"]
+    if max_commits and max_commits > 0:
+        cmd += ["-n", str(max_commits)]
+    if since:
+        cmd += ["--since", since]
+    try:
+        out = subprocess.run(
+            cmd, capture_output=True, text=True, errors="ignore", check=False,
+        )
+    except (OSError, ValueError):
+        return []
+    if out.returncode != 0:
+        return []
+    return scan_history(out.stdout)

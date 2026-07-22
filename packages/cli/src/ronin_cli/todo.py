@@ -12,6 +12,7 @@ from the tool call.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from ronin_agent_patterns import Tool
@@ -113,3 +114,65 @@ def render_todos(console, todos: list[dict[str, Any]]) -> None:
             console.print(f"  {glyph} [#e0af68]{content}[/#e0af68] [dim](blocked)[/dim]")
         else:
             console.print(f"  {glyph} [dim]{content}[/dim]")
+
+
+# ---- marker -> GitHub-issue draft -----------------------------------------
+#
+# `ronin todo` lists every FIXME/TODO/HACK in the tree. `--issues` turns the ones
+# you pick into draft GitHub issues (via the gh helper) so a stray "TODO: handle
+# the timeout" becomes a tracked piece of work instead of rotting in a comment.
+# The marker -> draft mapping is a pure function (below); the gh call lives in
+# gh_helper. Dry-run by default — nothing is filed without explicit confirmation.
+
+_MARKER_TITLE = {"FIXME": "Fix", "TODO": "Do", "HACK": "Clean up", "XXX": "Revisit"}
+
+
+@dataclass
+class IssueDraft:
+    """A GitHub issue drafted from one marker comment."""
+    title: str
+    body: str
+    labels: list[str]
+
+
+def _clip(text: str, n: int) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= n else text[: n - 1].rstrip() + "…"
+
+
+def context_lines(lines: list[str], line: int, before: int = 3, after: int = 3) -> list[str]:
+    """The ``before``/``after`` source lines around 1-based ``line``. Pure.
+
+    Returns the slice as-is (no markers added) so it can drop straight into a
+    fenced code block. Clamps to the file bounds; empty list for an out-of-range
+    line or empty file."""
+    if not lines or line < 1 or line > len(lines):
+        return []
+    start = max(0, line - 1 - before)
+    end = min(len(lines), line + after)
+    return lines[start:end]
+
+
+def marker_to_issue(file: str, line: int, marker: str, text: str,
+                    context: list[str] | None = None) -> IssueDraft:
+    """Turn one marker comment into a GitHub-issue draft. Pure and deterministic.
+
+    ``file``/``line``/``marker``/``text`` come straight from kaizen.find_targets;
+    ``context`` is the optional surrounding source lines (rendered as a fenced
+    code block). The title summarizes the marker; the body carries the file:line
+    reference and the code context so the issue is actionable on its own.
+    """
+    marker = (marker or "TODO").upper()
+    verb = _MARKER_TITLE.get(marker, "Address")
+    summary = _clip(text or "", 60) or f"{marker} in {file}"
+    title = f"[{marker}] {verb}: {summary}"
+
+    loc = f"`{file}:{line}`"
+    parts = [f"From a `{marker}` marker at {loc}:", "", f"> {_clip(text or '', 200)}"]
+    if context:
+        body_ctx = "\n".join(context).rstrip("\n")
+        parts += ["", "Context:", "", "```", body_ctx, "```"]
+    parts += ["", "_Filed by `ronin todo --issues`._"]
+    label = "fixme" if marker == "FIXME" else marker.lower()
+    return IssueDraft(title=_clip(title, 120), body="\n".join(parts),
+                      labels=["ronin", label])

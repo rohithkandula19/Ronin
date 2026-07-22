@@ -10,7 +10,14 @@ from rich.console import Console
 from ronin_agent_patterns import FakeProvider, LLMResponse, ToolCall
 from ronin_cli.code_mode import run_code_agent
 from ronin_cli.config import RoninConfig
-from ronin_cli.todo import TodoStore, build_todo_tool, render_todos
+from ronin_cli.todo import (
+    IssueDraft,
+    TodoStore,
+    build_todo_tool,
+    context_lines,
+    marker_to_issue,
+    render_todos,
+)
 
 
 def test_store_replace_cleans_and_validates() -> None:
@@ -135,3 +142,102 @@ def test_unknown_status_still_coerced_to_pending() -> None:
     store = TodoStore()
     store.replace([{"content": "x", "status": "wat"}])
     assert store.todos == [{"content": "x", "status": "pending"}]
+# ---- marker -> GitHub-issue draft -----------------------------------------
+
+def test_context_lines_window_and_bounds() -> None:
+    lines = [f"l{i}" for i in range(1, 11)]   # l1..l10
+    # line 5, default 3 before / 3 after -> l2..l8
+    assert context_lines(lines, 5) == ["l2", "l3", "l4", "l5", "l6", "l7", "l8"]
+    # clamps at the top
+    assert context_lines(lines, 1, before=3, after=1) == ["l1", "l2"]
+    # clamps at the bottom
+    assert context_lines(lines, 10, before=1, after=3) == ["l9", "l10"]
+    # out of range / empty -> []
+    assert context_lines(lines, 0) == []
+    assert context_lines([], 1) == []
+
+
+def test_marker_to_issue_shape() -> None:
+    d = marker_to_issue("app/db.py", 42, "FIXME", "handle the connection timeout",
+                        context=["def connect():", "    # FIXME handle the connection timeout",
+                                 "    return pool.get()"])
+    assert isinstance(d, IssueDraft)
+    assert d.title.startswith("[FIXME]")
+    assert "handle the connection timeout" in d.title
+    # body carries the file:line reference and a fenced code block
+    assert "`app/db.py:42`" in d.body
+    assert "```" in d.body and "def connect():" in d.body
+    # FIXME maps to a 'fixme' label alongside the 'ronin' tag
+    assert d.labels == ["ronin", "fixme"]
+
+
+def test_marker_to_issue_long_text_is_clipped() -> None:
+    d = marker_to_issue("x.py", 1, "TODO", "z" * 300)
+    assert len(d.title) <= 120 and d.title.endswith("…")
+    assert d.labels == ["ronin", "todo"]
+
+
+def test_marker_to_issue_no_context_omits_code_block() -> None:
+    d = marker_to_issue("x.py", 7, "HACK", "remove this shim")
+    assert "```" not in d.body
+    assert "`x.py:7`" in d.body and d.labels == ["ronin", "hack"]
+
+
+# ---- `ronin todo --issues` CLI wiring (gh mocked) -------------------------
+
+def _repo_with_marker(tmp_path: Path) -> None:
+    (tmp_path / "svc.py").write_text(
+        "def run():\n    pass  # FIXME wire up retries\n    return 1\n", encoding="utf-8")
+    (tmp_path / "ok.py").write_text("# TODO add docs\nx = 1\n", encoding="utf-8")
+
+
+def test_todo_issues_dry_run_does_not_file(tmp_path: Path) -> None:
+    from typer.testing import CliRunner
+
+    from ronin_cli import gh_helper
+    from ronin_cli.main import app
+
+    _repo_with_marker(tmp_path)
+    calls: list = []
+    with patch.object(gh_helper, "create_issue",
+                      side_effect=lambda *a, **k: calls.append(a) or "url"):
+        r = CliRunner().invoke(app, ["todo", "--issues", "--root", str(tmp_path)])
+    assert r.exit_code == 0
+    assert "dry-run" in r.stdout
+    assert "[FIXME]" in r.stdout and "[TODO]" in r.stdout
+    assert calls == []                     # nothing filed without --yes
+
+
+def test_todo_issues_only_filter_and_file(tmp_path: Path) -> None:
+    from typer.testing import CliRunner
+
+    from ronin_cli import gh_helper
+    from ronin_cli.main import app
+
+    _repo_with_marker(tmp_path)
+    filed: list = []
+
+    def fake_create(title, body, root=".", labels=None):
+        filed.append(title)
+        return "https://github.com/o/r/issues/1"
+
+    with patch.object(gh_helper, "create_issue", side_effect=fake_create), \
+         patch.object(gh_helper, "gh_available", return_value=True):
+        r = CliRunner().invoke(
+            app, ["todo", "--issues", "--only", "FIXME", "--yes", "--root", str(tmp_path)])
+    assert r.exit_code == 0
+    # only the FIXME marker was filed; the TODO was filtered out
+    assert len(filed) == 1 and filed[0].startswith("[FIXME]")
+
+
+def test_todo_issues_yes_without_gh_exits(tmp_path: Path) -> None:
+    from typer.testing import CliRunner
+
+    from ronin_cli import gh_helper
+    from ronin_cli.main import app
+
+    _repo_with_marker(tmp_path)
+    with patch.object(gh_helper, "gh_available", return_value=False):
+        r = CliRunner().invoke(app, ["todo", "--issues", "--yes", "--root", str(tmp_path)])
+    assert r.exit_code == 2
+    assert "gh" in r.stdout.lower()

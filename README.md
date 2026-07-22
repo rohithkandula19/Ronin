@@ -79,7 +79,7 @@ A coding agent that reads, edits, and runs your code: every write and shell comm
 - **@-file & @-URL mentions**: drop `@path` to pull a file into context, or `@https://…` to pull a web page's readable text into context. Start a message with a folder path to `cd` into it.
 - **Plan mode** (`--plan`) proposes the steps read-only, you approve, then it executes. **Resume** (`--continue`) picks up your last session.
 - **Live plan tracker**: multi-step tasks show a checklist the agent keeps current as it works — `✓` done · `▶` active · `☐` pending · `⊘` blocked · `✗` failed. It updates only from the agent's real `update_todos` state (no faked progress), and shows nothing when there's no plan.
-- **Tools**: read / write / `edit` / `multi_edit` / `glob` / search / run, plus **`web_search` / `fetch_url`**, **read-only git** (`git_status` / `git_diff` / `git_log`), **semantic code intelligence** (`diagnostics` / `definition` / `references` via LSP), a **`task`** subagent plus **`parallel_task`** (concurrent read-only fan-out) and **`isolated_task`** (parallel *mutating* sub-agents, each in its own git worktree so edits can't collide), and any **MCP** server's tools (`ronin mcp add …`).
+- **Tools**: read / write / `edit` / `multi_edit` / `glob` / search / run, plus **`web_search` / `fetch_url`**, **read-only git** (`git_status` / `git_diff` / `git_log` / `git_blame`), **semantic code intelligence** (`diagnostics` / `definition` / `references` via LSP), a **`task`** subagent plus **`parallel_task`** (concurrent read-only fan-out) and **`isolated_task`** (parallel *mutating* sub-agents, each in its own git worktree so edits can't collide), and any **MCP** server's tools (`ronin mcp add …`).
 - **Integrations**: give the agent new tools three ways, each one command: **local MCP** servers (24-server catalog: `ronin mcp install github`), **remote/hosted MCP** servers (`ronin mcp add-remote …`), or **plugins** (200 built-ins like weather/currency/dns/uuid + scaffold your own with `ronin plugin new`). See **[docs/INTEGRATIONS.md](docs/INTEGRATIONS.md)**.
 - **Project memory**: auto-loads `RONIN.md` / `CLAUDE.md` / `AGENTS.md` from the repo so it follows your conventions.
 - **34 slash commands** · steer across turns: `/help`, `/login`, `/provider`, `/free`, `/role`, `/model`, `/models`, `/theme`, `/mcp`, `/agents`, `/compact`, `/context`, `/copy`, `/export`, `/resume`, `/diff`, `/undo`, `/commit`, `/pr`, `/doctor`, `/config`, and more. `/provider` shows every provider with a free/paid + key-health view; `/free` switches to a $0 provider; `/role` picks a coding role; `/theme` restyles code blocks + diffs live. The chip strip + per-turn footer show the FREE/PAID badge, provider/model, mode, git branch, role, context, and time.
@@ -397,6 +397,8 @@ database_url = "postgres://readonly_user:...@host:5432/db"   # a read-only role
 | `ronin radius [--run]` | Blast radius of your diff + the affected test modules. |
 | `ronin flake "<cmd>" [-n N]` | Run a test command N times; rank non-deterministic tests. |
 | `ronin guard [--intent "<task>"]` | Scan the diff for debug/secret leftovers + scope creep. |
+| `ronin scan [--staged] [--history]` | Scan for committed secrets — working tree, staged diff, or whole git history. Exits non-zero on a hit. |
+| `ronin todo [--issues] [--execute]` | Board of every FIXME/TODO/HACK; `--issues` drafts a GitHub issue per marker (dry-run; `--yes` files via gh), `--execute` resolves them autonomously. |
 | `ronin version` | Print the version. |
 
 ## 🔒 Safety & security
