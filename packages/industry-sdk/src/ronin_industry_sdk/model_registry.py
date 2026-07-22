@@ -154,8 +154,11 @@ class _JsonStore:
 
 
 class ModelRegistry:
-    def __init__(self, store_path: str | Path) -> None:
-        self._store = _JsonStore(Path(store_path))
+    def __init__(self, store_path: str | Path = "", *, backend: object | None = None) -> None:
+        # ``backend`` is any object exposing load()/save(dict) — e.g. a
+        # ronin_persistence DocumentStore (Postgres/JSON-file/in-memory).
+        # Default keeps the byte-compatible local JSON file.
+        self._store = backend if backend is not None else _JsonStore(Path(store_path))
         self._models: dict[str, ModelRecord] = {
             mid: ModelRecord.model_validate(rec)
             for mid, rec in self._store.load().items()
@@ -190,8 +193,8 @@ class ModelRegistry:
 
 
 class AdapterRegistry:
-    def __init__(self, store_path: str | Path) -> None:
-        self._store = _JsonStore(Path(store_path))
+    def __init__(self, store_path: str | Path = "", *, backend: object | None = None) -> None:
+        self._store = backend if backend is not None else _JsonStore(Path(store_path))
         self._adapters: dict[str, AdapterRecord] = {
             aid: AdapterRecord.model_validate(rec)
             for aid, rec in self._store.load().items()

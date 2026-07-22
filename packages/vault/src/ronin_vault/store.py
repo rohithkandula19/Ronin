@@ -79,28 +79,38 @@ class TransferPreview(BaseModel):
 
 
 class VaultStore:
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path = "", *, backend: object | None = None) -> None:
+        # ``backend`` is any object exposing load()/save(dict) — e.g. a
+        # ronin_persistence DocumentStore (Postgres/JSON-file/in-memory).
+        # Default keeps the byte-compatible local JSON file at ``path``.
         self._path = Path(path)
+        self._backend = backend
         self._items: dict[str, MemoryItem] = {}
         self._usage: list[dict] = []  # {item_id, query, world, when}
         self._load()
 
     # ------------------------------------------------------------- persistence
     def _load(self) -> None:
-        if not self._path.exists():
-            return
-        data = json.loads(self._path.read_text(encoding="utf-8"))
+        if self._backend is not None:
+            data = self._backend.load()
+        elif self._path.exists():
+            data = json.loads(self._path.read_text(encoding="utf-8"))
+        else:
+            data = {}
         self._items = {
             iid: MemoryItem.model_validate(rec) for iid, rec in data.get("items", {}).items()
         }
         self._usage = data.get("usage", [])
 
     def _persist(self) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "items": {iid: item.model_dump(mode="json") for iid, item in self._items.items()},
             "usage": self._usage,
         }
+        if self._backend is not None:
+            self._backend.save(payload)
+            return
+        self._path.parent.mkdir(parents=True, exist_ok=True)
         self._path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
     # ------------------------------------------------------------------ CRUD

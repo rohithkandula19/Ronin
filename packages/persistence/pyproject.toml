@@ -1,0 +1,17 @@
+[project]
+name = "ronin-persistence"
+version = "0.1.0"
+description = "Ronin AI OS swappable document persistence: in-memory, JSON-file (default), and PostgreSQL (JSONB) backends behind one interface."
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+postgres = ["psycopg[binary]>=3.1"]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ronin_persistence"]

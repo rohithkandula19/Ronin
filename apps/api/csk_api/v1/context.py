@@ -19,6 +19,7 @@ from ronin_industry_sdk.model_registry import (
     seed_known_adapters,
 )
 from ronin_artifacts import ArtifactStore
+from ronin_persistence import from_env as _doc_store_from_env
 from ronin_vault import VaultStore
 
 
@@ -47,28 +48,35 @@ def suite_registry() -> SuiteRegistry:
     return SuiteRegistry.from_packs_root(packs_root())
 
 
+def _backend(name: str, filename: str):
+    """Pick the persistence backend for a store. When RONIN_DATABASE_URL is
+    set, all API state goes to PostgreSQL (one JSONB row per store); otherwise
+    it stays on the local JSON file — the default, identical to before."""
+    return _doc_store_from_env(name, path=_data_dir() / filename)
+
+
 @functools.lru_cache(maxsize=1)
 def model_registry() -> ModelRegistry:
-    reg = ModelRegistry(_data_dir() / "models.json")
+    reg = ModelRegistry(backend=_backend("models", "models.json"))
     seed_default_models(reg)
     return reg
 
 
 @functools.lru_cache(maxsize=1)
 def adapter_registry() -> AdapterRegistry:
-    reg = AdapterRegistry(_data_dir() / "adapters.json")
+    reg = AdapterRegistry(backend=_backend("adapters", "adapters.json"))
     seed_known_adapters(reg)
     return reg
 
 
 @functools.lru_cache(maxsize=1)
 def vault() -> VaultStore:
-    return VaultStore(_data_dir() / "vault.json")
+    return VaultStore(backend=_backend("vault", "vault.json"))
 
 
 @functools.lru_cache(maxsize=1)
 def artifacts() -> ArtifactStore:
-    return ArtifactStore(_data_dir() / "artifacts.json")
+    return ArtifactStore(backend=_backend("artifacts", "artifacts.json"))
 
 
 def reset_context_for_tests() -> None:

@@ -23,6 +23,7 @@ members = [
     "packages/tasks",
     "packages/inference",
     "packages/platform",
+    "packages/persistence",
     "packages/identity",
     "packages/storage",
     "packages/billing",
