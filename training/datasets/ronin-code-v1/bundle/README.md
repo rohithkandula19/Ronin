@@ -4,15 +4,15 @@
 runnable bundle. Training is a separate manual step on hardware you provide.
 
 - base model: `mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit`
-- training rows (eligible only): 8
+- training rows (eligible only): 34
 - seed: 0 (reproducible)
 
 ## Estimates (heuristic, not guarantees)
 
 - min VRAM (QLoRA 1.5B): ~6 GB
 - recommended RAM: ~16 GB
-- approx wall-clock: ~15 min
-- approx cloud GPU cost: ~$1.12
+- approx wall-clock: ~20 min
+- approx cloud GPU cost: ~$1.5
 
 ## Run
 
