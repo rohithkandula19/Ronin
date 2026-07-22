@@ -19,6 +19,7 @@ dependencies = [
     "ronin-industry-sdk",
     "ronin-vault",
     "ronin-artifacts",
+    "ronin-persistence",
 ]
 
 [project.optional-dependencies]
@@ -36,6 +37,7 @@ ronin-agent-patterns = { workspace = true }
 ronin-industry-sdk = { workspace = true }
 ronin-vault = { workspace = true }
 ronin-artifacts = { workspace = true }
+ronin-persistence = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

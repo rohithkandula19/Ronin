@@ -86,25 +86,34 @@ class VersionDiff:
 
 
 class ArtifactStore:
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path = "", *, backend: object | None = None) -> None:
+        # ``backend`` is any object exposing load()/save(dict) — e.g. a
+        # ronin_persistence DocumentStore (Postgres/JSON-file/in-memory).
+        # Default keeps the byte-compatible local JSON file at ``path``.
         self._path = Path(path)
+        self._backend = backend
         self._artifacts: dict[str, Artifact] = {}
         self._load()
 
     def _load(self) -> None:
-        if self._path.exists():
+        if self._backend is not None:
+            data = self._backend.load()
+        elif self._path.exists():
             data = json.loads(self._path.read_text(encoding="utf-8"))
-            self._artifacts = {
-                aid: Artifact.model_validate(rec) for aid, rec in data.items()
-            }
+        else:
+            data = {}
+        self._artifacts = {
+            aid: Artifact.model_validate(rec) for aid, rec in data.items()
+        }
 
     def _persist(self) -> None:
+        payload = {aid: a.model_dump(mode="json") for aid, a in self._artifacts.items()}
+        if self._backend is not None:
+            self._backend.save(payload)
+            return
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._path.write_text(
-            json.dumps(
-                {aid: a.model_dump(mode="json") for aid, a in self._artifacts.items()},
-                indent=2, sort_keys=True,
-            ),
+            json.dumps(payload, indent=2, sort_keys=True),
             encoding="utf-8",
         )
 

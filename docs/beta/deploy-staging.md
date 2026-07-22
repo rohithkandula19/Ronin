@@ -26,34 +26,43 @@ CLI equivalent: `vercel --cwd apps/web` (Preview) with a Vercel token.
 
 Once triggered, build failures can be diagnosed from Vercel build logs.
 
-## Backend (`apps/api`) — BLOCKED, needs real work + secrets
+## Backend (`apps/api`) — DB layer now wireable; host + secrets still needed
 
-Status: **BLOCKED_INFRASTRUCTURE + BLOCKED_CREDENTIALS**, and one code gap.
+Status: **BLOCKED_INFRASTRUCTURE + BLOCKED_CREDENTIALS** (the DB code gap is now
+closed).
 
-- **Persistence is JSON-file today** (`ModelRegistry("models.json")`,
-  `VaultStore("vault.json")`, `ArtifactStore("artifacts.json")`, …) behind
-  swappable interfaces. There is **no SQL schema / migration** yet, so a managed
-  Postgres (e.g. Supabase) cannot be wired in without first implementing a
-  Postgres-backed store for those interfaces. **Not creating a Supabase project
-  until that store exists** — it would be a dangling empty DB.
-- **Compute host**: `apps/api/Dockerfile` exists; the FastAPI app needs a
-  container host (Fly / Railway / Render). Vercel serverless is not a fit for
-  the uv-workspace app as-is.
+- **Persistence is now swappable** via `ronin-persistence` (`DocumentStore` with
+  in-memory / JSON-file / **PostgreSQL (JSONB)** backends). `apps/api` selects
+  the backend from the environment: set **`RONIN_DATABASE_URL`** and all API
+  state (models, adapters, vault, artifacts) moves to Postgres — one JSONB row
+  per store in a `ronin_documents` table, created on first use. Unset, it stays
+  on the byte-identical local JSON files (the default; unchanged for tests).
+  Install the driver with the `postgres` extra
+  (`pip install 'ronin-persistence[postgres]'`).
+- **Provision Postgres**: Supabase free tier is $0. Create a project, take its
+  connection string, and set it as `RONIN_DATABASE_URL`. (A live round-trip test
+  exists behind `RONIN_TEST_DATABASE_URL` — skipped until a server is supplied.)
+- **Compute host** (still needed): `apps/api/Dockerfile` exists; the FastAPI app
+  needs a container host (Fly / Railway / Render). Vercel serverless is not a fit
+  for the uv-workspace app as-is.
 - **Secrets required** before boot (enforced by `ronin_platform.envcheck`):
   `secret_key`, `encryption_key` (non-default), a provider API key, non-`*`
-  CORS, a real DB URL once the store exists, and a monthly cost ceiling.
-  `envcheck` fail-closes on an unsafe prod/staging config.
+  CORS, `RONIN_DATABASE_URL`, and a monthly cost ceiling. `envcheck`
+  fail-closes on an unsafe prod/staging config.
 
 ### Backend activation order (when you want it live)
 
-1. Implement a Postgres-backed store for the registry/vault/artifact/etc.
-   interfaces (or a durable SQLite volume for a first trusted-tester staging).
-2. Provision Postgres (Supabase free tier is $0) + run the (new) schema.
-3. Host `apps/api` (Docker) with the required secrets; point the frontend's
+1. Provision Postgres (Supabase free tier is $0); set `RONIN_DATABASE_URL`.
+   The `ronin_documents` table is created automatically on first write.
+2. Host `apps/api` (Docker) with the required secrets; point the frontend's
    `NEXT_PUBLIC_API_URL` at it.
-4. Confirm `check_environment("production"|"staging", cfg)` returns no errors.
-5. Wire one provider key into the inference gateway; set per-user/org/provider
+3. Confirm `check_environment("production"|"staging", cfg)` returns no errors.
+4. Wire one provider key into the inference gateway; set per-user/org/provider
    quotas and the platform monthly ceiling before exposing the cohort.
+
+> Migration note: today each store persists its whole collection as one JSONB
+> document — simple and correct for beta scale. A future row-per-entity schema
+> is a drop-in `DocumentStore`/repository swap when query patterns demand it.
 
 ## What is intentionally NOT done here
 
