@@ -21,6 +21,8 @@ members = [
     "ronin-mcp-servers",
     "ronin-memory",
     "ronin-relay",
+    "ronin-research",
+    "ronin-tasks",
     "ronin-training",
     "ronin-vault",
 ]
@@ -1562,6 +1564,7 @@ dependencies = [
     { name = "pydantic", extra = ["email"] },
     { name = "pydantic-settings" },
     { name = "ronin-agent-patterns" },
+    { name = "ronin-artifacts" },
     { name = "ronin-cli" },
     { name = "ronin-industry-sdk" },
     { name = "ronin-vault" },
@@ -1591,6 +1594,7 @@ requires-dist = [
     { name = "pydantic", extras = ["email"], specifier = ">=2.5" },
     { name = "pydantic-settings", specifier = ">=2.0" },
     { name = "ronin-agent-patterns", editable = "packages/agent-patterns" },
+    { name = "ronin-artifacts", editable = "packages/artifacts" },
     { name = "ronin-cli", editable = "packages/cli" },
     { name = "ronin-industry-sdk", editable = "packages/industry-sdk" },
     { name = "ronin-vault", editable = "packages/vault" },
@@ -1885,6 +1889,46 @@ dev = [
     { name = "pytest", specifier = ">=7.0" },
     { name = "pytest-asyncio", specifier = ">=0.23" },
 ]
+
+[[package]]
+name = "ronin-research"
+version = "0.1.0"
+source = { editable = "packages/research" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.5" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+]
+provides-extras = ["dev"]
+
+[[package]]
+name = "ronin-tasks"
+version = "0.1.0"
+source = { editable = "packages/tasks" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.5" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+]
+provides-extras = ["dev"]
 
 [[package]]
 name = "ronin-training"
