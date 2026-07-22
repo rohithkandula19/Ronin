@@ -18,6 +18,7 @@ members = [
     "packages/relay",
     "packages/industry-sdk",
     "packages/vault",
+    "packages/artifacts",
     "apps/demo",
     "apps/api",
     "training",

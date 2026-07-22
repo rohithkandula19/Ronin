@@ -12,6 +12,7 @@ members = [
     "ronin",
     "ronin-agent-patterns",
     "ronin-api",
+    "ronin-artifacts",
     "ronin-cli",
     "ronin-demo",
     "ronin-eval-suite",
@@ -1603,6 +1604,26 @@ dev = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "pytest", specifier = ">=7.0" },
 ]
+
+[[package]]
+name = "ronin-artifacts"
+version = "0.1.0"
+source = { editable = "packages/artifacts" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.5" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+]
+provides-extras = ["dev"]
 
 [[package]]
 name = "ronin-cli"
