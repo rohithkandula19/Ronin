@@ -56,7 +56,7 @@ export const WORLDS: World[] = [
   { id: "science", name: "Science", tagline: "Literature, methods, and reproducible reasoning.", icon: "science", risk: "review", href: null, status: "preparing" },
   { id: "creative", name: "Creative", tagline: "Writing and ideation with your voice, not a template.", icon: "creative", risk: "safe", href: null, status: "preparing" },
   { id: "marketing", name: "Marketing", tagline: "Campaigns and copy with provenance and brand guardrails.", icon: "marketing", risk: "review", href: null, status: "preparing" },
-  { id: "research", name: "Research", tagline: "Multi-source research with citations you can follow.", icon: "research", risk: "review", href: "/research", status: "available" },
+  { id: "research", name: "Research", tagline: "Multi-source research with citations you can follow.", icon: "research", risk: "review", href: "/os/research", status: "available" },
 ];
 
 export const GLOBAL_DESTINATIONS: { id: string; label: string; icon: IconName; href: string }[] = [
