@@ -25,11 +25,11 @@ print(report.summary)
 ## CLI
 
 ```bash
-csk-eval run golden.jsonl --target claude-sonnet-4-6 --judge claude-opus-4-7 --out report.html
-csk-eval drift baseline.json candidate.json --threshold 0.5
+ronin-eval run golden.jsonl --target claude-sonnet-4-6 --judge claude-opus-4-7 --out report.html
+ronin-eval drift baseline.json candidate.json --threshold 0.5
 ```
 
-`csk-eval drift` exits non-zero on regression — wire it into CI to catch quality drops before merge.
+`ronin-eval drift` exits non-zero on regression — wire it into CI to catch quality drops before merge.
 
 ## Dataset format (JSONL)
 
@@ -76,9 +76,9 @@ regressions.
 
 ```bash
 # score a standard predictions file ({instance_id, model_patch} JSONL):
-csk-eval swebench tasks.jsonl --predictions preds.jsonl --repo-root ./checkout --markdown out.md
+ronin-eval swebench tasks.jsonl --predictions preds.jsonl --repo-root ./checkout --markdown out.md
 # gate CI on regressions between two runs (exits non-zero if any task broke):
-csk-eval swebench-compare baseline.json candidate.json
+ronin-eval swebench-compare baseline.json candidate.json
 ```
 
 `FAIL_TO_PASS` / `PASS_TO_PASS` load from either JSON arrays or the official

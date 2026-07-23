@@ -25,7 +25,7 @@ Examples need a real LLM key (Anthropic by default — swap `AnthropicProvider` 
 The customer-support example ships a golden dataset. Score it with the eval CLI:
 
 ```bash
-uv run csk-eval run examples/customer-support/golden.jsonl \
+uv run ronin-eval run examples/customer-support/golden.jsonl \
     --target claude-sonnet-4-6 --judge claude-opus-4-7 \
     --out report.html
 ```

@@ -133,7 +133,7 @@ Test in Stripe test mode first; flip to live keys after one real test transactio
    gh workflow run release.yml --ref v0.2.0
    gh run watch
    ```
-4. Verify: open a fresh shell, run `pipx install ronin-cli && csk briefing`.
+4. Verify: open a fresh shell, run `pipx install ronin-cli && ronin briefing`.
 
 ## 7. Smoke test the live SaaS — 5 min
 

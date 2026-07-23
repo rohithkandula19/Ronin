@@ -1,6 +1,6 @@
 # Custom plugins
 
-Drop a Python file in `.ronin/plugins/` and `csk` will pick up any tools it exposes — no fork required.
+Drop a Python file in `.ronin/plugins/` and `ronin` will pick up any tools it exposes — no fork required.
 
 ## Anatomy
 
@@ -28,20 +28,20 @@ def register_tools() -> list[Tool]:
     ]
 ```
 
-That's it. `csk ask "..."` now has `my_tool` available alongside the built-in service tools.
+That's it. `ronin ask "..."` now has `my_tool` available alongside the built-in service tools.
 
 ## Try the example
 
 ```bash
 mkdir -p .ronin/plugins
 cp examples/plugins/weather.py .ronin/plugins/weather.py
-csk plugins                                                       # confirms it loaded
-csk ask "what's the weather in tokyo right now?"                  # invokes the plugin
+ronin plugins                                                       # confirms it loaded
+ronin ask "what's the weather in tokyo right now?"                  # invokes the plugin
 ```
 
 ## Conventions
 
 - Files starting with `_` are skipped.
-- `register_tools()` must return a `list[Tool]`. Anything else fails loudly in `csk plugins`.
+- `register_tools()` must return a `list[Tool]`. Anything else fails loudly in `ronin plugins`.
 - Errors in one plugin do not abort the others.
 - Plugins load AFTER built-in service tools. If you give a plugin tool the same name as a built-in, the built-in wins.
