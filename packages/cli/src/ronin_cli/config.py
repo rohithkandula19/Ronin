@@ -1,7 +1,9 @@
-"""Config file management for csk.
+"""Config file management for ronin.
 
 Config lives at ``./.ronin/config.toml`` (project-local, takes priority) or
-``~/.config/csk/config.toml`` (user-global). Demo mode skips all real creds.
+``~/.config/ronin/config.toml`` (user-global). A legacy user-global copy at
+``~/.ronin/config.toml`` (from before the XDG move) is still read and migrated
+forward so upgrades don't strand it. Demo mode skips all real creds.
 """
 from __future__ import annotations
 
@@ -21,6 +23,10 @@ USER_DIR = Path.home() / ".config" / "ronin"
 # first load so existing users keep their config, sessions, and skills.
 LEGACY_PROJECT_DIR = Path(".csk")
 LEGACY_USER_DIR = Path.home() / ".config" / "csk"
+# Older ronin installs stored the user-global config at ~/.ronin (before the
+# move to the XDG ~/.config/ronin). Still read + migrated so an upgrade doesn't
+# make a working config look missing and re-trigger the first-run wizard.
+LEGACY_HOME_DIR = Path.home() / ".ronin"
 
 
 def _merge_move(old: Path, new: Path) -> None:
@@ -50,6 +56,14 @@ def migrate_legacy_dirs() -> None:
                 _merge_move(old, new)
         except OSError:
             pass
+    # ~/.ronin → ~/.config/ronin. Skip when the project dir *is* ~/.ronin (ronin
+    # run from $HOME): there ``.ronin`` is the project-local config, not a legacy
+    # user-global one, and must not be swept into the user dir.
+    try:
+        if LEGACY_HOME_DIR.exists() and LEGACY_HOME_DIR.resolve() != PROJECT_DIR.resolve():
+            _merge_move(LEGACY_HOME_DIR, USER_DIR)
+    except OSError:
+        pass
 
 
 # Default model per provider. NOTE on the FREE providers (groq, gemini,
@@ -266,13 +280,20 @@ class RoninConfig(BaseModel):
 
 
 def find_config_path() -> Path | None:
-    """Return the first existing config path: project, then user. None if neither exists."""
+    """Return the first existing config path: project, then user, then the legacy
+    ~/.ronin location. None if none exists.
+
+    The legacy fallback means ``ronin doctor`` reports the real path (not
+    ``none``) even before migration runs, and a read-only home still resolves."""
     project = PROJECT_DIR / CONFIG_FILENAME
     if project.exists():
         return project
     user = USER_DIR / CONFIG_FILENAME
     if user.exists():
         return user
+    legacy_user = LEGACY_HOME_DIR / CONFIG_FILENAME
+    if legacy_user.exists():
+        return legacy_user
     return None
 
 
