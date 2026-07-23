@@ -488,7 +488,7 @@ report = SWEBenchHarness(
 print(report.summary["resolved_rate"])
 ```
 ```bash
-csk-eval swebench tasks.jsonl --predictions preds.jsonl --repo-root ./checkout --markdown out.md
+ronin-eval swebench tasks.jsonl --predictions preds.jsonl --repo-root ./checkout --markdown out.md
 ```
 
 > Ships the **harness**, not a published score — run it with your provider to produce numbers.

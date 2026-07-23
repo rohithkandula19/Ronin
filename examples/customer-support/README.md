@@ -22,7 +22,7 @@ Output is a structured `DraftReply` with category, summary, cited KB articles, s
 A 25-case golden dataset is included. Score the agent end-to-end:
 
 ```bash
-uv run csk-eval run examples/customer-support/golden.jsonl \
+uv run ronin-eval run examples/customer-support/golden.jsonl \
   --target claude-sonnet-4-6 --judge claude-opus-4-7 \
   --criteria "task_success,faithfulness,helpfulness,safety" \
   --out customer-support-report.html
