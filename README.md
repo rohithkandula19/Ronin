@@ -20,6 +20,41 @@ $ ronin code "explain @main.py and add tests" # @-mention files inline
 
 > The binary is **`ronin`**. `ro` also works as a short alias.
 
+## 🖥 Ronin AI OS — the web experience
+
+Beyond the terminal, Ronin is also an **operating system for AI work on the web**:
+instead of a blank prompt box, you enter an **industry world** — each with its own
+interface, tools, safety rules, memory boundaries and evaluations — all on the same
+provider-agnostic runtime as the CLI.
+
+**▶ Live:** **https://ronin-ai-os-staging.vercel.app** — open **`/os`** for Ronin Home,
+or jump straight into a world:
+
+| World | Route | Posture |
+| :--- | :--- | :--- |
+| **Coding** | [`/os/code`](https://ronin-ai-os-staging.vercel.app/os/code) | Plan-first IDE over the real runtime — files, diffs, tests, approval-gated writes |
+| **Research** | [`/os/research`](https://ronin-ai-os-staging.vercel.app/os/research) | Source-first notebooks with claim-to-source mapping; never invents a citation |
+| **Healthcare** | [`/os/healthcare`](https://ronin-ai-os-staging.vercel.app/os/healthcare) | Educational, **non-diagnostic** health information with an emergency boundary |
+| **Education** | [`/os/education`](https://ronin-ai-os-staging.vercel.app/os/education) | Role-aware tutoring and practice, grounded in sources, fail-closed on graded work |
+
+The worlds connect to a live FastAPI backend (`/api/v1`) when one is reachable, and
+degrade honestly to a labelled offline sample otherwise — a **Live · API** / **Offline ·
+sample** badge always tells you which.
+
+**Under the hood** — a pnpm/Turborepo workspace in [`apps/web`](apps/web) (Next.js 16 +
+React 19 + Tailwind v4) and [`apps/api`](apps/api) (FastAPI), built on the **Ronin Design
+System** ([`packages/design-system`](packages/design-system), RDS 1.0 — the "Sumi" ink
+identity: warm paper/clay palette, four themes, self-hosted Inter / Fraunces / JetBrains
+Mono type).
+
+```bash
+pnpm install
+pnpm --filter @ronin/web dev        # → http://localhost:3000  (landing + /os)
+uv run --package ronin-api uvicorn csk_api.main:app --reload   # the /api/v1 backend
+```
+
+Deploying the backend live? See [`docs/beta/deploy-backend.md`](docs/beta/deploy-backend.md).
+
 ## 🎬 Demo
 
 Usage dashboard → gamified profile → the 31-game arcade, in one shot:
