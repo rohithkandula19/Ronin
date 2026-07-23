@@ -46,7 +46,7 @@ export const WORLDS: World[] = [
     tagline: "Health information and summaries. Never diagnoses. Never prescribes.",
     icon: "healthcare",
     risk: "caution",
-    href: "/healthcare",
+    href: "/os/healthcare",
     status: "available",
     note: "Information only — not medical advice.",
   },
