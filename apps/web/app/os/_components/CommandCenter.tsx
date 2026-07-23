@@ -124,14 +124,14 @@ export function CommandCenter({ open, onClose }: { open: boolean; onClose: () =>
 
   return (
     <div
-      className="fixed inset-0 z-[200] flex items-start justify-center bg-ink/30 px-4 pt-[12vh] backdrop-blur-sm"
+      className="cmdk-backdrop fixed inset-0 z-[200] flex items-start justify-center bg-ink/30 px-4 pt-[12vh] backdrop-blur-sm"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
       aria-label="Command Center"
     >
       <div
-        className="fadeup w-full max-w-xl overflow-hidden rounded-2xl border border-border bg-surface shadow-[0_12px_40px_rgba(26,24,22,0.12)]"
+        className="cmdk-enter w-full max-w-xl overflow-hidden rounded-2xl border border-border bg-surface shadow-[0_12px_40px_rgba(26,24,22,0.12)]"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={onKeyDown}
       >

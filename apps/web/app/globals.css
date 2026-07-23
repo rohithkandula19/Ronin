@@ -115,3 +115,39 @@ body {
   .enso-stroke { animation: none; stroke-dashoffset: 0; }
   .enso-ink { animation: none; opacity: 0.5; }
 }
+
+/* ───────────────────────── in-app motion (OS shell) ─────────────────────── */
+
+/* Center-workspace route transition — the active surface rises in on change. */
+.ws-enter { animation: wsEnter 0.34s var(--rds-ease-standard) both; }
+@keyframes wsEnter {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Command Center open choreography — scale + fade from just above center. */
+.cmdk-enter { animation: cmdkEnter 0.22s var(--rds-ease-entrance) both; }
+@keyframes cmdkEnter {
+  from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+.cmdk-backdrop { animation: cmdkBackdrop 0.2s var(--rds-ease-standard) both; }
+@keyframes cmdkBackdrop { from { opacity: 0; } to { opacity: 1; } }
+
+/* Streaming/typing shimmer for AI-in-progress affordances. */
+.shimmer {
+  background: linear-gradient(
+    100deg,
+    var(--rds-surface-sunken) 30%,
+    color-mix(in srgb, var(--rds-accent) 12%, var(--rds-surface-sunken)) 50%,
+    var(--rds-surface-sunken) 70%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .ws-enter, .cmdk-enter, .cmdk-backdrop { animation: none; }
+  .shimmer { animation: none; }
+}
