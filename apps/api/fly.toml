@@ -1,0 +1,37 @@
+# Fly.io deploy config for the Ronin backend (apps/api).
+#
+# Build CONTEXT must be the repo root (the uv workspace lives there), so deploy
+# from the repo root:  fly deploy -c apps/api/fly.toml
+#
+# Secrets are NEVER committed — set them with `fly secrets set` (see
+# docs/beta/deploy-backend.md). This file contains only non-secret config.
+
+app = "ronin-api"          # change to your Fly app name
+primary_region = "iad"
+
+[build]
+  dockerfile = "apps/api/Dockerfile"
+
+[env]
+  PORT = "8000"
+  # Non-secret runtime config. Secrets (FERNET_KEY, DATABASE_URL,
+  # RONIN_DATABASE_URL, CORS_ORIGINS, ANTHROPIC_API_KEY, …) come from
+  # `fly secrets set` and are injected as env vars at runtime.
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/health"
+    interval = "15s"
+    timeout = "2s"
+    grace_period = "10s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
