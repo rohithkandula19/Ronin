@@ -122,6 +122,12 @@ export const aios = {
     request<{ adapters: AdapterInfo[] }>(
       `/api/v1/adapters${industry ? `?industry=${encodeURIComponent(industry)}` : ""}`,
     ),
+  // Healthcare safety content, straight from the backend. Read-only, no auth.
+  // `disclosures` is a map of {key: text}; callers use Object.values().
+  healthcareLimitations: () =>
+    request<{ disclosures: Record<string, string>; blocked: string[] }>(
+      `/api/v1/healthcare/limitations`,
+    ),
 };
 
 /** Race a promise against a timeout; used so an unreachable API degrades to
