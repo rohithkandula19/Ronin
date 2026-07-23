@@ -69,6 +69,15 @@ export default function LandingPage() {
     <main className="min-h-screen">
       {/* ============================================================ hero */}
       <section className="grain relative overflow-hidden border-b border-border">
+        {/* warm light wash for depth behind the mark */}
+        <div
+          className="pointer-events-none absolute inset-0"
+          aria-hidden
+          style={{
+            background:
+              "radial-gradient(60% 50% at 50% 0%, color-mix(in srgb, var(--rds-accent) 12%, transparent), transparent 70%)",
+          }}
+        />
         <div className="pointer-events-none absolute inset-0 hero-grid" aria-hidden />
         {/* a whisper of the ensō for depth, behind everything */}
         <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" aria-hidden>
@@ -83,10 +92,10 @@ export default function LandingPage() {
             Local-first · Provider-agnostic · Open-source
           </span>
 
-          <h1 className="fadeup mx-auto mt-7 max-w-4xl text-5xl font-semibold leading-[1.04] tracking-tight sm:text-6xl md:text-7xl">
+          <h1 className="fadeup font-display mx-auto mt-7 max-w-4xl text-[2.75rem] leading-[1.03] sm:text-6xl md:text-[4.5rem]">
             Specialized intelligence,
             <br />
-            <span className="bg-gradient-to-r from-accent-deep via-accent to-accent-soft bg-clip-text text-transparent">
+            <span className="bg-gradient-to-r from-accent-deep via-accent to-accent-soft bg-clip-text italic text-transparent">
               one world at a time.
             </span>
           </h1>
@@ -161,7 +170,7 @@ export default function LandingPage() {
       {/* ========================================================== worlds */}
       <section className="mx-auto max-w-6xl px-6 py-20">
         <Reveal className="max-w-2xl">
-          <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">Enter a world, not a prompt box.</h2>
+          <h2 className="font-display text-3xl sm:text-[2.5rem]">Enter a world, not a prompt box.</h2>
           <p className="mt-3 text-lg text-dim">
             Each world is a complete professional workspace — dedicated interface,
             agents, tools, knowledge and guardrails. Four are live; more are in preparation.
@@ -210,7 +219,7 @@ export default function LandingPage() {
       <section className="bg-[#161412] text-[#f5f4f2]">
         <div className="mx-auto grid max-w-6xl gap-10 px-6 py-20 md:grid-cols-2 md:items-center">
           <Reveal>
-            <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">Not another chatbot.</h2>
+            <h2 className="font-display text-3xl sm:text-[2.5rem]">Not another chatbot.</h2>
             <p className="mt-4 text-lg leading-relaxed text-[#f5f4f2]/70">
               A blank chat box makes you do all the work — the context, the
               guardrails, the format. A world already knows the role, the country,
@@ -252,7 +261,7 @@ export default function LandingPage() {
       {/* ======================================================== products */}
       <section className="mx-auto max-w-6xl px-6 py-20">
         <Reveal className="max-w-2xl">
-          <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">One runtime, many surfaces.</h2>
+          <h2 className="font-display text-3xl sm:text-[2.5rem]">One runtime, many surfaces.</h2>
           <p className="mt-3 text-lg text-dim">
             The same core powers a family of products — each doing one thing well,
             all sharing safety, memory and evaluations.
@@ -275,7 +284,7 @@ export default function LandingPage() {
       <section className="border-y border-border bg-surface">
         <div className="mx-auto max-w-6xl px-6 py-20">
           <Reveal className="max-w-2xl">
-            <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">Built to be trusted.</h2>
+            <h2 className="font-display text-3xl sm:text-[2.5rem]">Built to be trusted.</h2>
             <p className="mt-3 text-lg text-dim">
               Safety isn't a setting you flip — it's the floor everything stands
               on. These invariants are enforced in code and covered by tests.
@@ -305,7 +314,7 @@ export default function LandingPage() {
         </div>
         <div className="relative mx-auto max-w-4xl px-6 py-24 text-center">
           <Reveal>
-            <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">Pick a world and get to work.</h2>
+            <h2 className="font-display text-3xl sm:text-[2.5rem]">Pick a world and get to work.</h2>
             <p className="mx-auto mt-3 max-w-xl text-lg text-dim">
               Start on the models you already have — including fully local ones —
               and keep ownership of your data, your spend and your guardrails.

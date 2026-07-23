@@ -1,3 +1,12 @@
+// Self-hosted variable fonts (bundled woff2 — no runtime/CDN fetch). These
+// give the whole product a real typographic identity instead of the OS
+// default stack: Inter for UI/body, Fraunces for display headings, JetBrains
+// Mono for code surfaces. Imported before globals so the @font-face families
+// are registered when the token layer points --rds-font-* at them.
+import "@fontsource-variable/inter/index.css";
+import "@fontsource-variable/fraunces/opsz.css";
+import "@fontsource-variable/fraunces/opsz-italic.css";
+import "@fontsource-variable/jetbrains-mono/wght.css";
 import "./globals.css";
 import type { Metadata } from "next";
 import { SiteNav } from "./_components/SiteNav";

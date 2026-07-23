@@ -53,6 +53,7 @@ const config: Config = {
         sans: ["var(--rds-font-sans)"],
         mono: ["var(--rds-font-mono)"],
         serif: ["var(--rds-font-serif)"],
+        display: ["var(--rds-font-display)"],
       },
       maxWidth: {
         reading: "var(--rds-content-reading)",
