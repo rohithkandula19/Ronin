@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { Icon, Badge, RiskChip, StatusLabel, cn, type IconName } from "@ronin/design-system";
+import { useWorld } from "../_worldData";
+import { ConnectionBadge } from "../_components/ConnectionBadge";
 import {
   QUESTION,
   RESEARCH_STATUS,
@@ -36,6 +38,7 @@ function SupportLabel({ support }: { support: Support }) {
 
 export default function RoninResearch() {
   const [activeSource, setActiveSource] = useState<string | null>(null);
+  const live = useWorld("research");
 
   const byN = (n: number) => SOURCES.find((s) => s.n === n);
 
@@ -84,6 +87,7 @@ export default function RoninResearch() {
         <div className="mb-2 flex flex-wrap items-center gap-2">
           <Badge tone="accent"><Icon name="research" size={12} /> Research</Badge>
           <StatusLabel kind={RESEARCH_STATUS === "synthesized" ? "IMPLEMENTED" : "DRAFT"} detail={RESEARCH_STATUS} />
+          <ConnectionBadge status={live.status} error={live.error} />
           <span className="text-[0.8125rem] text-text-faint">{SOURCES.length} sources</span>
         </div>
         <h1 className="max-w-3xl text-[1.75rem] font-semibold leading-tight tracking-tight text-text">

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Icon, Badge, RiskChip, StatusLabel, cn } from "@ronin/design-system";
+import { Icon, Badge, RiskChip, cn } from "@ronin/design-system";
 import {
   DISCLOSURE,
   BLOCKED_CAPABILITIES,
@@ -12,16 +12,34 @@ import {
   PHI_NOTE,
   SAMPLE_QUESTIONS,
 } from "./_data";
+import { useHealthcareLive } from "../_worldData";
+import { ConnectionBadge } from "../_components/ConnectionBadge";
 
 function isEmergency(q: string): boolean {
   const s = q.toLowerCase();
   return EMERGENCY_TERMS.some((t) => s.includes(t));
 }
 
+function humanize(id: string): string {
+  return id.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 export default function RoninHealthcare() {
   const [query, setQuery] = useState("");
   const [activeSource, setActiveSource] = useState<string | null>(null);
   const emergency = isEmergency(query);
+  const live = useHealthcareLive();
+
+  // Real safety content from /api/v1/healthcare/limitations when connected.
+  const disclosures =
+    live.status === "connected" && live.disclosures?.length ? live.disclosures : [DISCLOSURE];
+  const blockedList =
+    live.status === "connected" && live.blocked?.length
+      ? live.blocked.map((id) => ({
+          label: humanize(id),
+          why: "Refused by the healthcare world policy — enforced server-side.",
+        }))
+      : BLOCKED_CAPABILITIES;
 
   const byN = (n: number) => SOURCES.find((s) => s.n === n);
 
@@ -49,13 +67,17 @@ export default function RoninHealthcare() {
       {/* Unmissable, non-dismissable disclosure (fail-closed) */}
       <div className="mb-5 flex items-start gap-3 rounded-xl border border-warn/40 bg-warn-soft px-4 py-3">
         <Icon name="shield" size={18} className="mt-0.5 shrink-0 text-warn" />
-        <p className="text-[0.8125rem] leading-relaxed text-text">{DISCLOSURE}</p>
+        <div className="space-y-1 text-[0.8125rem] leading-relaxed text-text">
+          {disclosures.map((d, i) => (
+            <p key={i}>{d}</p>
+          ))}
+        </div>
       </div>
 
       <div className="mb-6 flex flex-wrap items-center gap-2">
         <Badge tone="accent"><Icon name="healthcare" size={12} /> Healthcare Information</Badge>
         <RiskChip tone="caution" label="Non-diagnostic" />
-        <StatusLabel kind="IMPLEMENTED" detail="offline sample" />
+        <ConnectionBadge status={live.status} error={live.error} />
       </div>
 
       {/* Ask bar with live emergency detection */}
@@ -127,7 +149,7 @@ export default function RoninHealthcare() {
                 <Icon name="shield" size={14} /> What Ronin will not do here
               </h2>
               <div className="overflow-hidden rounded-xl border border-border bg-surface">
-                {BLOCKED_CAPABILITIES.map((c, i) => (
+                {blockedList.map((c, i) => (
                   <div key={i} className={cn("flex items-start gap-3 p-3.5", i > 0 && "border-t border-border")}>
                     <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-danger-soft text-danger">
                       <Icon name="alert" size={12} />

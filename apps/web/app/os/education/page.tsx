@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Icon, Badge, RiskChip, StatusLabel, cn } from "@ronin/design-system";
+import { Icon, Badge, RiskChip, cn } from "@ronin/design-system";
+import { useWorld } from "../_worldData";
+import { ConnectionBadge } from "../_components/ConnectionBadge";
 import {
   ROLES,
   INTEGRITY_TERMS,
@@ -32,6 +34,7 @@ export default function RoninEducation() {
   const [revealed, setRevealed] = useState<Record<number, boolean>>({});
   const [activeSource, setActiveSource] = useState<string | null>(null);
   const integrity = isIntegrityRisk(query);
+  const live = useWorld("education");
 
   const byN = (n: number) => SOURCES.find((s) => s.n === n);
   function Cite({ ns }: { ns: number[] }) {
@@ -58,7 +61,7 @@ export default function RoninEducation() {
       <div className="mb-5 flex flex-wrap items-center gap-2">
         <Badge tone="accent"><Icon name="education" size={12} /> Education</Badge>
         <RiskChip tone="safe" />
-        <StatusLabel kind="IMPLEMENTED" detail="offline sample" />
+        <ConnectionBadge status={live.status} error={live.error} />
         {/* role selector */}
         <div className="ml-auto flex overflow-hidden rounded-lg border border-border">
           {ROLES.map((r) => (
