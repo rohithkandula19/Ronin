@@ -206,17 +206,18 @@ export default function LandingPage() {
       </section>
 
       {/* ================================================= not a chatbot band */}
-      <section className="bg-ink text-bg">
+      {/* Pinned to sumi-dark in every theme so it stays a dramatic ink band. */}
+      <section className="bg-[#161412] text-[#f5f4f2]">
         <div className="mx-auto grid max-w-6xl gap-10 px-6 py-20 md:grid-cols-2 md:items-center">
           <Reveal>
             <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">Not another chatbot.</h2>
-            <p className="mt-4 text-lg leading-relaxed text-bg/70">
+            <p className="mt-4 text-lg leading-relaxed text-[#f5f4f2]/70">
               A blank chat box makes you do all the work — the context, the
               guardrails, the format. A world already knows the role, the country,
               the language, the safety rules and how to show its work. You get an
               operator, not an autocomplete.
             </p>
-            <ul className="mt-6 space-y-2 text-sm text-bg/80">
+            <ul className="mt-6 space-y-2 text-sm text-[#f5f4f2]/80">
               {[
                 "Auditable actions — every tool call, approval and source is on the record",
                 "Editable, versioned artifacts instead of throwaway messages",
@@ -231,16 +232,16 @@ export default function LandingPage() {
           </Reveal>
 
           <Reveal delay={140}>
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-6 font-mono text-sm leading-relaxed text-bg/90 backdrop-blur">
-              <div className="text-bg/50">// coding world · plan tracker</div>
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-6 font-mono text-sm leading-relaxed text-[#f5f4f2]/90 backdrop-blur">
+              <div className="text-[#f5f4f2]/50">// coding world · plan tracker</div>
               <div className="mt-3 space-y-1">
                 <div><span className="text-emerald-300">✓</span> Read auth module</div>
                 <div><span className="text-accent-soft">▶</span> Patch token-refresh bug</div>
-                <div className="text-bg/50">☐ Run focused tests</div>
-                <div className="text-bg/50">☐ Summarize the diff for review</div>
+                <div className="text-[#f5f4f2]/50">☐ Run focused tests</div>
+                <div className="text-[#f5f4f2]/50">☐ Summarize the diff for review</div>
               </div>
               <div className="mt-4 rounded-lg border border-white/10 bg-black/20 p-3 text-xs">
-                <div className="text-bg/60">⏺ edit(auth/token.py)</div>
+                <div className="text-[#f5f4f2]/60">⏺ edit(auth/token.py)</div>
                 <div className="mt-1 text-amber-200">⚠ write requires approval — floored tool, awaiting you</div>
               </div>
             </div>

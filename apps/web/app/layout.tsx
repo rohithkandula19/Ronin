@@ -12,6 +12,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className="font-sans antialiased">
+        {/* No-flash theme bootstrap: apply the persisted RDS theme before paint,
+            so the whole site (landing + OS) shares the viewer's choice. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "(function(){try{var t=localStorage.getItem('rds-theme');if(t){document.documentElement.setAttribute('data-theme',t);}}catch(e){}})();",
+          }}
+        />
         <SiteNav />
         {children}
       </body>
