@@ -5,6 +5,7 @@ import { Icon, IconButton, type Theme } from "@ronin/design-system";
 import { LeftRail } from "./LeftRail";
 import { RightPanel } from "./RightPanel";
 import { CommandCenter } from "./CommandCenter";
+import { WorkspaceTransition } from "./WorkspaceTransition";
 
 const THEME_ORDER: Theme[] = ["light", "dark", "oled", "hc"];
 const THEME_META: Record<Theme, { icon: Parameters<typeof Icon>[0]["name"]; label: string }> = {
@@ -109,7 +110,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </header>
 
         <div className="flex min-h-0 flex-1">
-          <main className="min-w-0 flex-1 overflow-y-auto">{children}</main>
+          <main className="min-w-0 flex-1 overflow-y-auto">
+            <WorkspaceTransition>{children}</WorkspaceTransition>
+          </main>
           {panelOpen && <RightPanel onClose={() => setPanelOpen(false)} />}
         </div>
       </div>
