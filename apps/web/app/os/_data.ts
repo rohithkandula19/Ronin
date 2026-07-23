@@ -37,7 +37,7 @@ export const WORLDS: World[] = [
     tagline: "Study plans, explanations, and practice — grounded, never graded in secret.",
     icon: "education",
     risk: "safe",
-    href: "/education",
+    href: "/os/education",
     status: "available",
   },
   {
