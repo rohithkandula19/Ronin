@@ -96,9 +96,39 @@ export interface WorldsResponse {
   discovery_errors: Record<string, string>;
 }
 
+export interface ModelInfo {
+  id: string;
+  provider?: string;
+  display_name?: string;
+  name?: string;
+  capabilities?: string[];
+  [k: string]: unknown;
+}
+
+export interface AdapterInfo {
+  id: string;
+  industry?: string;
+  base_model?: string;
+  [k: string]: unknown;
+}
+
 export const aios = {
   // World Navigator data. Read-only, no auth required to browse.
   listWorlds: (includeDisabled = true) =>
     request<WorldsResponse>(`/api/v1/worlds?include_disabled=${includeDisabled}`),
   getWorld: (id: string) => request<World>(`/api/v1/worlds/${id}`),
+  listModels: () => request<{ models: ModelInfo[] }>(`/api/v1/models`),
+  listAdapters: (industry?: string) =>
+    request<{ adapters: AdapterInfo[] }>(
+      `/api/v1/adapters${industry ? `?industry=${encodeURIComponent(industry)}` : ""}`,
+    ),
 };
+
+/** Race a promise against a timeout; used so an unreachable API degrades to
+ *  the offline sample quickly instead of hanging the UI. */
+export function withTimeout<T>(p: Promise<T>, ms = 3500): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error("timeout")), ms)),
+  ]);
+}
