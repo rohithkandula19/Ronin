@@ -151,3 +151,78 @@ def test_update_check_reports_available_without_mutating(
     assert "update available" in r.stdout
     head_after = _git(clone, "rev-parse", "HEAD")
     assert head_before == head_after
+
+
+# ---------- ronin update --doctor: post-update health check ----------
+
+def _up_to_date_clone(tmp_path: Path) -> Path:
+    """A clone whose origin/main == HEAD, so `update` takes the up-to-date path
+    (no network reset needed to exercise the post-update hook)."""
+    upstream = tmp_path / "upstream"
+    _make_repo(upstream)
+    clone = tmp_path / "clone"
+    subprocess.run(["git", "clone", str(upstream), str(clone)], check=True,
+                   capture_output=True, text=True)
+    subprocess.run(["git", "-C", str(clone), "fetch", "origin"], check=True,
+                   capture_output=True, text=True)
+    return clone
+
+
+def test_update_doctor_runs_health_check_and_passes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """--doctor runs the provider live-check after update; a healthy provider
+    prints the health line and exits 0."""
+    from ronin_cli.main import _LiveCheck
+
+    clone = _up_to_date_clone(tmp_path)
+    monkeypatch.setattr("ronin_cli.selfupdate.find_repo_root", lambda start=None: clone)
+    monkeypatch.setattr(
+        "ronin_cli.main._provider_live_check",
+        lambda cfg: _LiveCheck(status="ok — key + endpoint + model all valid", ok=True),
+    )
+
+    r = runner.invoke(app, ["update", "--doctor"])
+    assert r.exit_code == 0, r.stdout
+    assert "health check" in r.stdout
+
+
+def test_update_doctor_exits_nonzero_on_broken_provider(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A provider the upgrade left broken makes --doctor exit non-zero and print
+    the remedy, so the breakage surfaces now instead of on the next run."""
+    from ronin_cli.main import _LiveCheck
+
+    clone = _up_to_date_clone(tmp_path)
+    monkeypatch.setattr("ronin_cli.selfupdate.find_repo_root", lambda start=None: clone)
+    monkeypatch.setattr(
+        "ronin_cli.main._provider_live_check",
+        lambda cfg: _LiveCheck(
+            status="[red]model not found[/red]",
+            remedy="run `ronin models` to list valid ids",
+            ok=False,
+        ),
+    )
+
+    r = runner.invoke(app, ["update", "--doctor"])
+    assert r.exit_code == 1, r.stdout
+    assert "health check" in r.stdout
+    assert "ronin models" in r.stdout
+
+
+def test_update_without_doctor_skips_health_check(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Without --doctor the live-check never runs (no network, no health line)."""
+    clone = _up_to_date_clone(tmp_path)
+    monkeypatch.setattr("ronin_cli.selfupdate.find_repo_root", lambda start=None: clone)
+
+    def _boom(cfg):  # pragma: no cover - must never be called
+        raise AssertionError("provider live-check ran without --doctor")
+
+    monkeypatch.setattr("ronin_cli.main._provider_live_check", _boom)
+
+    r = runner.invoke(app, ["update"])
+    assert r.exit_code == 0, r.stdout
+    assert "health check" not in r.stdout

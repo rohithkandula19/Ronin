@@ -5873,6 +5873,23 @@ def version() -> None:
 
 # ---------- update ----------
 
+def _post_update_health_check() -> bool:
+    """Live-check the configured provider/model after an update, reusing the same
+    end-to-end probe as ``ronin doctor --check``. Prints the result (and the
+    exact fix on failure) and returns True iff the provider answers.
+
+    A ronin upgrade can ship a new default model or provider handling, so a
+    config that worked before the pull can silently 404 on the next run — this
+    surfaces that immediately instead of at the next real command."""
+    config = load_config()
+    with console.status("[dim]post-update health check: live-checking provider…[/dim]", spinner="dots"):
+        live = _provider_live_check(config)
+    console.print(f"health check ({config.provider}/{config.resolved_model()}): {live.status}")
+    if live.remedy and not live.ok:
+        console.print(live.remedy)
+    return live.ok
+
+
 @app.command()
 def update(
     check: bool = typer.Option(
@@ -5883,12 +5900,17 @@ def update(
         False, "--force",
         help="Update even when there are uncommitted local changes (they are reset).",
     ),
+    doctor: bool = typer.Option(
+        False, "--doctor",
+        help="After updating, live-check the provider/model (like `ronin doctor --check`) so a config broken by the upgrade surfaces now, not on the next run.",
+    ),
 ) -> None:
     """Update this ronin install in place from origin/main.
 
     Works only for a git checkout. It fetches origin, hard-resets to
     origin/main, and re-runs `uv sync`. Use --check to see if there is anything
-    to pull without touching the working tree.
+    to pull without touching the working tree. Add --doctor to live-check the
+    provider/model once the update lands.
     """
     import subprocess
 
@@ -5954,6 +5976,8 @@ def update(
 
     if up_to_date:
         console.print(f"[green]already up to date[/green] ({local} on {git_branch(root)}).")
+        if doctor and not _post_update_health_check():
+            raise typer.Exit(code=1)
         raise typer.Exit(code=0)
 
     # Refuse to clobber uncommitted work unless --force.
@@ -5988,6 +6012,9 @@ def update(
     new_sha = git_short_sha(root)
     console.print(f"[green]updated[/green]: {old_sha} -> {new_sha}")
     console.print(version_line())
+
+    if doctor and not _post_update_health_check():
+        raise typer.Exit(code=1)
 
 
 @app.command()
