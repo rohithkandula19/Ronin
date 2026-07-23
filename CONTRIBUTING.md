@@ -9,7 +9,8 @@ git clone https://github.com/rohithkandula19/Ronin
 cd Ronin
 uv sync --all-packages --all-groups
 uv run pytest packages/agent-patterns packages/eval-suite packages/memory \
-    packages/hardening packages/mcp-servers packages/cli apps/demo -q
+    packages/hardening packages/mcp-servers packages/cli packages/relay \
+    apps/demo apps/api training -q
 ```
 
 CI runs the same command. If it's green locally, it'll be green in CI.
@@ -20,7 +21,7 @@ CI runs the same command. If it's green locally, it'll be green in CI.
 - **New MCP servers** — read-only, following the pattern in `packages/mcp-servers/src/ronin_mcp_servers/`. Each server: a `*_ReadOnlyTools` Pydantic class + a `*_tools()` factory + tests with mocked `httpx`.
 - **New providers** — add a class subclassing `LLMProvider` in `packages/agent-patterns/src/ronin_agent_patterns/providers/`. See `openai_compat.py` for the template.
 - **Documentation** — typos, clarifications, new cookbook recipes in `apps/docs/`.
-- **CLI commands** — keep them small and composable. `csk` should feel like `git`, not `kubectl`.
+- **CLI commands** — keep them small and composable. `ronin` should feel like `git`, not `kubectl`.
 
 ## What we don't want (please don't open PRs for these)
 
