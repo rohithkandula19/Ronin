@@ -24,6 +24,14 @@ class Settings(BaseSettings):
     default_briefing_model: str = "claude-sonnet-4-6"
     enable_scheduler: bool = True
     debug: bool = False
+    # Comma-separated exact origins allowed to call the API cross-origin from a
+    # browser (e.g. "https://app.example.com,https://staging.example.com").
+    # Empty (default) = no CORS headers emitted — same-origin / server-proxy only.
+    # Never use "*" with credentials; list the real web origins.
+    cors_origins: str = ""
+
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
 
 _settings: Settings | None = None

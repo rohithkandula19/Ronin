@@ -26,6 +26,24 @@ CLI equivalent: `vercel --cwd apps/web` (Preview) with a Vercel token.
 
 Once triggered, build failures can be diagnosed from Vercel build logs.
 
+### Connecting the frontend to a running backend
+
+The Ronin OS worlds (`/os/*`) read real data from `/api/v1` and fall back to a
+labelled offline sample when no backend is reachable (the default). Two ways to
+connect them to a hosted `apps/api`:
+
+1. **Same-origin proxy (recommended — no CORS).** Set **`RONIN_API_ORIGIN`** to
+   the backend base URL (e.g. `https://api.example.com`) as a **build-time** env
+   var (Next bakes `rewrites()` into the build). `apps/web` then proxies
+   `/api/v1/*` to that backend, and the browser only ever calls its own origin.
+2. **Direct cross-origin.** Set **`NEXT_PUBLIC_API_URL`** to the backend URL and
+   add the web origin to the backend's **`CORS_ORIGINS`** allowlist
+   (comma-separated exact origins; never `*`). The API emits CORS headers only
+   for listed origins.
+
+With neither set, the worlds stay in offline/sample mode — correct and honest,
+never a fabricated backend.
+
 ## Backend (`apps/api`) — DB layer now wireable; host + secrets still needed
 
 Status: **BLOCKED_INFRASTRUCTURE + BLOCKED_CREDENTIALS** (the DB code gap is now

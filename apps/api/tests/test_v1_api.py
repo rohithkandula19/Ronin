@@ -168,3 +168,41 @@ def test_openapi_documents_v1(client: TestClient):
     assert "/api/v1/auth/register" in paths
     assert "/api/v1/worlds" in paths
     assert "/api/v1/memory/recall" in paths
+
+
+def test_cors_allowlist(tmp_path, monkeypatch):
+    """CORS is opt-in via CORS_ORIGINS: listed origins are allowed, others are
+    not, and no allowlist means no CORS header at all."""
+    from fastapi.testclient import TestClient as _TC
+
+    def build(origins: str | None) -> _TC:
+        monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'cors.db'}")
+        monkeypatch.setenv("RONIN_AIOS_DATA", str(tmp_path / "aios_cors"))
+        if origins is None:
+            monkeypatch.delenv("CORS_ORIGINS", raising=False)
+        else:
+            monkeypatch.setenv("CORS_ORIGINS", origins)
+        from csk_api.db import reset_db_for_tests
+        reset_db_for_tests(f"sqlite:///{tmp_path / 'cors.db'}")
+        from csk_api.v1 import context
+        context.reset_context_for_tests()
+        from csk_api import config
+        config.reset_settings_for_tests()
+        from csk_api.main import make_app
+        return _TC(make_app())
+
+    allowed = "https://app.example.com"
+    c = build(allowed)
+    # An allowed origin is echoed back.
+    r = c.get("/api/v1/worlds/coding", headers={"Origin": allowed})
+    assert r.status_code == 200
+    assert r.headers.get("access-control-allow-origin") == allowed
+    # A non-listed origin gets no allow-origin header.
+    r2 = c.get("/api/v1/worlds/coding", headers={"Origin": "https://evil.example.com"})
+    assert r2.headers.get("access-control-allow-origin") in (None, "")
+
+    # With no allowlist, no CORS header is emitted even for a plausible origin.
+    c2 = build(None)
+    r3 = c2.get("/api/v1/worlds/coding", headers={"Origin": allowed})
+    assert r3.status_code == 200
+    assert r3.headers.get("access-control-allow-origin") in (None, "")

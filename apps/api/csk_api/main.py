@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any, Iterator
 
 from fastapi import Depends, FastAPI, HTTPException, Header, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
@@ -119,6 +120,19 @@ def make_app() -> FastAPI:
         description="Per-user storage + scheduled execution of csk briefings.",
         debug=settings.debug,
     )
+
+    # Cross-origin access is opt-in via an explicit allowlist (CORS_ORIGINS).
+    # With none set, no CORS headers are emitted — the browser can still reach
+    # the API same-origin (e.g. behind the apps/web Next proxy). Never "*".
+    cors_origins = settings.cors_origin_list()
+    if cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=cors_origins,
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+            allow_headers=["Authorization", "Content-Type"],
+        )
 
     @app.get("/health")
     def health() -> dict:
