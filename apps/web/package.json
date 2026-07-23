@@ -10,6 +10,7 @@
     "test": "node --test lib/*.test.mjs"
   },
   "dependencies": {
+    "@ronin/design-system": "workspace:*",
     "next": "^16.2.11",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"

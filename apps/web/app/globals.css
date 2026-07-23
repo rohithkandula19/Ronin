@@ -1,24 +1,56 @@
+@import "@ronin/design-system/styles/rds.css";
 @import "tailwindcss";
 @config "../tailwind.config.ts";
 
-html, body { background: #fafaf9; color: #1a1a1a; }
+html { scroll-behavior: smooth; }
+html, body { background: var(--rds-bg); color: var(--rds-text); }
+body {
+  font-family: var(--rds-font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+::selection { background: var(--rds-selection); color: var(--rds-text); }
+
+/* Subtle entrance motion, disabled for reduced-motion users. */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: none; }
+}
+.fadeup { animation: fadeUp var(--rds-duration-slow) var(--rds-ease-standard) both; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .fadeup { animation: none; }
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* Faint dotted grid used behind the hero. */
+.hero-grid {
+  background-image: radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--rds-text) 7%, transparent) 1px, transparent 0);
+  background-size: 22px 22px;
+  -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 40%, transparent 75%);
+          mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 40%, transparent 75%);
+}
 
 .btn {
   @apply inline-flex items-center justify-center rounded-md px-4 py-2 font-medium transition;
 }
 .btn-primary {
-  @apply bg-accent text-white hover:bg-accent-deep;
+  @apply bg-accent text-on-accent hover:bg-accent-deep;
 }
 .btn-secondary {
-  @apply bg-white border border-border text-ink hover:bg-bg;
+  @apply bg-surface border border-border text-ink hover:bg-surface-sunken;
 }
 
 .card {
-  @apply bg-white border border-border rounded-xl p-5;
+  @apply bg-surface border border-border rounded-xl p-5;
 }
 
 .input {
-  @apply w-full rounded-md border border-border bg-white px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-accent;
+  @apply w-full rounded-md border border-border bg-surface px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-accent;
 }
 
 .markdown {

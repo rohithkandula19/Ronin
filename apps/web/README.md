@@ -45,3 +45,5 @@ Set `NEXT_PUBLIC_API_URL` to your production backend URL (e.g. the Railway host 
 - A Vercel account for hosting
 - (Optional) Clerk for "Sign in with Google" upgrades
 - (Optional) Stripe Connect / Stripe Billing — backend scaffolding is in `apps/api/csk_api/billing.py`
+
+<!-- staging deploy trigger: ronin-ai-os -->
