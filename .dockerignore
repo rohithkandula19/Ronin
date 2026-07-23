@@ -1,0 +1,17 @@
+# Keep the backend image build context lean and reproducible.
+.git
+**/node_modules
+**/.next
+**/.venv
+.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
+**/tsconfig.tsbuildinfo
+.ronin
+**/.env
+**/.env.*
+*.log
+/tmp
+apps/web/.next
