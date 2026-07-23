@@ -41,6 +41,31 @@ export function clearToken() {
   if (typeof window !== "undefined") localStorage.removeItem(TOKEN_KEY);
 }
 
+/**
+ * Base for Ronin OS `/api/v1` calls.
+ * - `NEXT_PUBLIC_API_URL` set → call the backend directly (the backend's
+ *   `CORS_ORIGINS` must include this web origin).
+ * - unset → call same-origin `/api/v1/...` and let the Next proxy
+ *   (`RONIN_API_ORIGIN`, see next.config.js) forward it — no CORS needed.
+ * With neither a direct URL nor a proxy configured, these calls simply fail
+ * and the UI falls back to its labelled offline sample.
+ */
+const AIOS_BASE = process.env.NEXT_PUBLIC_API_URL || "";
+
+async function aiosRequest<T>(path: string): Promise<T> {
+  const headers = new Headers({ "Content-Type": "application/json" });
+  const token = getToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const res = await fetch(`${AIOS_BASE}${path}`, { headers });
+  if (!res.ok) {
+    let detail: string;
+    try { detail = (await res.json()).detail ?? res.statusText; }
+    catch { detail = res.statusText; }
+    throw new Error(`${res.status}: ${detail}`);
+  }
+  return res.json() as Promise<T>;
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
@@ -115,17 +140,17 @@ export interface AdapterInfo {
 export const aios = {
   // World Navigator data. Read-only, no auth required to browse.
   listWorlds: (includeDisabled = true) =>
-    request<WorldsResponse>(`/api/v1/worlds?include_disabled=${includeDisabled}`),
-  getWorld: (id: string) => request<World>(`/api/v1/worlds/${id}`),
-  listModels: () => request<{ models: ModelInfo[] }>(`/api/v1/models`),
+    aiosRequest<WorldsResponse>(`/api/v1/worlds?include_disabled=${includeDisabled}`),
+  getWorld: (id: string) => aiosRequest<World>(`/api/v1/worlds/${id}`),
+  listModels: () => aiosRequest<{ models: ModelInfo[] }>(`/api/v1/models`),
   listAdapters: (industry?: string) =>
-    request<{ adapters: AdapterInfo[] }>(
+    aiosRequest<{ adapters: AdapterInfo[] }>(
       `/api/v1/adapters${industry ? `?industry=${encodeURIComponent(industry)}` : ""}`,
     ),
   // Healthcare safety content, straight from the backend. Read-only, no auth.
   // `disclosures` is a map of {key: text}; callers use Object.values().
   healthcareLimitations: () =>
-    request<{ disclosures: Record<string, string>; blocked: string[] }>(
+    aiosRequest<{ disclosures: Record<string, string>; blocked: string[] }>(
       `/api/v1/healthcare/limitations`,
     ),
 };
