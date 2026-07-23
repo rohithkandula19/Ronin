@@ -34,7 +34,7 @@ export default function RoninHome() {
           <span className="grid size-5 place-items-center rounded-full bg-ink text-[0.625rem] text-bg">円</span>
           {dateLine || "Ronin OS"}
         </div>
-        <h1 className="text-[2.5rem] font-semibold leading-[1.1] tracking-tight text-text sm:text-[3rem]">
+        <h1 className="font-display text-[2.75rem] leading-[1.05] text-text sm:text-[3.25rem]">
           {hello}.
         </h1>
         <p className="mt-3 max-w-xl text-[1.0625rem] leading-relaxed text-text-dim">
@@ -94,7 +94,7 @@ export default function RoninHome() {
             <Link
               key={w.id}
               href={w.href ?? "/worlds"}
-              className="group flex flex-col rounded-xl border border-border bg-surface p-5 transition-all duration-[220ms] ease-standard hover:-translate-y-0.5 hover:border-border-strong hover:shadow-[0_4px_16px_rgba(26,24,22,0.08)]"
+              className="card-lift hairline group flex flex-col rounded-xl border border-border bg-surface p-5"
             >
               <div className="mb-3 flex items-center justify-between">
                 <span className="grid size-11 place-items-center rounded-xl bg-surface-sunken text-text group-hover:bg-accent-tint group-hover:text-accent-deep">
