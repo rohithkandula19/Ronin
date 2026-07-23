@@ -2,12 +2,30 @@
 @import "tailwindcss";
 @config "../tailwind.config.ts";
 
+/* Repoint the RDS type ramp at the self-hosted variable fonts (loaded in
+   layout.tsx). Fallbacks keep everything readable if a face fails to load. */
+:root {
+  --rds-font-sans: "Inter Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, "Helvetica Neue", Arial, sans-serif;
+  --rds-font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, Monaco, "Cascadia Code", monospace;
+  --rds-font-display: "Fraunces Variable", ui-serif, "Iowan Old Style", Georgia, "Times New Roman", serif;
+}
+
 html { scroll-behavior: smooth; }
 html, body { background: var(--rds-bg); color: var(--rds-text); }
 body {
   font-family: var(--rds-font-sans);
+  font-optical-sizing: auto;
+  letter-spacing: -0.011em;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+}
+/* Editorial display face for hero/section headings and brand moments. */
+.font-display {
+  font-family: var(--rds-font-display);
+  font-optical-sizing: auto;
+  letter-spacing: -0.02em;
+  font-weight: 560;
 }
 ::selection { background: var(--rds-selection); color: var(--rds-text); }
 
