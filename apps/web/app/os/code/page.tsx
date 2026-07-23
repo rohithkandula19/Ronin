@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Icon, RiskChip, Badge, cn, type IconName } from "@ronin/design-system";
+import { useCodingData, type CodingLive } from "./_useCodingData";
 import {
   FILE_TREE,
   OPEN_FILES,
@@ -26,7 +27,9 @@ export default function RoninCode() {
   const [activePath, setActivePath] = useState(OPEN_FILES[0].path);
   const [openPaths, setOpenPaths] = useState<string[]>(OPEN_FILES.map((f) => f.path));
   const [showDiff, setShowDiff] = useState(true);
-  const [bottomTab, setBottomTab] = useState<"terminal" | "problems">("terminal");
+  const [bottomTab, setBottomTab] = useState<"terminal" | "problems" | "safety">("terminal");
+  const live = useCodingData();
+  const [modelId, setModelId] = useState("");
   const [autonomy, setAutonomy] = useState<Autonomy>("ask");
   const [autonomyOpen, setAutonomyOpen] = useState(false);
 
@@ -48,7 +51,10 @@ export default function RoninCode() {
         </Badge>
         <span className="text-[0.75rem] text-text-faint">main · sandboxed working copy</span>
 
-        <div className="relative ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          <ConnBadge live={live} />
+          <ModelControl live={live} value={modelId} onChange={setModelId} />
+          <div className="relative">
           <button
             onClick={() => setAutonomyOpen((o) => !o)}
             className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-1.5 text-[0.8125rem] text-text hover:border-border-strong"
@@ -83,6 +89,7 @@ export default function RoninCode() {
               </div>
             </>
           )}
+          </div>
         </div>
       </div>
 
@@ -189,12 +196,15 @@ export default function RoninCode() {
                   {PROBLEMS.length}
                 </span>
               </DockTab>
+              <DockTab active={bottomTab === "safety"} onClick={() => setBottomTab("safety")} icon="shield">
+                Safety
+              </DockTab>
               <span className="ml-auto flex items-center gap-1.5 text-[0.6875rem] text-text-faint">
                 <Icon name="shield" size={12} /> runs in an isolated sandbox
               </span>
             </div>
             <div className="h-[calc(100%-2.25rem)] overflow-auto px-4 py-2 font-mono text-[0.75rem] leading-5">
-              {bottomTab === "terminal" ? <Terminal /> : <Problems />}
+              {bottomTab === "terminal" ? <Terminal /> : bottomTab === "problems" ? <Problems /> : <Safety live={live} />}
             </div>
           </div>
         </div>
@@ -420,5 +430,107 @@ function Problems() {
         </li>
       ))}
     </ul>
+  );
+}
+
+/* ── live /api/v1 wiring ── */
+function ConnBadge({ live }: { live: CodingLive }) {
+  const map = {
+    loading: { dot: "bg-text-faint animate-pulse", label: "Connecting…" },
+    connected: { dot: "bg-success", label: "Live · API" },
+    offline: { dot: "bg-text-faint", label: "Offline · sample" },
+  } as const;
+  const m = map[live.status];
+  return (
+    <span
+      title={
+        live.status === "offline"
+          ? `/api/v1 unreachable${live.error ? ` (${live.error})` : ""} — showing sample`
+          : "Connected to /api/v1"
+      }
+      className="flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[0.75rem] text-text-dim"
+    >
+      <span className={cn("size-1.5 rounded-full", m.dot)} />
+      {m.label}
+    </span>
+  );
+}
+
+function ModelControl({
+  live,
+  value,
+  onChange,
+}: {
+  live: CodingLive;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  if (live.status === "connected" && live.models.length > 0) {
+    const cur = value || live.models[0].id;
+    return (
+      <select
+        value={cur}
+        onChange={(e) => onChange(e.target.value)}
+        className="hidden rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[0.8125rem] text-text focus:outline-none focus:ring-2 focus:ring-accent sm:block"
+      >
+        {live.models.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.id}
+            {m.provider ? ` · ${m.provider}` : ""}
+          </option>
+        ))}
+      </select>
+    );
+  }
+  return (
+    <span className="hidden items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[0.8125rem] text-text-dim sm:flex">
+      <Icon name="spark" size={13} /> claude-sonnet <span className="text-text-faint">(sample)</span>
+    </span>
+  );
+}
+
+function Safety({ live }: { live: CodingLive }) {
+  if (live.status === "connected" && live.world) {
+    const w = live.world;
+    return (
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge tone="accent">risk: {w.risk_level}</Badge>
+          {w.default_adapter && <Badge tone="neutral">adapter: {w.default_adapter}</Badge>}
+          <span className="text-text-faint">live from /api/v1/worlds/coding</span>
+        </div>
+        <div>
+          <p className="mb-1 text-text-dim">Allowed tools</p>
+          <div className="flex flex-wrap gap-1">
+            {w.allowed_tools.map((t) => (
+              <span key={t} className="rounded bg-surface-sunken px-1.5 py-0.5 text-text">{t}</span>
+            ))}
+          </div>
+        </div>
+        {w.blocked_capabilities.length > 0 && (
+          <div>
+            <p className="mb-1 text-text-dim">Blocked capabilities</p>
+            <div className="flex flex-wrap gap-1">
+              {w.blocked_capabilities.map((t) => (
+                <span key={t} className="rounded bg-danger-soft px-1.5 py-0.5 text-danger">{t}</span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-1.5 text-text-dim">
+      <p>
+        Offline — the real allowed tools, blocked capabilities, risk level and default adapter load
+        from <span className="text-text">/api/v1/worlds/coding</span> when the API is reachable
+        (set <span className="text-text">NEXT_PUBLIC_API_URL</span>).
+      </p>
+      <p className="text-text-faint">
+        Safety floor (enforced server-side, not waivable from the web): destructive/payment tool
+        calls are denied; a read-only role can never write; sensitive writes need explicit approval.
+      </p>
+    </div>
   );
 }
