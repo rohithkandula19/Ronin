@@ -33,7 +33,7 @@
                   "required": ["name", "arguments"],
                   "properties": {
                     "name": {"type": "string"},
-                    "arguments": {"type": ["string", "object"]}
+                    "arguments": {"type": "object"}
                   }
                 }
               }

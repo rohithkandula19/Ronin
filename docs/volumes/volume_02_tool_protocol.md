@@ -13,7 +13,7 @@ patterns cannot teach an unparseable protocol.
    {"role": "system", "content": "You are Ronin. Emit tool calls whose arguments are valid JSON matching the tool schema."},
    {"role": "user", "content": "Read src/config.py."},
    {"role": "assistant", "tool_calls": [
-     {"id": "r1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"src/config.py\"}"}}
+     {"id": "r1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "src/config.py"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 text file.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}]}
@@ -36,7 +36,7 @@ Use the ranked map to find files in an unfamiliar repo, then read them.
    {"role": "system", "content": "You are Ronin. In an unfamiliar repo, use repo_map to locate the right files, then read_file them."},
    {"role": "user", "content": "How is authentication handled in this codebase?"},
    {"role": "assistant", "tool_calls": [
-     {"id": "m1", "type": "function", "function": {"name": "repo_map", "arguments": "{\"query\": \"how is authentication handled\", \"k\": 8}"}}
+     {"id": "m1", "type": "function", "function": {"name": "repo_map", "arguments": {"query": "how is authentication handled", "k": 8}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "repo_map", "description": "Relevance-ranked code search.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "k": {"type": "integer"}}, "required": ["query"]}}}]}
@@ -50,7 +50,7 @@ Use the ranked map to find files in an unfamiliar repo, then read them.
    {"role": "system", "content": "You are Ronin. Use search_files for an exact string, glob for a filename pattern."},
    {"role": "user", "content": "Find every place the literal string DEPRECATED_FLAG appears."},
    {"role": "assistant", "tool_calls": [
-     {"id": "s1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"DEPRECATED_FLAG\"}"}}
+     {"id": "s1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "DEPRECATED_FLAG"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "search_files", "description": "Grep a literal string.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "directory": {"type": "string"}}, "required": ["query"]}}}]}
@@ -62,7 +62,7 @@ Use the ranked map to find files in an unfamiliar repo, then read them.
    {"role": "system", "content": "You are Ronin. Use glob for a filename pattern."},
    {"role": "user", "content": "List all the Python test files."},
    {"role": "assistant", "tool_calls": [
-     {"id": "g1", "type": "function", "function": {"name": "glob", "arguments": "{\"pattern\": \"**/test_*.py\"}"}}
+     {"id": "g1", "type": "function", "function": {"name": "glob", "arguments": {"pattern": "**/test_*.py"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "glob", "description": "Find files by glob pattern.", "parameters": {"type": "object", "properties": {"pattern": {"type": "string"}, "directory": {"type": "string"}}, "required": ["pattern"]}}}]}
@@ -78,7 +78,7 @@ Use the ranked map to find files in an unfamiliar repo, then read them.
    {"role": "system", "content": "You are Ronin. To change an existing file, prefer a surgical edit_file over a full write_file overwrite."},
    {"role": "user", "content": "In app.py change the port from 8000 to 9000."},
    {"role": "assistant", "tool_calls": [
-     {"id": "e1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"app.py\", \"old_string\": \"PORT = 8000\", \"new_string\": \"PORT = 9000\"}"}}
+     {"id": "e1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "app.py", "old_string": "PORT = 8000", "new_string": "PORT = 9000"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "edit_file", "description": "Surgical unique-string replace.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old_string": {"type": "string"}, "new_string": {"type": "string"}}, "required": ["path", "old_string", "new_string"]}}}]}
@@ -92,7 +92,7 @@ Use the ranked map to find files in an unfamiliar repo, then read them.
    {"role": "system", "content": "You are Ronin. Batch several edits to one file into a single multi_edit."},
    {"role": "user", "content": "In config.py rename DEBUG to VERBOSE and change TIMEOUT from 30 to 60."},
    {"role": "assistant", "tool_calls": [
-     {"id": "me1", "type": "function", "function": {"name": "multi_edit", "arguments": "{\"path\": \"config.py\", \"edits\": [{\"old_string\": \"DEBUG =\", \"new_string\": \"VERBOSE =\"}, {\"old_string\": \"TIMEOUT = 30\", \"new_string\": \"TIMEOUT = 60\"}]}"}}
+     {"id": "me1", "type": "function", "function": {"name": "multi_edit", "arguments": {"path": "config.py", "edits": [{"old_string": "DEBUG =", "new_string": "VERBOSE ="}, {"old_string": "TIMEOUT = 30", "new_string": "TIMEOUT = 60"}]}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "multi_edit", "description": "Several surgical edits to one file.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "edits": {"type": "array", "items": {"type": "object", "properties": {"old_string": {"type": "string"}, "new_string": {"type": "string"}}, "required": ["old_string", "new_string"]}}}, "required": ["path", "edits"]}}}]}
@@ -109,7 +109,7 @@ A dev server or watcher never exits, so `run_command` would hang. Start it with
    {"role": "system", "content": "You are Ronin. Start a never-exiting process with run_background, not run_command."},
    {"role": "user", "content": "Start the dev server."},
    {"role": "assistant", "tool_calls": [
-     {"id": "b1", "type": "function", "function": {"name": "run_background", "arguments": "{\"command\": \"npm run dev\"}"}}
+     {"id": "b1", "type": "function", "function": {"name": "run_background", "arguments": {"command": "npm run dev"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "run_background", "description": "Start a long-running command in the background.", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}}]}

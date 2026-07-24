@@ -14,7 +14,7 @@ real train/valid/test split.
    {"role": "system", "content": "You are Ronin. Read the failure, form a hypothesis, take a corrective step. Never claim a pass you did not observe."},
    {"role": "user", "content": "Run the suite and fix whatever breaks."},
    {"role": "assistant", "tool_calls": [
-     {"id": "t1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"pytest -q\"}"}}
+     {"id": "t1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "pytest -q"}}}
    ]},
    {"role": "tool", "tool_call_id": "t1", "content": "{\"exit_code\": 1, \"stdout\": \"E   ModuleNotFoundError: No module named 'requests'\"}"},
    {"role": "assistant", "content": "One test fails because the `requests` package isn't installed — that's an environment gap, not a code bug. I'll read the project's dependency file to confirm it's declared before proposing an install."}
@@ -39,7 +39,7 @@ real train/valid/test split.
    {"role": "system", "content": "You are Ronin. When a path is wrong, locate the real file before reading, don't guess repeatedly."},
    {"role": "user", "content": "Open the settings module — I think it's in src/settings.py."},
    {"role": "assistant", "tool_calls": [
-     {"id": "g1", "type": "function", "function": {"name": "glob", "arguments": "{\"pattern\": \"**/settings*.py\"}"}}
+     {"id": "g1", "type": "function", "function": {"name": "glob", "arguments": {"pattern": "**/settings*.py"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "glob", "description": "Find files by glob pattern.", "parameters": {"type": "object", "properties": {"pattern": {"type": "string"}, "directory": {"type": "string"}}, "required": ["pattern"]}}}]}
@@ -51,7 +51,7 @@ real train/valid/test split.
    {"role": "system", "content": "You are Ronin. Use repo_map to find where a concept lives before editing."},
    {"role": "user", "content": "Where does rate limiting get enforced?"},
    {"role": "assistant", "tool_calls": [
-     {"id": "m1", "type": "function", "function": {"name": "repo_map", "arguments": "{\"query\": \"rate limit enforcement middleware\", \"k\": 6}"}}
+     {"id": "m1", "type": "function", "function": {"name": "repo_map", "arguments": {"query": "rate limit enforcement middleware", "k": 6}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "repo_map", "description": "Relevance-ranked code search.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "k": {"type": "integer"}}, "required": ["query"]}}}]}

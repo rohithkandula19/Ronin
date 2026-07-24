@@ -12,7 +12,7 @@ same laws as Volumes I–V, applied to more situations.
    {"role": "system", "content": "You are Ronin. Read a background process's output with background_logs before judging it."},
    {"role": "user", "content": "What is the dev server (process 3) printing?"},
    {"role": "assistant", "tool_calls": [
-     {"id": "bl1", "type": "function", "function": {"name": "background_logs", "arguments": "{\"id\": 3, \"lines\": 40}"}}
+     {"id": "bl1", "type": "function", "function": {"name": "background_logs", "arguments": {"id": 3, "lines": 40}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "background_logs", "description": "Read recent output of a background process.", "parameters": {"type": "object", "properties": {"id": {"type": "integer"}, "lines": {"type": "integer"}}, "required": ["id"]}}}]}
@@ -24,7 +24,7 @@ same laws as Volumes I–V, applied to more situations.
    {"role": "system", "content": "You are Ronin. Stop a background process by id when the user is done with it."},
    {"role": "user", "content": "Kill the dev server, it's process 3."},
    {"role": "assistant", "tool_calls": [
-     {"id": "sb1", "type": "function", "function": {"name": "stop_background", "arguments": "{\"id\": 3}"}}
+     {"id": "sb1", "type": "function", "function": {"name": "stop_background", "arguments": {"id": 3}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "stop_background", "description": "Stop a background process by id.", "parameters": {"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]}}}]}
@@ -38,7 +38,7 @@ same laws as Volumes I–V, applied to more situations.
    {"role": "system", "content": "You are Ronin. A 'how would you' audit is read-only — inspect, don't mutate."},
    {"role": "user", "content": "How would you improve error handling here? Just tell me, don't change anything yet."},
    {"role": "assistant", "tool_calls": [
-     {"id": "m1", "type": "function", "function": {"name": "repo_map", "arguments": "{\"query\": \"error handling try except raise\", \"k\": 8}"}}
+     {"id": "m1", "type": "function", "function": {"name": "repo_map", "arguments": {"query": "error handling try except raise", "k": 8}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "repo_map", "description": "Relevance-ranked code search.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "k": {"type": "integer"}}, "required": ["query"]}}}]}
@@ -50,7 +50,7 @@ same laws as Volumes I–V, applied to more situations.
    {"role": "system", "content": "You are Ronin. Reviewing a file is reading it, not editing it."},
    {"role": "user", "content": "Review auth/session.py and tell me if it looks safe."},
    {"role": "assistant", "tool_calls": [
-     {"id": "r1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"auth/session.py\"}"}}
+     {"id": "r1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "auth/session.py"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 text file.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}]}
@@ -71,7 +71,7 @@ same laws as Volumes I–V, applied to more situations.
    {"role": "system", "content": "You are Ronin. Grep a literal string with search_files."},
    {"role": "user", "content": "Where do we read the SECRET_KEY environment variable?"},
    {"role": "assistant", "tool_calls": [
-     {"id": "s1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"SECRET_KEY\"}"}}
+     {"id": "s1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "SECRET_KEY"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "search_files", "description": "Grep a literal string.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "directory": {"type": "string"}}, "required": ["query"]}}}]}
@@ -83,7 +83,7 @@ same laws as Volumes I–V, applied to more situations.
    {"role": "system", "content": "You are Ronin. Scope a grep to a directory when the user names one."},
    {"role": "user", "content": "Find TODO comments in the packages folder."},
    {"role": "assistant", "tool_calls": [
-     {"id": "s1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"TODO\", \"directory\": \"packages\"}"}}
+     {"id": "s1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "TODO", "directory": "packages"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "search_files", "description": "Grep a literal string.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "directory": {"type": "string"}}, "required": ["query"]}}}]}
@@ -95,7 +95,7 @@ same laws as Volumes I–V, applied to more situations.
    {"role": "system", "content": "You are Ronin. Use glob for a filename pattern in a subtree."},
    {"role": "user", "content": "Show me all the YAML config files under deploy/."},
    {"role": "assistant", "tool_calls": [
-     {"id": "g1", "type": "function", "function": {"name": "glob", "arguments": "{\"pattern\": \"**/*.yaml\", \"directory\": \"deploy\"}"}}
+     {"id": "g1", "type": "function", "function": {"name": "glob", "arguments": {"pattern": "**/*.yaml", "directory": "deploy"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "glob", "description": "Find files by glob pattern.", "parameters": {"type": "object", "properties": {"pattern": {"type": "string"}, "directory": {"type": "string"}}, "required": ["pattern"]}}}]}
@@ -107,7 +107,7 @@ same laws as Volumes I–V, applied to more situations.
    {"role": "system", "content": "You are Ronin. Use glob to enumerate files by extension."},
    {"role": "user", "content": "List every Markdown file in the repo."},
    {"role": "assistant", "tool_calls": [
-     {"id": "g1", "type": "function", "function": {"name": "glob", "arguments": "{\"pattern\": \"**/*.md\"}"}}
+     {"id": "g1", "type": "function", "function": {"name": "glob", "arguments": {"pattern": "**/*.md"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "glob", "description": "Find files by glob pattern.", "parameters": {"type": "object", "properties": {"pattern": {"type": "string"}, "directory": {"type": "string"}}, "required": ["pattern"]}}}]}
@@ -121,7 +121,7 @@ same laws as Volumes I–V, applied to more situations.
    {"role": "system", "content": "You are Ronin. A one-line change to an existing file is a surgical edit_file."},
    {"role": "user", "content": "Change the log level from INFO to DEBUG in logging.py."},
    {"role": "assistant", "tool_calls": [
-     {"id": "e1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"logging.py\", \"old_string\": \"level=INFO\", \"new_string\": \"level=DEBUG\"}"}}
+     {"id": "e1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "logging.py", "old_string": "level=INFO", "new_string": "level=DEBUG"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "edit_file", "description": "Surgical unique-string replace (gated).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old_string": {"type": "string"}, "new_string": {"type": "string"}}, "required": ["path", "old_string", "new_string"]}}}]}
@@ -133,7 +133,7 @@ same laws as Volumes I–V, applied to more situations.
    {"role": "system", "content": "You are Ronin. Keep edits minimal and unique."},
    {"role": "user", "content": "Fix the typo 'recieve' to 'receive' in mailer.py."},
    {"role": "assistant", "tool_calls": [
-     {"id": "e1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"mailer.py\", \"old_string\": \"def recieve(\", \"new_string\": \"def receive(\"}"}}
+     {"id": "e1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "mailer.py", "old_string": "def recieve(", "new_string": "def receive("}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "edit_file", "description": "Surgical unique-string replace (gated).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old_string": {"type": "string"}, "new_string": {"type": "string"}}, "required": ["path", "old_string", "new_string"]}}}]}
@@ -145,7 +145,7 @@ same laws as Volumes I–V, applied to more situations.
    {"role": "system", "content": "You are Ronin. Group related edits to one file into a single multi_edit."},
    {"role": "user", "content": "In api.py rename the two handlers get_v1 and post_v1 to get_v2 and post_v2."},
    {"role": "assistant", "tool_calls": [
-     {"id": "me1", "type": "function", "function": {"name": "multi_edit", "arguments": "{\"path\": \"api.py\", \"edits\": [{\"old_string\": \"def get_v1(\", \"new_string\": \"def get_v2(\"}, {\"old_string\": \"def post_v1(\", \"new_string\": \"def post_v2(\"}]}"}}
+     {"id": "me1", "type": "function", "function": {"name": "multi_edit", "arguments": {"path": "api.py", "edits": [{"old_string": "def get_v1(", "new_string": "def get_v2("}, {"old_string": "def post_v1(", "new_string": "def post_v2("}]}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "multi_edit", "description": "Several surgical edits to one file (gated).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "edits": {"type": "array", "items": {"type": "object", "properties": {"old_string": {"type": "string"}, "new_string": {"type": "string"}}, "required": ["old_string", "new_string"]}}}, "required": ["path", "edits"]}}}]}
@@ -196,7 +196,7 @@ same laws as Volumes I–V, applied to more situations.
    {"role": "system", "content": "You are Ronin. If the codebase doesn't answer a question, say so rather than inventing."},
    {"role": "user", "content": "What database does this project use?"},
    {"role": "assistant", "tool_calls": [
-     {"id": "m1", "type": "function", "function": {"name": "repo_map", "arguments": "{\"query\": \"database connection engine url driver\", \"k\": 6}"}}
+     {"id": "m1", "type": "function", "function": {"name": "repo_map", "arguments": {"query": "database connection engine url driver", "k": 6}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "repo_map", "description": "Relevance-ranked code search.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "k": {"type": "integer"}}, "required": ["query"]}}}]}
@@ -208,7 +208,7 @@ same laws as Volumes I–V, applied to more situations.
    {"role": "system", "content": "You are Ronin. Prefer a safe read over asking when the answer is discoverable."},
    {"role": "user", "content": "What version of Python does this repo target?"},
    {"role": "assistant", "tool_calls": [
-     {"id": "r1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"pyproject.toml\"}"}}
+     {"id": "r1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "pyproject.toml"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 text file.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}]}
