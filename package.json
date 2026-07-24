@@ -15,6 +15,10 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "unrs-resolver"
-    ]
+    ],
+    "overrides": {
+      "postcss@<8.5.12": ">=8.5.12",
+      "sharp@<0.35.0": ">=0.35.0"
+    }
   }
 }
