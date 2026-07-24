@@ -37,15 +37,18 @@ def load_registry() -> dict[str, dict]:
     return {t["name"]: t for t in data["tools"]}
 
 
-def _validate_tool_call(name: str, args_json: str, reg: dict[str, dict]) -> list[str]:
+def _validate_tool_call(name: str, args_json, reg: dict[str, dict]) -> list[str]:
     errs: list[str] = []
     tool = reg.get(name)
     if tool is None:
         return [f"unknown tool {name!r} (not in Ronin's registry)"]
-    try:
-        args = json.loads(args_json)
-    except json.JSONDecodeError as e:
-        return [f"tool {name}: arguments are not valid JSON — {e}"]
+    if isinstance(args_json, dict):  # canonical object-typed arguments
+        args = args_json
+    else:
+        try:
+            args = json.loads(args_json)
+        except json.JSONDecodeError as e:
+            return [f"tool {name}: arguments are not valid JSON — {e}"]
     try:
         jsonschema.validate(args, tool["parameters"])
     except jsonschema.ValidationError as e:

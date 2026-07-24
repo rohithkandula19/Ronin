@@ -1,0 +1,23 @@
+[project]
+name = "ronin-dialect"
+version = "1.0.0"
+description = "The canonical ronin tool-call wire format — one renderer/parser shared by corpus generation, the embedded runtime, and the eval."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Rohith Kandula", email = "rohithkandula937@gmail.com" }]
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest>=7.0"]
+
+[build-system]
+requires = ["hatchling>=1.31.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ronin_dialect"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

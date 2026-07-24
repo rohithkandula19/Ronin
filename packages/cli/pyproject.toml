@@ -34,6 +34,7 @@ dependencies = [
     "textual>=8.0,<9",
     "tomli-w>=1.0,<2",
     "ronin-agent-patterns==1.0.0",
+    "ronin-dialect==1.0.0",
     "ronin-hardening==1.0.0",
     "ronin-memory==1.0.0",
     "ronin-mcp-servers==1.0.0",
@@ -84,6 +85,7 @@ dev = [
 
 [tool.uv.sources]
 ronin-arcade = { workspace = true }
+ronin-dialect = { workspace = true }
 ronin-agent-patterns = { workspace = true }
 ronin-hardening = { workspace = true }
 ronin-memory = { workspace = true }

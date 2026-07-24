@@ -276,14 +276,18 @@ def tools_to_openai(tools: list[Tool]) -> list[dict[str, Any]]:
     ]
 
 
-# Qwen-Coder emits one JSON object per <tool_call> block:
-#   <tool_call>\n{"name": "...", "arguments": {...}}\n</tool_call>
-_TOOL_CALL_BLOCK = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
+# The <tool_call> dialect lives in ONE canonical module (ronin_dialect) shared
+# with corpus generation and the eval extractor, so the three can never drift
+# (see training/reports/valid_tool_json_root_cause.md). Kept as a module-level
+# name for back-compat with anything that imported it from here.
+from ronin_dialect import BLOCK_RE as _TOOL_CALL_BLOCK  # noqa: E402
+from ronin_dialect import parse_tool_calls as _dialect_parse  # noqa: E402
 
 
 def parse_tool_calls(text: str) -> tuple[str, list[ToolCall]]:
     """Extract ``<tool_call>`` blocks from generated text into ``ToolCall``s.
-    PURE — no I/O.
+    PURE — no I/O. Delegates to the canonical ``ronin_dialect`` parser; this
+    wrapper only assigns the runtime's ``embedded_N`` call ids.
 
     Returns ``(clean_text, calls)`` where ``clean_text`` is the text with parsed
     blocks removed. A block whose body isn't a JSON object with a string ``name``
@@ -291,34 +295,41 @@ def parse_tool_calls(text: str) -> tuple[str, list[ToolCall]]:
     dropped or "repaired" into a call the model didn't make. ``arguments`` may be
     a JSON object or (per some templates) a JSON-encoded string of one.
     """
-    calls: list[ToolCall] = []
-    kept: list[str] = []
-    cursor = 0
-    for m in _TOOL_CALL_BLOCK.finditer(text):
-        kept.append(text[cursor:m.start()])
-        cursor = m.end()
-        try:
-            obj = json.loads(m.group(1))
-        except json.JSONDecodeError:
-            kept.append(m.group(0))  # malformed: keep visible in the text
-            continue
-        name = obj.get("name") if isinstance(obj, dict) else None
-        if not isinstance(name, str) or not name:
-            kept.append(m.group(0))
-            continue
-        args = obj.get("arguments", {})
-        if isinstance(args, str):
-            try:
-                args = json.loads(args)
-            except json.JSONDecodeError:
-                kept.append(m.group(0))
-                continue
-        if not isinstance(args, dict):
-            kept.append(m.group(0))
-            continue
-        calls.append(ToolCall(id=f"embedded_{len(calls)}", name=name, arguments=args))
-    kept.append(text[cursor:])
-    return "".join(kept).strip(), calls
+    clean, parsed = _dialect_parse(text)
+    calls = [ToolCall(id=f"embedded_{i}", name=p.name, arguments=p.arguments)
+             for i, p in enumerate(parsed)]
+    return clean, calls
+
+
+# Files a trained mlx LoRA adapter dir must contain to count as an adapter.
+_ADAPTER_REQUIRED = ("adapter_config.json", "adapters.safetensors")
+
+
+def validate_adapter_dir(adapter_path: str | None) -> str | None:
+    """Fail-closed adapter validation. PURE (filesystem reads only).
+
+    Returns the normalized path, or None when no adapter was requested. Raises
+    when an adapter WAS requested but can't actually be served — the embedded
+    provider must never silently answer with the bare base model while the
+    config claims ronin-code-1.5b."""
+    adapter = (adapter_path or "").strip() or None
+    if adapter is None:
+        return None
+    p = Path(adapter)
+    if not p.is_dir():
+        raise FileNotFoundError(
+            f"adapter_path {adapter!r} is not a directory — expected a trained "
+            "LoRA adapter dir (adapter_config.json + adapters.safetensors), e.g. "
+            "training/adapters/ronin-code-1.5b-v4/adapters"
+        )
+    missing = [f for f in _ADAPTER_REQUIRED if not (p / f).is_file()]
+    if missing:
+        raise FileNotFoundError(
+            f"adapter_path {adapter!r} is missing {missing} — refusing to fall "
+            "back to the bare base model. Train with training/cuda/run.sh or "
+            "unset RONIN_ADAPTER to run the base model explicitly."
+        )
+    return adapter
 
 
 def render_prompt(
@@ -418,22 +429,20 @@ class EmbeddedProvider(LLMProvider):
             self._load_llama_cpp(repo, cache)
 
     def _load_mlx(self, repo: str) -> None:
+        # FAIL-CLOSED adapter guard, BEFORE the heavy import: a missing or
+        # half-baked adapter dir must raise — silently serving the bare base
+        # model while claiming the fine-tune would be a lie about which brain
+        # is answering. Guard order also makes this testable on any platform.
+        adapter = validate_adapter_dir(self.adapter_path)
         try:
             from mlx_lm import load  # lazy: heavy + Apple-Silicon-only
         except ImportError as e:  # engine not installed
             raise MissingEngineError("mlx", e) from e
-        adapter = (self.adapter_path or "").strip() or None
-        if adapter and not Path(adapter).is_dir():
-            raise FileNotFoundError(
-                f"adapter_path {adapter!r} is not a directory — expected a trained "
-                "LoRA adapter dir (adapter_config.json + adapters.safetensors), e.g. "
-                "training/adapters/ronin_1.5b"
-            )
         # First call downloads + caches the 4-bit weights from the HF Hub (no key).
         self._model_obj, self._tokenizer = load(repo, adapter_path=adapter)
 
     def _load_llama_cpp(self, repo: str, cache: Path) -> None:
-        if (self.adapter_path or "").strip():
+        if (self.adapter_path or "").strip():  # fail-closed: see _load_mlx
             # Guard BEFORE the heavy import: safetensors LoRA adapters are an
             # mlx-lm feature; failing quietly here would silently serve the base
             # model while claiming the fine-tune.
