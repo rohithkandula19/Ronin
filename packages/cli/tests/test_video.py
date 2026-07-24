@@ -65,7 +65,7 @@ def test_generate_video_ffmpeg_failure_surfaces(tmp_path: Path) -> None:
 
 def test_cli_video_without_ffmpeg_exits_2() -> None:
     with patch("ronin_cli.media.ffmpeg_available", return_value=False):
-        r = runner.invoke(app, ["video", "a panda", "--no-show"])
+        r = runner.invoke(app, ["util", "video", "a panda", "--no-show"])
     assert r.exit_code == 2
     assert "ffmpeg" in r.stdout
 
@@ -76,7 +76,7 @@ def test_cli_video_happy_path(tmp_path: Path) -> None:
     out.write_bytes(b"mp4")
     with patch("ronin_cli.media.ffmpeg_available", return_value=True), \
          patch("ronin_cli.media.generate_video", return_value=fake):
-        r = runner.invoke(app, ["video", "a panda", "--no-show", "--out", str(out)])
+        r = runner.invoke(app, ["util", "video", "a panda", "--no-show", "--out", str(out)])
     assert r.exit_code == 0, r.stdout
     # rich wraps text on narrow CI terminals — collapse whitespace so the
     # substring check survives "8 \nframes" wrapping (gh actions = 80 cols).

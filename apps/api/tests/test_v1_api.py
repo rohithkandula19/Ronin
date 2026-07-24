@@ -83,7 +83,8 @@ def test_list_worlds_shows_initial_and_disabled(client: TestClient):
     assert worlds["coding"]["status"] != "disabled"
     assert worlds["healthcare"]["risk_level"] == "high"
     assert "autonomous_diagnosis" in worlds["healthcare"]["blocked_capabilities"]
-    assert worlds["finance"]["status"] == "disabled"
+    # empty future-world stubs were deleted in the wedge cut — only real packs list
+    assert "finance" not in worlds
 
 
 def test_enter_world_validates_and_audits(client: TestClient):
@@ -103,11 +104,11 @@ def test_enter_world_validates_and_audits(client: TestClient):
     })
     assert bad_role.status_code == 422
 
-    disabled = client.post("/api/v1/worlds/enter", headers=_auth(token), json={
+    unknown = client.post("/api/v1/worlds/enter", headers=_auth(token), json={
         "workspace_id": ws_id, "world": "finance", "role": "member",
         "country": "US", "language": "en",
     })
-    assert disabled.status_code == 422
+    assert unknown.status_code == 422
 
     audit = client.get("/api/v1/audit", headers=_auth(token)).json()["events"]
     actions = {e["action"] for e in audit}

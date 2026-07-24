@@ -288,14 +288,14 @@ def test_cli_missing_token_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None
 
     monkeypatch.setattr("ronin_cli.telegram_bot.TelegramBot", explode)
 
-    r = runner.invoke(app, ["telegram", "--once"])
+    r = runner.invoke(app, ["util", "telegram", "--once"])
     assert r.exit_code != 0
     assert "TELEGRAM_BOT_TOKEN" in r.stdout
 
 
 def test_cli_malformed_token_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "bogus")
-    r = runner.invoke(app, ["telegram", "--once"])
+    r = runner.invoke(app, ["util", "telegram", "--once"])
     assert r.exit_code != 0
 
 
@@ -435,7 +435,7 @@ def test_cli_getme_failure_redacts_token(monkeypatch: pytest.MonkeyPatch) -> Non
         "ronin_cli.telegram_bot.TelegramBot.get_me", failing_get_me
     )
 
-    r = runner.invoke(app, ["telegram", "--once"])
+    r = runner.invoke(app, ["util", "telegram", "--once"])
     assert r.exit_code != 0
     assert "getMe failed" in r.stdout
     assert VALID_TOKEN not in r.stdout, "token must not be printed on getMe failure"
@@ -580,7 +580,7 @@ def test_cli_runs_read_only_code_agent_rooted_at_default_home(
 
     monkeypatch.setattr("ronin_cli.telegram_bot.TelegramBot", capture_bot)
 
-    r = runner.invoke(app, ["telegram", "--once"])
+    r = runner.invoke(app, ["util", "telegram", "--once"])
     assert r.exit_code == 0, r.stdout
 
     assert len(calls) == 1, "the read-only code agent must run exactly once"
@@ -630,7 +630,7 @@ def test_cli_streams_progress_via_edit_message_text(
 
     monkeypatch.setattr("ronin_cli.telegram_bot.TelegramBot", capture_bot)
 
-    r = runner.invoke(app, ["telegram", "--once"])
+    r = runner.invoke(app, ["util", "telegram", "--once"])
     assert r.exit_code == 0, r.stdout
 
     edits = client.edited_messages()
@@ -664,7 +664,7 @@ def test_cli_never_passes_write_path_to_code_agent(
 
     monkeypatch.setattr("ronin_cli.telegram_bot.TelegramBot", capture_bot)
 
-    r = runner.invoke(app, ["telegram", "--once"])
+    r = runner.invoke(app, ["util", "telegram", "--once"])
     assert r.exit_code == 0, r.stdout
 
     assert calls, "the code agent should have been invoked"
@@ -685,7 +685,7 @@ class _FakeStep:
 
 
 def test_step_line_maps_tool_calls_to_human_lines() -> None:
-    from ronin_cli.main import _telegram_step_line
+    from ronin_cli.telegram_cmds import _telegram_step_line
 
     line = _telegram_step_line(_FakeStep("tool_call", {"name": "read_file", "input": {"path": "src/app.py"}}))
     assert line == "reading src/app.py"
@@ -706,7 +706,7 @@ def test_step_line_maps_tool_calls_to_human_lines() -> None:
 def test_step_progress_calls_progress_as_steps_arrive_and_throttles() -> None:
     """on_step_cb pushes a line on the first step, then coalesces by time so it
     does not edit the status message on every single step."""
-    from ronin_cli.main import _telegram_step_progress
+    from ronin_cli.telegram_cmds import _telegram_step_progress
 
     pushed: list[str] = []
     clock = {"t": 100.0}
@@ -751,6 +751,6 @@ def test_cli_root_respects_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
 
     monkeypatch.setattr("ronin_cli.telegram_bot.TelegramBot", capture_bot)
 
-    r = runner.invoke(app, ["telegram", "--once"])
+    r = runner.invoke(app, ["util", "telegram", "--once"])
     assert r.exit_code == 0, r.stdout
     assert calls and calls[0]["root"] == tmp_path.resolve()

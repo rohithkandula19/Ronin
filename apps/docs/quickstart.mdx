@@ -1,16 +1,20 @@
 ---
 title: Quickstart
-description: Build a working Claude agent with tools, evals, and hardening in under 5 minutes.
+description: The coding agent that runs free, local, and air-gapped — install and fix your first bug in under 5 minutes.
 ---
+
+`ronin` is a coding agent that runs **free** (Gemini / Cerebras / Groq free tiers, or a fully
+local model with zero keys), keeps **everything on your machine** (no telemetry; `--offline`
+strips all network egress), and puts a **hard safety floor** under destructive commands.
 
 ## 1. Install
 
 ```bash
-git clone https://github.com/rohithkandula19/Ronin
-cd Ronin
-uv sync --all-packages --all-groups
-export ANTHROPIC_API_KEY=sk-ant-...
+curl -sSL https://raw.githubusercontent.com/rohithkandula19/Ronin/main/install.sh | bash
+ronin init          # pick a provider — free tiers work, or Ollama for zero keys
 ```
+
+Working on the framework itself instead? Clone and `uv sync --all-packages --all-groups`.
 
 ## 2. Run an agent (30 seconds)
 

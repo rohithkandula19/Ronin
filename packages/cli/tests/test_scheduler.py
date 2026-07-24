@@ -165,23 +165,23 @@ def test_run_due_default_runner_uses_offline_demo_brain(home: Path) -> None:
 # ---------- CLI surface ----------
 
 def test_cli_add_list_run_remove(home: Path) -> None:
-    r = runner.invoke(app, ["schedule", "add", "briefing", "summarize MRR", "--cron", "0 9 * * 1-5"])
+    r = runner.invoke(app, ["util", "schedule", "add", "briefing", "summarize MRR", "--cron", "0 9 * * 1-5"])
     assert r.exit_code == 0 and "stored" in r.stdout
 
-    r = runner.invoke(app, ["schedule", "list"])
+    r = runner.invoke(app, ["util", "schedule", "list"])
     assert r.exit_code == 0 and "briefing" in r.stdout and "0 9 * * 1-5" in r.stdout
 
     # run-due at a time it is due (demo mode via default config: still offline demo brain).
-    r = runner.invoke(app, ["schedule", "run-due", "--at", "2026-06-22 09:00"])  # a Monday
+    r = runner.invoke(app, ["util", "schedule", "run-due", "--at", "2026-06-22 09:00"])  # a Monday
     assert r.exit_code == 0 and "briefing" in r.stdout
 
-    r = runner.invoke(app, ["schedule", "remove", "briefing"])
+    r = runner.invoke(app, ["util", "schedule", "remove", "briefing"])
     assert r.exit_code == 0 and "removed" in r.stdout
 
-    r = runner.invoke(app, ["schedule", "list"])
+    r = runner.invoke(app, ["util", "schedule", "list"])
     assert "no scheduled tasks yet" in r.stdout
 
 
 def test_cli_add_rejects_bad_cron(home: Path) -> None:
-    r = runner.invoke(app, ["schedule", "add", "x", "do thing", "--cron", "not-a-cron"])
+    r = runner.invoke(app, ["util", "schedule", "add", "x", "do thing", "--cron", "not-a-cron"])
     assert r.exit_code == 1 and "invalid cron" in r.stdout

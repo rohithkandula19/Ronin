@@ -6,21 +6,19 @@ to manage with ``Base.metadata.create_all`` for now; migrate to Alembic when
 the first prod user signs up.
 
 Tables:
-- ``users``: signup record + hashed API token + plan tier
+- ``users``: signup record + hashed API token
 - ``service_connections``: encrypted credential per (user, service)
 - ``briefing_runs``: history of generated briefings (Markdown stored inline)
 - ``schedules``: cron triggers per user
 """
 from __future__ import annotations
 
-import enum
 from datetime import datetime
 from typing import Any, Iterator
 
 from sqlalchemy import (
     Column,
     DateTime,
-    Enum,
     ForeignKey,
     Index,
     Integer,
@@ -46,20 +44,12 @@ class Base(DeclarativeBase):
     __allow_unmapped__ = True
 
 
-class Plan(str, enum.Enum):
-    FREE = "free"
-    PRO = "pro"
-    TEAM = "team"
-
-
 class User(Base):
     __tablename__ = "users"
 
     id: int = Column(Integer, primary_key=True)  # type: ignore[assignment]
     email: str = Column(String(320), unique=True, nullable=False)  # type: ignore[assignment]
     api_token_hash: str = Column(String(128), nullable=False)  # type: ignore[assignment]
-    plan: Plan = Column(Enum(Plan), default=Plan.FREE, nullable=False)  # type: ignore[assignment]
-    stripe_customer_id: str | None = Column(String(64), nullable=True)  # type: ignore[assignment]
     created_at: datetime = Column(DateTime, default=datetime.utcnow, nullable=False)  # type: ignore[assignment]
 
     connections: list["ServiceConnection"] = relationship(

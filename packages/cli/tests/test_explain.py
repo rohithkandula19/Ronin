@@ -97,7 +97,7 @@ def test_cli_explain_without_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     runner.invoke(app, ["init", "--demo", "-y"])
-    r = runner.invoke(app, ["explain", "main.py"])
+    r = runner.invoke(app, ["dev", "explain", "main.py"])
     assert r.exit_code == 2
     assert "needs an LLM key" in r.stdout
 
@@ -108,7 +108,7 @@ def test_cli_explain_writes_out_file(tmp_path: Path, monkeypatch: pytest.MonkeyP
     (tmp_path / "main.py").write_text("print('hi')\n", encoding="utf-8")
     out = tmp_path / "explanation.md"
     with patch("ronin_cli.explain_mode.build_provider", return_value=_explainer(read_first=False)):
-        r = runner.invoke(app, ["explain", "main.py", "--out", str(out), "--root", str(tmp_path)])
+        r = runner.invoke(app, ["dev", "explain", "main.py", "--out", str(out), "--root", str(tmp_path)])
     assert r.exit_code == 0, r.stdout
     assert out.is_file() and "entrypoint" in out.read_text()
     assert "Architecture diagram" in r.stdout

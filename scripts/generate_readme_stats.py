@@ -11,7 +11,7 @@ stale number fails the build).
 Numbers owned here:
   * test count      — ``pytest --collect-only`` across packages + apps
   * total packages  — directories under ``packages/``
-  * arcade games    — entries in ``ronin_cli.games.GAMES``
+  * arcade games    — entries in ``ronin_arcade.games.GAMES``
 
 Prose (which packages, what they do) stays human-authored; only the digits are
 generated, via idempotent, anchored substitutions.
@@ -46,7 +46,7 @@ def package_count() -> int:
 
 def game_count() -> int:
     sys.path.insert(0, str(ROOT / "packages" / "cli" / "src"))
-    from ronin_cli.games import GAMES  # noqa: E402
+    from ronin_arcade.games import GAMES  # noqa: E402
     return len(GAMES)
 
 

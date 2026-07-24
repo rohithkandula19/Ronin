@@ -92,7 +92,7 @@ def test_briefing_slack_flag_without_token_errors(tmp_path: Path, monkeypatch: p
     monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
     runner.invoke(app, ["init", "--demo", "-y"])
 
-    r = runner.invoke(app, ["briefing", "--slack", "#founders", "--raw"])
+    r = runner.invoke(app, ["util", "briefing", "--slack", "#founders", "--raw"])
     assert r.exit_code == 2
     assert "SLACK_BOT_TOKEN" in r.stdout
 
@@ -113,7 +113,7 @@ def test_briefing_slack_flag_posts_when_configured(tmp_path: Path, monkeypatch: 
         return _ok_response()
 
     with patch.object(httpx.Client, "post", fake_post):
-        r = runner.invoke(app, ["briefing", "--slack", "#founders", "--raw"])
+        r = runner.invoke(app, ["util", "briefing", "--slack", "#founders", "--raw"])
 
     assert r.exit_code == 0, r.stdout
     assert "posted to" in r.stdout

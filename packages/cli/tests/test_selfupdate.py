@@ -22,7 +22,7 @@ runner = CliRunner()
 
 def test_version_output_contains_version() -> None:
     from ronin_cli import __version__, display_version
-    r = runner.invoke(app, ["version"])
+    r = runner.invoke(app, ["util", "version"])
     assert r.exit_code == 0, r.stdout
     assert display_version(__version__) in r.stdout   # friendly display (e.g. 1.0.0-rc.1)
     assert "ronin" in r.stdout

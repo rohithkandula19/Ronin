@@ -120,7 +120,7 @@ def test_agent_cli_without_key_errors(tmp_path: Path, monkeypatch: pytest.Monkey
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     runner.invoke(app, ["init", "--demo", "-y"])
 
-    r = runner.invoke(app, ["agent", "why did revenue drop"])
+    r = runner.invoke(app, ["util", "agent", "why did revenue drop"])
     assert r.exit_code == 2
     assert "agent mode needs a real llm" in r.stdout.lower()
 
@@ -131,7 +131,7 @@ def test_agent_cli_runs_with_fake_provider(tmp_path: Path, monkeypatch: pytest.M
     runner.invoke(app, ["init", "--demo", "-y"])
 
     with patch("ronin_cli.agent_mode.build_provider", return_value=_two_step_provider()):
-        r = runner.invoke(app, ["agent", "how many active subscriptions?"])
+        r = runner.invoke(app, ["util", "agent", "how many active subscriptions?"])
 
     assert r.exit_code == 0, r.stdout
     assert "2 active subscriptions" in r.stdout

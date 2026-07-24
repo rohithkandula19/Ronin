@@ -146,7 +146,6 @@ No network, no real credentials — sqlite-backed, briefings run against the CLI
 
 - **OAuth flows** for Stripe/Linear/Slack. Users currently paste their raw API keys (same as the CLI). OAuth is a follow-up — needs registering apps in each provider's developer console.
 - **Frontend**. There's no React app yet. Hit the endpoints with curl, or build a Next.js app at `apps/web/` that consumes them.
-- **Billing**. No Stripe Connect / Stripe Billing yet. Add as a follow-up once you have a real user base.
 - **Email** for the per-user API token. Currently returned in the signup response, which is fine for the API-first phase.
 - **Real OAuth-based session auth**. Bearer tokens are sufficient for API consumption; add Clerk/Auth.js when the frontend lands.
 - **Rate limits**. Add via FastAPI middleware + Redis when traffic justifies.

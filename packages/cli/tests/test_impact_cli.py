@@ -28,7 +28,7 @@ def _chain(root: Path) -> Path:
 
 def test_impact_text(tmp_path: Path):
     _chain(tmp_path)
-    r = runner.invoke(app, ["impact", "pkg.c", "--root", str(tmp_path)])
+    r = runner.invoke(app, ["dev", "impact", "pkg.c", "--root", str(tmp_path)])
     assert r.exit_code == 0, r.output
     assert "blast radius: 2" in r.output   # a and b reach c
     assert "pkg.b" in r.output
@@ -36,32 +36,32 @@ def test_impact_text(tmp_path: Path):
 
 def test_impact_json(tmp_path: Path):
     _chain(tmp_path)
-    r = runner.invoke(app, ["impact", "pkg.c", "--root", str(tmp_path), "--format", "json"])
+    r = runner.invoke(app, ["dev", "impact", "pkg.c", "--root", str(tmp_path), "--format", "json"])
     assert r.exit_code == 0, r.output
     assert '"blast_radius"' in r.output
 
 
 def test_impact_leaf_is_safe(tmp_path: Path):
     _chain(tmp_path)
-    r = runner.invoke(app, ["impact", "pkg.a", "--root", str(tmp_path)])
+    r = runner.invoke(app, ["dev", "impact", "pkg.a", "--root", str(tmp_path)])
     assert r.exit_code == 0, r.output
     assert "safe to change in isolation" in r.output
 
 
 def test_impact_unresolvable_exits_2(tmp_path: Path):
     _chain(tmp_path)
-    r = runner.invoke(app, ["impact", "does.not.exist", "--root", str(tmp_path)])
+    r = runner.invoke(app, ["dev", "impact", "does.not.exist", "--root", str(tmp_path)])
     assert r.exit_code == 2
 
 
 def test_why(tmp_path: Path):
     _chain(tmp_path)
-    r = runner.invoke(app, ["why", "pkg.b", "--root", str(tmp_path)])
+    r = runner.invoke(app, ["dev", "why", "pkg.b", "--root", str(tmp_path)])
     assert r.exit_code == 0, r.output
     assert "imports 1" in r.output and "imported by 1" in r.output
 
 
 def test_changed_outside_git_exits_2(tmp_path: Path):
     _chain(tmp_path)   # a bare temp dir is not a git repository
-    r = runner.invoke(app, ["changed", "--root", str(tmp_path)])
+    r = runner.invoke(app, ["dev", "changed", "--root", str(tmp_path)])
     assert r.exit_code == 2

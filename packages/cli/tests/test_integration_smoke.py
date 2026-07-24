@@ -93,7 +93,7 @@ COVERED_SURFACES = {
 # =========================================================================== #
 class TestGamesRegistry:
     def test_registry_has_at_least_26_games_all_playable(self) -> None:
-        from ronin_cli.games import GAMES, GAMES_BY_KEY, find
+        from ronin_arcade.games import GAMES, GAMES_BY_KEY, find
 
         assert len(GAMES) >= 26, f"expected >= 26 games, found {len(GAMES)}"
         # registry integrity: unique keys, every game fully described + playable.
@@ -422,7 +422,7 @@ class TestMcpServer:
 # =========================================================================== #
 class TestGamify:
     def test_level_for_curve(self) -> None:
-        from ronin_cli.gamify import level_for
+        from ronin_arcade.gamify import level_for
 
         assert level_for(0) == (1, "Ronin Initiate")
         assert level_for(50)[0] == 2
@@ -433,7 +433,7 @@ class TestGamify:
     ) -> None:
         import json
 
-        from ronin_cli import gamify
+        from ronin_arcade import gamify
 
         monkeypatch.setenv("RONIN_HOME", str(tmp_path))
 

@@ -75,7 +75,7 @@ def test_espeak_uses_wav_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -
 
 def test_cli_say_no_engine(monkeypatch: pytest.MonkeyPatch) -> None:
     with patch("ronin_cli.audio.tts_engine", return_value=None):
-        r = runner.invoke(app, ["say", "hello"])
+        r = runner.invoke(app, ["util", "say", "hello"])
     assert r.exit_code == 2
     assert "text-to-speech" in r.stdout
 
@@ -83,7 +83,7 @@ def test_cli_say_no_engine(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_cli_say_speaks(monkeypatch: pytest.MonkeyPatch) -> None:
     with patch("ronin_cli.audio.tts_engine", return_value="say"), \
          patch("ronin_cli.audio.speak", return_value=None):
-        r = runner.invoke(app, ["say", "hello", "there"])
+        r = runner.invoke(app, ["util", "say", "hello", "there"])
     assert r.exit_code == 0, r.stdout
     assert "spoke aloud" in r.stdout
 
@@ -92,12 +92,12 @@ def test_cli_say_saves_file(tmp_path: Path) -> None:
     out = tmp_path / "a.m4a"
     with patch("ronin_cli.audio.tts_engine", return_value="say"), \
          patch("ronin_cli.audio.speak", return_value=out):
-        r = runner.invoke(app, ["say", "hello", "--out", str(out)])
+        r = runner.invoke(app, ["util", "say", "hello", "--out", str(out)])
     assert r.exit_code == 0, r.stdout
     assert "saved audio" in r.stdout
 
 
 def test_cli_say_empty_text_errors() -> None:
     with patch("ronin_cli.audio.tts_engine", return_value="say"):
-        r = runner.invoke(app, ["say"])
+        r = runner.invoke(app, ["util", "say"])
     assert r.exit_code == 2

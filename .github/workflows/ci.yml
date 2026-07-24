@@ -89,10 +89,10 @@ jobs:
         run: |
           mkdir -p /tmp/ronin-smoke && cd /tmp/ronin-smoke
           uv --project "$GITHUB_WORKSPACE" run ronin init --demo -y
-          uv --project "$GITHUB_WORKSPACE" run ronin tools
-          uv --project "$GITHUB_WORKSPACE" run ronin doctor
-          uv --project "$GITHUB_WORKSPACE" run ronin version
+          uv --project "$GITHUB_WORKSPACE" run ronin util tools
+          uv --project "$GITHUB_WORKSPACE" run ronin util doctor
+          uv --project "$GITHUB_WORKSPACE" run ronin util version
           uv --project "$GITHUB_WORKSPACE" run ronin update --check
-          uv --project "$GITHUB_WORKSPACE" run ronin relay --help
-          uv --project "$GITHUB_WORKSPACE" run ronin relay connect --help
-          uv --project "$GITHUB_WORKSPACE" run ronin telegram --help
+          uv --project "$GITHUB_WORKSPACE" run ronin util relay --help
+          uv --project "$GITHUB_WORKSPACE" run ronin util relay connect --help
+          uv --project "$GITHUB_WORKSPACE" run ronin util telegram --help

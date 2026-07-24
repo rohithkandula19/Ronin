@@ -89,7 +89,7 @@ def test_cli_see_without_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     img = tmp_path / "p.png"; img.write_bytes(PNG)
-    r = runner.invoke(app, ["see", str(img)])
+    r = runner.invoke(app, ["util", "see", str(img)])
     assert r.exit_code == 2
     assert "vision needs a provider key" in r.stdout
 
@@ -100,6 +100,6 @@ def test_cli_see_happy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     img = tmp_path / "p.png"; img.write_bytes(PNG)
     with patch("ronin_cli.vision.describe_image", return_value="A red panda samurai."), \
          patch("ronin_cli.media.display_image", return_value="none"):
-        r = runner.invoke(app, ["see", str(img), "what", "is", "this?"])
+        r = runner.invoke(app, ["util", "see", str(img), "what", "is", "this?"])
     assert r.exit_code == 0, r.stdout
     assert "red panda samurai" in r.stdout

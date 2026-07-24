@@ -150,7 +150,7 @@ def test_cli_book_command_prepare_only(monkeypatch) -> None:
     # Mock the default search to avoid any network.
     monkeypatch.setattr(main_mod, "_book_default_search", lambda: _fake_search)
     runner = CliRunner()
-    r = runner.invoke(main_mod.app, ["book", "flight SFO to JFK Friday", "--no-browser"])
+    r = runner.invoke(main_mod.app, ["util", "book", "flight SFO to JFK Friday", "--no-browser"])
     assert r.exit_code == 0, r.stdout
     # The command tells the user it prepared (not paid) and lists an option link.
     assert "Prepared (not paid)" in r.stdout

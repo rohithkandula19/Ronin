@@ -15,7 +15,7 @@ runner = CliRunner()
 
 
 def test_version() -> None:
-    result = runner.invoke(app, ["version"])
+    result = runner.invoke(app, ["util", "version"])
     assert result.exit_code == 0
     assert "ronin" in result.stdout
 
@@ -23,8 +23,13 @@ def test_version() -> None:
 def test_help_lists_subcommands() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    for cmd in ["init", "ask", "chat", "tools", "doctor", "version"]:
+    # the wedge front page: ~10 verbs + the dev/util groups, one screen
+    for cmd in ["init", "ask", "chat", "code", "config", "update", "memory",
+                "play", "dev", "util", "eval", "mcp"]:
         assert cmd in result.stdout
+    # collapsed commands must NOT be on the front page
+    for cmd in ["doctor", "duel", "briefing"]:
+        assert f" {cmd} " not in result.stdout
 
 
 def test_init_demo_creates_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -41,7 +46,7 @@ def test_doctor_reports_no_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
-    result = runner.invoke(app, ["doctor"])
+    result = runner.invoke(app, ["util", "doctor"])
     assert result.exit_code == 0
     assert "none" in result.stdout.lower()
 
@@ -51,7 +56,7 @@ def test_tools_after_demo_init(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     runner.invoke(app, ["init", "--demo", "-y"])
 
-    result = runner.invoke(app, ["tools"])
+    result = runner.invoke(app, ["util", "tools"])
     assert result.exit_code == 0
     assert "stripe_list_customers" in result.stdout
     assert "linear_list_issues" in result.stdout

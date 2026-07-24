@@ -52,6 +52,10 @@ Issues = "https://github.com/rohithkandula19/Ronin/issues"
 Changelog = "https://github.com/rohithkandula19/Ronin/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
+# 30+ terminal games + the XP/levels gamification layer. NOT a core dependency:
+# `ronin play` / `profile` / `xp` print a one-line install hint without it.
+#   pip install 'ronin-cli[arcade]'
+arcade = ["ronin-arcade==1.0.0"]
 postgres = ["psycopg2-binary>=2.9"]
 # Optional web computer-use via Playwright. NOT a core dependency: imported
 # lazily, mocked in tests. Enable with:
@@ -79,6 +83,7 @@ dev = [
 ]
 
 [tool.uv.sources]
+ronin-arcade = { workspace = true }
 ronin-agent-patterns = { workspace = true }
 ronin-hardening = { workspace = true }
 ronin-memory = { workspace = true }

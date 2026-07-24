@@ -17,8 +17,10 @@ def _registry() -> PackRegistry:
 
 
 def test_every_shipped_manifest_validates():
+    # Only packs with real policies + evals ship; empty future-world stubs were
+    # deleted in the wedge cut rather than shipping 17 one-file manifests.
     reg = _registry()
-    assert len(reg.list_packs()) >= 20
+    assert {m.id for m in reg.list_packs()} == INITIAL_WORLDS
 
 
 def test_initial_worlds_enabled_futures_disabled():

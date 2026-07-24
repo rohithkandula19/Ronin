@@ -49,10 +49,10 @@ const PRODUCTS = [
 const PROVIDERS = ["Claude", "Gemini", "Groq", "Cerebras", "Ollama (local)"];
 
 const STATS = [
-  { n: "4", l: "worlds live" },
-  { n: "1", l: "shared runtime" },
-  { n: "100%", l: "local-capable" },
-  { n: "0", l: "silent high-risk actions" },
+  { n: "$0", l: "to run — free tiers & local" },
+  { n: "0", l: "telemetry, ever" },
+  { n: "100%", l: "offline-capable" },
+  { n: "7", l: "providers, no lock-in" },
 ];
 
 const TRUST = [
@@ -101,28 +101,41 @@ export default function LandingPage() {
 
           <span className="fadeup inline-flex items-center gap-2 rounded-full border border-border bg-surface/70 px-3.5 py-1.5 text-xs font-medium text-dim shadow-sm backdrop-blur">
             <span className="h-1.5 w-1.5 rounded-full bg-accent" />
-            Local-first · Provider-agnostic · Open-source
+            Free · Local-first · Air-gapped · Open-source
           </span>
 
           <h1 className="fadeup font-display display-xl mx-auto mt-8 max-w-4xl">
-            Specialized intelligence,
+            The coding agent that
             <br />
-            <span className="text-gradient italic">one world at a time.</span>
+            <span className="text-gradient italic">never leaves your machine.</span>
           </h1>
 
           <p className="fadeup mx-auto mt-7 max-w-2xl text-lg leading-relaxed text-dim sm:text-xl">
-            Ronin AI OS is an operating system for AI work. Instead of a blank
-            prompt box, you enter an industry <em className="not-italic text-ink">world</em> —
-            with its own tools, safety rules, memory boundaries and evaluations —
-            on the models you choose, cloud or fully local.
+            Ronin reads, edits and runs your code from the terminal — on any
+            provider or a <em className="not-italic text-ink">fully local model</em>,
+            offline if you want, with zero telemetry and a hard safety floor
+            under every destructive command.
           </p>
 
-          <div className="fadeup mt-10 flex flex-wrap items-center justify-center gap-3">
-            <Link href="/os" className="btn btn-primary rounded-xl px-7 py-3.5 text-base transition hover:-translate-y-0.5">
-              Enter Ronin →
-            </Link>
-            <Link href="/worlds" className="btn btn-secondary rounded-xl px-7 py-3.5 text-base transition hover:-translate-y-0.5">
-              Browse worlds
+          <div className="fadeup mx-auto mt-10 max-w-2xl">
+            <div className="frame hairline text-left">
+              <FrameBar url="terminal" />
+              <pre className="overflow-x-auto px-5 py-4 font-mono text-sm leading-relaxed text-ink">
+                <code>{`curl -sSL https://raw.githubusercontent.com/rohithkandula19/Ronin/main/install.sh | bash
+ronin code "fix the failing test"`}</code>
+              </pre>
+            </div>
+          </div>
+
+          <div className="fadeup mt-8 flex flex-wrap items-center justify-center gap-3">
+            <a
+              href="https://github.com/rohithkandula19/Ronin"
+              className="btn btn-primary rounded-xl px-7 py-3.5 text-base transition hover:-translate-y-0.5"
+            >
+              View on GitHub →
+            </a>
+            <Link href="/os" className="btn btn-secondary rounded-xl px-7 py-3.5 text-base transition hover:-translate-y-0.5">
+              Try the web workspace
             </Link>
           </div>
 
@@ -184,11 +197,11 @@ export default function LandingPage() {
       {/* ========================================================== worlds */}
       <section className="mx-auto max-w-6xl px-6 py-24">
         <Reveal className="max-w-2xl">
-          <span className="text-xs font-semibold uppercase tracking-[0.16em] text-accent-deep">The worlds</span>
-          <h2 className="font-display display-lg mt-3">Enter a world, not a prompt box.</h2>
+          <span className="text-xs font-semibold uppercase tracking-[0.16em] text-accent-deep">The web workspaces</span>
+          <h2 className="font-display display-lg mt-3">The same agent, with a UI when you want one.</h2>
           <p className="mt-4 text-lg text-dim">
-            Each world is a complete professional workspace — dedicated interface,
-            agents, tools, knowledge and guardrails. Four are live; more are in preparation.
+            The terminal is the product. These companion workspaces run on the same
+            runtime and the same safety rules — for the times a browser beats a shell.
           </p>
         </Reveal>
 
@@ -221,16 +234,6 @@ export default function LandingPage() {
             </Reveal>
           ))}
 
-          <Reveal className="sm:col-span-2 lg:col-span-3">
-            <div className="flex flex-col justify-center rounded-2xl border border-dashed border-border bg-surface-sunken/60 p-6">
-              <p className="text-sm text-dim">
-                <span className="font-semibold text-ink">More worlds in preparation</span>{" "}
-                — Finance, Legal, Science, Business, Creative, Marketing and more.
-                Each stays disabled until its policies, datasets and evaluations
-                exist. No world ships on optimism.
-              </p>
-            </div>
-          </Reveal>
         </div>
       </section>
 

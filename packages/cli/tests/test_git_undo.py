@@ -128,7 +128,7 @@ def _init_repo(tmp_path: Path) -> None:
 
 def test_undo_commit_soft_reset(tmp_path: Path) -> None:
     _init_repo(tmp_path)
-    r = runner.invoke(app, ["undo-commit", "--yes", "--root", str(tmp_path)])
+    r = runner.invoke(app, ["dev", "undo-commit", "--yes", "--root", str(tmp_path)])
     assert r.exit_code == 0, r.output
     assert "undone" in r.output
     # The "second" commit is gone, but its change is staged.
@@ -141,7 +141,7 @@ def test_undo_commit_soft_reset(tmp_path: Path) -> None:
 
 def test_undo_commit_revert(tmp_path: Path) -> None:
     _init_repo(tmp_path)
-    r = runner.invoke(app, ["undo-commit", "--revert", "--yes", "--root", str(tmp_path)])
+    r = runner.invoke(app, ["dev", "undo-commit", "--revert", "--yes", "--root", str(tmp_path)])
     assert r.exit_code == 0, r.output
     assert "reverted" in r.output
     log = _git(tmp_path, "log", "--oneline").stdout
@@ -153,7 +153,7 @@ def test_undo_commit_revert(tmp_path: Path) -> None:
 
 def test_undo_commit_abort_on_no(tmp_path: Path) -> None:
     _init_repo(tmp_path)
-    r = runner.invoke(app, ["undo-commit", "--root", str(tmp_path)], input="n\n")
+    r = runner.invoke(app, ["dev", "undo-commit", "--root", str(tmp_path)], input="n\n")
     assert r.exit_code == 0
     assert "aborted" in r.output
     log = _git(tmp_path, "log", "--oneline").stdout
@@ -162,7 +162,7 @@ def test_undo_commit_abort_on_no(tmp_path: Path) -> None:
 
 def test_undo_commit_shows_commit_info(tmp_path: Path) -> None:
     _init_repo(tmp_path)
-    r = runner.invoke(app, ["undo-commit", "--root", str(tmp_path)], input="n\n")
+    r = runner.invoke(app, ["dev", "undo-commit", "--root", str(tmp_path)], input="n\n")
     assert "second: add line" in r.output
     assert "last commit" in r.output
 
@@ -183,7 +183,7 @@ def test_undo_commit_pushed_guard_blocks_soft_reset(tmp_path: Path) -> None:
     _git(work, "commit", "-m", "pushed second")
     _git(work, "push", "-u", "origin", "HEAD")
 
-    r = runner.invoke(app, ["undo-commit", "--yes", "--root", str(work)])
+    r = runner.invoke(app, ["dev", "undo-commit", "--yes", "--root", str(work)])
     assert r.exit_code == 2, r.output
     assert "pushed" in r.output
     # Commit must still be there (blocked, not rewritten).
@@ -206,14 +206,14 @@ def test_undo_commit_pushed_force_allows_soft_reset(tmp_path: Path) -> None:
     _git(work, "commit", "-m", "pushed second")
     _git(work, "push")
 
-    r = runner.invoke(app, ["undo-commit", "--force", "--yes", "--root", str(work)])
+    r = runner.invoke(app, ["dev", "undo-commit", "--force", "--yes", "--root", str(work)])
     assert r.exit_code == 0, r.output
     assert "undone" in r.output
     assert "pushed second" not in _git(work, "log", "--oneline").stdout
 
 
 def test_undo_commit_not_a_repo(tmp_path: Path) -> None:
-    r = runner.invoke(app, ["undo-commit", "--yes", "--root", str(tmp_path)])
+    r = runner.invoke(app, ["dev", "undo-commit", "--yes", "--root", str(tmp_path)])
     assert r.exit_code == 2
     assert "not a git repository" in r.output
 

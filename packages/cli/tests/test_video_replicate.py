@@ -80,12 +80,12 @@ def test_replicate_list_output_takes_last(tmp_path: Path, monkeypatch: pytest.Mo
 
 def test_cli_video_replicate_without_token(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("REPLICATE_API_TOKEN", raising=False)
-    r = runner.invoke(app, ["video", "a panda", "--engine", "replicate", "--no-show"])
+    r = runner.invoke(app, ["util", "video", "a panda", "--engine", "replicate", "--no-show"])
     assert r.exit_code == 1
     assert "REPLICATE_API_TOKEN" in r.stdout
 
 
 def test_cli_video_unknown_engine() -> None:
-    r = runner.invoke(app, ["video", "x", "--engine", "bogus", "--no-show"])
+    r = runner.invoke(app, ["util", "video", "x", "--engine", "bogus", "--no-show"])
     assert r.exit_code == 2
     assert "unknown --engine" in r.stdout

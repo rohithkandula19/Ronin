@@ -27,45 +27,45 @@ def _cyclic(root: Path) -> Path:
 
 def test_graph_text(tmp_path: Path):
     _cyclic(tmp_path)
-    r = runner.invoke(app, ["graph", str(tmp_path)])
+    r = runner.invoke(app, ["dev", "graph", str(tmp_path)])
     assert r.exit_code == 0, r.output
     assert "modules:" in r.output and "cycles: 1" in r.output
 
 
 def test_graph_json_has_keys(tmp_path: Path):
     _cyclic(tmp_path)
-    r = runner.invoke(app, ["graph", str(tmp_path), "--format", "json"])
+    r = runner.invoke(app, ["dev", "graph", str(tmp_path), "--format", "json"])
     assert r.exit_code == 0, r.output
     assert '"modules"' in r.output and '"edges"' in r.output
 
 
 def test_graph_cycles_flag(tmp_path: Path):
     _cyclic(tmp_path)
-    r = runner.invoke(app, ["graph", str(tmp_path), "--cycles"])
+    r = runner.invoke(app, ["dev", "graph", str(tmp_path), "--cycles"])
     assert r.exit_code == 0, r.output
     assert "circular import group" in r.output
 
 
 def test_graph_strict_exits_nonzero_on_cycle(tmp_path: Path):
     _cyclic(tmp_path)
-    r = runner.invoke(app, ["graph", str(tmp_path), "--strict"])
+    r = runner.invoke(app, ["dev", "graph", str(tmp_path), "--strict"])
     assert r.exit_code == 1, r.output
 
 
 def test_graph_empty_dir_exits_2(tmp_path: Path):
-    r = runner.invoke(app, ["graph", str(tmp_path)])
+    r = runner.invoke(app, ["dev", "graph", str(tmp_path)])
     assert r.exit_code == 2
 
 
 def test_architecture_text(tmp_path: Path):
     _cyclic(tmp_path)
-    r = runner.invoke(app, ["architecture", str(tmp_path)])
+    r = runner.invoke(app, ["dev", "architecture", str(tmp_path)])
     assert r.exit_code == 0, r.output
     assert "stack" in r.output and "packages" in r.output
 
 
 def test_architecture_json(tmp_path: Path):
     _cyclic(tmp_path)
-    r = runner.invoke(app, ["architecture", str(tmp_path), "--format", "json"])
+    r = runner.invoke(app, ["dev", "architecture", str(tmp_path), "--format", "json"])
     assert r.exit_code == 0, r.output
     assert '"stack"' in r.output and '"packages"' in r.output

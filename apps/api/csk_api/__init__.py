@@ -7,7 +7,6 @@ Exposes:
 - POST /briefings         — run the briefing for the calling user
 - GET  /briefings         — list past briefings
 - POST /briefings/schedule — enable weekly briefing (cron worker picks it up)
-- POST /webhooks/billing  — Stripe billing webhook stub
 
 Web dashboard (ronin ui), read-only + self-contained + offline:
 - GET  /                  : the single self-contained dashboard HTML page

@@ -350,7 +350,7 @@ _runner = CliRunner()
 def test_cli_dry_run_shows_plan_and_edits_nothing(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     (tmp_path / "keep.py").write_text("v = 1\n", encoding="utf-8")
-    res = _runner.invoke(app, ["pipeline", "add a feature", "--dry-run"])
+    res = _runner.invoke(app, ["util", "pipeline", "add a feature", "--dry-run"])
     assert res.exit_code == 0
     assert "Pipeline plan" in res.stdout and "dry run" in res.stdout
     assert "READ-ONLY" in res.stdout
@@ -363,7 +363,7 @@ def test_cli_dry_run_shows_plan_and_edits_nothing(tmp_path, monkeypatch) -> None
 def test_cli_dry_run_json_shape(tmp_path, monkeypatch) -> None:
     import json as _json
     monkeypatch.chdir(tmp_path)
-    res = _runner.invoke(app, ["pipeline", "do x", "--dry-run", "--json",
+    res = _runner.invoke(app, ["util", "pipeline", "do x", "--dry-run", "--json",
                                "--roles", "reviewer,tester"])
     assert res.exit_code == 0
     data = _json.loads(res.stdout)
@@ -375,7 +375,7 @@ def test_cli_dry_run_json_shape(tmp_path, monkeypatch) -> None:
 
 def test_cli_invalid_roles_exit_2(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
-    res = _runner.invoke(app, ["pipeline", "x", "--roles", "architect,wizard"])
+    res = _runner.invoke(app, ["util", "pipeline", "x", "--roles", "architect,wizard"])
     assert res.exit_code == 2
     assert "unknown role" in res.stdout
 
@@ -384,7 +384,7 @@ def test_cli_out_writes_json_file(tmp_path, monkeypatch) -> None:
     import json as _json
     monkeypatch.chdir(tmp_path)
     out = tmp_path / "state.json"
-    res = _runner.invoke(app, ["pipeline", "ship", "--dry-run", "--out", str(out)])
+    res = _runner.invoke(app, ["util", "pipeline", "ship", "--dry-run", "--out", str(out)])
     assert res.exit_code == 0
     assert out.exists()
     data = _json.loads(out.read_text())
@@ -393,7 +393,7 @@ def test_cli_out_writes_json_file(tmp_path, monkeypatch) -> None:
 
 def test_cli_dry_run_write_flag_shows_write_capable(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
-    res = _runner.invoke(app, ["pipeline", "x", "--dry-run", "--write",
+    res = _runner.invoke(app, ["util", "pipeline", "x", "--dry-run", "--write",
                                "--roles", "implementer"])
     assert res.exit_code == 0
     assert "WRITE-CAPABLE" in res.stdout
@@ -438,7 +438,7 @@ def test_artifacts_preserved_when_a_later_stage_fails() -> None:
 def test_json_output_includes_artifacts(tmp_path, monkeypatch) -> None:
     import json as _json
     monkeypatch.chdir(tmp_path)
-    res = _runner.invoke(app, ["pipeline", "do x", "--dry-run", "--json"])
+    res = _runner.invoke(app, ["util", "pipeline", "do x", "--dry-run", "--json"])
     data = _json.loads(res.stdout)
     # dry-run stages carry the artifact field (empty dict), so the shape is stable
     assert "artifact" in data["stages"][0]
@@ -521,7 +521,7 @@ def test_cli_commit_dry_run_describes_but_does_not_commit(tmp_path, monkeypatch)
     subprocess.run(["git", "-C", str(tmp_path), "add", "-A"], check=True, capture_output=True)
     subprocess.run(["git", "-C", str(tmp_path), "commit", "-q", "-m", "init"], check=True, capture_output=True)
     monkeypatch.chdir(tmp_path)
-    res = _runner.invoke(app, ["pipeline", "do x", "--dry-run", "--commit"])
+    res = _runner.invoke(app, ["util", "pipeline", "do x", "--dry-run", "--commit"])
     assert res.exit_code == 0
     assert "would:" in res.stdout and "commit" in res.stdout
     # still only the initial commit
@@ -659,7 +659,7 @@ def test_run_pipeline_no_verify_cmd_preserves_advisory() -> None:
 
 def test_cli_no_task_no_resume_exits_2(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
-    res = _runner.invoke(app, ["pipeline"])
+    res = _runner.invoke(app, ["util", "pipeline"])
     assert res.exit_code == 2
     assert "give a task" in res.stdout or "--resume" in res.stdout
 
@@ -668,7 +668,7 @@ def test_cli_resume_corrupt_file_exits_2(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     bad = tmp_path / "bad.json"
     bad.write_text("{not json", encoding="utf-8")
-    res = _runner.invoke(app, ["pipeline", "--resume", str(bad)])
+    res = _runner.invoke(app, ["util", "pipeline", "--resume", str(bad)])
     assert res.exit_code == 2
     assert "corrupt" in res.stdout.lower() or "incompatible" in res.stdout.lower()
 
@@ -686,7 +686,7 @@ def test_cli_resume_continues_from_incomplete(tmp_path, monkeypatch) -> None:
     path.write_text(saved.model_dump_json(), encoding="utf-8")
     out = tmp_path / "after.json"
     # resume in dry-run so no model is needed; it should load + re-render the plan
-    res = _runner.invoke(app, ["pipeline", "--resume", str(path), "--dry-run", "--out", str(out)])
+    res = _runner.invoke(app, ["util", "pipeline", "--resume", str(path), "--dry-run", "--out", str(out)])
     assert res.exit_code == 0
     data = _json.loads(out.read_text())
     assert data["task"] == "resume me"
@@ -696,7 +696,7 @@ def test_cli_resume_continues_from_incomplete(tmp_path, monkeypatch) -> None:
 def test_cli_json_state_has_wave6_fields(tmp_path, monkeypatch) -> None:
     import json as _json
     monkeypatch.chdir(tmp_path)
-    res = _runner.invoke(app, ["pipeline", "do x", "--dry-run", "--json"])
+    res = _runner.invoke(app, ["util", "pipeline", "do x", "--dry-run", "--json"])
     data = _json.loads(res.stdout)
     for key in ("contract", "independent_verify", "final_verdict", "verdict", "root"):
         assert key in data

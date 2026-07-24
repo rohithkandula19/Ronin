@@ -40,6 +40,15 @@ app = typer.Typer(
 )
 console = Console()
 
+# Grouped sub-apps — the wedge front page stays ~10 verbs; everything else
+# lives under `ronin dev …` (repo/code workflows) and `ronin util …` (the rest).
+from .dev_cmds import dev_app
+from .util_cmds import util_app
+from . import telegram_cmds  # noqa: F401 — registers `ronin util telegram`
+
+app.add_typer(dev_app, name="dev")
+app.add_typer(util_app, name="util")
+
 
 # The panda mascot (dancing / running / playing / playing football / sleeping)
 # lives in panda_art.py — single source of truth for both the launch banner
@@ -380,7 +389,7 @@ def _key_preview(key: str) -> str:
     return f"{n} chars · {masked} · {flag}"
 
 
-@app.command("set-key")
+@util_app.command("set-key")
 def set_key(
     provider: str = typer.Option(None, "--provider", help="Set/override the provider (e.g. groq, openrouter, anthropic)."),
     model: str = typer.Option(None, "--model", help="Set/override the model (e.g. qwen/qwen3-coder:free)."),
@@ -506,7 +515,7 @@ def chat(
 
 # ---------- consensus (multi-model) ----------
 
-@app.command()
+@util_app.command()
 def consensus(
     task: str = typer.Argument(..., help="The question / task to put to the panel of models."),
     models: str = typer.Option(
@@ -540,7 +549,7 @@ def consensus(
     render_consensus(console, result)
 
 
-@app.command()
+@util_app.command()
 def pipeline(
     task: str = typer.Argument("", help="The task to run through the role pipeline (omit with --resume)."),
     roles: str = typer.Option(
@@ -770,7 +779,7 @@ def pipeline(
         raise typer.Exit(1)
 
 
-@app.command()
+@dev_app.command()
 def ghost(
     root: Path = typer.Option(Path("."), "--root", help="Directory to watch."),
     test: bool = typer.Option(False, "--test", help="Run the test suite after each save and react."),
@@ -794,7 +803,7 @@ def ghost(
               watchful=watchful, duel_against=duel_spec)
 
 
-@app.command()
+@util_app.command()
 def dojo(
     task: str = typer.Argument(..., help="The coding task all the models will fight over."),
     models: str = typer.Option(
@@ -854,7 +863,7 @@ def dojo(
     console.print("[green]✓ applied[/green]" if ok else "[red]could not apply cleanly[/red]")
 
 
-@app.command()
+@util_app.command()
 def duel(
     against: str = typer.Option(
         ..., "--against", "-a",
@@ -890,7 +899,7 @@ def duel(
         raise typer.Exit(1)
 
 
-@app.command()
+@util_app.command()
 def kaizen(
     goal: Optional[str] = typer.Argument(
         None, help="What to improve. Omit to auto-pick the top FIXME/TODO in ronin's own source."),
@@ -943,7 +952,7 @@ def kaizen(
 
 # ---------- bench (model bake-off) ----------
 
-@app.command()
+@util_app.command()
 def bench(
     models: str = typer.Option(
         ..., "--models", "-m",
@@ -973,7 +982,7 @@ def bench(
 
 # ---------- tools ----------
 
-@app.command()
+@util_app.command()
 def tools() -> None:
     """List the tools that are wired up for the current config."""
     config = load_config()
@@ -1164,7 +1173,7 @@ def _provider_live_check(config: RoninConfig) -> _LiveCheck:
     )
 
 
-@app.command()
+@util_app.command()
 def doctor(
     check: bool = typer.Option(False, "--check", help="Ping the provider to verify the key + model actually work end-to-end (network)."),
 ) -> None:
@@ -1233,7 +1242,7 @@ def doctor(
 
 # ---------- saved queries ----------
 
-@app.command()
+@util_app.command()
 def save(
     name: str = typer.Argument(..., help="Short slug-style name. Letters / digits / '-' / '_' only."),
     query: list[str] = typer.Argument(..., help="The question to save. Quote multi-word questions."),
@@ -1253,7 +1262,7 @@ def save(
     console.print(f"[dim]run it with:[/dim] [bold]ronin run {name}[/bold]")
 
 
-@app.command()
+@util_app.command()
 def run(
     name: str = typer.Argument(..., help="Name of a saved query."),
     raw: bool = typer.Option(False, "--raw", help="Plain output."),
@@ -1278,7 +1287,7 @@ def run(
     _print_result(result, raw=raw)
 
 
-@app.command()
+@util_app.command()
 def queries() -> None:
     """List all saved queries."""
     store = QueryStore.load(queries_path())
@@ -1295,7 +1304,7 @@ def queries() -> None:
     console.print(table)
 
 
-@app.command(name="unsave")
+@util_app.command(name="unsave")
 def unsave(name: str = typer.Argument(..., help="Name of the saved query to remove.")) -> None:
     """Remove a saved query."""
     path = queries_path()
@@ -1400,7 +1409,7 @@ def eval_drift(
 # ---------- plugin (scaffold custom tools) ----------
 
 plugin_app = typer.Typer(help="Scaffold & manage custom Python tool plugins (.ronin/plugins/).")
-app.add_typer(plugin_app, name="plugin")
+util_app.add_typer(plugin_app, name="plugin")
 
 
 @plugin_app.command("new", help="Scaffold a working plugin: ronin plugin new weather")
@@ -1807,7 +1816,7 @@ def mcp_add_remote(
 
 # ---------- plugins ----------
 
-@app.command()
+@util_app.command()
 def plugins() -> None:
     """Discover and list user plugins from .ronin/plugins/."""
     from .plugins import find_plugin_dir, load_plugins
@@ -1840,7 +1849,7 @@ def plugins() -> None:
 
 # ---------- serve ----------
 
-@app.command()
+@util_app.command()
 def serve(
     host: str = typer.Option("127.0.0.1", "--host"),
     port: int = typer.Option(8000, "--port"),
@@ -1873,7 +1882,7 @@ def serve(
 
 # ---------- export (session → markdown) ----------
 
-@app.command()
+@util_app.command()
 def export(
     session_id: str = typer.Argument(None, help="Session id to export. Omit for the latest."),
     out: str = typer.Option(None, "--out", help="Write to this file (default: print to stdout)."),
@@ -1904,7 +1913,7 @@ def export(
 
 # ---------- recall (search past sessions) ----------
 
-@app.command()
+@util_app.command()
 def recall(
     query: str = typer.Argument(..., help="What to search your past sessions for."),
     here: bool = typer.Option(False, "--here", help="Only this repo's sessions (default: all)."),
@@ -1937,7 +1946,7 @@ def recall(
 
 # ---------- replay (session history) ----------
 
-@app.command()
+@util_app.command()
 def replay(
     session_id: str = typer.Argument(None, help="Session id to replay. Omit for the latest."),
     list_sessions_flag: bool = typer.Option(False, "--list", help="List this repo's sessions and exit."),
@@ -1976,7 +1985,7 @@ def replay(
 
 # ---------- map (codebase onboarding) ----------
 
-@app.command(name="map")
+@dev_app.command(name="map")
 def map_cmd(
     write: bool = typer.Option(False, "--write", help="Save the overview as RONIN.md (project memory)."),
     root: Path = typer.Option(Path("."), "--root", help="Repo to map."),
@@ -2013,7 +2022,7 @@ def map_cmd(
 
 # ---------- pr (open a PR with AI-drafted title/body) ----------
 
-@app.command()
+@dev_app.command()
 def pr(
     root: Path = typer.Option(Path("."), "--root", help="Repo root."),
 ) -> None:
@@ -2027,7 +2036,7 @@ def pr(
 
 # ---------- undo-commit (explain + soft-reset / revert the last commit) ----------
 
-@app.command(name="undo-commit")
+@dev_app.command(name="undo-commit")
 def undo_commit(
     revert: bool = typer.Option(
         False, "--revert",
@@ -2115,7 +2124,7 @@ stash_app = typer.Typer(
          "'list' shows entries, 'pop [n]' restores.",
     invoke_without_command=True,
 )
-app.add_typer(stash_app, name="stash")
+util_app.add_typer(stash_app, name="stash")
 
 
 def _stash_drafter(config: RoninConfig):
@@ -2216,7 +2225,7 @@ def stash_pop(
 
 # ---------- style (fine-tuning dataset from your sessions) ----------
 
-@app.command()
+@util_app.command()
 def style(
     out: str = typer.Option("ronin-style.jsonl", "--out", help="Output JSONL path."),
     with_bushido: bool = typer.Option(True, "--bushido/--no-bushido", help="Prepend your code-of-honor as the system message."),
@@ -2254,7 +2263,7 @@ def style(
 
 # ---------- patches (review/apply nightshift output) ----------
 
-@app.command()
+@dev_app.command()
 def patches(
     apply: bool = typer.Option(False, "--apply", help="Apply the patches to your working tree."),
     pr: bool = typer.Option(False, "--pr", help="Open a GitHub PR per patch (branch + push + gh)."),
@@ -2336,7 +2345,7 @@ def patches(
 
 # ---------- swarm (multi-provider agent team) ----------
 
-@app.command()
+@util_app.command()
 def swarm(
     task: str = typer.Argument(..., help="The task for the team to work."),
     roster: str = typer.Option(
@@ -2372,7 +2381,7 @@ def swarm(
 
 # ---------- orchestrate (plan -> provider-agnostic sub-agents -> synthesize) ----------
 
-@app.command()
+@util_app.command()
 def orchestrate(
     goal: str = typer.Argument(..., help="The high-level goal to decompose and work."),
     roster: str = typer.Option(
@@ -2478,7 +2487,7 @@ def orchestrate(
 
 # ---------- ui (web dashboard) ----------
 
-@app.command()
+@util_app.command()
 def ui(
     host: str = typer.Option("127.0.0.1", "--host", help="Interface to bind (localhost by default)."),
     port: int = typer.Option(8765, "--port", "-p", help="Port to serve the dashboard on."),
@@ -2523,7 +2532,7 @@ def ui(
 
 # ---------- nightshift (autonomous backlog) ----------
 
-@app.command()
+@util_app.command()
 def nightshift(
     goal: str = typer.Argument(None, help="An explicit task to work. Omit to use TODOs/issues."),
     todos: bool = typer.Option(True, "--todos/--no-todos", help="Include FIXME/TODO markers."),
@@ -2638,7 +2647,7 @@ def nightshift(
 
 # ---------- failover (cross-provider resilience) ----------
 
-@app.command()
+@util_app.command()
 def failover(
     providers: str = typer.Argument(None, help="Ordered fallbacks, e.g. 'groq,gemini'. Omit to show current."),
     off: bool = typer.Option(False, "--off", help="Turn failover off."),
@@ -2740,7 +2749,7 @@ def config(
 
 # ---------- changelog (from commits) ----------
 
-@app.command()
+@dev_app.command()
 def changelog(
     since: str = typer.Option(None, "--since", help="Ref to start from (default: last tag, else all)."),
     version: str = typer.Option("Unreleased", "--version", help="Version heading."),
@@ -2780,7 +2789,7 @@ def changelog(
 
 # ---------- scan (secret scanning) ----------
 
-@app.command()
+@dev_app.command()
 def scan(
     staged: bool = typer.Option(False, "--staged", help="Scan only files staged for commit."),
     history: bool = typer.Option(False, "--history", help="Scan the whole git history (git log -p), not just the working tree — catches secrets committed and later removed."),
@@ -2847,12 +2856,12 @@ def scan(
 
 
 hook_app = typer.Typer(help="Manage ronin's git pre-commit secret-scan hook.")
-app.add_typer(hook_app, name="hook")
+util_app.add_typer(hook_app, name="hook")
 
 
 # Tool-event hooks (.ronin/hooks.json) — distinct from the git pre-commit `hook`.
 hooks_app = typer.Typer(help="Trust/list .ronin/hooks.json — shell commands ronin runs on tool events.")
-app.add_typer(hooks_app, name="hooks")
+util_app.add_typer(hooks_app, name="hooks")
 
 
 @hooks_app.command("list", help="Show the hooks declared in .ronin/hooks.json and whether they're trusted.")
@@ -2937,7 +2946,7 @@ def hook_uninstall(root: Path = typer.Option(Path("."), "--root", help="Repo roo
 
 # ---------- setup (first-run wizard) ----------
 
-@app.command()
+@util_app.command()
 def setup() -> None:
     """🧰 Get routing set up in one go — suggests a free/cheap blade for simple
     turns and a strong blade for hard ones (the Cost Router + Scout→Strike), based
@@ -2975,7 +2984,7 @@ def setup() -> None:
 
 # ---------- types (add missing type hints) ----------
 
-@app.command()
+@dev_app.command()
 def types(
     execute: bool = typer.Option(False, "--execute", help="Add type hints (default: list gaps)."),
     limit: int = typer.Option(60, "--limit", help="Max functions."),
@@ -3014,7 +3023,7 @@ def types(
 
 # ---------- deps (dependency audit) ----------
 
-@app.command()
+@dev_app.command()
 def deps(root: Path = typer.Option(Path("."), "--root", help="Repo root.")) -> None:
     """📦 Audit dependencies — cross-checks what your code imports against what the
     project declares: flags declared-but-unused deps and used-but-undeclared imports.
@@ -3039,7 +3048,7 @@ def deps(root: Path = typer.Option(Path("."), "--root", help="Repo root.")) -> N
 
 # ---------- onboard (understand a new repo fast) ----------
 
-@app.command()
+@dev_app.command()
 def onboard(
     repo: str = typer.Argument(".", help="A git URL to clone, or a local path."),
     keep: bool = typer.Option(False, "--keep", help="Keep the cloned repo (don't delete the temp dir)."),
@@ -3103,7 +3112,7 @@ def onboard(
 
 # ---------- usages (deep-dive one symbol + its call sites) ----------
 
-@app.command()
+@dev_app.command()
 def usages(
     symbol: str = typer.Argument(..., help="A function/class/method name to deep-dive."),
     root: Path = typer.Option(Path("."), "--root", help="Repo root."),
@@ -3143,7 +3152,7 @@ def usages(
 
 # ---------- browse (optional web computer-use via Playwright) ----------
 
-@app.command()
+@util_app.command()
 def browse(
     task: str = typer.Argument(..., help="What to do on the web, e.g. 'open example.com and read it'."),
     root: Path = typer.Option(Path("."), "--root", help="Project root (for screenshots)."),
@@ -3179,7 +3188,7 @@ def browse(
 
 # ---------- watch (re-run on save) ----------
 
-@app.command()
+@dev_app.command()
 def watch(
     command: list[str] = typer.Argument(None, help="Command to run on change. Default: pytest -q."),
     root: Path = typer.Option(Path("."), "--root", help="Directory to watch."),
@@ -3242,7 +3251,7 @@ def watch(
 
 # ---------- verify (detect + run the repo's tests; --fix repairs to green) ----------
 
-@app.command()
+@dev_app.command()
 def verify(
     root: Path = typer.Option(Path("."), "--root", help="Repo root."),
     fix: bool = typer.Option(False, "--fix", help="If red, hand the failure to ronin and repair to green."),
@@ -3306,7 +3315,7 @@ def verify(
 
 # ---------- auto (supervised autonomy: checkpoint + test-gate + stall-stop) ----------
 
-@app.command()
+@dev_app.command()
 def auto(
     task: list[str] = typer.Argument(..., help="The task to work, in plain words."),
     root: Path = typer.Option(Path("."), "--root", help="Repo root."),
@@ -3394,7 +3403,7 @@ def auto(
 
 # ---------- grep (search code by intent) ----------
 
-@app.command()
+@dev_app.command()
 def grep(
     query: list[str] = typer.Argument(..., help="What you're looking for, in plain words."),
     root: Path = typer.Option(Path("."), "--root", help="Repo root."),
@@ -3434,7 +3443,7 @@ def grep(
 
 # ---------- commit (stage + Conventional Commit message) ----------
 
-@app.command()
+@dev_app.command()
 def commit(
     all_changes: bool = typer.Option(True, "--all/--staged", "-a", help="Stage all tracked changes first (default), or commit only what's staged."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show the message; don't commit."),
@@ -3495,8 +3504,9 @@ def commit(
     if r.returncode == 0:
         short = _git(["rev-parse", "--short", "HEAD"]).stdout.strip()
         console.print(f"[green]✓ committed[/green] [bold]{short}[/bold]")
-        try:  # auto-earn XP for a real unit of progress (best-effort, never blocks)
-            from .gamify import record
+        try:  # auto-earn XP for a real unit of progress (best-effort, never blocks;
+            # gamification lives in the optional ronin-arcade extra)
+            from ronin_arcade.gamify import record
             record("commit")
         except Exception:  # noqa: BLE001
             pass
@@ -3507,7 +3517,7 @@ def commit(
 
 # ---------- lint (detect + run + optional --fix) ----------
 
-@app.command()
+@dev_app.command()
 def lint(
     fix: bool = typer.Option(False, "--fix", help="Apply safe autofixes, then have ronin fix the rest."),
     root: Path = typer.Option(Path("."), "--root", help="Repo root."),
@@ -3571,7 +3581,7 @@ def lint(
 
 # ---------- checkup (repo health report) ----------
 
-@app.command()
+@dev_app.command()
 def checkup(
     root: Path = typer.Option(Path("."), "--root", help="Repo root."),
 ) -> None:
@@ -3598,7 +3608,7 @@ def checkup(
 
 # ---------- complexity (cyclomatic hotspots) ----------
 
-@app.command()
+@dev_app.command()
 def complexity(
     threshold: int = typer.Option(10, "--threshold", "-t", help="Minimum complexity to report."),
     limit: int = typer.Option(25, "--limit", help="Max functions to list."),
@@ -3641,7 +3651,7 @@ def complexity(
 
 # ---------- api (markdown API reference) ----------
 
-@app.command()
+@dev_app.command()
 def api(
     out: Path = typer.Option(None, "--out", "-o", help="Write the reference to a file (default: print to stdout)."),
     title: str = typer.Option("API Reference", "--title", help="Document title."),
@@ -3673,103 +3683,11 @@ def api(
 
 # ---------- subnet (CIDR calculator) ----------
 
-@app.command()
-def subnet(
-    cidr: str = typer.Argument(..., help="A CIDR or IP, e.g. 192.168.1.0/24 or 10.0.5.37/16."),
-) -> None:
-    """🌐 Subnet / CIDR calculator — network, broadcast, mask, usable host range.
-    IPv4 + IPv6. Offline.
-    """
-    from .subnet_calc import subnet_info
-
-    i = subnet_info(cidr)
-    if "error" in i:
-        console.print(f"[#f7768e]{i['error']}[/#f7768e]")
-        raise typer.Exit(1)
-    console.print(f"[#7aa2f7]🌐 {i['cidr']}[/#7aa2f7] [dim](IPv{i['version']}{', private' if i['is_private'] else ''})[/dim]")
-    console.print(f"   network    [bold]{i['network']}[/bold]")
-    if i.get("broadcast"):
-        console.print(f"   broadcast  [bold]{i['broadcast']}[/bold]")
-    console.print(f"   netmask    {i['netmask']}  [dim]/{i['prefix']}[/dim]")
-    if i.get("wildcard"):
-        console.print(f"   wildcard   {i['wildcard']}")
-    console.print(f"   hosts      [bold]{i['usable_hosts']:,}[/bold] usable "
-                  f"[dim]({i['first_host']} – {i['last_host']})[/dim]" if i["first_host"] else
-                  f"   addresses  [bold]{i['num_addresses']:,}[/bold]")
-
-
 # ---------- passphrase (memorable strong passwords) ----------
-
-@app.command()
-def passphrase(
-    words: int = typer.Argument(4, help="How many words (2-12)."),
-    separator: str = typer.Option("-", "--sep", help="Word separator."),
-    capitalize: bool = typer.Option(False, "--capitalize", help="Capitalize each word."),
-    number: bool = typer.Option(False, "--number", help="Append a random 2-digit number."),
-    count: int = typer.Option(1, "--count", "-n", help="How many to generate."),
-) -> None:
-    """🔑 Generate memorable, strong diceware-style passphrases. Offline."""
-    from .passphrase import passphrase as _gen
-
-    for _ in range(max(1, count)):
-        r = _gen(words, separator=separator, capitalize=capitalize, add_number=number)
-        console.print(f"[bold #9ece6a]{r['passphrase']}[/bold #9ece6a] "
-                      f"[dim]~{r['entropy_bits']} bits[/dim]")
-
 
 # ---------- toc (markdown table of contents) ----------
 
-@app.command()
-def toc(
-    file: Path = typer.Argument(..., help="A Markdown file."),
-    min_level: int = typer.Option(2, "--min", help="Smallest heading level to include (1-6)."),
-    max_level: int = typer.Option(4, "--max", help="Largest heading level to include."),
-) -> None:
-    """📑 Generate a Markdown table of contents (with anchor links) from a file."""
-    from .toc_gen import extract_headings, generate_toc
-
-    if not file.is_file():
-        console.print(f"[red]no such file:[/red] {file}")
-        raise typer.Exit(1)
-    headings = extract_headings(file.read_text(encoding="utf-8"))
-    if not headings:
-        console.print("[yellow]no headings found.[/yellow]")
-        raise typer.Exit(1)
-    out = generate_toc(headings, min_level=min_level, max_level=max_level)
-    print(out)
-
-
 # ---------- jwt (decode a JSON Web Token) ----------
-
-@app.command()
-def jwt(
-    token: str = typer.Argument(..., help="A JWT (header.payload.signature)."),
-) -> None:
-    """🪪 Decode a JWT's header & payload (no signature verification). Offline.
-
-    Decoding is NOT verification — never trust an unverified token for authz.
-    """
-    import json
-
-    from rich.syntax import Syntax
-
-    from .jwt_decode import decode_jwt
-
-    out = decode_jwt(token)
-    if "error" in out:
-        console.print(f"[#f7768e]{out['error']}[/#f7768e]")
-        raise typer.Exit(1)
-    console.print(f"[#7aa2f7]🪪 JWT[/#7aa2f7] [dim]alg={out['alg']}[/dim]")
-    console.print("[dim]── header ──[/dim]")
-    console.print(Syntax(json.dumps(out["header"], indent=2), "json", theme="dracula", background_color="default"))
-    console.print("[dim]── payload ──[/dim]")
-    console.print(Syntax(json.dumps(out["payload"], indent=2), "json", theme="dracula", background_color="default"))
-    if out["times"]:
-        console.print("[dim]── timestamps (UTC) ──[/dim]")
-        for claim, iso in out["times"].items():
-            console.print(f"   {claim:<10} [bold]{iso}[/bold]")
-    console.print("[yellow]signature not verified.[/yellow]")
-
 
 # ---------- book (research & prepare a booking; you confirm and pay) ----------
 
@@ -3810,7 +3728,7 @@ def _book_browser_prefill(request, result):
     return True
 
 
-@app.command()
+@util_app.command()
 def book(
     request: str = typer.Argument(..., help='What to book, e.g. "a flight SFO to JFK on Friday".'),
     no_browser: bool = typer.Option(False, "--no-browser", help="Skip the browser; search + summary only."),
@@ -3863,7 +3781,7 @@ def book(
 
 # ---------- research (search the web and answer) ----------
 
-@app.command()
+@util_app.command()
 def research(
     question: str = typer.Argument(..., help='What to look up, e.g. "who won the 2022 world cup".'),
 ) -> None:
@@ -3883,116 +3801,15 @@ def research(
 
 # ---------- uuid (generate / inspect) ----------
 
-@app.command()
-def uuid(
-    version: int = typer.Option(4, "--version", "-v", help="UUID version: 1, 3, 4 or 5."),
-    name: Optional[str] = typer.Option(None, "--name", help="Name for v3/v5 (name-based)."),
-    namespace: str = typer.Option("dns", "--namespace", help="Namespace for v3/v5: dns|url|oid|x500."),
-    count: int = typer.Option(1, "--count", "-n", help="How many to generate."),
-    inspect_value: Optional[str] = typer.Option(None, "--inspect", help="Inspect an existing UUID instead."),
-) -> None:
-    """🆔 Generate UUIDs (v4/v1/v5) or inspect one with --inspect. Offline."""
-    from .uuid_tools import generate, inspect
-
-    if inspect_value is not None:
-        info = inspect(inspect_value)
-        if "error" in info:
-            console.print(f"[#f7768e]{info['error']}[/#f7768e]")
-            raise typer.Exit(1)
-        console.print(f"[#7aa2f7]🆔 {info['uuid']}[/#7aa2f7]")
-        console.print(f"   version  [bold]{info['version']}[/bold]   variant  {info['variant']}")
-        if info.get("timestamp"):
-            console.print(f"   time     [bold]{info['timestamp']}[/bold]")
-        if info["is_nil"]:
-            console.print("   [dim]nil UUID[/dim]")
-        return
-    for _ in range(max(1, count)):
-        r = generate(version, name=name, namespace=namespace)
-        if "error" in r:
-            console.print(f"[#f7768e]{r['error']}[/#f7768e]")
-            raise typer.Exit(1)
-        console.print(f"[bold #9ece6a]{r['uuid']}[/bold #9ece6a]")
-
-
 # ---------- hash (digests / checksums) ----------
-
-@app.command()
-def hash(
-    source: str = typer.Argument(..., help="Text to hash, or @path for a file."),
-    algorithm: Optional[str] = typer.Option(None, "--algo", "-a", help="Only this algo: md5|sha1|sha256|sha512."),
-    check: Optional[str] = typer.Option(None, "--check", help="Verify the input matches this digest."),
-) -> None:
-    """#️⃣  Compute md5/sha1/sha256/sha512 of text or a @file. Offline.
-
-    md5/sha1 are for checksums/legacy only — not cryptographically safe.
-    """
-    from .hash_tools import ALGORITHMS, hash_file, hash_text, verify
-
-    algos = (algorithm,) if algorithm else ALGORITHMS
-    if source.startswith("@"):
-        digests = hash_file(source[1:], algorithms=algos)
-    else:
-        digests = hash_text(source, algorithms=algos)
-    if "error" in digests:
-        console.print(f"[#f7768e]{digests['error']}[/#f7768e]")
-        raise typer.Exit(1)
-    if check is not None:
-        ok = verify(check, digests)
-        console.print("[#9ece6a]✓ match[/#9ece6a]" if ok else "[#f7768e]✗ no match[/#f7768e]")
-        raise typer.Exit(0 if ok else 1)
-    for algo, digest in digests.items():
-        console.print(f"   {algo:<7} [bold]{digest}[/bold]")
-
 
 # ---------- curl2code (curl -> code) ----------
 
-@app.command(name="curl2code")
-def curl2code(
-    command: list[str] = typer.Argument(..., help="A curl command (quote it)."),
-    lang: str = typer.Option("python", "--lang", "-l", help="python | js | both."),
-) -> None:
-    """🔁 Convert a curl command into Python (httpx) or JavaScript (fetch) code."""
-    from rich.syntax import Syntax
-
-    from .curl_convert import parse_curl, to_javascript, to_python
-    parsed = parse_curl(" ".join(command))
-    if not parsed["url"]:
-        console.print("[yellow]couldn't find a URL in that curl command.[/yellow]")
-        raise typer.Exit(1)
-    if lang in ("python", "py", "both"):
-        console.print(Syntax(to_python(parsed), "python", theme="dracula", background_color="default"))
-    if lang in ("js", "javascript", "both"):
-        console.print(Syntax(to_javascript(parsed), "javascript", theme="dracula", background_color="default"))
-
-
 # ---------- count (wc-like) ----------
-
-@app.command()
-def count(
-    source: str = typer.Argument(..., help="Text: a string, @file, or '-' for stdin."),
-) -> None:
-    """🔢 Count lines, words, characters and bytes (a friendly wc). Offline."""
-    import sys
-
-    from .text_count import count_text
-    if source == "-":
-        raw = sys.stdin.read()
-    elif source.startswith("@"):
-        try:
-            raw = Path(source[1:]).read_text(encoding="utf-8")
-        except OSError as e:
-            console.print(f"[red]{e}[/red]")
-            raise typer.Exit(1)
-    else:
-        raw = source
-    c = count_text(raw)
-    console.print(f"[bold]{c['lines']}[/bold] lines · [bold]{c['words']}[/bold] words · "
-                  f"[bold]{c['characters']}[/bold] chars · [bold]{c['bytes']}[/bold] bytes")
-
 
 # ---------- api-test (assert on an endpoint) ----------
 
-@app.command(name="api-test")
+@dev_app.command(name="api-test")
 def api_test_cmd(
     url: str = typer.Argument(..., help="The endpoint to test."),
     status: int = typer.Option(None, "--status", "-s", help="Expected HTTP status code."),
@@ -4036,23 +3853,9 @@ def api_test_cmd(
 
 # ---------- user-agent (parse a UA string) ----------
 
-@app.command(name="user-agent")
-def user_agent_cmd(
-    ua: list[str] = typer.Argument(..., help="A User-Agent string (quote it)."),
-) -> None:
-    """🧭 Parse a User-Agent string into browser / OS / device. Offline."""
-    from .user_agent import parse_user_agent
-
-    info = parse_user_agent(" ".join(ua))
-    ver = f" {info['version']}" if info["version"] else ""
-    console.print(f"[#7aa2f7]🧭 browser[/#7aa2f7] [bold]{info['browser']}{ver}[/bold]")
-    console.print(f"   [cyan]os[/cyan]      {info['os']}")
-    console.print(f"   [cyan]device[/cyan]  {info['device']}")
-
-
 # ---------- env-example (.env -> .env.example) ----------
 
-@app.command(name="env-example")
+@dev_app.command(name="env-example")
 def env_example_cmd(
     source: str = typer.Option(".env", "--from", help="The .env file to read."),
     write: bool = typer.Option(False, "--write", help="Write to .env.example."),
@@ -4079,259 +3882,21 @@ def env_example_cmd(
 
 # ---------- time (world clock / timezone) ----------
 
-@app.command()
-def time(
-    zone: str = typer.Argument(None, help="A timezone, e.g. 'Asia/Tokyo'. Omit for a world clock."),
-) -> None:
-    """🕰️  World clock — current time across zones, or one zone. Offline."""
-    import datetime as _dt
-
-    from .time_zones import format_in, world_clock
-    now = _dt.datetime.now(_dt.timezone.utc)
-    if zone:
-        info = format_in(now, zone)
-        if info is None:
-            console.print(f"[yellow]unknown timezone '{zone}'[/yellow] [dim](e.g. Asia/Tokyo, Europe/London)[/dim]")
-            raise typer.Exit(1)
-        console.print(f"[#7aa2f7]🕰️  {info['zone']}[/#7aa2f7]  [bold]{info['time']}[/bold] "
-                      f"[dim]{info['day']} {info['date']} · UTC{info['offset']} {info['abbrev']}[/dim]")
-        return
-    console.print("[bold]🕰️  world clock[/bold]")
-    for info in world_clock(now):
-        console.print(f"  [cyan]{info['zone']:<22}[/cyan] [bold]{info['time']}[/bold] "
-                      f"[dim]{info['day'][:3]} · UTC{info['offset']}[/dim]")
-
-
 # ---------- http (explain a status code) ----------
-
-@app.command()
-def http(
-    code: int = typer.Argument(..., help="An HTTP status code, e.g. 404."),
-) -> None:
-    """🌐 Explain an HTTP status code. Offline."""
-    from .http_status import explain_status
-
-    info = explain_status(code)
-    if info is None:
-        console.print(f"[yellow]unknown status code {code}[/yellow]")
-        raise typer.Exit(1)
-    color = {"success": "green", "redirect": "#7aa2f7", "client error": "#e0af68",
-             "server error": "#f7768e", "informational": "#6b7089"}.get(info["category"], "white")
-    console.print(f"[{color}]🌐 {info['code']} {info['name']}[/{color}] [dim]({info['category']})[/dim]")
-    console.print(f"   {info['explanation']}")
-
 
 # ---------- redact (strip secrets/PII from text) ----------
 
-@app.command()
-def redact(
-    source: str = typer.Argument(..., help="Text to redact: a string, @file, or '-' for stdin."),
-) -> None:
-    """🕶️  Redact secrets & PII (emails, IPs, API keys, tokens, JWTs) from text so
-    you can share logs/errors safely. Offline.
-    """
-    import sys
-
-    from .redact import redact_text
-    if source == "-":
-        raw = sys.stdin.read()
-    elif source.startswith("@"):
-        try:
-            raw = Path(source[1:]).read_text(encoding="utf-8")
-        except OSError as e:
-            console.print(f"[red]{e}[/red]")
-            raise typer.Exit(1)
-    else:
-        raw = source
-    result = redact_text(raw)
-    print(result["text"])
-    if result["total"]:
-        summary = ", ".join(f"{k}: {v}" for k, v in result["redactions"].items())
-        console.print(f"\n[dim]🕶️  redacted {result['total']} item(s) — {summary}[/dim]")
-    else:
-        console.print("[dim]🕶️  nothing to redact.[/dim]")
-
-
 # ---------- diff-json (structural JSON diff) ----------
-
-@app.command(name="diff-json")
-def diff_json_cmd(
-    a: str = typer.Argument(..., help="First JSON: string or @file.json."),
-    b: str = typer.Argument(..., help="Second JSON: string or @file.json."),
-) -> None:
-    """🔀 Structural diff between two JSON docs — added / removed / changed paths."""
-    import json as _json
-
-    from .diff_json import diff_json, summarize
-
-    def load(src: str):
-        raw = Path(src[1:]).read_text(encoding="utf-8") if src.startswith("@") else src
-        return _json.loads(raw)
-    try:
-        ja, jb = load(a), load(b)
-    except (OSError, _json.JSONDecodeError) as e:
-        console.print(f"[red]{e}[/red]")
-        raise typer.Exit(1)
-    changes = diff_json(ja, jb)
-    if not changes:
-        console.print("[green]✓ identical[/green]")
-        return
-    icon = {"added": "[green]+[/green]", "removed": "[#f7768e]-[/#f7768e]", "changed": "[#e0af68]~[/#e0af68]"}
-    for c in changes[:200]:
-        if c["type"] == "changed":
-            console.print(f"  {icon['changed']} [cyan]{c['path']}[/cyan]: {c['old']!r} → {c['new']!r}")
-        elif c["type"] == "added":
-            console.print(f"  {icon['added']} [cyan]{c['path']}[/cyan]: {c['new']!r}")
-        else:
-            console.print(f"  {icon['removed']} [cyan]{c['path']}[/cyan]: {c['old']!r}")
-    s = summarize(changes)
-    console.print(f"\n[dim]{s['added']} added · {s['removed']} removed · {s['changed']} changed[/dim]")
-
 
 # ---------- chmod (explain unix permissions) ----------
 
-@app.command()
-def chmod(
-    spec: str = typer.Argument(..., help="A permission: 644, 0755, or rw-r--r--."),
-) -> None:
-    """🔐 Explain & convert unix file permissions (octal ↔ symbolic). Offline."""
-    from .chmod_explain import explain_perm
-
-    info = explain_perm(spec)
-    if "error" in info:
-        console.print(f"[#f7768e]{info['error']}[/#f7768e]")
-        raise typer.Exit(1)
-    console.print(f"[#7aa2f7]🔐 {info['octal']}[/#7aa2f7]  [bold]{info['symbolic']}[/bold]")
-    console.print(f"   [cyan]owner[/cyan]  {info['owner']}")
-    console.print(f"   [cyan]group[/cyan]  {info['group']}")
-    console.print(f"   [cyan]others[/cyan] {info['others']}")
-
-
 # ---------- json (query JSON with a path) ----------
-
-@app.command()
-def json(
-    path: str = typer.Argument(..., help="A path like users.0.name or '.' for the whole thing."),
-    source: str = typer.Argument(..., help="JSON string, or @file.json, or '-' to read stdin."),
-    keys: bool = typer.Option(False, "--keys", help="List the keys/indices at the path instead of the value."),
-) -> None:
-    """🔧 Query JSON with a path (jq-lite): `ronin json users.0.name @data.json`."""
-    import json as _json
-    import sys
-
-    from .json_query import QueryError, keys_at, query_json
-    if source == "-":
-        raw = sys.stdin.read()
-    elif source.startswith("@"):
-        try:
-            raw = Path(source[1:]).read_text(encoding="utf-8")
-        except OSError as e:
-            console.print(f"[red]{e}[/red]")
-            raise typer.Exit(1)
-    else:
-        raw = source
-    try:
-        data = _json.loads(raw)
-    except _json.JSONDecodeError as e:
-        console.print(f"[red]invalid JSON:[/red] {e}")
-        raise typer.Exit(1)
-    try:
-        result = query_json(data, path)
-    except QueryError as e:
-        console.print(f"[yellow]{e}[/yellow]")
-        raise typer.Exit(1)
-    if keys:
-        console.print("\n".join(keys_at(result)) or "[dim](scalar — no keys)[/dim]")
-    elif isinstance(result, (dict, list)):
-        console.print_json(_json.dumps(result))
-    else:
-        console.print(str(result))
-
 
 # ---------- license (generate a LICENSE) ----------
 
-@app.command()
-def license(
-    kind: str = typer.Argument(None, help="License id: mit, isc, bsd-3-clause, unlicense. Omit to list."),
-    name: str = typer.Argument("", help="Copyright holder name."),
-    write: bool = typer.Option(False, "--write", help="Write to ./LICENSE."),
-    year: str = typer.Option("", "--year", help="Copyright year (default: from git/current)."),
-    root: Path = typer.Option(Path("."), "--root", help="Where to write."),
-) -> None:
-    """⚖️  Generate an open-source LICENSE file (mit/isc/bsd-3-clause/unlicense).
-    Offline. (Fixes the 'no LICENSE' finding from `ronin checkup`.)
-    """
-    import subprocess
-
-    from .license_gen import available, license_text
-
-    if not kind:
-        console.print("[bold]licenses[/bold]  " + ", ".join(available()))
-        console.print("[dim]e.g. [bold]ronin license mit \"Your Name\" --write[/bold][/dim]")
-        return
-    if not year:
-        # current year from git's last commit date, else leave to fill
-        try:
-            year = subprocess.run(["git", "-C", str(root), "log", "-1", "--format=%cd", "--date=format:%Y"],
-                                  capture_output=True, text=True, timeout=10).stdout.strip()
-        except (OSError, subprocess.SubprocessError):
-            year = ""
-    text = license_text(kind, name, year)
-    if text is None:
-        console.print(f"[yellow]unknown license '{kind}'[/yellow] — try: {', '.join(available())}")
-        raise typer.Exit(1)
-    if write:
-        (Path(root) / "LICENSE").write_text(text, encoding="utf-8")
-        console.print(f"[green]✓[/green] wrote [cyan]{Path(root) / 'LICENSE'}[/cyan]")
-    else:
-        console.print(text)
-
-
 # ---------- gitignore (generate from templates) ----------
 
-@app.command()
-def gitignore(
-    stacks: list[str] = typer.Argument(None, help="Stacks/OS/editors, e.g. python node macos vscode. Omit to list available."),
-    out: bool = typer.Option(False, "--write", help="Write to ./.gitignore (append if it exists)."),
-    root: Path = typer.Option(Path("."), "--root", help="Where to write."),
-) -> None:
-    """🙈 Generate a .gitignore from built-in templates (python, node, go, rust,
-    macos, vscode, jetbrains, env…). Offline.
-    """
-    from .gitignore_gen import available, gitignore_for
-
-    if not stacks:
-        console.print("[bold]available templates[/bold]")
-        console.print("  " + ", ".join(available()))
-        console.print("[dim]e.g. [bold]ronin gitignore python node macos[/bold][/dim]")
-        return
-    content = gitignore_for(list(stacks))
-    if out:
-        target = Path(root) / ".gitignore"
-        existing = target.read_text(encoding="utf-8") if target.is_file() else ""
-        target.write_text((existing + "\n" + content) if existing else content, encoding="utf-8")
-        console.print(f"[green]✓[/green] {'appended to' if existing else 'wrote'} [cyan]{target}[/cyan]")
-    else:
-        console.print(content)
-
-
 # ---------- cron (explain a cron expression) ----------
-
-@app.command()
-def cron(
-    expression: list[str] = typer.Argument(..., help="A cron expression, e.g. '*/15 9-17 * * 1-5' (quote it)."),
-) -> None:
-    """⏰ Explain a cron expression in plain English. Offline."""
-    from .cron_describe import describe_cron
-
-    expr = " ".join(expression)
-    desc = describe_cron(expr)
-    if desc.lower().startswith("invalid"):
-        console.print(f"[#f7768e]{desc}[/#f7768e]")
-        raise typer.Exit(1)
-    console.print(f"[#7aa2f7]⏰ {expr}[/#7aa2f7]")
-    console.print(f"   [bold]{desc}[/bold]")
-
 
 # ---------- schedule (store / list / run-due tasks) ----------
 
@@ -4339,7 +3904,7 @@ schedule_app = typer.Typer(
     help="A real task scheduler: store agent tasks on a cron schedule, list them, "
          "and run the ones that are due. Offline-capable (no key, no network).",
 )
-app.add_typer(schedule_app, name="schedule")
+util_app.add_typer(schedule_app, name="schedule")
 
 
 @schedule_app.command("add")
@@ -4444,66 +4009,9 @@ def schedule_run_due(
 
 # ---------- mock (fixture data from a schema) ----------
 
-@app.command()
-def mock(
-    source: str = typer.Argument(..., help="A JSON Schema, or a JSON sample (a schema is inferred from it), or @file."),
-    count: int = typer.Option(1, "--count", "-n", help="How many records to generate."),
-) -> None:
-    """🎭 Generate realistic mock/fixture data from a JSON Schema (or a sample).
-    Field names drive the values — email→an email, city→a city, created_at→a date.
-    """
-    import json
-
-    from .mock_data import generate_records
-    from .schema_infer import infer_schema
-    raw = source
-    if source.startswith("@"):
-        try:
-            raw = Path(source[1:]).read_text(encoding="utf-8")
-        except OSError as e:
-            console.print(f"[red]{e}[/red]")
-            raise typer.Exit(1)
-    try:
-        obj = json.loads(raw)
-    except json.JSONDecodeError as e:
-        console.print(f"[red]invalid JSON:[/red] {e}")
-        raise typer.Exit(1)
-    # if it doesn't look like a schema (no top-level "type"), infer one from the sample
-    sch = obj if isinstance(obj, dict) and "type" in obj and "properties" in obj else infer_schema(obj)
-    records = generate_records(sch, count=count)
-    console.print_json(json.dumps(records if count > 1 else records[0]))
-
-
 # ---------- schema / endpoint (API toolkit) ----------
 
-@app.command()
-def schema(
-    source: str = typer.Argument(..., help="A JSON string, or @file.json to read from a file."),
-) -> None:
-    """🧬 Infer a JSON Schema from a JSON sample (string or @file)."""
-    import json
-
-    from .schema_infer import infer_schema, leaf_paths
-    raw = source
-    if source.startswith("@"):
-        try:
-            raw = Path(source[1:]).read_text(encoding="utf-8")
-        except OSError as e:
-            console.print(f"[red]{e}[/red]")
-            raise typer.Exit(1)
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as e:
-        console.print(f"[red]invalid JSON:[/red] {e}")
-        raise typer.Exit(1)
-    sch = infer_schema(data)
-    console.print_json(json.dumps(sch))
-    paths = leaf_paths(data)
-    if paths:
-        console.print(f"\n[dim]fields: {', '.join(paths[:15])}[/dim]")
-
-
-@app.command()
+@dev_app.command()
 def endpoint(
     url: str = typer.Argument(..., help="An HTTP(S) endpoint to probe."),
 ) -> None:
@@ -4543,7 +4051,7 @@ def endpoint(
 
 # ---------- tree (annotated project map) ----------
 
-@app.command()
+@dev_app.command()
 def tree(
     depth: int = typer.Option(3, "--depth", "-d", help="How many directory levels to show."),
     root: Path = typer.Option(Path("."), "--root", help="Repo root."),
@@ -4570,7 +4078,7 @@ def tree(
 
 # ---------- deadcode (probably-unused symbols) ----------
 
-@app.command()
+@dev_app.command()
 def deadcode(
     include_decorated: bool = typer.Option(False, "--include-decorated", help="Also flag decorated functions (CLI commands, fixtures, routes)."),
     limit: int = typer.Option(100, "--limit", help="Max candidates to list."),
@@ -4602,7 +4110,7 @@ def deadcode(
 
 # ---------- release (bump + changelog + tag) ----------
 
-@app.command()
+@dev_app.command()
 def release(
     kind: str = typer.Argument("patch", help="major | minor | patch."),
     tag: bool = typer.Option(False, "--tag", help="Create a git tag for the new version."),
@@ -4661,7 +4169,7 @@ def release(
 
 # ---------- docstring (find + write missing docstrings) ----------
 
-@app.command()
+@dev_app.command()
 def docstring(
     execute: bool = typer.Option(False, "--execute", help="Write docstrings (default: list gaps)."),
     limit: int = typer.Option(60, "--limit", help="Max symbols."),
@@ -4745,7 +4253,7 @@ def _todo_to_issues(targets, *, root: Path, only: str, yes: bool) -> None:
     console.print(f"\n[bold]filed {filed}/{len(drafts)} issue(s).[/bold]")
 
 
-@app.command()
+@dev_app.command()
 def todo(
     execute: bool = typer.Option(False, "--execute", help="Work the TODOs autonomously (Nightshift)."),
     issues: bool = typer.Option(False, "--issues", help="Draft a GitHub issue per marker (dry-run unless --yes)."),
@@ -4802,7 +4310,7 @@ def todo(
 
 # ---------- scaffold (generate a component) ----------
 
-@app.command()
+@dev_app.command()
 def scaffold(
     what: str = typer.Argument(..., help="What to scaffold, e.g. \"a RetryClient with backoff\"."),
     yolo: bool = typer.Option(False, "--yolo", help="Auto-approve the writes."),
@@ -4832,7 +4340,7 @@ def scaffold(
 
 # ---------- estimate (scope a task before doing it) ----------
 
-@app.command()
+@dev_app.command()
 def estimate(
     task: str = typer.Argument(..., help="The task to size up."),
     root: Path = typer.Option(Path("."), "--root", help="Repo to scope against."),
@@ -4863,7 +4371,7 @@ def estimate(
 
 # ---------- spec (design-doc-first) ----------
 
-@app.command()
+@dev_app.command()
 def spec(
     feature: str = typer.Argument(..., help="The feature/change to spec out."),
     out: str = typer.Option(None, "--out", help="Write the spec to this file (e.g. SPEC.md)."),
@@ -4893,7 +4401,7 @@ def spec(
 
 # ---------- diagram (architecture map) ----------
 
-@app.command()
+@dev_app.command()
 def diagram(
     pkg: str = typer.Option(None, "--pkg", help="Package directory (default: auto-detect the biggest)."),
     out: str = typer.Option(None, "--out", help="Write the Mermaid diagram to this file."),
@@ -4931,7 +4439,7 @@ def diagram(
 
 # ---------- coverage (find + fill test gaps) ----------
 
-@app.command()
+@dev_app.command()
 def coverage(
     execute: bool = typer.Option(False, "--execute", help="Actually write tests (default: list the gaps)."),
     limit: int = typer.Option(40, "--limit", help="Max symbols."),
@@ -4977,7 +4485,7 @@ def coverage(
 
 # ---------- tournament (single-elim model bracket) ----------
 
-@app.command()
+@util_app.command()
 def tournament(
     question: str = typer.Argument(..., help="The question the models compete on."),
     models: str = typer.Option(..., "--models", "-m", help="Contenders, e.g. 'anthropic,gemini,cerebras,groq'."),
@@ -5011,7 +4519,7 @@ def tournament(
 
 # ---------- migrate (guided large refactor) ----------
 
-@app.command()
+@dev_app.command()
 def migrate(
     change: str = typer.Argument(..., help="The migration, e.g. \"replace requests with httpx\"."),
     match: str = typer.Option(None, "--match", help="Only files containing this substring (e.g. 'requests')."),
@@ -5061,7 +4569,7 @@ def migrate(
 
 # ---------- pair (ambient co-pilot) ----------
 
-@app.command()
+@dev_app.command()
 def pair(
     interval: float = typer.Option(2.0, "--interval", help="Poll interval (seconds)."),
     root: Path = typer.Option(Path("."), "--root", help="Directory to watch."),
@@ -5079,7 +4587,7 @@ def pair(
 
 # ---------- archaeology (why is this code here) ----------
 
-@app.command()
+@dev_app.command()
 def archaeology(
     file: str = typer.Argument(..., help="The file to investigate."),
     limit: int = typer.Option(25, "--limit", help="How many commits of history to read."),
@@ -5116,7 +4624,7 @@ def archaeology(
 
 # ---------- perf (benchmark + analyze) ----------
 
-@app.command()
+@dev_app.command()
 def perf(
     command: list[str] = typer.Argument(..., help="The command to benchmark, e.g. \"pytest -q\"."),
     runs: int = typer.Option(5, "--runs", help="Timed runs (after a warmup)."),
@@ -5154,7 +4662,7 @@ def perf(
 
 # ---------- debate (multi-round cross-vendor argument) ----------
 
-@app.command()
+@util_app.command()
 def debate(
     question: str = typer.Argument(..., help="The question to debate."),
     models: str = typer.Option(..., "--models", "-m", help="Panelists, e.g. 'anthropic,gemini,cerebras'."),
@@ -5192,7 +4700,7 @@ def debate(
 
 # ---------- bisect (autonomous regression hunt) ----------
 
-@app.command()
+@dev_app.command()
 def bisect(
     command: list[str] = typer.Argument(..., help="The command that FAILS now but passed before, e.g. \"pytest -k test_login\"."),
     good: str = typer.Option(None, "--good", help="A known-good ref (default: last tag, else HEAD~20)."),
@@ -5238,7 +4746,7 @@ def bisect(
 
 # ---------- status (mission-control dashboard) ----------
 
-@app.command()
+@util_app.command()
 def status(root: Path = typer.Option(Path("."), "--root", help="Repo to summarize.")) -> None:
     """🛰  Mission control — one view of every ronin system: Cost-Router savings,
     the Dojo leaderboard, what the self-tuning router has learned, your sessions,
@@ -5251,7 +4759,7 @@ def status(root: Path = typer.Option(Path("."), "--root", help="Repo to summariz
 
 # ---------- leaderboard (dojo standings) ----------
 
-@app.command()
+@util_app.command()
 def leaderboard(
     reset: bool = typer.Option(False, "--reset", help="Clear the dojo leaderboard."),
     root: Path = typer.Option(Path("."), "--root", help="Repo whose dojo history to show."),
@@ -5294,7 +4802,7 @@ def leaderboard(
 
 # ---------- router (self-tuning insight) ----------
 
-@app.command()
+@util_app.command()
 def router(
     reset: bool = typer.Option(False, "--reset", help="Forget everything the router has learned."),
     root: Path = typer.Option(Path("."), "--root", help="Repo whose routing stats to show."),
@@ -5337,7 +4845,7 @@ def router(
 
 # ---------- costs ----------
 
-@app.command()
+@util_app.command()
 def costs(
     by: str = typer.Option("model", "--by", help="Group by 'model' or 'day'."),
 ) -> None:
@@ -5397,7 +4905,7 @@ def costs(
 
 # ---------- tui ----------
 
-@app.command()
+@util_app.command()
 def tui() -> None:
     """Launch a full-screen TUI (Textual) — chat pane + live trace + input box."""
     config = load_config()
@@ -5414,7 +4922,7 @@ def tui() -> None:
 
 # ---------- briefing ----------
 
-@app.command()
+@util_app.command()
 def briefing(
     out: Optional[Path] = typer.Option(None, "--out", help="Write briefing to a Markdown file."),
     raw: bool = typer.Option(False, "--raw", help="Print plain Markdown (no Rich panel)."),
@@ -5551,7 +5059,7 @@ def briefing(
 
 # ---------- agent ----------
 
-@app.command()
+@util_app.command()
 def agent(
     goal: list[str] = typer.Argument(..., help="The goal for the agent to pursue. Quote multi-word goals."),
     confirm: bool = typer.Option(False, "--confirm", help="Pause for y/N approval before each tool call (Cline-style)."),
@@ -5724,7 +5232,7 @@ def code(
 
 # ---------- investigate ----------
 
-@app.command()
+@util_app.command()
 def investigate(
     symptom: list[str] = typer.Argument(..., help="The business symptom to root-cause. Quote it."),
     root: Path = typer.Option(Path("."), "--root", help="Code repo to inspect for causes."),
@@ -5773,7 +5281,7 @@ def investigate(
 
 # ---------- fix ----------
 
-@app.command()
+@dev_app.command()
 def tdd(
     spec: str = typer.Argument(..., help="What to build, e.g. \"parse_duration handles '2h30m'\"."),
     test: str = typer.Option("pytest -q", "--test", help="Command that runs the test(s)."),
@@ -5809,7 +5317,7 @@ def tdd(
     raise typer.Exit(0 if ok else 1)
 
 
-@app.command(name="fix")
+@dev_app.command(name="fix")
 def fix_cmd(
     command: list[str] = typer.Argument(..., help="The command to make pass, e.g. \"pytest -q\"."),
     root: Path = typer.Option(Path("."), "--root", help="Project directory."),
@@ -5832,7 +5340,7 @@ def fix_cmd(
 
 # ---------- review ----------
 
-@app.command()
+@dev_app.command()
 def review(
     base: str = typer.Option(None, "--base", help="Review this branch vs a base ref (e.g. main)."),
     staged: bool = typer.Option(False, "--staged", help="Review only staged changes."),
@@ -5855,7 +5363,7 @@ def review(
     run_review(config, root=root, base=base, staged=staged, pr=pr, comment=comment, console=console)
 
 
-@app.command()
+@dev_app.command()
 def triage(
     limit: int = typer.Option(10, "--limit", help="How many open issues to triage."),
     root: Path = typer.Option(Path("."), "--root", help="Repo to triage."),
@@ -5888,7 +5396,7 @@ def triage(
 
 # ---------- version ----------
 
-@app.command()
+@util_app.command()
 def version() -> None:
     """Print the ronin version.
 
@@ -6096,7 +5604,7 @@ def memory(
     console.print("[dim]clear with [bold]ronin memory --clear[/bold][/dim]")
 
 
-@app.command()
+@util_app.command()
 def panda(
     activity: str = typer.Argument(None, help="dancing | running | playing | sleeping (default: all)"),
     loops: int = typer.Option(3, "--loops", "-n", help="How many times to repeat each activity."),
@@ -6112,7 +5620,7 @@ def panda(
         _render_panda(console, activity=name, loops=loops, tagline=False)
 
 
-@app.command()
+@util_app.command()
 def image(
     prompt: list[str] = typer.Argument(..., help="What to draw, e.g. \"a red panda coding at night, neon\"."),
     out: Path = typer.Option(None, "--out", "-o", help="Where to save (default: ./ronin_image_<ts>.png)."),
@@ -6154,7 +5662,7 @@ def image(
             console.print("[dim]opened in your image viewer[/dim]")
 
 
-@app.command()
+@util_app.command()
 def video(
     prompt: list[str] = typer.Argument(..., help="What to animate, e.g. \"a red panda surfing a neon wave\"."),
     out: Path = typer.Option(None, "--out", "-o", help="Where to save the mp4 (default: ./ronin_video_<ts>.mp4)."),
@@ -6254,7 +5762,7 @@ def video(
         console.print("[dim]opened the video in your player[/dim]")
 
 
-@app.command()
+@util_app.command()
 def say(
     text: list[str] = typer.Argument(None, help="What to speak."),
     voice: str = typer.Option(None, "--voice", "-v", help="Voice name (see --list-voices)."),
@@ -6298,7 +5806,7 @@ def say(
         console.print("[green]✓[/green] [dim]spoke aloud[/dim]")
 
 
-@app.command()
+@util_app.command()
 def see(
     image: Path = typer.Argument(..., help="Path to a local image (png/jpg/gif/webp)."),
     question: list[str] = typer.Argument(None, help="What to ask about it (default: describe it)."),
@@ -6335,7 +5843,7 @@ def see(
     console.print(Panel(answer or "[dim](no answer)[/dim]", title=f"👁  {image.name}", border_style="green", padding=(1, 2)))
 
 
-@app.command()
+@dev_app.command()
 def explain(
     target: str = typer.Argument(..., help="File, directory, or repo path to explain."),
     question: list[str] = typer.Argument(None, help="Optional focus, e.g. 'how does auth work'."),
@@ -6430,7 +5938,7 @@ def _print_result(result: AgentResultRich, *, raw: bool) -> None:
 
 # ---------- explain-error (parse a trace, get cause + fix) ----------
 
-@app.command(name="explain-error")
+@dev_app.command(name="explain-error")
 def explain_error(
     trace: list[str] = typer.Argument(None, help="The error/stack trace. Omit to read piped stdin."),
     root: Path = typer.Option(Path("."), "--root", help="Repo root the cited paths are relative to."),
@@ -6513,7 +6021,7 @@ def explain_error(
 
 # ---------- guard (intent / scope-creep gate) ----------
 
-@app.command()
+@dev_app.command()
 def guard(
     intent: str = typer.Option(None, "--intent", help="What this change is meant to do — enables an LLM scope-creep check."),
     analyze: bool = typer.Option(True, "--analyze/--no-analyze", help="With --intent, flag files that drift from it."),
@@ -6562,7 +6070,7 @@ def guard(
 
 # ---------- flake (flaky-test hunter) ----------
 
-@app.command()
+@dev_app.command()
 def flake(
     command: list[str] = typer.Argument(..., help='Test command to repeat, e.g. "pytest -q -k login".'),
     runs: int = typer.Option(5, "--runs", "-n", help="How many times to run it."),
@@ -6600,7 +6108,7 @@ def flake(
 
 # ---------- mutants (mutation-testing gate) ----------
 
-@app.command()
+@dev_app.command()
 def mutants(
     target: str = typer.Argument(..., help="Source file to mutate, e.g. parser.py."),
     test: str = typer.Option("python -m pytest -q", "--test", help="Test command that SHOULD catch mutations."),
@@ -6636,7 +6144,7 @@ def mutants(
 
 # ---------- radius (blast radius + impact-aware tests) ----------
 
-@app.command()
+@dev_app.command()
 def radius(
     run: bool = typer.Option(False, "--run", help="Also run the affected test files with pytest."),
     root: Path = typer.Option(Path("."), "--root", help="Repo root."),
@@ -6668,7 +6176,7 @@ def radius(
 
 # ---------- graph / architecture (Phase 6 repo cognition) ----------
 
-@app.command()
+@dev_app.command()
 def graph(
     path: Path = typer.Argument(Path("."), help="Repository root to analyze."),
     format: str = typer.Option("text", "--format", "-f", help="text | json | mermaid"),
@@ -6710,7 +6218,7 @@ def graph(
         raise typer.Exit(1)
 
 
-@app.command()
+@dev_app.command()
 def architecture(
     path: Path = typer.Argument(Path("."), help="Repository root to analyze."),
     format: str = typer.Option("text", "--format", "-f", help="text | json | mermaid"),
@@ -6748,7 +6256,7 @@ def architecture(
 
 # ---------- remember / forget / timeline (Phase 6 memory surface) ----------
 
-@app.command()
+@util_app.command()
 def remember(
     fact: list[str] = typer.Argument(..., help='The fact, e.g. `ronin remember I use Groq`.'),
 ) -> None:
@@ -6778,7 +6286,7 @@ def remember(
         console.print("[dim]already known — nothing added[/dim]")
 
 
-@app.command()
+@util_app.command()
 def forget(
     pattern: list[str] = typer.Argument(None, help="Forget facts matching this phrase."),
     forget_everything: bool = typer.Option(False, "--all", help="Forget everything."),
@@ -6803,7 +6311,7 @@ def forget(
         console.print(f"[dim]nothing matched {text!r}[/dim]")
 
 
-@app.command()
+@util_app.command()
 def timeline(
     limit: int = typer.Option(20, "--limit", "-n", help="How many facts to show (newest last)."),
     format: str = typer.Option("text", "--format", "-f", help="text | json"),
@@ -6832,7 +6340,7 @@ def timeline(
 
 # ---------- impact / changed / why (Phase 6 change intelligence) ----------
 
-@app.command()
+@dev_app.command()
 def impact(
     target: str = typer.Argument(..., help="A module (pkg.mod) or file path to analyze."),
     root: Path = typer.Option(Path("."), "--root", help="Repository root."),
@@ -6876,7 +6384,7 @@ def impact(
         console.print("  [#9ece6a]nothing imports it — safe to change in isolation[/#9ece6a]")
 
 
-@app.command()
+@dev_app.command()
 def why(
     target: str = typer.Argument(..., help="A module (pkg.mod) or file path."),
     root: Path = typer.Option(Path("."), "--root", help="Repository root."),
@@ -6908,7 +6416,7 @@ def why(
                       f"{len(in_cycle)}: " + " → ".join(in_cycle) + "[/#e0af68]")
 
 
-@app.command()
+@dev_app.command()
 def changed(
     ref: str = typer.Argument("HEAD", help="Git ref to diff against (default: HEAD = working tree)."),
     root: Path = typer.Option(Path("."), "--root", help="Repository root."),
@@ -6952,7 +6460,7 @@ def changed(
 
 # ---------- smell (AST-based code-smell detector) ----------
 
-@app.command()
+@dev_app.command()
 def smell(
     path: Path = typer.Argument(Path("."), help="A .py file or a directory to scan."),
     max_statements: int = typer.Option(50, "--max-statements", help="Statements per function."),
@@ -7016,7 +6524,7 @@ faithfulness_app = typer.Typer(
     help="Grounding harness: is an answer supported by the sources it cites? "
          "Decomposes claims, flags hallucinated code symbols, scores 0..1.",
 )
-app.add_typer(faithfulness_app, name="faithfulness")
+util_app.add_typer(faithfulness_app, name="faithfulness")
 
 
 @faithfulness_app.command("check")
@@ -7085,423 +6593,7 @@ def faithfulness_check(
 # offline. `python -m ronin_relay` keeps working unchanged.
 from .relay import relay_app
 
-app.add_typer(relay_app, name="relay")
-
-
-# ---------- telegram (control Ronin from your phone, outbound-only) ----------
-
-
-def _telegram_git_repos(root) -> list:
-    """Bounded scan for git repos under root (skips heavy dirs, stops at a repo
-    boundary, caps total)."""
-    from pathlib import Path
-
-    base = Path(root)
-    skip = {
-        "node_modules", ".venv", "venv", "__pycache__", ".cache", "Library",
-        ".Trash", ".npm", ".cargo", "go", "dist", "build", ".git",
-    }
-    repos: list = []
-
-    def walk(d, depth: int) -> None:
-        if depth > 4 or len(repos) > 200:
-            return
-        if (d / ".git").exists():
-            repos.append(d)
-            return
-        try:
-            entries = list(d.iterdir())
-        except OSError:
-            return
-        for e in entries:
-            if e.is_dir() and e.name not in skip and not e.name.startswith("."):
-                walk(e, depth + 1)
-
-    walk(base, 0)
-    return repos
-
-
-def _telegram_dirty_repos(root) -> list:
-    """Git repos under root that currently have uncommitted/untracked changes."""
-    import subprocess
-
-    out = []
-    for repo in _telegram_git_repos(root):
-        try:
-            st = subprocess.run(
-                ["git", "-C", str(repo), "status", "--porcelain"],
-                capture_output=True, text=True, timeout=20,
-            )
-            if st.returncode == 0 and st.stdout.strip():
-                out.append(repo)
-        except Exception:  # noqa: BLE001
-            continue
-    return out
-
-
-# How often (seconds) the live status message may be edited. Telegram rate-limits
-# editMessageText; coalescing to ~1/s keeps us well clear while still feeling live.
-_TELEGRAM_PROGRESS_MIN_INTERVAL = 1.0
-
-
-def _telegram_step_line(step) -> str | None:
-    """Turn one agent Step into a short, human progress line, or None to skip.
-
-    We only surface tool calls (the visible "doing something" moments). A
-    tool_call step's content is {"name": <tool>, "input": <args>}. Examples:
-    "reading src/app.py", "editing main.py", "ran: pytest -q",
-    "searching for TODO". Unknown/uninteresting steps return None so the status
-    line is not churned by thoughts or tool results.
-    """
-    if getattr(step, "kind", None) != "tool_call":
-        return None
-    content = getattr(step, "content", None) or {}
-    if not isinstance(content, dict):
-        return None
-    name = content.get("name") or ""
-    args = content.get("input") or {}
-    if not isinstance(args, dict):
-        args = {}
-
-    def _short(value, limit: int = 80) -> str:
-        s = str(value).strip().replace("\n", " ")
-        return s if len(s) <= limit else s[: limit - 3] + "..."
-
-    if name == "read_file":
-        return f"reading {_short(args.get('path', ''))}"
-    if name in ("write_file", "edit_file", "multi_edit"):
-        return f"editing {_short(args.get('path', ''))}"
-    if name == "run_command":
-        return f"ran: {_short(args.get('command', ''))}"
-    if name == "search_files":
-        return f"searching for {_short(args.get('query', ''))}"
-    if name == "glob":
-        return f"globbing {_short(args.get('pattern', ''))}"
-    if name == "list_files":
-        return f"listing {_short(args.get('directory', '.'))}"
-    if name == "update_todos":
-        return "updating the plan"
-    target = args.get("path") or args.get("command") or args.get("query") or ""
-    return f"running {name} {_short(target)}".rstrip()
-
-
-def _telegram_step_progress(progress, *, _now=None):
-    """Build an on_step_cb that pushes throttled progress lines to `progress`.
-
-    Coalesces: it edits the status message at most once every
-    _TELEGRAM_PROGRESS_MIN_INTERVAL seconds (the FIRST step always shows so the
-    user sees immediate life). Each shown line is prefixed with a small spinner
-    frame so successive identical actions still visibly change (Telegram rejects
-    an edit to identical text). Returns a callable(step) -> None.
-    """
-    import time
-
-    now = _now or time.monotonic
-    state = {"last": 0.0, "tick": 0}
-
-    def on_step(step) -> None:
-        line = _telegram_step_line(step)
-        if not line:
-            return
-        t = now()
-        # First line shows immediately; afterwards throttle to the interval.
-        if state["last"] and (t - state["last"]) < _TELEGRAM_PROGRESS_MIN_INTERVAL:
-            return
-        state["last"] = t
-        frame = "|/-\\"[state["tick"] % 4]
-        state["tick"] += 1
-        try:
-            progress(f"{frame} {line}")
-        except Exception:  # noqa: BLE001 - progress is best-effort, never fatal
-            pass
-
-    return on_step
-
-
-def _telegram_changes_summary(root, *, max_chars: int = 2500) -> str:
-    """Show what changed: per dirty repo, a `git diff --stat` plus a truncated
-    diff, so the Telegram reply shows the actual edits (Claude-Code style)."""
-    import subprocess
-
-    parts = []
-    for repo in _telegram_dirty_repos(root):
-        try:
-            stat = subprocess.run(
-                ["git", "-C", str(repo), "diff", "--stat"],
-                capture_output=True, text=True, timeout=20,
-            ).stdout.strip()
-            porcelain = subprocess.run(
-                ["git", "-C", str(repo), "status", "--porcelain"],
-                capture_output=True, text=True, timeout=20,
-            ).stdout.strip()
-            diff = subprocess.run(
-                ["git", "-C", str(repo), "diff"],
-                capture_output=True, text=True, timeout=20,
-            ).stdout.strip()
-        except Exception:  # noqa: BLE001
-            continue
-        block = f"[{repo}]\n{stat or porcelain or '(changes)'}"
-        if diff:
-            block += "\n\n" + diff[:1500]
-        parts.append(block)
-    if not parts:
-        return ""
-    text = "\n\n".join(parts)
-    if len(text) > max_chars:
-        text = text[:max_chars] + "\n... (truncated; ask me to show the full diff)"
-    return text
-
-
-def _telegram_undo(root) -> str:
-    """Best-effort /undo: stash uncommitted changes in dirty git repos under root
-    so recent edits are reverted but recoverable via `git stash pop`."""
-    import subprocess
-
-    stashed: list[str] = []
-    for repo in _telegram_dirty_repos(root):
-        try:
-            r = subprocess.run(
-                ["git", "-C", str(repo), "stash", "push", "-u",
-                 "-m", "ronin telegram undo"],
-                capture_output=True, text=True, timeout=40,
-            )
-            if r.returncode == 0:
-                stashed.append(str(repo))
-        except Exception:  # noqa: BLE001
-            continue
-    if not stashed:
-        return "Nothing to undo: no uncommitted changes found under the root."
-    body = "\n".join(f"- {p}" for p in stashed)
-    return (
-        "Reverted recent changes (stashed) in:\n" + body
-        + "\nRestore any of them with: git -C <repo> stash pop"
-    )
-
-
-@app.command()
-def telegram(
-    allow: list[int] = typer.Option(
-        None, "--allow",
-        help="Append a chat id to the allowlist for THIS run (repeatable). "
-             "Merged with TELEGRAM_ALLOWED_CHAT_IDS and the config field.",
-    ),
-    once: bool = typer.Option(
-        False, "--once",
-        help="Do a single getUpdates poll and exit (useful for testing).",
-    ),
-    poll_timeout: int = typer.Option(
-        30, "--poll-timeout",
-        help="Long-poll timeout in seconds passed to getUpdates.",
-    ),
-) -> None:
-    """Run Ronin from your phone over Telegram. Outbound-only and allowlisted.
-
-    The bot long-polls api.telegram.org (no inbound port, works behind NAT) and,
-    for messages from an ALLOWED chat id, runs a READ-ONLY file agent rooted at
-    RONIN_TELEGRAM_ROOT (default: your home dir), then replies with the answer.
-    It can read and search your files but never edits files or runs shell
-    commands. Reads of obviously sensitive paths (~/.ssh, key/env files, ...) are
-    refused.
-
-    Set TELEGRAM_BOT_TOKEN (from @BotFather) and TELEGRAM_ALLOWED_CHAT_IDS
-    (comma-separated chat ids). With an empty allowlist the bot answers nobody;
-    it only tells a chat its numeric id so you can add it. See docs/TELEGRAM.md.
-    """
-    from .telegram_bot import (
-        DEFAULT_MAX_ITERATIONS,
-        ENV_ALLOWED,
-        TelegramBot,
-        TelegramConfigError,
-        get_bot_token,
-        is_secret_path,
-        parse_allowed_chat_ids,
-        redact_token,
-        resolve_root,
-    )
-
-    # 1) Token: fail closed (exit non-zero, never poll) if missing/malformed.
-    try:
-        token = get_bot_token()
-    except TelegramConfigError as exc:
-        console.print(f"[red]x[/red] {exc}")
-        raise typer.Exit(2)
-
-    config = load_config()
-
-    # 2) Allowlist: config field + env var + repeatable --allow flag.
-    allowed = parse_allowed_chat_ids(
-        os.environ.get(ENV_ALLOWED),
-        config_ids=list(config.telegram_allowed_chat_ids or []),
-    )
-    for cid in (allow or []):
-        if cid not in allowed:
-            allowed.append(cid)
-
-    # 3) Root the read-only file agent at RONIN_TELEGRAM_ROOT (default: home).
-    #    Resolved once here so every message runs against one fixed, absolute root.
-    root = resolve_root()
-
-    # 4) The agent is the SAME read-only code-agent path consensus uses: it can
-    #    read and search files under `root` but has NO write/edit/shell tool
-    #    (read_only=True). `deny=is_secret_path` makes the read tools refuse or
-    #    skip obviously sensitive paths so a stray request cannot dump a secret
-    #    into the Telegram history. run_code_agent is imported LAZILY so importing
-    #    this module stays light and offline.
-    # Full mode (read + EDIT + run) is opt-in via RONIN_TELEGRAM_ALLOW_EDITS.
-    # Unset/false => read_only (the safe default). The allowlist + secret guard
-    # stay in force in both modes.
-    edits_on = (
-        os.environ.get("RONIN_TELEGRAM_ALLOW_EDITS", "").strip().lower()
-        in {"1", "true", "yes", "on"}
-    )
-
-    edit_nudge = (
-        "You are operating over Telegram for the owner, who cannot see your screen. "
-        "ACTUALLY DO the task end to end: read the relevant files, make the edits, and "
-        "run any commands needed to verify it works (e.g. run the tests). Do not stop "
-        "early and do not just describe what you would do. When finished, give a short, "
-        "plain summary of exactly what you changed and what you ran."
-    )
-
-    def answer_fn(message_text: str, progress=None) -> str:
-        # `progress(text)` (optional, passed by the bot) edits a live status
-        # message in place so the work streams to the phone instead of arriving
-        # as one final blob. We turn each agent Step into a short human line and
-        # push it through progress(), THROTTLED so we never spam Telegram with an
-        # edit per step (Telegram rate-limits edits, and most steps are noise).
-        from .code_mode import run_code_agent
-        from .memory_store import (
-            build_forget_tool,
-            build_recall_tool,
-            build_remember_tool,
-            relevant_prompt_block,
-        )
-
-        text = message_text.strip()
-        if edits_on and text == "/undo":
-            return _telegram_undo(root)
-
-        on_step_cb = _telegram_step_progress(progress) if progress else None
-
-        # AUTO-RECALL: load the durable facts relevant to THIS message and inject
-        # them into the system prompt so the agent already knows the user (name,
-        # stack, repos, preferences) and stops re-asking. Bounded (top-K + capped).
-        # Memory failures must never break a reply.
-        try:
-            mem_block = relevant_prompt_block(message_text)
-        except Exception:  # noqa: BLE001 - memory is best-effort, never fatal
-            mem_block = ""
-
-        # Only the EDIT mode (read_only False) gets the remember/recall/forget
-        # tools, so the agent can update memory while it works. The default
-        # read-only path passes NO extra_tools at all (a write-safety invariant the
-        # bridge tests enforce); auto-recall still applies there via extra_system,
-        # and explicit memory commands are handled deterministically by the bot.
-        extra: dict = {}
-        if edits_on:
-            try:
-                extra["extra_tools"] = [
-                    build_remember_tool(), build_recall_tool(), build_forget_tool()]
-            except Exception:  # noqa: BLE001 - best-effort
-                pass
-
-        res = run_code_agent(
-            config,
-            message_text,
-            root=root,
-            console=None,
-            yolo=True,
-            read_only=not edits_on,
-            include_image_tool=False,
-            max_iterations=40 if edits_on else DEFAULT_MAX_ITERATIONS,
-            deny=is_secret_path,
-            base_system=edit_nudge if edits_on else None,
-            extra_system=mem_block,
-            on_step_cb=on_step_cb,
-            **extra,
-        )
-        out = res.output or res.error or "(no answer)"
-        if edits_on:
-            changes = _telegram_changes_summary(root)
-            if changes:
-                out = out + "\n\n=== what changed ===\n" + changes
-        return out
-
-    def briefing_fn(prompt: str) -> str:
-        # A daily briefing runs its prompt through the SAME read-only agent at
-        # fire time and sends the result. Read-only and secret-guarded, exactly
-        # like a normal message; no progress streaming (it fires unattended).
-        # AUTO-RECALL applies here too so a briefing reflects what we know.
-        from .code_mode import run_code_agent
-        from .memory_store import relevant_prompt_block
-
-        try:
-            mem_block = relevant_prompt_block(prompt)
-        except Exception:  # noqa: BLE001 - memory is best-effort, never fatal
-            mem_block = ""
-
-        res = run_code_agent(
-            config,
-            prompt,
-            root=root,
-            console=None,
-            yolo=True,
-            read_only=True,
-            include_image_tool=False,
-            max_iterations=DEFAULT_MAX_ITERATIONS,
-            deny=is_secret_path,
-            extra_system=mem_block,
-        )
-        return res.output or res.error or "(no answer)"
-
-    bot = TelegramBot(
-        token=token,
-        allowed_chat_ids=allowed,
-        answer_fn=answer_fn,
-        briefing_fn=briefing_fn,
-        poll_timeout=poll_timeout,
-    )
-
-    # 4) getMe at startup so the user sees the bot is reachable.
-    try:
-        me = bot.get_me()
-    except Exception as exc:  # noqa: BLE001
-        # httpx errors embed the request URL, which carries the token. Redact it
-        # so a startup getMe failure does not print the secret to the terminal.
-        console.print(
-            "[red]x[/red] could not reach Telegram (getMe failed): "
-            f"{redact_token(str(exc), token)}"
-        )
-        raise typer.Exit(1)
-
-    username = me.get("username", "?")
-    console.print(f"[green]ok[/green] bot @{username} ready; allowed chats: {allowed}")
-    if edits_on:
-        console.print(
-            f"[yellow]FULL mode[/yellow]: I can read, EDIT, and RUN commands in {root}. "
-            "Send /undo to revert recent changes (stashed). Secret files stay blocked."
-        )
-    else:
-        console.print(
-            f"[dim]Read-only file access, rooted at {root}. I can read and search "
-            "your files but cannot edit or run commands.[/dim]"
-        )
-    if not allowed:
-        console.print(
-            "[yellow]![/yellow] allowlist is empty: I will not run the agent for "
-            f"anyone. Message the bot and it replies with your chat id; add it to "
-            f"{ENV_ALLOWED} to enable me."
-        )
-
-    if once:
-        bot.poll_once()
-        return
-
-    console.print("[dim]polling… press Ctrl+C to stop[/dim]")
-    try:
-        bot.run_forever()
-    except KeyboardInterrupt:
-        console.print("\n[dim]stopped[/dim]")
+util_app.add_typer(relay_app, name="relay")
 
 
 @app.command()
@@ -7510,7 +6602,12 @@ def play(
         "", help="Game key to launch directly (e.g. 2048, snake, ttt). Omit for the menu."),
 ) -> None:
     """Take a break — play a free terminal game in ronin's arcade. 🎮"""
-    from .games import GAMES, find
+    try:
+        from ronin_arcade.games import GAMES, find
+    except ImportError:
+        console.print("🐼 the arcade isn't installed — get 30+ free terminal games with: "
+                      "[bold]pip install 'ronin-cli\\[arcade]'[/bold]")
+        return
     from .picker import Choice, ask_choice
     from .theme import gradient_text
 
@@ -7525,7 +6622,7 @@ def play(
             raise typer.Exit(1)
         g.play(console)
         try:
-            from .gamify import record
+            from ronin_arcade.gamify import record
             record("game_played")
         except Exception:  # noqa: BLE001
             pass
@@ -7551,14 +6648,14 @@ def play(
                 console.print("\n  [dim]back to the menu…[/dim]")
             else:
                 try:
-                    from .gamify import record
+                    from ronin_arcade.gamify import record
                     record("game_played")
                 except Exception:  # noqa: BLE001
                     pass
             console.print()
 
 
-@app.command()
+@util_app.command()
 def route(
     task: list[str] = typer.Argument(..., help="The task to run on the auto-chosen blade."),
 ) -> None:
@@ -7570,7 +6667,7 @@ def route(
     _route(load_config(), " ".join(task), console=console)
 
 
-@app.command()
+@util_app.command()
 def swebench(
     models: str = typer.Option(
         ..., "--models", "-m",
@@ -7583,22 +6680,32 @@ def swebench(
     run_swebench([s.strip() for s in models.split(",") if s.strip()], console=console)
 
 
-@app.command()
+@util_app.command()
 def profile() -> None:
     """Your coding profile: XP, level, daily streak, and unlocked achievements —
     earned for real actions (tests passing, bugs fixed, commits, PRs)."""
-    from .gamify import render_profile
+    try:
+        from ronin_arcade.gamify import render_profile
+    except ImportError:
+        console.print("🐼 profiles live in the arcade extra — "
+                      "[bold]pip install 'ronin-cli\\[arcade]'[/bold]")
+        return
     render_profile(console)
 
 
-@app.command()
+@util_app.command()
 def xp(
     event: str = typer.Argument(..., help="The action to award XP for: test_passed, bug_fixed, commit, pr_opened, …"),
     n: int = typer.Option(1, "--n", help="How many of this event to record."),
 ) -> None:
     """Award XP for a coding action and show what changed (level-ups, streak, new badges).
     Hooks call this automatically; also handy to log a win by hand."""
-    from .gamify import record
+    try:
+        from ronin_arcade.gamify import record
+    except ImportError:
+        console.print("🐼 XP tracking lives in the arcade extra — "
+                      "[bold]pip install 'ronin-cli\\[arcade]'[/bold]")
+        return
     res = record(event, n=n)
     line = f"[#2dd4bf]✦ +{res['xp_gained']} XP[/#2dd4bf] · [bold]LV {res['level']}[/bold] {res['title']}"
     if res.get("streak"):
@@ -7611,7 +6718,7 @@ def xp(
 
 
 # ---------- index · scalable repo context for big codebases ----------
-@app.command()
+@dev_app.command()
 def index(
     query: Optional[str] = typer.Option(None, "--query", "-q", help="Preview the bounded context a task would front-load."),
     budget: int = typer.Option(8000, "--budget", help="Token budget for the --query preview."),
@@ -7625,7 +6732,7 @@ def index(
 
 
 # ---------- stats · usage dashboard (sessions, tokens, streaks, heatmap) ----------
-@app.command()
+@util_app.command()
 def stats() -> None:
     """📊 Your ronin at a glance — sessions, tokens, active-day streaks, peak hour,
     favorite model, and an activity heatmap. Read-only; counts only, never content."""
@@ -7634,7 +6741,7 @@ def stats() -> None:
 
 
 # ---------- do · universal action engine (grounded + approved, never pays) ----------
-@app.command()
+@util_app.command()
 def do(
     task: list[str] = typer.Argument(
         ..., help="A real-world task: 'order me a pizza', 'book a flight to NYC', 'reserve a table for 2'."),
@@ -7648,7 +6755,7 @@ def do(
 
 
 # ---------- privacy / vault · data safety (encryption at rest + audit) ----------
-@app.command()
+@util_app.command()
 def privacy() -> None:
     """🔐 Audit what ronin stores locally and what's protected — read-only, and it
     never prints secret VALUES, only whether each is encrypted/redacted. The
@@ -7658,7 +6765,7 @@ def privacy() -> None:
 
 
 vault_app = typer.Typer(help="🔒 Encrypt ronin's local data at rest (passphrase-derived, per-file key).")
-app.add_typer(vault_app, name="vault")
+util_app.add_typer(vault_app, name="vault")
 
 
 def _vault_salt(path: str) -> bytes:
@@ -7696,14 +6803,14 @@ def vault_unlock(
 # ---------- gateway · safe multi-channel (allowlist + pairing, read-only) ----------
 try:  # optional — never let a gateway import break the whole CLI
     from .gateway import gateway_app as _gateway_app
-    app.add_typer(_gateway_app, name="gateway")
+    util_app.add_typer(_gateway_app, name="gateway")
 except Exception:  # noqa: BLE001
     pass
 
 
 # ---------- skill registry · shareable prompt-template skills (no code execution) ----------
 skill_app = typer.Typer(help="📦 Publish / install / search shareable skills — templates only, no code runs.")
-app.add_typer(skill_app, name="skill")
+util_app.add_typer(skill_app, name="skill")
 
 
 @skill_app.command("publish")
@@ -7736,7 +6843,7 @@ def skill_search(query: str = typer.Argument("", help="Search the registry (blan
 
 
 # ---------- bg · fire-and-forget background agents ----------
-@app.command(name="bg")
+@util_app.command(name="bg")
 def bg_cmd(
     task: list[str] = typer.Argument(None, help="Task to run in the background (quote multi-word)."),
     code: bool = typer.Option(False, "--code", help="Run the coding agent (read-only/plan; never auto-applies) instead of read-only ask."),
@@ -7776,7 +6883,7 @@ def bg_cmd(
 
 
 # ---------- checkpoint / undo · snapshot the repo, roll back a messy session ----------
-@app.command()
+@dev_app.command()
 def checkpoint(
     label: list[str] = typer.Argument(None, help="Optional short label for the snapshot."),
     list_: bool = typer.Option(False, "--list", "-l", help="List saved checkpoints instead of creating one."),
@@ -7792,7 +6899,7 @@ def checkpoint(
                   f"roll back with [bold]ronin undo {cp.id}[/bold]")
 
 
-@app.command()
+@dev_app.command()
 def undo(
     checkpoint_id: str = typer.Argument(None, help="Checkpoint id to restore (default: the most recent)."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
@@ -7822,7 +6929,7 @@ def undo(
 
 
 # ---------- loc · code-stats dashboard ----------
-@app.command()
+@dev_app.command()
 def loc(
     root: Path = typer.Option(Path("."), "--root", help="Project root to scan."),
 ) -> None:
@@ -7833,7 +6940,7 @@ def loc(
 
 
 # ---------- todo-scan · TODO/FIXME/HACK comment board ----------
-@app.command("todo-scan")
+@dev_app.command("todo-scan")
 def todo_scan(
     kind: str = typer.Option(None, "--kind", help="Only this marker: fixme|bug|todo|xxx|hack."),
     root: Path = typer.Option(Path("."), "--root", help="Repo root to scan."),
@@ -7848,7 +6955,7 @@ def todo_scan(
 
 
 # ---------- pr-draft · draft a PR title + body from the branch diff ----------
-@app.command("pr-draft")
+@dev_app.command("pr-draft")
 def pr_draft_cmd(
     base: str = typer.Option("main", "--base", help="Base branch to compare against."),
     root: Path = typer.Option(Path("."), "--root", help="Repo root."),
@@ -7874,7 +6981,7 @@ def pr_draft_cmd(
 
 
 # ---------- local · run ronin on a fully local open model (zero API key) ----------
-@app.command()
+@util_app.command()
 def local(
     model: str = typer.Option(None, "--model", help="Ollama model tag (default: sized to your RAM, e.g. qwen2.5-coder:7b)."),
     embedded: bool = typer.Option(False, "--embedded", help="Run on the IN-PROCESS embedded model — no Ollama, no key (pip install 'ronin-cli[local]')."),
@@ -7892,7 +6999,7 @@ def local(
 
 # ---------- finetune · train ronin's own brain from your sessions ----------
 finetune_app = typer.Typer(help="🧠 Fine-tune an open coding model on YOUR ronin sessions, then serve it locally via Ollama. (Training runs on a rented GPU.)")
-app.add_typer(finetune_app, name="finetune")
+util_app.add_typer(finetune_app, name="finetune")
 
 
 @finetune_app.command("collect")
