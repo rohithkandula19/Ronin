@@ -22,7 +22,7 @@ def available() -> tuple[bool, str]:
     user-facing explanation when ``ok`` is False.
     """
     try:
-        from ..config import load_config
+        from ronin_cli.config import load_config
         cfg = load_config()
     except Exception as e:  # noqa: BLE001 - missing/broken config shouldn't crash a game
         return False, f"couldn't load your ronin config ({e})"
@@ -45,8 +45,8 @@ def complete(system: str, prompt: str, *, max_tokens: int = 400,
     try:
         from ronin_agent_patterns import Message
 
-        from ..config import load_config
-        from ..runner import build_single_provider
+        from ronin_cli.config import load_config
+        from ronin_cli.runner import build_single_provider
 
         cfg = load_config()
         messages = [Message(role=r, content=c) for (r, c) in (history or [])]

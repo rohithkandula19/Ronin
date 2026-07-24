@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 
 from ronin_cli.code_mode import UNIFIED_SYSTEM
-from ronin_cli.games import GAMES
+from ronin_arcade.games import GAMES
 
 
 def test_unified_prompt_knows_about_the_arcade():

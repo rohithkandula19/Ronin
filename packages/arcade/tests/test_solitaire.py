@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import random
 
-from ronin_cli.games.solitaire import (
+from ronin_arcade.games.solitaire import (
     GAME,
     can_go_to_foundation,
     can_stack_tableau,

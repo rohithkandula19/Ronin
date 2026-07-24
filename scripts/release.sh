@@ -134,7 +134,7 @@ bump_in_file() {
 # cli pins its siblings with '==', so bumping only the cli desynced the whole
 # workspace on the first post-1.0 release — bump every member + the pins in
 # lockstep.
-RELEASE_PKGS=(cli agent-patterns eval-suite memory hardening mcp-servers relay)
+RELEASE_PKGS=(cli arcade agent-patterns eval-suite memory hardening mcp-servers relay)
 for pkg in "${RELEASE_PKGS[@]}"; do
   bump_in_file \
     "packages/${pkg}/pyproject.toml" \
@@ -148,7 +148,7 @@ bump_in_file \
   "__version__ = \"${VERSION}\""
 
 # Keep the cli's exact sibling pins in lockstep with the bumped versions.
-for dep in ronin-agent-patterns ronin-hardening ronin-memory ronin-mcp-servers ronin-eval-suite; do
+for dep in ronin-arcade ronin-agent-patterns ronin-hardening ronin-memory ronin-mcp-servers ronin-eval-suite; do
   bump_in_file \
     "packages/cli/pyproject.toml" \
     "${dep}==[0-9][^\"]*" \

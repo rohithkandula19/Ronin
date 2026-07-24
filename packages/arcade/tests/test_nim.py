@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from ronin_cli.games import nim as N
+from ronin_arcade.games import nim as N
 
 
 def _apply(piles: list[int], move: tuple[int, int]) -> list[int]:

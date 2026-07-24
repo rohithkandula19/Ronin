@@ -3495,8 +3495,9 @@ def commit(
     if r.returncode == 0:
         short = _git(["rev-parse", "--short", "HEAD"]).stdout.strip()
         console.print(f"[green]✓ committed[/green] [bold]{short}[/bold]")
-        try:  # auto-earn XP for a real unit of progress (best-effort, never blocks)
-            from .gamify import record
+        try:  # auto-earn XP for a real unit of progress (best-effort, never blocks;
+            # gamification lives in the optional ronin-arcade extra)
+            from ronin_arcade.gamify import record
             record("commit")
         except Exception:  # noqa: BLE001
             pass
@@ -7510,7 +7511,12 @@ def play(
         "", help="Game key to launch directly (e.g. 2048, snake, ttt). Omit for the menu."),
 ) -> None:
     """Take a break — play a free terminal game in ronin's arcade. 🎮"""
-    from .games import GAMES, find
+    try:
+        from ronin_arcade.games import GAMES, find
+    except ImportError:
+        console.print("🐼 the arcade isn't installed — get 30+ free terminal games with: "
+                      "[bold]pip install 'ronin-cli\\[arcade]'[/bold]")
+        return
     from .picker import Choice, ask_choice
     from .theme import gradient_text
 
@@ -7525,7 +7531,7 @@ def play(
             raise typer.Exit(1)
         g.play(console)
         try:
-            from .gamify import record
+            from ronin_arcade.gamify import record
             record("game_played")
         except Exception:  # noqa: BLE001
             pass
@@ -7551,7 +7557,7 @@ def play(
                 console.print("\n  [dim]back to the menu…[/dim]")
             else:
                 try:
-                    from .gamify import record
+                    from ronin_arcade.gamify import record
                     record("game_played")
                 except Exception:  # noqa: BLE001
                     pass
@@ -7587,7 +7593,12 @@ def swebench(
 def profile() -> None:
     """Your coding profile: XP, level, daily streak, and unlocked achievements —
     earned for real actions (tests passing, bugs fixed, commits, PRs)."""
-    from .gamify import render_profile
+    try:
+        from ronin_arcade.gamify import render_profile
+    except ImportError:
+        console.print("🐼 profiles live in the arcade extra — "
+                      "[bold]pip install 'ronin-cli\\[arcade]'[/bold]")
+        return
     render_profile(console)
 
 
@@ -7598,7 +7609,12 @@ def xp(
 ) -> None:
     """Award XP for a coding action and show what changed (level-ups, streak, new badges).
     Hooks call this automatically; also handy to log a win by hand."""
-    from .gamify import record
+    try:
+        from ronin_arcade.gamify import record
+    except ImportError:
+        console.print("🐼 XP tracking lives in the arcade extra — "
+                      "[bold]pip install 'ronin-cli\\[arcade]'[/bold]")
+        return
     res = record(event, n=n)
     line = f"[#2dd4bf]✦ +{res['xp_gained']} XP[/#2dd4bf] · [bold]LV {res['level']}[/bold] {res['title']}"
     if res.get("streak"):

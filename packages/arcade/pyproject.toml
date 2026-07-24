@@ -1,0 +1,28 @@
+[project]
+name = "ronin-arcade"
+version = "1.0.0"
+description = "The ronin arcade — 30+ free terminal games as an optional extra for ronin-cli. Install with: pip install 'ronin-cli[arcade]'."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "Rohith Kandula", email = "rohithkandula937@gmail.com" }]
+keywords = ["ronin", "terminal", "games", "arcade", "cli"]
+dependencies = [
+    "rich>=13.7,<16",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=7.0",
+]
+
+[build-system]
+requires = ["hatchling>=1.31.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ronin_arcade"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

@@ -12,6 +12,7 @@ members = [
     "ronin",
     "ronin-agent-patterns",
     "ronin-api",
+    "ronin-arcade",
     "ronin-artifacts",
     "ronin-billing",
     "ronin-cli",
@@ -1696,6 +1697,25 @@ dev = [
 ]
 
 [[package]]
+name = "ronin-arcade"
+version = "1.0.0"
+source = { editable = "packages/arcade" }
+dependencies = [
+    { name = "rich" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "rich", specifier = ">=13.7,<16" }]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=7.0" }]
+
+[[package]]
 name = "ronin-artifacts"
 version = "0.1.0"
 source = { editable = "packages/artifacts" }
@@ -1755,6 +1775,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+arcade = [
+    { name = "ronin-arcade" },
+]
 browser = [
     { name = "playwright" },
 ]
@@ -1789,6 +1812,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.5,<3" },
     { name = "rich", specifier = ">=13.7,<16" },
     { name = "ronin-agent-patterns", editable = "packages/agent-patterns" },
+    { name = "ronin-arcade", marker = "extra == 'arcade'", editable = "packages/arcade" },
     { name = "ronin-eval-suite", editable = "packages/eval-suite" },
     { name = "ronin-hardening", editable = "packages/hardening" },
     { name = "ronin-mcp-servers", editable = "packages/mcp-servers" },
@@ -1798,7 +1822,7 @@ requires-dist = [
     { name = "typer", specifier = ">=0.12,<1" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'server'", specifier = ">=0.51.0" },
 ]
-provides-extras = ["postgres", "browser", "server", "local"]
+provides-extras = ["arcade", "postgres", "browser", "server", "local"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -1,7 +1,7 @@
 """Guess the Output — unit tests for the pure bank + grader (no terminal)."""
 from __future__ import annotations
 
-from ronin_cli.games import guessout as G
+from ronin_arcade.games import guessout as G
 
 
 def test_bank_is_substantial_and_well_formed() -> None:

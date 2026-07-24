@@ -15,6 +15,7 @@ members = [
     "packages/mcp-servers",
     "packages/hardening",
     "packages/cli",
+    "packages/arcade",
     "packages/relay",
     "packages/industry-sdk",
     "packages/vault",

@@ -5,7 +5,7 @@ import random
 
 import pytest
 
-from ronin_cli.games import maze as M
+from ronin_arcade.games import maze as M
 
 
 def test_generate_maze_is_deterministic_for_a_seed() -> None:

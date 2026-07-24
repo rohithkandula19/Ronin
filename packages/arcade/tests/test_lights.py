@@ -5,7 +5,7 @@ import random
 
 import pytest
 
-from ronin_cli.games import lights as L
+from ronin_arcade.games import lights as L
 
 
 def _off(n: int = 5) -> list[list[int]]:

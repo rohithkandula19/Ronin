@@ -8,8 +8,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ronin_cli import gamify
-from ronin_cli.gamify import (
+from ronin_arcade import gamify
+from ronin_arcade.gamify import (
     ACHIEVEMENTS,
     LEVEL_TITLES,
     check_achievements,

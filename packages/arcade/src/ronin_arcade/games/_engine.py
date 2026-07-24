@@ -24,18 +24,28 @@ class GameMeta:
     play: Callable[[Console], None]
 
 
+def _theme_colors() -> tuple[str, str]:
+    """ronin's brand colors when running inside the cli, safe fallbacks when the
+    arcade is used standalone (ronin-arcade never *depends* on ronin-cli)."""
+    try:
+        from ronin_cli.theme import ACCENT, MUTE
+        return ACCENT, MUTE
+    except ImportError:
+        return "#2dd4bf", "#6b7089"
+
+
 def header(console: Console, game: "GameMeta") -> None:
     """A small consistent banner printed at the top of every game."""
-    from ..theme import ACCENT, MUTE
+    accent, mute = _theme_colors()
     console.print()
-    console.print(f"  [bold {ACCENT}]{game.emoji}  {game.name}[/bold {ACCENT}]"
-                  f"   [{MUTE}]{game.desc}[/{MUTE}]")
+    console.print(f"  [bold {accent}]{game.emoji}  {game.name}[/bold {accent}]"
+                  f"   [{mute}]{game.desc}[/{mute}]")
     console.print()
 
 
 def ask_line(console: Console, prompt: str, *, default: str = "") -> str:
     """Read one line of input, tolerant of EOF/interrupt (returns ``default``)."""
-    from ..theme import ACCENT
+    ACCENT, _ = _theme_colors()
     try:
         got = console.input(f"  [bold {ACCENT}]›[/bold {ACCENT}] {prompt} ").strip()
         return got or default
