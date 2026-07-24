@@ -1433,6 +1433,39 @@ def _estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4) if text else 0
 
 
+def _history_token_estimate(message_history: list) -> int:
+    """Estimate tokens held in the structured history for the context gauge.
+
+    ``message_history`` is a list of ``ronin_agent_patterns.Message`` objects
+    (not dicts). Counting only ``dict`` items — as the pinned-bar gauge used to —
+    always summed 0 and pinned "context left" at 100%. Mirror the estimator
+    ``ReActAgent._maybe_compact`` uses: message content PLUS tool-call arguments
+    (write_file/edit_file payloads live in ``tool_calls[].arguments``, not
+    ``content``). Tolerates both Message objects and legacy dict messages.
+    """
+    import json as _json
+
+    chars = 0
+    for m in (message_history or []):
+        if isinstance(m, dict):
+            c = m.get("content", "")
+            if isinstance(c, str):
+                chars += len(c)
+            elif isinstance(c, list):
+                for p in c:
+                    if isinstance(p, dict):
+                        chars += len(p.get("text", "") or "")
+            for tc in (m.get("tool_calls") or []):
+                args = tc.get("arguments") if isinstance(tc, dict) else None
+                chars += len(_json.dumps(args, default=str)) if args else 0
+        else:
+            chars += len(getattr(m, "content", "") or "")
+            for tc in (getattr(m, "tool_calls", None) or []):
+                args = getattr(tc, "arguments", None)
+                chars += len(_json.dumps(args, default=str)) if args else 0
+    return chars // 4
+
+
 def _compact_transcript(config: "RoninConfig", transcript: list[str], console: "Console") -> None:
     """Summarize the conversation into a tight note and replace the transcript
     with it — frees context while keeping the gist (like Claude Code's /compact)."""
@@ -1637,16 +1670,9 @@ def run_code_session(
                 _used = 0
                 _left = 100
                 try:
-                    for _m in (message_history or []):
-                        if not isinstance(_m, dict):
-                            continue
-                        _c = _m.get("content", "")
-                        if isinstance(_c, str):
-                            _used += _estimate_tokens(_c)
-                        elif isinstance(_c, list):
-                            for _p in _c:
-                                if isinstance(_p, dict):
-                                    _used += _estimate_tokens(_p.get("text", ""))
+                    # Count the structured history (Message objects, not dicts) —
+                    # content + tool-call arguments — so the gauge actually ticks.
+                    _used = _history_token_estimate(message_history)
                     _left = max(0, 100 - int(_used * 100 / 128000))
                     # Always-visible chip strip: [FREE] [provider:model] [mode]
                     # [branch*] [write-gated] [role:x], width-aware.
@@ -2003,16 +2029,9 @@ def run_unified_session(
                 _used = 0
                 _left = 100
                 try:
-                    for _m in (message_history or []):
-                        if not isinstance(_m, dict):
-                            continue
-                        _c = _m.get("content", "")
-                        if isinstance(_c, str):
-                            _used += _estimate_tokens(_c)
-                        elif isinstance(_c, list):
-                            for _p in _c:
-                                if isinstance(_p, dict):
-                                    _used += _estimate_tokens(_p.get("text", ""))
+                    # Count the structured history (Message objects, not dicts) —
+                    # content + tool-call arguments — so the gauge actually ticks.
+                    _used = _history_token_estimate(message_history)
                     _left = max(0, 100 - int(_used * 100 / 128000))
                     # Always-visible chip strip: [FREE] [provider:model] [mode]
                     # [branch*] [write-gated] [role:x], width-aware.
