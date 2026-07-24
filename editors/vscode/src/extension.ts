@@ -1,7 +1,7 @@
 // Ronin VS Code extension.
 //
 // Drives a locally-running `ronin serve` HTTP API from the editor. Two commands:
-//   - ronin.code : "Ronin: Run a coding task"
+//   - ronin.code : "Ronin: Run a task (Q&A — no file edits)"
 //   - ronin.ask  : "Ronin: Ask about the codebase"
 //
 // Both prompt for input and POST it to `<serveUrl>/ask` with the body shape
@@ -211,7 +211,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand('ronin.code', () =>
       runCommand('task', {
-        prompt: 'Describe the coding task for Ronin',
+        prompt: 'Describe a task for Ronin (Q&A over `ronin serve` — answers, does not edit files)',
         placeHolder: 'e.g. add retry + tests to the http client',
         progress: 'Ronin is working on your task…',
       }),

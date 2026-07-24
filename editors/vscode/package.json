@@ -1,7 +1,7 @@
 {
   "name": "ronin",
   "displayName": "Ronin",
-  "description": "Drive the ronin coding agent from VS Code — run coding tasks and ask about the codebase against a locally-running `ronin serve`.",
+  "description": "Ask the ronin agent about your codebase from VS Code against a locally-running `ronin serve` (/ask). Q&A only — this endpoint has no file/shell tools, so it does not edit files yet; in-editor code edits are future work.",
   "version": "0.1.0",
   "publisher": "ronin",
   "license": "MIT",
@@ -32,7 +32,7 @@
     "commands": [
       {
         "command": "ronin.code",
-        "title": "Ronin: Run a coding task",
+        "title": "Ronin: Run a task (Q&A — no file edits)",
         "category": "Ronin"
       },
       {
