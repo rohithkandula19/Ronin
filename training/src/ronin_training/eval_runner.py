@@ -199,6 +199,42 @@ def mlx_provider(model_path: str, *, adapter_path: str | None = None,
     return _provider
 
 
+def hf_provider(model_path: str, *, adapter_path: str | None = None,
+                max_tokens: int = 512) -> Provider:
+    """A Provider backed by transformers (+ optional PEFT adapter) — the FREE
+    eval path: runs on a Colab/Kaggle T4 or any box that can load the base
+    model, no Apple Silicon required. Raises a clear ImportError if the stack
+    isn't installed — never degrades to empty responses."""
+    try:
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+    except ImportError as e:                        # pragma: no cover - env-dependent
+        raise ImportError(
+            "hf_provider needs torch+transformers (see training/cuda/"
+            "requirements.txt) — free on Colab/Kaggle; see training/colab/."
+        ) from e
+
+    tokenizer = AutoTokenizer.from_pretrained(model_path)   # pragma: no cover
+    model = AutoModelForCausalLM.from_pretrained(           # pragma: no cover
+        model_path, device_map="auto",
+        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32)
+    if adapter_path:                                        # pragma: no cover
+        from peft import PeftModel
+        model = PeftModel.from_pretrained(model, adapter_path)
+    tools = ronin_tools_for_template()
+
+    def _provider(case: dict) -> ProviderResponse:  # pragma: no cover - needs a model
+        ids = tokenizer.apply_chat_template(
+            case_messages(case), tools=tools, add_generation_prompt=True,
+            return_tensors="pt").to(model.device)
+        out = model.generate(ids, max_new_tokens=max_tokens, do_sample=False,
+                             pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id)
+        text = tokenizer.decode(out[0][ids.shape[1]:], skip_special_tokens=True)
+        return ProviderResponse(text=text, tool_calls=extract_tool_names(text))
+
+    return _provider
+
+
 def case_messages(case: dict) -> list[dict]:
     """The chat-template message list for a case. PURE.
 
@@ -299,6 +335,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="report path (default: timestamped file in training/reports/)")
     ap.add_argument("--title", default="Protocol Eval")
     ap.add_argument("--max-tokens", type=int, default=512)
+    ap.add_argument("--provider", choices=("mlx", "hf"), default="mlx",
+                    help="mlx = Apple Silicon on-device; hf = transformers "
+                    "(+PEFT) — the free Colab/Kaggle path")
     ap.add_argument("--baseline", action="store_true",
                     help="ALSO score the bare base model (no adapter) — every "
                     "adapter number ships next to its baseline delta")
@@ -318,8 +357,9 @@ def main(argv: list[str] | None = None) -> int:
         runs.append(("baseline", None))
 
     scores: dict[str, EvalReport] = {}
+    make = hf_provider if a.provider == "hf" else mlx_provider
     for label, adapter in runs:
-        provider = mlx_provider(a.model, adapter_path=adapter, max_tokens=a.max_tokens)
+        provider = make(a.model, adapter_path=adapter, max_tokens=a.max_tokens)
         report = run_evals(cases, provider)
         scores[label] = report
         out = a.out or str(Path("training/reports") / f"eval{len(cases)}_{label}_{stamp}.md")

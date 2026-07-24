@@ -46,3 +46,28 @@ def test_report_carries_provenance_and_per_task_rows(tmp_path):
     assert "## Provenance" in text and "deadbeef" in text
     assert "| a | grounding | PASS |" in text
     assert "| b | recovery | FAIL |" in text
+
+
+def test_hf_provider_raises_cleanly_without_the_stack():
+    import importlib.util
+    import pytest
+    from ronin_training.eval_runner import hf_provider
+    if importlib.util.find_spec("transformers") is not None:
+        pytest.skip("transformers installed here; the guard path can't fire")
+    with pytest.raises(ImportError, match="Colab/Kaggle"):
+        hf_provider("Qwen/Qwen2.5-Coder-1.5B-Instruct")
+
+
+def test_provider_flag_parses(monkeypatch):
+    # --provider hf reaches the right factory (stubbed; no model load)
+    import ronin_training.eval_runner as er
+    seen = {}
+    def fake_hf(model, *, adapter_path=None, max_tokens=512):
+        seen["provider"] = "hf"; seen["adapter"] = adapter_path
+        return lambda case: er.ProviderResponse(text="")
+    monkeypatch.setattr(er, "hf_provider", fake_hf)
+    monkeypatch.setattr(er, "assert_frozen_eval_set", lambda p, repin=False: [])
+    monkeypatch.setattr(er, "load_cases", lambda p: [])
+    monkeypatch.setattr(er, "write_report", lambda *a, **k: None)
+    er.main(["--provider", "hf", "--model", "m", "--adapter", "x", "--out", "/dev/null"])
+    assert seen == {"provider": "hf", "adapter": "x"}

@@ -54,6 +54,15 @@ Pass `--allow-invalid` to exclude bad rows instead of failing.
 
 ## Evaluate a model on the protocol
 
+**Runs free.** Two provider paths: `--provider mlx` (Apple Silicon, on-device)
+and `--provider hf` (transformers + optional PEFT adapter) — the second runs on
+a free Colab/Kaggle T4 (same notebook as training, Cell 5) or any machine that
+can load the 1.5B base model, CPU included. The frozen 91-case set is
+sha256-pinned; the runner refuses a drifted set and stamps model+adapter+commit
+into every report. `--baseline` prints the adapter score next to
+"Qwen-1.5B alone" — that delta is the value proposition.
+
+
 ```python
 from ronin_training.eval_runner import load_cases, run_evals, mlx_provider, write_report
 
