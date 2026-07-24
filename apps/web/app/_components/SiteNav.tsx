@@ -76,6 +76,14 @@ export function SiteNav() {
           {n.label}
         </Link>
       ))}
+      <a
+        href="https://github.com/rohithkandula19/Ronin"
+        target="_blank"
+        rel="noreferrer"
+        className="ml-auto shrink-0 rounded-md px-3 py-1.5 font-medium text-dim transition hover:bg-accent/10 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      >
+        GitHub ↗
+      </a>
       <button
         onClick={cycleTheme}
         aria-label={`Theme: ${THEME_META[theme].label} (click to change)`}

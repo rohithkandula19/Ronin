@@ -1,6 +1,6 @@
 # ronin — Quickstart 🐼
 
-A masterless, terminal-native, **provider-agnostic** coding agent. Runs on Claude for top quality, or **free** on Gemini / Cerebras / Groq / Ollama — same agent, your choice of brain.
+The coding agent that runs **free, local, and air-gapped**. Any provider — Claude for top quality, free tiers on Gemini / Cerebras / Groq, or a fully local model with zero keys — with **no telemetry** and a **hard safety floor** under destructive commands.
 
 ## 1. Install & log in
 
