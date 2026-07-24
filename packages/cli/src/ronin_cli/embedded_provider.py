@@ -276,14 +276,18 @@ def tools_to_openai(tools: list[Tool]) -> list[dict[str, Any]]:
     ]
 
 
-# Qwen-Coder emits one JSON object per <tool_call> block:
-#   <tool_call>\n{"name": "...", "arguments": {...}}\n</tool_call>
-_TOOL_CALL_BLOCK = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
+# The <tool_call> dialect lives in ONE canonical module (ronin_dialect) shared
+# with corpus generation and the eval extractor, so the three can never drift
+# (see training/reports/valid_tool_json_root_cause.md). Kept as a module-level
+# name for back-compat with anything that imported it from here.
+from ronin_dialect import BLOCK_RE as _TOOL_CALL_BLOCK  # noqa: E402
+from ronin_dialect import parse_tool_calls as _dialect_parse  # noqa: E402
 
 
 def parse_tool_calls(text: str) -> tuple[str, list[ToolCall]]:
     """Extract ``<tool_call>`` blocks from generated text into ``ToolCall``s.
-    PURE — no I/O.
+    PURE — no I/O. Delegates to the canonical ``ronin_dialect`` parser; this
+    wrapper only assigns the runtime's ``embedded_N`` call ids.
 
     Returns ``(clean_text, calls)`` where ``clean_text`` is the text with parsed
     blocks removed. A block whose body isn't a JSON object with a string ``name``
@@ -291,34 +295,10 @@ def parse_tool_calls(text: str) -> tuple[str, list[ToolCall]]:
     dropped or "repaired" into a call the model didn't make. ``arguments`` may be
     a JSON object or (per some templates) a JSON-encoded string of one.
     """
-    calls: list[ToolCall] = []
-    kept: list[str] = []
-    cursor = 0
-    for m in _TOOL_CALL_BLOCK.finditer(text):
-        kept.append(text[cursor:m.start()])
-        cursor = m.end()
-        try:
-            obj = json.loads(m.group(1))
-        except json.JSONDecodeError:
-            kept.append(m.group(0))  # malformed: keep visible in the text
-            continue
-        name = obj.get("name") if isinstance(obj, dict) else None
-        if not isinstance(name, str) or not name:
-            kept.append(m.group(0))
-            continue
-        args = obj.get("arguments", {})
-        if isinstance(args, str):
-            try:
-                args = json.loads(args)
-            except json.JSONDecodeError:
-                kept.append(m.group(0))
-                continue
-        if not isinstance(args, dict):
-            kept.append(m.group(0))
-            continue
-        calls.append(ToolCall(id=f"embedded_{len(calls)}", name=name, arguments=args))
-    kept.append(text[cursor:])
-    return "".join(kept).strip(), calls
+    clean, parsed = _dialect_parse(text)
+    calls = [ToolCall(id=f"embedded_{i}", name=p.name, arguments=p.arguments)
+             for i, p in enumerate(parsed)]
+    return clean, calls
 
 
 def render_prompt(

@@ -124,16 +124,19 @@ def run_evals(cases: list[dict], provider: Provider) -> EvalReport:
 # "refusing" rm -rf ~ while echoing the call JSON in its refusal — executing that
 # would be catastrophic), so the eval must not award credit for output the runtime
 # would not consume.
-_TOOLCALL = re.compile(r'\{\s*"name"\s*:\s*"([a-z_]+)"\s*,\s*"arguments"')
+# The call-shape regex and extraction now live in the canonical ronin_dialect
+# module — the SAME code the runtime parser and corpus renderer use, so the eval
+# can never drift from what the runtime executes (the guarantee this comment
+# used to merely assert). _TOOLCALL kept as an alias for back-compat.
+from ronin_dialect import CALL_SHAPE_RE as _TOOLCALL  # noqa: E402
+from ronin_dialect import extract_call_names as _dialect_extract  # noqa: E402
 
 
 def extract_all_call_names(raw: str) -> list[str]:
     """Every wrapper-enclosed, call-shaped tool name in the output, INCLUDING names
-    not in Ronin's registry — used to detect hallucinated tools."""
-    names: list[str] = []
-    for chunk in re.findall(r"<tool_call>(.*?)</tool_call>", raw, re.DOTALL):
-        names.extend(_TOOLCALL.findall(chunk))
-    return names
+    not in Ronin's registry — used to detect hallucinated tools. Delegates to the
+    canonical ``ronin_dialect`` extractor."""
+    return _dialect_extract(raw)
 
 
 def extract_tool_names(raw: str) -> list[str]:

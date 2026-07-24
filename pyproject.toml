@@ -16,6 +16,7 @@ members = [
     "packages/hardening",
     "packages/cli",
     "packages/arcade",
+    "packages/dialect",
     "packages/relay",
     "packages/industry-sdk",
     "packages/vault",

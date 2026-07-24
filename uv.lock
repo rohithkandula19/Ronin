@@ -16,6 +16,7 @@ members = [
     "ronin-artifacts",
     "ronin-cli",
     "ronin-demo",
+    "ronin-dialect",
     "ronin-eval-suite",
     "ronin-hardening",
     "ronin-identity",
@@ -1744,6 +1745,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "rich" },
     { name = "ronin-agent-patterns" },
+    { name = "ronin-dialect" },
     { name = "ronin-eval-suite" },
     { name = "ronin-hardening" },
     { name = "ronin-mcp-servers" },
@@ -1792,6 +1794,7 @@ requires-dist = [
     { name = "rich", specifier = ">=13.7,<16" },
     { name = "ronin-agent-patterns", editable = "packages/agent-patterns" },
     { name = "ronin-arcade", marker = "extra == 'arcade'", editable = "packages/arcade" },
+    { name = "ronin-dialect", editable = "packages/dialect" },
     { name = "ronin-eval-suite", editable = "packages/eval-suite" },
     { name = "ronin-hardening", editable = "packages/hardening" },
     { name = "ronin-mcp-servers", editable = "packages/mcp-servers" },
@@ -1840,6 +1843,21 @@ dev = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "pytest", specifier = ">=9.1.1" },
 ]
+
+[[package]]
+name = "ronin-dialect"
+version = "1.0.0"
+source = { editable = "packages/dialect" }
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=7.0" }]
 
 [[package]]
 name = "ronin-eval-suite"
@@ -2186,6 +2204,7 @@ source = { editable = "training" }
 dependencies = [
     { name = "jsonschema" },
     { name = "pyyaml" },
+    { name = "ronin-dialect" },
 ]
 
 [package.optional-dependencies]
@@ -2202,6 +2221,7 @@ requires-dist = [
     { name = "mlx-lm", marker = "extra == 'mlx'", specifier = ">=0.20" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.1.1" },
     { name = "pyyaml", specifier = ">=6.0" },
+    { name = "ronin-dialect", editable = "packages/dialect" },
 ]
 provides-extras = ["mlx", "dev"]
 
