@@ -23,8 +23,24 @@ from .volume_parser import parse_dir
 _MLX_KEEP = ("messages", "tools")
 
 
-def _mlx_row(ex: dict) -> dict:
-    return {k: ex[k] for k in _MLX_KEEP if k in ex}
+def _full_registry_tools() -> list[dict]:
+    """All registry tools in OpenAI function shape — the runtime's exact prompt.
+    D1 fix: training rows are exported under the SAME tool list the runtime and
+    the 91-case eval present, instead of each row's 0-6 case tools."""
+    from .validators import load_registry
+    return [
+        {"type": "function", "function": {
+            "name": t["name"], "description": t["description"], "parameters": t["parameters"],
+        }}
+        for t in load_registry().values()
+    ]
+
+
+def _mlx_row(ex: dict, *, full_registry: bool = True) -> dict:
+    row = {k: ex[k] for k in _MLX_KEEP if k in ex}
+    if full_registry:
+        row["tools"] = _full_registry_tools()
+    return row
 
 
 def _public(obj: dict) -> dict:
@@ -46,7 +62,7 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
 
 
 def build(volumes_dir: str | Path, out_dir: str | Path,
-          *, strict: bool = True) -> dict:
+          *, strict: bool = True, full_registry: bool = True) -> dict:
     """Build the dataset. Returns a report dict. Raises if `strict` and any row is
     invalid — a bad training row is never silently included."""
     parsed = parse_dir(Path(volumes_dir))
@@ -89,9 +105,9 @@ def build(volumes_dir: str | Path, out_dir: str | Path,
 
     train, va, te = split_by_family(deduped)
     out = Path(out_dir)
-    _write_jsonl(out / "train.jsonl", [_mlx_row(x) for x in train])
-    _write_jsonl(out / "valid.jsonl", [_mlx_row(x) for x in va])
-    _write_jsonl(out / "test.jsonl", [_mlx_row(x) for x in te])
+    _write_jsonl(out / "train.jsonl", [_mlx_row(x, full_registry=full_registry) for x in train])
+    _write_jsonl(out / "valid.jsonl", [_mlx_row(x, full_registry=full_registry) for x in va])
+    _write_jsonl(out / "test.jsonl", [_mlx_row(x, full_registry=full_registry) for x in te])
     _write_jsonl(out.parent / "evals" / "ronin_protocol_eval.jsonl",
                  [_public(ec) for ec in valid_evals])
 
@@ -152,8 +168,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", default="training/data/generated")
     ap.add_argument("--allow-invalid", action="store_true",
                     help="do not raise on invalid rows (they are still excluded)")
+    ap.add_argument("--case-tools", action="store_true",
+                    help="export each row's own 0-6 case tools instead of the "
+                    "full registry (pre-D1 behavior; eval-mismatched)")
     a = ap.parse_args(argv)
-    rep = build(a.volumes, a.out, strict=not a.allow_invalid)
+    rep = build(a.volumes, a.out, strict=not a.allow_invalid,
+                full_registry=not a.case_tools)
     _skip = {"problems", "coverage_table"}
     print(json.dumps({k: v for k, v in rep.items() if k not in _skip}, indent=2))
     return 0
