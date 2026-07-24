@@ -15,6 +15,7 @@ the pass rate.
 """
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import re
 from dataclasses import dataclass, field
@@ -215,15 +216,62 @@ def case_messages(case: dict) -> list[dict]:
     return msgs
 
 
-def write_report(report: EvalReport, path: str | Path, *, title: str = "Protocol Eval") -> None:
+def _sha256_file(path: str | Path) -> str:
+    import hashlib
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _git_sha() -> str:
+    import subprocess
+    try:
+        return subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True,
+                              text=True, check=True).stdout.strip()
+    except Exception:  # noqa: BLE001
+        return "unknown"
+
+
+# The frozen eval set's pin lives IN GIT (training/data/ is gitignored, so the
+# pin is the durable truth). An eval run against a set whose bytes don't match
+# the pin is not comparable to any recorded number — refuse, loudly.
+_EVAL_PIN = Path(__file__).resolve().parents[2] / "schemas" / "protocol_eval.sha256"
+
+
+def assert_frozen_eval_set(evals_path: str | Path, *, repin: bool = False) -> list[str]:
+    """[] if ``evals_path`` matches the committed pin. ``repin=True`` rewrites the
+    pin (deliberate corpus evolution — never mid-comparison)."""
+    p = Path(evals_path)
+    if not p.is_file():
+        return [f"eval set {p} missing — regenerate with the dataset builder"]
+    digest = _sha256_file(p)
+    if repin:
+        _EVAL_PIN.write_text(digest + "\n", encoding="utf-8")
+        return []
+    if not _EVAL_PIN.is_file():
+        return [f"no frozen pin at {_EVAL_PIN} — run once with --repin to freeze the set"]
+    want = _EVAL_PIN.read_text().strip()
+    if digest != want:
+        return [f"eval set sha256 {digest} != pinned {want} — scores would not be "
+                "comparable; regenerate the canonical set or deliberately --repin"]
+    return []
+
+
+def write_report(report: EvalReport, path: str | Path, *, title: str = "Protocol Eval",
+                 provenance: dict | None = None) -> None:
     lines = [
         f"# {title}", "",
         f"- cases: **{report.total}**",
         f"- passed: **{report.passed}**  ·  pass rate: **{report.pass_rate:.1%}**", "",
-        "## By category", "", "| category | passed | total |", "|---|---|---|",
     ]
+    if provenance:
+        lines += ["## Provenance", ""]
+        lines += [f"- {k}: `{v}`" for k, v in provenance.items()]
+        lines += [""]
+    lines += ["## By category", "", "| category | passed | total |", "|---|---|---|"]
     for cat, (p, t) in report.by_category().items():
         lines.append(f"| {cat} | {p} | {t} |")
+    lines += ["", "## Per-task", "", "| task | category | result |", "|---|---|---|"]
+    for r in report.results:
+        lines.append(f"| {r.eval_id} | {r.category} | {'PASS' if r.passed else 'FAIL'} |")
     fails = [r for r in report.results if not r.passed]
     if fails:
         lines += ["", "## Failures", ""]
@@ -247,19 +295,46 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--model", required=True)
     ap.add_argument("--adapter", default=None, help="path to a trained LoRA adapter")
     ap.add_argument("--evals", default="training/data/evals/ronin_protocol_eval.jsonl")
-    ap.add_argument("--out", required=True)
+    ap.add_argument("--out", default=None,
+                    help="report path (default: timestamped file in training/reports/)")
     ap.add_argument("--title", default="Protocol Eval")
     ap.add_argument("--max-tokens", type=int, default=512)
+    ap.add_argument("--baseline", action="store_true",
+                    help="ALSO score the bare base model (no adapter) — every "
+                    "adapter number ships next to its baseline delta")
+    ap.add_argument("--repin", action="store_true",
+                    help="deliberately re-pin the frozen eval-set hash (corpus "
+                    "evolution only; forbidden mid-comparison)")
     a = ap.parse_args(argv)
 
-    provider = mlx_provider(a.model, adapter_path=a.adapter, max_tokens=a.max_tokens)
+    frozen_errs = assert_frozen_eval_set(a.evals, repin=a.repin)
+    if frozen_errs:
+        raise SystemExit("FROZEN EVAL VIOLATION:\n- " + "\n- ".join(frozen_errs))
+
     cases = load_cases(a.evals)
-    report = run_evals(cases, provider)
-    write_report(report, a.out, title=a.title)
-    print(f"{a.title}: {report.passed}/{report.total} passed "
-          f"({report.pass_rate:.1%}) → {a.out}")
-    for cat, (p, t) in report.by_category().items():
-        print(f"  {cat}: {p}/{t}")
+    stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    runs = [("adapter" if a.adapter else "model", a.adapter)]
+    if a.baseline and a.adapter:
+        runs.append(("baseline", None))
+
+    scores: dict[str, EvalReport] = {}
+    for label, adapter in runs:
+        provider = mlx_provider(a.model, adapter_path=adapter, max_tokens=a.max_tokens)
+        report = run_evals(cases, provider)
+        scores[label] = report
+        out = a.out or str(Path("training/reports") / f"eval{len(cases)}_{label}_{stamp}.md")
+        write_report(report, out, title=f"{a.title} — {label}",
+                     provenance={"model": a.model, "adapter": adapter or "(none)",
+                                 "commit": _git_sha(), "eval_set_sha256": _sha256_file(a.evals),
+                                 "timestamp": stamp})
+        print(f"{a.title} [{label}]: {report.passed}/{report.total} passed "
+              f"({report.pass_rate:.1%}) → {out}")
+        for cat, (p, t) in report.by_category().items():
+            print(f"  {cat}: {p}/{t}")
+    if len(scores) == 2:
+        d = scores["adapter"].passed - scores["baseline"].passed
+        print(f"baseline delta: {d:+d} (adapter {scores['adapter'].passed} vs "
+              f"base {scores['baseline'].passed} of {len(cases)})")
     return 0
 
 

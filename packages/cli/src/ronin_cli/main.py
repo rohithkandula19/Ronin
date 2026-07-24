@@ -1406,6 +1406,32 @@ def eval_drift(
     raise typer.Exit(eval_main(argv))
 
 
+@eval_app.command("protocol", help="Run the frozen 91-task protocol eval against "
+                  "an adapter (with --baseline for the base-model delta).")
+def eval_protocol(
+    adapter: str = typer.Option(None, "--adapter", help="Path to a trained LoRA adapter dir."),
+    model: str = typer.Option("mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit", "--model"),
+    baseline: bool = typer.Option(False, "--baseline",
+                                  help="Also score the bare base model — every adapter "
+                                  "number ships next to its baseline delta."),
+    evals: str = typer.Option("training/data/evals/ronin_protocol_eval.jsonl", "--evals"),
+) -> None:
+    """Honest, frozen, reproducible: refuses a contaminated eval set (sha256 pin),
+    stamps model+adapter+commit into a timestamped training/reports/ file."""
+    try:
+        from ronin_training.eval_runner import main as _eval_main
+    except ImportError:
+        console.print("[red]x[/red] the protocol eval needs the training workspace: "
+                      "run from a repo checkout with [cyan]uv sync --all-packages[/cyan]")
+        raise typer.Exit(2)
+    argv = ["--model", model, "--evals", evals]
+    if adapter:
+        argv += ["--adapter", adapter]
+    if baseline:
+        argv += ["--baseline"]
+    raise typer.Exit(_eval_main(argv))
+
+
 # ---------- plugin (scaffold custom tools) ----------
 
 plugin_app = typer.Typer(help="Scaffold & manage custom Python tool plugins (.ronin/plugins/).")
