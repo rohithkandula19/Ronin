@@ -1,5 +1,5 @@
 # Pinned CUDA training stack for ronin-code-1.5b (see README.md).
-torch==2.6.0
+torch==2.13.0
 transformers==4.51.3
 trl==0.17.0
 peft==0.15.2
