@@ -421,6 +421,12 @@ def set_key(
 def ask(
     question: list[str] = typer.Argument(None, help="The question to ask. Wrap multi-word questions in quotes."),
     raw: bool = typer.Option(False, "--raw", help="Print plain output instead of rich panels."),
+    json_out: bool = typer.Option(
+        False, "--json",
+        help="Emit ONE JSON object on stdout: {result, tool_calls, files_changed, "
+             "cost, duration, success, usage}. Progress/logs go to stderr — for CI "
+             "and scripting.",
+    ),
 ) -> None:
     """One-shot Q&A — also reads piped stdin, so ronin composes in shell pipelines.
 
@@ -428,6 +434,7 @@ def ask(
       ronin ask "which customers churned?"
       cat error.log | ronin ask "what's the root cause?"
       git diff | ronin ask "write release notes for these changes"
+      ronin ask --json "list the open ports"        # machine-readable, for scripts
     """
     config = load_config()
     if not config.has_provider_auth():
@@ -450,6 +457,29 @@ def ask(
         console.print("[red]✗[/red] nothing to ask — give a question or pipe input "
                       "([dim]cat file | ronin ask \"...\"[/dim]).")
         raise typer.Exit(2)
+
+    if json_out:
+        import json as _json
+        import time as _time
+        _t0 = _time.monotonic()
+        # console=None keeps stdout clean; only the JSON object is written there.
+        result = run_ask(config, text, console=None)
+        tool_calls = [
+            s.get("content") for s in (result.trace or [])
+            if isinstance(s, dict) and s.get("kind") in ("tool_call", "action")
+        ]
+        payload = {
+            "result": result.output,
+            "success": result.success,
+            "tool_calls": tool_calls,
+            "files_changed": [],  # `ask` is read-only Q&A; edits happen in `code`
+            "cost": None,          # not priced here; token counts are in `usage`
+            "usage": result.usage or {},
+            "duration": round(_time.monotonic() - _t0, 3),
+            "error": result.error,
+        }
+        print(_json.dumps(payload))
+        raise typer.Exit(0 if result.success else 1)
 
     result = run_ask(config, text, console=console)
     _print_result(result, raw=raw)
