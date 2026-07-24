@@ -4,10 +4,19 @@ import json
 import re
 from typing import Any, Callable, TypeVar
 
-import anthropic
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 T = TypeVar("T", bound=BaseModel)
+
+
+def __getattr__(name: str):
+    """Lazily expose the ``anthropic`` SDK (a ~0.7s import) as a module
+    attribute so importing this module — and thus ``ronin --help`` — doesn't
+    load it, while ``patch('...validation.anthropic.Anthropic')`` still works."""
+    if name == "anthropic":
+        import anthropic
+        return anthropic
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class ValidationFailure(Exception):
@@ -58,6 +67,7 @@ class OutputValidator(BaseModel):
         returns a follow-up message. Default behavior appends the error to the user
         message verbatim.
         """
+        import anthropic  # lazy: keep the SDK off the import path (ronin --help)
         client = anthropic.Anthropic(api_key=self.api_key) if self.api_key else anthropic.Anthropic()
         builder = prompt_builder or (lambda err: f"Your previous response failed validation: {err}\nReturn corrected output.")
 

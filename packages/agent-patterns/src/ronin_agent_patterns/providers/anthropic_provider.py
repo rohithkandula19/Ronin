@@ -3,12 +3,26 @@ from __future__ import annotations
 
 from typing import Any
 
-import anthropic
 
 from typing import Iterator
 
 from ..types import Tool
 from .base import LLMProvider, LLMResponse, Message, StreamEvent, ToolCall
+
+
+def __getattr__(name: str):
+    """Lazily expose the ``anthropic`` SDK as a module attribute.
+
+    The SDK is a ~0.7s import; keeping it off the module's top-level means
+    ``ronin --help`` (which imports this module transitively) never pays for it.
+    Accessing ``anthropic_provider.anthropic`` — including via test patches like
+    ``patch('...anthropic_provider.anthropic.Anthropic')`` — imports it on first
+    use and returns the real module, so patching still works.
+    """
+    if name == "anthropic":
+        import anthropic
+        return anthropic
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _parse_anthropic_message(message: Any) -> LLMResponse:
@@ -113,7 +127,10 @@ class AnthropicProvider(LLMProvider):
     # is left off and the request body is byte-for-byte unchanged (the default).
     effort: str | None = None
 
-    def _client(self) -> anthropic.Anthropic:
+    def _client(self) -> "anthropic.Anthropic":
+        # Lazy import: keep the ~0.7s anthropic SDK load off the `ronin --help`
+        # path; it only happens when a real client is constructed.
+        import anthropic
         return anthropic.Anthropic(api_key=self.api_key) if self.api_key else anthropic.Anthropic()
 
     def _build_kwargs(

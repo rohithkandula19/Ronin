@@ -4,8 +4,6 @@ import inspect
 import json
 from typing import Any
 
-import anthropic
-
 from .types import MALFORMED_ARGS_KEY, Tool
 
 DEFAULT_MODEL = "claude-sonnet-4-6"
@@ -24,8 +22,14 @@ _ALIAS_FAMILIES: tuple[frozenset[str], ...] = (
 )
 
 
-def make_client(api_key: str | None = None) -> anthropic.Anthropic:
-    """Build an Anthropic client. ``api_key=None`` falls back to ``ANTHROPIC_API_KEY``."""
+def make_client(api_key: str | None = None) -> "anthropic.Anthropic":
+    """Build an Anthropic client. ``api_key=None`` falls back to ``ANTHROPIC_API_KEY``.
+
+    The SDK is imported lazily here (not at module top) so importing the agent
+    framework — and therefore `ronin --help` — doesn't pay the ~0.7s anthropic
+    import cost until a client is actually constructed.
+    """
+    import anthropic
     return anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
 
 
