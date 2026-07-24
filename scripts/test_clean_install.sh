@@ -65,9 +65,9 @@ esac
 echo "== smoke, run from OUTSIDE the repo ($RUNDIR) =="
 cd "$RUNDIR"
 "$RONIN" --version                >/dev/null || fail "ronin --version"
-"$RONIN" version                  >/dev/null || fail "ronin version"
+"$RONIN" util version             >/dev/null || fail "ronin util version"
 "$RONIN" --help                   >/dev/null || fail "ronin --help"
-"$RONIN" doctor                   >/dev/null || fail "ronin doctor"
+"$RONIN" util doctor              >/dev/null || fail "ronin util doctor"
 "$RO" --version                   >/dev/null || fail "ro --version"
 # offline-safe: a missing eval dataset must error gracefully (exit 2), not crash.
 set +e
