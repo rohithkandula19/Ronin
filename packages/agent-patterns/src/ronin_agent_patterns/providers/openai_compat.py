@@ -19,7 +19,7 @@ from typing import Any, Iterator
 
 import httpx
 
-from ..types import Tool
+from ..types import MALFORMED_ARGS_KEY, Tool
 from .base import LLMProvider, LLMResponse, Message, StreamEvent, ToolCall
 
 
@@ -168,7 +168,12 @@ class OpenAICompatProvider(LLMProvider):
             try:
                 return json.loads(args_raw)
             except json.JSONDecodeError:
-                return {}
+                # Weak models sometimes emit truncated/invalid JSON. Coercing to
+                # {} silently ran the tool argument-less, and recovery then
+                # mis-diagnosed it as a wrong-arg-NAME error. Preserve the raw
+                # string behind a sentinel so execute_tool_call can tell the
+                # model its JSON was malformed (see MALFORMED_ARGS_KEY).
+                return {MALFORMED_ARGS_KEY: args_raw}
         return args_raw or {}
 
     @staticmethod

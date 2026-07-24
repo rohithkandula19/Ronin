@@ -21,6 +21,8 @@
 set -euo pipefail
 
 REPO_URL="https://github.com/rohithkandula19/Ronin"
+# Pinned uv version for reproducible installs (override with UV_INSTALL_VERSION).
+UV_INSTALL_VERSION="${UV_INSTALL_VERSION:-0.5.11}"
 INSTALL_DIR="${RONIN_INSTALL_DIR:-${CSK_INSTALL_DIR:-$HOME/.local/share/ronin}}"
 BIN_DIR="${RONIN_BIN_DIR:-${CSK_BIN_DIR:-$HOME/.local/bin}}"
 REF="main"
@@ -54,15 +56,29 @@ die()  { echo "  ${C_RED}✗${C_RESET} $*" >&2; exit 1; }
 OS="$(uname -s)"
 case "$OS" in
   Darwin|Linux) ;;
-  *) die "unsupported OS: $OS (this installer supports macOS and Linux only)" ;;
+  MINGW*|MSYS*|CYGWIN*|Windows_NT)
+    die "Windows is not yet supported natively. Run this installer inside WSL (Windows Subsystem for Linux): open a WSL shell and re-run the same curl | bash command." ;;
+  *) die "unsupported OS: $OS. Supported: macOS and Linux (Windows via WSL)." ;;
 esac
 ok "platform: $OS"
 
 # --- uv ---
 say "Checking uv"
 if ! command -v uv >/dev/null 2>&1; then
-  warn "uv not found — installing via the official installer"
-  curl -sSLf https://astral.sh/uv/install.sh | sh
+  warn "uv not found — installing the pinned official installer ($UV_INSTALL_VERSION)"
+  # Pin the uv version (reproducible installs) and stage the installer to a file
+  # before running it, rather than piping the network stream straight into `sh`
+  # (a piped partial download can execute half a script). If UV_INSTALLER_SHA256
+  # is set, the download is verified against it before execution.
+  _uv_installer="$(mktemp)"
+  curl -sSLf "https://astral.sh/uv/${UV_INSTALL_VERSION}/install.sh" -o "$_uv_installer" \
+    || die "failed to download the uv $UV_INSTALL_VERSION installer"
+  if [[ -n "${UV_INSTALLER_SHA256:-}" ]]; then
+    echo "${UV_INSTALLER_SHA256}  ${_uv_installer}" | shasum -a 256 -c - \
+      || die "uv installer checksum mismatch — refusing to run it"
+  fi
+  sh "$_uv_installer"
+  rm -f "$_uv_installer"
   # Source the shell config the installer dropped to pick up uv on PATH
   export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
   if ! command -v uv >/dev/null 2>&1; then
@@ -81,15 +97,23 @@ say "Fetching ronin ($REF)"
 mkdir -p "$(dirname "$INSTALL_DIR")"
 if [[ -d "$INSTALL_DIR/.git" ]]; then
   ok "existing checkout at $INSTALL_DIR — fetching latest"
-  git -C "$INSTALL_DIR" fetch --tags --quiet origin
-  git -C "$INSTALL_DIR" checkout --quiet "$REF"
-  git -C "$INSTALL_DIR" pull --quiet --ff-only origin "$REF" 2>/dev/null || true
+  git -C "$INSTALL_DIR" fetch --tags --quiet origin || die "git fetch failed for $REF"
+  git -C "$INSTALL_DIR" checkout --quiet "$REF" || die "git checkout '$REF' failed — is it a valid branch/tag?"
+  # A fast-forward can legitimately fail on a tag or a diverged local tree; only
+  # fatal when updating a branch. Never swallow it silently.
+  git -C "$INSTALL_DIR" pull --quiet --ff-only origin "$REF" 2>/dev/null \
+    || warn "could not fast-forward '$REF' (tag or diverged checkout) — using the checked-out commit"
 else
   ok "cloning to $INSTALL_DIR"
   git clone --quiet --branch "$REF" "$REPO_URL" "$INSTALL_DIR" 2>/dev/null \
-    || git clone --quiet "$REPO_URL" "$INSTALL_DIR"
-  git -C "$INSTALL_DIR" checkout --quiet "$REF" 2>/dev/null || true
+    || git clone --quiet "$REPO_URL" "$INSTALL_DIR" \
+    || die "git clone failed for $REPO_URL"
+  git -C "$INSTALL_DIR" checkout --quiet "$REF" \
+    || die "'$REF' is not a valid branch/tag in $REPO_URL — refusing to silently install main"
 fi
+# Prove we are on the ref the user asked for, and print the exact commit.
+_head="$(git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+ok "checked out $REF @ $_head"
 
 # --- sync ---
 say "Resolving workspace with uv"

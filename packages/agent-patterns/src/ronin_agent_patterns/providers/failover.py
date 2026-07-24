@@ -80,9 +80,13 @@ class FailoverProvider(LLMProvider):
             except Exception as e:  # noqa: BLE001
                 last_error = e
                 if emitted:
-                    # tokens already reached the user — can't restart elsewhere
-                    raise
-                # nothing emitted yet → safe to try the next provider
+                    # Tokens already reached the user, but the reset contract lets
+                    # us recover: tell the renderer to discard this provider's
+                    # partial output, then fail over so the next provider's answer
+                    # renders exactly once (previously we re-raised and lost the
+                    # turn entirely once a single token had streamed).
+                    yield StreamEvent(type="reset")
+                # try the next provider
         raise RuntimeError(
             f"all {len(self.providers)} providers failed; last error: {last_error}"
         ) from last_error

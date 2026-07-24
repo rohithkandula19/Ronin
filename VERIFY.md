@@ -6,8 +6,8 @@ that every new command's **code path runs without crashing** when the LLM, the
 network, the terminal, and `~/.ronin` are mocked. Run it any time with:
 
 ```bash
-cd /Users/rohithkandula/ronin
-.venv/bin/python -m pytest packages/cli/tests/test_integration_smoke.py -q
+cd "$(git rev-parse --show-toplevel)"
+uv run pytest packages/cli/tests/test_integration_smoke.py -q
 ```
 
 What a machine **can't** judge is the live UX — colours, arrow-key handling,

@@ -5,7 +5,7 @@ terminal. Two commands talk to a locally-running `ronin serve` HTTP API:
 
 | Command (Command Palette) | ID | What it does |
 |---|---|---|
-| **Ronin: Run a coding task** | `ronin.code` | Prompts for a task and sends it to ronin. |
+| **Ronin: Run a task (Q&A)** | `ronin.code` | Prompts for a task and sends it to `ronin serve` /ask. Q&A only — no file edits (the endpoint has no code tools yet). |
 | **Ronin: Ask about the codebase** | `ronin.ask` | Prompts for a question and sends it to ronin. |
 
 Both prompt with an input box, POST to `ronin serve`, and render the reply in
@@ -50,7 +50,7 @@ Then in VS Code:
    **Extension Development Host**, with the extension loaded.
 3. Make sure `ronin serve` is running in a terminal.
 4. In the dev-host window open the Command Palette (`Cmd/Ctrl+Shift+P`) and run
-   **Ronin: Run a coding task** or **Ronin: Ask about the codebase**.
+   **Ronin: Run a task (Q&A)** or **Ronin: Ask about the codebase**.
 5. Watch the answer appear in the **Ronin** output channel (View → Output →
    "Ronin").
 

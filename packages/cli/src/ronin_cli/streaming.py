@@ -121,11 +121,11 @@ class LiveRenderer:
 
             class _ThinkingLine:
                 # Re-rendered every spinner frame, so the clock ticks live
-                # (Claude-Code-style "forging... (12s . esc to interrupt)").
+                # (Claude-Code-style "forging... (12s . ctrl+c to interrupt)").
                 def __rich_console__(self, console, options):
                     secs = _time.monotonic() - start_t
                     line = Text(f" {verb}... ", style=SOFT)
-                    line.append(f"({secs:.0f}s · esc to interrupt)", style="dim")
+                    line.append(f"({secs:.0f}s · ctrl+c to interrupt)", style="dim")
                     yield line
 
             self._status = self.console.status(

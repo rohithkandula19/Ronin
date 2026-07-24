@@ -20,7 +20,6 @@ members = [
     "ronin-hardening",
     "ronin-identity",
     "ronin-industry-sdk",
-    "ronin-inference",
     "ronin-jobs",
     "ronin-mcp-servers",
     "ronin-memory",
@@ -1924,26 +1923,6 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.5" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.1.1" },
     { name = "pyyaml", specifier = ">=6.0" },
-]
-provides-extras = ["dev"]
-
-[[package]]
-name = "ronin-inference"
-version = "0.1.0"
-source = { editable = "packages/inference" }
-dependencies = [
-    { name = "pydantic" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "pydantic", specifier = ">=2.5" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.1.1" },
 ]
 provides-extras = ["dev"]
 

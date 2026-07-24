@@ -17,6 +17,7 @@ from __future__ import annotations
 import datetime
 import hashlib
 import json
+import os
 import uuid
 from pathlib import Path
 
@@ -58,19 +59,43 @@ def _title_of(transcript: list[str]) -> str:
     return "(no user message)"
 
 
+SCHEMA_VERSION = 2
+
+
+def _serialize_messages(messages: list | None) -> list:
+    """Best-effort JSON-safe form of a structured Message list (pydantic objects
+    or already-dicts). Never raises — a serialization hiccup must not lose the
+    display transcript."""
+    out: list = []
+    for m in messages or []:
+        if isinstance(m, dict):
+            out.append(m)
+        elif hasattr(m, "model_dump"):
+            try:
+                out.append(m.model_dump())
+            except Exception:  # noqa: BLE001
+                pass
+    return out
+
+
 def save_session(root: Path | str, transcript: list[str], *,
-                 session_id: str | None = None) -> Path | None:
-    """Archive ``transcript`` (in full) to this session's file. Returns the path."""
+                 session_id: str | None = None, messages: list | None = None) -> Path | None:
+    """Archive ``transcript`` (display) and, when given, the full structured
+    ``messages`` (tool calls + results) so ``--continue`` restores real context,
+    not just a flattened text tail. Atomic (tmp + replace). Returns the path."""
     if not transcript:
         return None
     sid = session_id or current_session_id()
-    d = _dir()
+    path = _session_path(sid)
+    if path is None:
+        return None
+    d = path.parent
     try:
         d.mkdir(parents=True, exist_ok=True)
     except OSError:
         return None
-    path = d / f"{sid}.json"
     data = {
+        "version": SCHEMA_VERSION,
         "id": sid,
         "root": str(Path(root).resolve()),
         "proj": _proj_key(root),
@@ -78,10 +103,19 @@ def save_session(root: Path | str, transcript: list[str], *,
         "title": _title_of(transcript),
         "turns": sum(1 for e in transcript if e.startswith("USER: ")),
         "transcript": transcript,
+        "messages": _serialize_messages(messages),
     }
+    # Atomic write: a crash mid-save must never truncate the session (it used to
+    # write_text in place → a partial file, silently loaded as empty next run).
+    tmp = path.with_suffix(".json.tmp")
     try:
-        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        tmp.replace(path)
     except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
         return None
     return path
 
@@ -120,15 +154,77 @@ def list_sessions(root: Path | str | None = None) -> list[dict]:
     return out
 
 
+def _session_path(session_id: str) -> Path | None:
+    """Resolve the on-disk path for a session id, or None if the id is unsafe.
+
+    Session ids are our own timestamp-uuid stamps (or legacy ``code-<hash>``),
+    never a path. The filename is reduced to its last path component with
+    ``os.path.basename`` — CodeQL's recognised path-traversal barrier — and the
+    id is rejected unless it survives that reduction unchanged, so no separator
+    or ``..`` component can ever reach the filesystem join."""
+    if not session_id or session_id in (".", ".."):
+        return None
+    # Strip any directory portion, then normalise the join and confirm the
+    # result stays inside the sessions dir with a startswith prefix check —
+    # os.path.basename + os.path.normpath + str.startswith are the path-traversal
+    # barriers CodeQL recognises, applied to the value that reaches the path.
+    name = os.path.basename(f"{session_id}.json")
+    if name != f"{session_id}.json":   # id carried a separator — reject outright
+        return None
+    base = os.path.normpath(str(_dir()))
+    target = os.path.normpath(os.path.join(base, name))
+    if target != base and not target.startswith(base + os.sep):
+        return None
+    return Path(target)
+
+
+def _read_session(session_id: str) -> dict | None:
+    """Parse a session file. A corrupt file emits a one-line warning to stderr
+    (never a silent empty result that looks like 'no history').
+
+    The id (which can arrive from the command line, e.g. ``ronin replay <id>``)
+    is never concatenated into a path. Instead we enumerate the sessions dir and
+    match the id against each file's stem, so the path handed to ``read_text``
+    always comes from the directory listing — a crafted id cannot escape the
+    sessions dir or address an arbitrary file."""
+    if not session_id or session_id in (".", "..") or os.path.basename(session_id) != session_id:
+        return None
+    d = _dir()
+    if not d.is_dir():
+        return None
+    for f in d.glob("*.json"):
+        if f.stem != session_id:
+            continue
+        try:
+            return json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            import sys
+            print(f"ronin: warning — session {session_id} is unreadable ({e}); "
+                  "starting fresh for this turn.", file=sys.stderr)
+            return None
+    return None
+
+
 def load_session(session_id: str) -> list[str]:
-    """The transcript for a session id (empty list if missing)."""
-    path = _dir() / f"{session_id}.json"
-    if not path.is_file():
+    """The display transcript for a session id (empty list if missing/corrupt)."""
+    data = _read_session(session_id)
+    return list(data.get("transcript", [])) if data else []
+
+
+def load_session_messages(session_id: str) -> list:
+    """The full structured message list (Message objects) for a session, for real
+    resume. Empty for legacy v1 files (which only stored the flat transcript) —
+    callers fall back to the transcript tail in that case."""
+    data = _read_session(session_id)
+    if not data:
+        return []
+    raw = data.get("messages") or []
+    if not raw:
         return []
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return list(data.get("transcript", []))
-    except (OSError, ValueError):
+        from ronin_agent_patterns import Message
+        return [Message(**m) if isinstance(m, dict) else m for m in raw]
+    except Exception:  # noqa: BLE001 — a schema drift must not break resume
         return []
 
 

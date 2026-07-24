@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-v1.0.0-blue)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-3355%20passing-brightgreen.svg)](#-whats-under-the-hood)
+[![Tests](https://img.shields.io/badge/tests-4159%20passing-brightgreen.svg)](#-whats-under-the-hood)
 [![Providers](https://img.shields.io/badge/providers-Claude%20·%20Gemini%20·%20Cerebras%20·%20Groq%20·%20OpenRouter%20·%20Ollama%20·%20OpenAI-d4a373)](#-supported-providers)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
@@ -19,6 +19,43 @@ $ ronin code "explain @main.py and add tests" # @-mention files inline
 ```
 
 > The binary is **`ronin`**. `ro` also works as a short alias.
+>
+> **Platform support:** macOS and Linux are supported. Windows is supported via **WSL** (run the same install command inside a WSL shell) — native Windows is not yet supported. Requires Python 3.11+ and `git`.
+
+## 🖥 Ronin AI OS — the web experience
+
+Beyond the terminal, Ronin is also an **operating system for AI work on the web**:
+instead of a blank prompt box, you enter an **industry world** — each with its own
+interface, tools, safety rules, memory boundaries and evaluations — all on the same
+provider-agnostic runtime as the CLI.
+
+**▶ Live:** **https://ronin-ai-os-staging.vercel.app** — open **`/os`** for Ronin Home,
+or jump straight into a world:
+
+| World | Route | Posture |
+| :--- | :--- | :--- |
+| **Coding** | [`/os/code`](https://ronin-ai-os-staging.vercel.app/os/code) | Plan-first IDE over the real runtime — files, diffs, tests, approval-gated writes |
+| **Research** | [`/os/research`](https://ronin-ai-os-staging.vercel.app/os/research) | Source-first notebooks with claim-to-source mapping; never invents a citation |
+| **Healthcare** | [`/os/healthcare`](https://ronin-ai-os-staging.vercel.app/os/healthcare) | Educational, **non-diagnostic** health information with an emergency boundary |
+| **Education** | [`/os/education`](https://ronin-ai-os-staging.vercel.app/os/education) | Role-aware tutoring and practice, grounded in sources, fail-closed on graded work |
+
+The worlds connect to a live FastAPI backend (`/api/v1`) when one is reachable, and
+degrade honestly to a labelled offline sample otherwise — a **Live · API** / **Offline ·
+sample** badge always tells you which.
+
+**Under the hood** — a pnpm/Turborepo workspace in [`apps/web`](apps/web) (Next.js 16 +
+React 19 + Tailwind v4) and [`apps/api`](apps/api) (FastAPI), built on the **Ronin Design
+System** ([`packages/design-system`](packages/design-system), RDS 1.0 — the "Sumi" ink
+identity: warm paper/clay palette, four themes, self-hosted Inter / Fraunces / JetBrains
+Mono type).
+
+```bash
+pnpm install
+pnpm --filter @ronin/web dev        # → http://localhost:3000  (landing + /os)
+uv run --package ronin-api uvicorn csk_api.main:app --reload   # the /api/v1 backend
+```
+
+Deploying the backend live? See [`docs/beta/deploy-backend.md`](docs/beta/deploy-backend.md).
 
 ## 🖥 Ronin AI OS — the web experience
 
@@ -79,7 +116,7 @@ Regenerate the walkthrough anytime with [`vhs`](https://github.com/charmbracelet
 
 **One front door:** type **`ronin`** and you get a single agent that reads, writes, and runs code (every edit and shell command gated behind a diff preview and your approval, reads run freely), generates images/video/speech, and queries your connected data, all in one conversation, in plain language. It's **provider-agnostic**: the same agent runs on Claude or on free open models.
 
-It's also a **reference implementation for building agents the right way**. The CLI is a thin wrapper over seven independently-usable packages: agent patterns, evals, memory, hardening, and MCP integrations, backed by **3,355 tests** that run offline in CI. (`ronin code` is the focused coding agent; `ronin chat` is the talk/media surface, both available when you want a single-purpose mode.)
+It's also a **reference implementation for building agents the right way**. The CLI is a thin wrapper over seven core, independently-usable packages — `agent-patterns`, `eval-suite`, `memory`, `hardening`, `mcp-servers`, `relay`, and `cli` — part of a 22-package workspace (the other 15 are platform packages: identity, vault, billing, observability, and so on), backed by **4,159 tests** that run offline in CI. (`ronin code` is the focused coding agent; `ronin chat` is the talk/media surface, both available when you want a single-purpose mode.)
 
 ## 🛠 `ronin code` · the coding agent (Claude-Code shaped)
 
@@ -249,7 +286,7 @@ ronin image "a red panda hacking at night, neon, flat vector"    # free, no API 
 
 ## 🎮 `ronin play` · the arcade
 
-A break room built into the terminal. **`ronin play`** opens a picker menu (arrow keys, teal highlight); **`ronin play <game>`** jumps straight in. **26 games, all free**, in four flavours:
+A break room built into the terminal. **`ronin play`** opens a picker menu (arrow keys, teal highlight); **`ronin play <game>`** jumps straight in. **31 games, all free**, in four flavours:
 
 - **⚡ Real-time, arrow-key controls** — full-screen, in-place render via a shared raw-mode engine (`games/_realtime.py`): 🐍 Snake (start-on-keypress, no cheap deaths) · 🔢 2048 · 🟦 Tetris (7-bag, ghost piece, line-clear scoring) · 💣 Minesweeper · ⭕ Tic-Tac-Toe (unbeatable minimax) · 🔴 Connect Four · 🧠 Memory Match.
 - **🃏 Classics with real depth**: Blackjack (betting / double / 3:2) · Pandle (Wordle with a live on-screen keyboard) · Hangman · Rock-Paper-Scissors · Pig · Simon · Word Scramble · Sudoku (unique-solution generator) · Mastermind · Battleship (hunt/target AI) · Reversi · Typing Test · Number Guess.
@@ -461,7 +498,7 @@ ronin is MIT-licensed and meant to be picked up by other people. A few notes if 
 
 ## 🧱 What's under the hood
 
-`ronin` is the user-facing wrapper. The substance lives in **seven packages you can also use independently**, this is the engineering core:
+`ronin` is the user-facing wrapper. The substance lives in **seven core packages you can also use independently** (part of a 22-package workspace), this is the engineering core:
 
 | Package | What it does | Tests |
 |---|---|---|
@@ -470,10 +507,10 @@ ronin is MIT-licensed and meant to be picked up by other people. A few notes if 
 | `memory` | Short-term (rolling summary), long-term (pluggable vector store), user preferences | 11 |
 | `hardening` | Prompt-injection scanner, faithfulness/grounding harness, tool allowlist, approval gates, output validator, token budgets, tracing | 60 |
 | `mcp-servers` | Read-only Postgres, Stripe, Linear, Slack, Notion, Tavily, GitHub templates | 67 |
-| `cli` | The `ronin` binary: agent loop, MCP client, web tools, subagents, eval, media, the **26-game arcade** (`ronin play`) | 1882 |
+| `cli` | The `ronin` binary: agent loop, MCP client, web tools, subagents, eval, media, the **31-game arcade** (`ronin play`) | 1882 |
 | `deployment-templates` | Docker Compose, Modal, Vercel, Railway | - |
 
-**3,355 tests** across all packages (incl. the demo/API apps), green on every push (see CI). A `FakeProvider` makes them deterministic, offline, and free: no API calls in CI.
+**4,159 tests** across all packages (incl. the demo/API apps), green on every push (see CI). A `FakeProvider` makes them deterministic, offline, and free: no API calls in CI.
 
 ## Use the modules without the CLI
 

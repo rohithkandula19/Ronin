@@ -20,7 +20,7 @@ flowchart TB
 Conversation turns with smart compression. When token estimate crosses `compress_threshold_tokens`, older turns are summarized via Claude and dropped; the last `keep_recent` turns stay verbatim.
 
 ```python
-from ro_claude_kit_memory import ShortTermMemory
+from ronin_memory import ShortTermMemory
 
 mem = ShortTermMemory(keep_recent=6, compress_threshold_tokens=4000)
 mem.add_turn("user", "What's your name?")
@@ -41,7 +41,7 @@ The summary is injected as a synthetic user/assistant pair on `messages()` so it
 ## Long-term — per-user vector store
 
 ```python
-from ro_claude_kit_memory import LongTermMemory
+from ronin_memory import LongTermMemory
 
 mem = LongTermMemory()  # in-memory backend by default
 mem.remember("user prefers dark mode", namespace="alice", source="onboarding")
@@ -80,7 +80,7 @@ The `chromadb` extra is declared optional: `uv pip install ronin-memory[chromadb
 Sometimes you want durable user facts in a queryable shape, not embedded in fuzzy vector search.
 
 ```python
-from ro_claude_kit_memory import UserPreferenceMemory
+from ronin_memory import UserPreferenceMemory
 
 prefs = UserPreferenceMemory()
 prefs.set("alice", "tone", "concise")

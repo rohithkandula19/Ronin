@@ -130,15 +130,30 @@ bump_in_file() {
   fi
 }
 
-bump_in_file \
-  "packages/cli/pyproject.toml" \
-  '^version = "[^"]+"' \
-  "version = \"${VERSION}\""
+# All packages that publish together at the same version (see RELEASE.md). The
+# cli pins its siblings with '==', so bumping only the cli desynced the whole
+# workspace on the first post-1.0 release — bump every member + the pins in
+# lockstep.
+RELEASE_PKGS=(cli agent-patterns eval-suite memory hardening mcp-servers relay)
+for pkg in "${RELEASE_PKGS[@]}"; do
+  bump_in_file \
+    "packages/${pkg}/pyproject.toml" \
+    '^version = "[^"]+"' \
+    "version = \"${VERSION}\""
+done
 
 bump_in_file \
   "packages/cli/src/ronin_cli/__init__.py" \
   '^__version__ = "[^"]+"' \
   "__version__ = \"${VERSION}\""
+
+# Keep the cli's exact sibling pins in lockstep with the bumped versions.
+for dep in ronin-agent-patterns ronin-hardening ronin-memory ronin-mcp-servers ronin-eval-suite; do
+  bump_in_file \
+    "packages/cli/pyproject.toml" \
+    "${dep}==[0-9][^\"]*" \
+    "${dep}==${VERSION}"
+done
 
 # Tests badge in README (only if count changed)
 if [[ -n "${PASS_COUNT:-}" ]]; then
@@ -180,6 +195,12 @@ if [[ "$DRY_RUN" == "yes" ]]; then
 fi
 
 git add packages/cli/pyproject.toml \
+        packages/agent-patterns/pyproject.toml \
+        packages/eval-suite/pyproject.toml \
+        packages/memory/pyproject.toml \
+        packages/hardening/pyproject.toml \
+        packages/mcp-servers/pyproject.toml \
+        packages/relay/pyproject.toml \
         packages/cli/src/ronin_cli/__init__.py \
         README.md \
         CHANGELOG.md

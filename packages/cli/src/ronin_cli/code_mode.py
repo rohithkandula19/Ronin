@@ -193,11 +193,13 @@ def _session_path(root: Path | str) -> _Path:
     return _Path(".ronin") / "sessions" / f"code-{key}.json"
 
 
-def save_session(root: Path | str, transcript: list[str]) -> None:
+def save_session(root: Path | str, transcript: list[str], *, messages: list | None = None) -> None:
     """Archive the FULL current-session transcript under .ronin/sessions/ — every
-    session is kept as its own file (resumable via /resume), never overwritten."""
+    session is kept as its own file (resumable via /resume), never overwritten.
+    ``messages`` (the structured Message list) is persisted too, so ``--continue``
+    restores real context, not just the flat text tail."""
     from .sessions import save_session as _archive
-    _archive(root, transcript)
+    _archive(root, transcript, messages=messages)
 
 
 def load_session(root: Path | str) -> list[str]:
@@ -209,6 +211,22 @@ def load_session(root: Path | str) -> list[str]:
         return []
     set_current_session(sid)   # continue that session instead of forking a new file
     return _load(sid)
+
+
+def _resume_message_history(continue_session: bool) -> list:
+    """Structured Message history for a resumed session — real --continue, not the
+    6-line flat text tail. Must be called after ``load_session(root)`` has set the
+    current session. Empty for new sessions and legacy v1 files (those fall back
+    to the transcript tail via history_prefix)."""
+    if not continue_session:
+        return []
+    try:
+        from ronin_agent_patterns.react import trim_to_complete_pairs
+
+        from .sessions import current_session_id, load_session_messages
+        return trim_to_complete_pairs(load_session_messages(current_session_id()))
+    except Exception:  # noqa: BLE001 — a resume glitch must never block a new turn
+        return []
 
 
 def expand_file_mentions(task: str, root: Path | str, *, offline: bool = False) -> str:
@@ -654,6 +672,42 @@ def _selective_gate(
     return gate
 
 
+def _user_prompt_injection_gate(task, *, console=None, gate_cb=None):
+    """Trust polarity for F4: the user's OWN prompt is the TRUSTED channel, so a
+    scanner hit is a warning — never a hard block (which locked out people who
+    legitimately type injection strings, e.g. editing the injection tests). The
+    untrusted channel (fetched web content) is scanned+enveloped in web_tools.
+
+    Returns a blocked ``CodeRunResult`` only when an interactive user explicitly
+    declines; otherwise ``None`` (proceed).
+    """
+    import sys as _sys
+    scan = InjectionScanner().scan(task)
+    if not scan.flagged:
+        return None
+    labels = [h["label"] for h in scan.hits]
+    if console is not None:
+        console.print(
+            f"[#e0af68]\u26a0 your task matched prompt-injection patterns {labels}. "
+            "You are the trusted user \u2014 this is a warning, not a block.[/#e0af68]"
+        )
+    if console is not None and gate_cb is None and _sys.stdin.isatty():
+        try:
+            resp = input("  proceed anyway? [y/N] ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            resp = "n"
+        if resp not in ("y", "yes"):
+            return CodeRunResult(
+                success=False,
+                output="[cancelled] injection-scan warning declined.",
+                iterations=0,
+                error="user declined after injection warning",
+                blocked=True,
+            )
+    return None
+
+
+
 def run_code_agent(
     config: RoninConfig,
     task: str,
@@ -679,15 +733,14 @@ def run_code_agent(
     on_step_cb=None,
     gate_cb=None,
 ) -> CodeRunResult:
-    scan = InjectionScanner().scan(task)
-    if scan.flagged:
-        return CodeRunResult(
-            success=False,
-            output="[blocked] your task was flagged as a potential prompt-injection attempt.",
-            iterations=0,
-            error=f"injection-scan flagged: {[h['label'] for h in scan.hits]}",
-            blocked=True,
-        )
+    # Trust polarity: the user's OWN typed task is the TRUSTED channel, so a
+    # scanner hit here is a warning, not a hard block (hard-blocking locked out
+    # the exact people who legitimately type injection strings — e.g. someone
+    # editing the injection tests — with no override). The untrusted channel
+    # (fetched web pages / search results) is scanned + enveloped in web_tools.
+    _blocked = _user_prompt_injection_gate(task, console=console, gate_cb=gate_cb)
+    if _blocked is not None:
+        return _blocked
 
     # A read-only role (researcher / reviewer / architect) restricts the agent to
     # read-only tools — guidance that's also enforced, never a safety bypass.
@@ -1433,6 +1486,39 @@ def _estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4) if text else 0
 
 
+def _history_token_estimate(message_history: list) -> int:
+    """Estimate tokens held in the structured history for the context gauge.
+
+    ``message_history`` is a list of ``ronin_agent_patterns.Message`` objects
+    (not dicts). Counting only ``dict`` items — as the pinned-bar gauge used to —
+    always summed 0 and pinned "context left" at 100%. Mirror the estimator
+    ``ReActAgent._maybe_compact`` uses: message content PLUS tool-call arguments
+    (write_file/edit_file payloads live in ``tool_calls[].arguments``, not
+    ``content``). Tolerates both Message objects and legacy dict messages.
+    """
+    import json as _json
+
+    chars = 0
+    for m in (message_history or []):
+        if isinstance(m, dict):
+            c = m.get("content", "")
+            if isinstance(c, str):
+                chars += len(c)
+            elif isinstance(c, list):
+                for p in c:
+                    if isinstance(p, dict):
+                        chars += len(p.get("text", "") or "")
+            for tc in (m.get("tool_calls") or []):
+                args = tc.get("arguments") if isinstance(tc, dict) else None
+                chars += len(_json.dumps(args, default=str)) if args else 0
+        else:
+            chars += len(getattr(m, "content", "") or "")
+            for tc in (getattr(m, "tool_calls", None) or []):
+                args = getattr(tc, "arguments", None)
+                chars += len(_json.dumps(args, default=str)) if args else 0
+    return chars // 4
+
+
 def _compact_transcript(config: "RoninConfig", transcript: list[str], console: "Console") -> None:
     """Summarize the conversation into a tight note and replace the transcript
     with it — frees context while keeping the gist (like Claude Code's /compact)."""
@@ -1599,7 +1685,7 @@ def run_code_session(
     # prefix stays warm. ``transcript`` (text) lives on for /resume + display; this
     # is what actually feeds the model. Starts empty (a resumed session falls back
     # to the text tail for its first turn, then accumulates structured history).
-    message_history: list = []
+    message_history: list = _resume_message_history(continue_session)
 
     resumed = " · resumed" if (continue_session and transcript) else ""
     _welcome(console, config, root, yolo,
@@ -1637,16 +1723,9 @@ def run_code_session(
                 _used = 0
                 _left = 100
                 try:
-                    for _m in (message_history or []):
-                        if not isinstance(_m, dict):
-                            continue
-                        _c = _m.get("content", "")
-                        if isinstance(_c, str):
-                            _used += _estimate_tokens(_c)
-                        elif isinstance(_c, list):
-                            for _p in _c:
-                                if isinstance(_p, dict):
-                                    _used += _estimate_tokens(_p.get("text", ""))
+                    # Count the structured history (Message objects, not dicts) —
+                    # content + tool-call arguments — so the gauge actually ticks.
+                    _used = _history_token_estimate(message_history)
                     _left = max(0, 100 - int(_used * 100 / 128000))
                     # Always-visible chip strip: [FREE] [provider:model] [mode]
                     # [branch*] [write-gated] [role:x], width-aware.
@@ -1849,11 +1928,14 @@ def run_code_session(
             save_stats(root, _rstats)   # learn from this outcome
         transcript.append(f"USER: {user}")
         transcript.append(f"ASSISTANT: {result.output}")
-        save_session(root, transcript)  # persist so `ronin code --continue` can resume
+        save_session(root, transcript, messages=message_history)
         # Adopt the structured conversation so the next turn keeps full context.
-        # Only on success — a failed/blocked turn returns no messages, so we keep
-        # the prior history intact rather than dropping a half-finished exchange in.
-        if result.success and result.messages:
+        # Adopt whenever messages are present — including a cap-hit turn
+        # (success=False), whose react-trimmed messages are pairing-valid — so a
+        # long task that exhausts the iteration cap doesn't start the next turn
+        # cold. A plain error (rate-limit) returns no messages, so prior history
+        # is kept intact.
+        if result.messages:
             message_history = result.messages
         if not result.success:
             console.print(f"\n{result.output}\n")   # clean error (e.g. rate-limit), session continues
@@ -1936,7 +2018,7 @@ def run_unified_session(
     undo_stack: list = []
     transcript: list[str] = load_session(root) if continue_session else []
     # Structured cross-turn conversation (see run_code_session for the rationale).
-    message_history: list = []
+    message_history: list = _resume_message_history(continue_session)
     artifacts: list = []
     # media (image/video/speech) + data (stripe/linear/…) + persistent memory,
     # layered on the coding agent's machinery (streaming, diffs, gate, todos).
@@ -2003,16 +2085,9 @@ def run_unified_session(
                 _used = 0
                 _left = 100
                 try:
-                    for _m in (message_history or []):
-                        if not isinstance(_m, dict):
-                            continue
-                        _c = _m.get("content", "")
-                        if isinstance(_c, str):
-                            _used += _estimate_tokens(_c)
-                        elif isinstance(_c, list):
-                            for _p in _c:
-                                if isinstance(_p, dict):
-                                    _used += _estimate_tokens(_p.get("text", ""))
+                    # Count the structured history (Message objects, not dicts) —
+                    # content + tool-call arguments — so the gauge actually ticks.
+                    _used = _history_token_estimate(message_history)
                     _left = max(0, 100 - int(_used * 100 / 128000))
                     # Always-visible chip strip: [FREE] [provider:model] [mode]
                     # [branch*] [write-gated] [role:x], width-aware.
@@ -2160,8 +2235,9 @@ def run_unified_session(
             )
         pending.extend(_iq.drain())
         _elapsed = _time.time() - _t0
-        # Adopt structured history on success so the next turn keeps full context.
-        if result.success and result.messages:
+        # Adopt structured history whenever present (incl. a cap-hit turn, whose
+        # messages are pairing-valid) so the next turn keeps full context.
+        if result.messages:
             message_history = result.messages
 
         # smarter agent: opt-in self-verification after a turn that made changes
@@ -2208,7 +2284,7 @@ def run_unified_session(
             save_stats(root, _rstats)
         transcript.append(f"USER: {user}")
         transcript.append(f"ASSISTANT: {result.output}")
-        save_session(root, transcript)
+        save_session(root, transcript, messages=message_history)
         # auto-remember durable facts — only on substantive turns (saves rate limit
         # on trivial ones like "hey", which never yield facts anyway)
         if result.success and len(user) > 20:

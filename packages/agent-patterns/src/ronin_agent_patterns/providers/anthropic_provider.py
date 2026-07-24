@@ -3,12 +3,26 @@ from __future__ import annotations
 
 from typing import Any
 
-import anthropic
 
 from typing import Iterator
 
 from ..types import Tool
 from .base import LLMProvider, LLMResponse, Message, StreamEvent, ToolCall
+
+
+def __getattr__(name: str):
+    """Lazily expose the ``anthropic`` SDK as a module attribute.
+
+    The SDK is a ~0.7s import; keeping it off the module's top-level means
+    ``ronin --help`` (which imports this module transitively) never pays for it.
+    Accessing ``anthropic_provider.anthropic`` — including via test patches like
+    ``patch('...anthropic_provider.anthropic.Anthropic')`` — imports it on first
+    use and returns the real module, so patching still works.
+    """
+    if name == "anthropic":
+        import anthropic
+        return anthropic
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _parse_anthropic_message(message: Any) -> LLMResponse:
@@ -87,6 +101,37 @@ def _to_anthropic_messages(messages: list[Message]) -> list[dict[str, Any]]:
     return out
 
 
+# Transient statuses worth retrying — overload (529), rate limit (429) and 5xx
+# are routine at peak; an agent loop fires several calls per task, so retrying
+# saves the whole turn. Mirrors the OpenAI-compat path so the paid Anthropic
+# path is no longer the least-resilient provider in the stack.
+_RETRY_STATUSES = {429, 500, 502, 503, 529}
+_MAX_RETRIES = 6
+
+
+def _retry_wait(attempt: int, retry_after: str | None) -> float:
+    """Seconds before retry ``attempt`` (0-based): honour a numeric Retry-After,
+    else exponential backoff (2,4,8,16,30,30s)."""
+    if retry_after:
+        try:
+            return min(float(retry_after), 60.0)
+        except ValueError:
+            pass
+    return float(min(2 ** (attempt + 1), 30))
+
+
+def _status_of(exc: Exception) -> int | None:
+    return getattr(exc, "status_code", None)
+
+
+def _retry_after_of(exc: Exception) -> str | None:
+    resp = getattr(exc, "response", None)
+    try:
+        return resp.headers.get("retry-after") if resp is not None else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 _EPHEMERAL = {"type": "ephemeral"}
 
 
@@ -112,8 +157,14 @@ class AnthropicProvider(LLMProvider):
     # Reasoning budget ("low"|"medium"|"high"|"xhigh"). None → extended thinking
     # is left off and the request body is byte-for-byte unchanged (the default).
     effort: str | None = None
+    # Transient-error retries (429/5xx/529 + connection drops), matching the
+    # OpenAI-compat path. Set 0 to disable.
+    max_retries: int = _MAX_RETRIES
 
-    def _client(self) -> anthropic.Anthropic:
+    def _client(self) -> "anthropic.Anthropic":
+        # Lazy import: keep the ~0.7s anthropic SDK load off the `ronin --help`
+        # path; it only happens when a real client is constructed.
+        import anthropic
         return anthropic.Anthropic(api_key=self.api_key) if self.api_key else anthropic.Anthropic()
 
     def _build_kwargs(
@@ -164,11 +215,28 @@ class AnthropicProvider(LLMProvider):
         tools: list[Tool],
         max_tokens: int = 4096,
     ) -> LLMResponse:
+        import time
+
+        import anthropic
         kwargs = self._build_kwargs(
             system=system, messages=messages, tools=tools, max_tokens=max_tokens
         )
-        response = self._client().messages.create(**kwargs)
-        return _parse_anthropic_message(response)
+        client = self._client()
+        for attempt in range(self.max_retries + 1):
+            try:
+                response = client.messages.create(**kwargs)
+                return _parse_anthropic_message(response)
+            except anthropic.APIStatusError as e:
+                if _status_of(e) in _RETRY_STATUSES and attempt < self.max_retries:
+                    time.sleep(_retry_wait(attempt, _retry_after_of(e)))
+                    continue
+                raise
+            except anthropic.APIConnectionError:
+                if attempt < self.max_retries:
+                    time.sleep(_retry_wait(attempt, None))
+                    continue
+                raise
+        raise RuntimeError("unreachable: retry loop exhausted without return/raise")
 
     def stream(
         self,
@@ -178,12 +246,41 @@ class AnthropicProvider(LLMProvider):
         tools: list[Tool],
         max_tokens: int = 4096,
     ) -> Iterator[StreamEvent]:
+        import time
+
+        import anthropic
         kwargs = self._build_kwargs(
             system=system, messages=messages, tools=tools, max_tokens=max_tokens
         )
-        with self._client().messages.stream(**kwargs) as stream:
-            for delta in stream.text_stream:
-                if delta:
-                    yield StreamEvent(type="text", text=delta)
-            final = stream.get_final_message()
-        yield StreamEvent(type="done", response=_parse_anthropic_message(final))
+        client = self._client()
+        # Each attempt re-streams from scratch. If a prior attempt already
+        # forwarded text, emit a ``reset`` first so the renderer discards the
+        # partial and the answer renders exactly once (the LiveRenderer.on_reset
+        # contract, shared with the OpenAI-compat path).
+        for attempt in range(self.max_retries + 1):
+            emitted = False
+            try:
+                with client.messages.stream(**kwargs) as stream:
+                    for delta in stream.text_stream:
+                        if delta:
+                            emitted = True
+                            yield StreamEvent(type="text", text=delta)
+                    final = stream.get_final_message()
+                yield StreamEvent(type="done", response=_parse_anthropic_message(final))
+                return
+            except anthropic.APIStatusError as e:
+                if _status_of(e) in _RETRY_STATUSES and attempt < self.max_retries:
+                    if emitted:
+                        yield StreamEvent(type="reset")
+                    time.sleep(_retry_wait(attempt, _retry_after_of(e)))
+                    continue
+                raise
+            except anthropic.APIConnectionError:
+                # Connection dropped mid-stream (routine on flaky links); reset the
+                # partial and re-attempt the whole request.
+                if attempt < self.max_retries:
+                    if emitted:
+                        yield StreamEvent(type="reset")
+                    time.sleep(_retry_wait(attempt, None))
+                    continue
+                raise

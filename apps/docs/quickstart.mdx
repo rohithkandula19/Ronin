@@ -25,7 +25,7 @@ You'll see the answer, the typed trace, and token usage.
 Define a tool and wire it into a `ReActAgent`:
 
 ```python
-from ro_claude_kit_agent_patterns import ReActAgent, Tool
+from ronin_agent_patterns import ReActAgent, Tool
 
 def search_my_docs(query: str) -> str:
     # Replace with your real search — vector store, full-text, whatever.
@@ -57,7 +57,7 @@ print(result.output)
 Before `agent.run`, scan input for injection. After, validate output:
 
 ```python
-from ro_claude_kit_hardening import InjectionScanner, OutputValidator
+from ronin_hardening import InjectionScanner, OutputValidator
 from pydantic import BaseModel
 
 class AnswerWithSource(BaseModel):
@@ -78,7 +78,7 @@ parsed = validator.call(system="...", user_message=user_input)
 Build a small golden dataset and let an LLM judge score your agent's outputs:
 
 ```python
-from ro_claude_kit_eval_suite import EvalSuite, Rubric, GoldenDataset
+from ronin_eval_suite import EvalSuite, Rubric, GoldenDataset
 
 dataset = GoldenDataset.from_jsonl("./golden.jsonl")
 suite = EvalSuite(

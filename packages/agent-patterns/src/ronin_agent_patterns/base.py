@@ -4,9 +4,7 @@ import inspect
 import json
 from typing import Any
 
-import anthropic
-
-from .types import Tool
+from .types import MALFORMED_ARGS_KEY, Tool
 
 DEFAULT_MODEL = "claude-sonnet-4-6"
 
@@ -24,8 +22,14 @@ _ALIAS_FAMILIES: tuple[frozenset[str], ...] = (
 )
 
 
-def make_client(api_key: str | None = None) -> anthropic.Anthropic:
-    """Build an Anthropic client. ``api_key=None`` falls back to ``ANTHROPIC_API_KEY``."""
+def make_client(api_key: str | None = None) -> "anthropic.Anthropic":
+    """Build an Anthropic client. ``api_key=None`` falls back to ``ANTHROPIC_API_KEY``.
+
+    The SDK is imported lazily here (not at module top) so importing the agent
+    framework — and therefore `ronin --help` — doesn't pay the ~0.7s anthropic
+    import cost until a client is actually constructed.
+    """
+    import anthropic
     return anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
 
 
@@ -81,6 +85,16 @@ def execute_tool_call(tool: Tool, args: dict[str, Any]) -> tuple[str, bool]:
     correctly) instead of a raw ``TypeError``. Other exceptions are still caught
     and surfaced so the agent can recover.
     """
+    if isinstance(args, dict) and MALFORMED_ARGS_KEY in args:
+        # The provider could not parse this call's JSON arguments. Tell the model
+        # its JSON was malformed (quoting the raw text) — a distinct failure from
+        # a wrong argument name, so it fixes the JSON instead of renaming args.
+        raw = args[MALFORMED_ARGS_KEY]
+        return (f"ERROR calling {tool.name}: your tool-call arguments were not "
+                f"valid JSON, so the call could not run. Raw arguments received: "
+                f"{raw!r}. Re-emit the call with valid JSON matching: "
+                f"{_signature_hint(tool)} ('?' marks optional).", True)
+
     if not isinstance(args, dict):
         try:
             out = tool.handler(args)

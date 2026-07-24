@@ -80,12 +80,20 @@ def test_stream_fails_over_before_any_token() -> None:
     assert fo.failed_over_to == "b"
 
 
-def test_stream_does_not_restart_after_emitting() -> None:
-    """Once tokens have streamed to the user, a mid-stream failure must propagate
-    rather than silently re-answer on another model."""
-    fo = FailoverProvider(providers=[_BoomMidStream(), _ok("would-be backup")], labels=["a", "b"])
-    with pytest.raises(RuntimeError, match="died after first token"):
-        list(fo.stream(**_args()))
+def test_stream_resets_then_fails_over_after_emitting() -> None:
+    """After tokens have streamed, a mid-stream failure now emits a reset (telling
+    the renderer to discard the partial) and fails over — recovering the turn
+    instead of losing it once a single token had streamed (F3)."""
+    fo = FailoverProvider(providers=[_BoomMidStream(), _ok("backup answer")], labels=["a", "b"])
+    events = list(fo.stream(**_args()))
+    kinds = [e.type for e in events]
+    assert "reset" in kinds                       # provider A's partial discarded
+    # B's answer streams after the reset (FakeProvider emits it word-by-word).
+    reset_at = kinds.index("reset")
+    after = "".join(e.text or "" for e in events[reset_at:] if e.type == "text")
+    assert "backup" in after and "answer" in after
+    assert events[-1].type == "done"
+    assert fo.failed_over_to == "b"
 
 
 def test_empty_providers_raises() -> None:

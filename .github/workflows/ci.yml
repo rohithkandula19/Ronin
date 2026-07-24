@@ -6,8 +6,44 @@ on:
   pull_request:
     branches: [main]
 
+# Least privilege: CI only reads the repo (tests, build, smoke) — no write scope.
+permissions:
+  contents: read
+
 jobs:
-  ci:
+  test:
+    name: test (${{ matrix.os }} · py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Pin Python ${{ matrix.python }}
+        run: uv python install ${{ matrix.python }}
+
+      - name: Install Python deps (with dev groups)
+        run: uv sync --all-packages --all-groups --python ${{ matrix.python }}
+
+      # Full workspace gate: every package + app + training, not a hand-picked
+      # subset. Previously CI ran only 10 of 23 package/app paths, so 400+ tests
+      # in identity (fail-closed RBAC), vault (cross-industry isolation),
+      # billing, observability, etc. could regress green and only surface at the
+      # release tag. `pytest packages apps training` mirrors the Makefile and
+      # collects the full suite.
+      - name: Test (Python — full workspace)
+        run: uv run --python ${{ matrix.python }} pytest packages apps training -q
+
+  gates:
+    name: gates (build · smoke · docs-stats)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -23,42 +59,25 @@ jobs:
           cache: pnpm
 
       - name: Install Node deps
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
+
+      # Gate the web app for real (previously ungated): typecheck + production
+      # build, so a broken apps/web can't ship green.
+      - name: Build web (apps/web)
+        run: pnpm --filter @ronin/web build
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
-      - name: Install Python deps
-        run: uv sync --all-packages
-
-      # No JS linter or Node test suite is wired, so the previous
-      # `pnpm run lint` / `pnpm run test` steps were echo no-ops (they printed
-      # "no linter wired yet" / "no tests yet" and always passed). They are
-      # removed rather than presenting a green gate that checks nothing. The
-      # real gate is the Python test suite below. Secret scanning runs as a
-      # pre-commit hook (`ronin hook`); a repo-wide CI secret gate is deferred
-      # only because the scanner flags its own intentional test fixtures
-      # (see docs/security/secret_rotation_checklist.md).
-
       - name: Install Python deps (with dev groups)
         run: uv sync --all-packages --all-groups
 
-      - name: Test (Python)
-        run: |
-          uv run --frozen pytest \
-            packages/agent-patterns \
-            packages/eval-suite \
-            packages/memory \
-            packages/hardening \
-            packages/mcp-servers \
-            packages/cli \
-            packages/relay \
-            apps/demo \
-            apps/api \
-            training \
-            -q
+      # README headline numbers (tests / packages / games) are generated from
+      # the repo; fail the build if they drift from the committed README.
+      - name: README stats are current
+        run: uv run python scripts/generate_readme_stats.py --check
 
       - name: Build packages (sdist + wheel)
         run: uv build --all-packages
