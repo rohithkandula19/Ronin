@@ -164,15 +164,18 @@ def _session_path(session_id: str) -> Path | None:
     or ``..`` component can ever reach the filesystem join."""
     if not session_id or session_id in (".", ".."):
         return None
-    filename = f"{session_id}.json"
-    # Reduce to the last path component with os.path.basename — CodeQL's
-    # recognised path-traversal sanitizer. Reject if the reduction changed the
-    # string (a separator or ".." was present), and — crucially — build the path
-    # from the *sanitised* result so the barrier is on the taint path itself.
-    safe = os.path.basename(filename)
-    if safe != filename:
+    # Strip any directory portion, then normalise the join and confirm the
+    # result stays inside the sessions dir with a startswith prefix check —
+    # os.path.basename + os.path.normpath + str.startswith are the path-traversal
+    # barriers CodeQL recognises, applied to the value that reaches the path.
+    name = os.path.basename(f"{session_id}.json")
+    if name != f"{session_id}.json":   # id carried a separator — reject outright
         return None
-    return _dir() / safe
+    base = os.path.normpath(str(_dir()))
+    target = os.path.normpath(os.path.join(base, name))
+    if target != base and not target.startswith(base + os.sep):
+        return None
+    return Path(target)
 
 
 def _read_session(session_id: str) -> dict | None:
