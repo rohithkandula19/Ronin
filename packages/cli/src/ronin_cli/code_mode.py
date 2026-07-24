@@ -193,11 +193,13 @@ def _session_path(root: Path | str) -> _Path:
     return _Path(".ronin") / "sessions" / f"code-{key}.json"
 
 
-def save_session(root: Path | str, transcript: list[str]) -> None:
+def save_session(root: Path | str, transcript: list[str], *, messages: list | None = None) -> None:
     """Archive the FULL current-session transcript under .ronin/sessions/ — every
-    session is kept as its own file (resumable via /resume), never overwritten."""
+    session is kept as its own file (resumable via /resume), never overwritten.
+    ``messages`` (the structured Message list) is persisted too, so ``--continue``
+    restores real context, not just the flat text tail."""
     from .sessions import save_session as _archive
-    _archive(root, transcript)
+    _archive(root, transcript, messages=messages)
 
 
 def load_session(root: Path | str) -> list[str]:
@@ -209,6 +211,22 @@ def load_session(root: Path | str) -> list[str]:
         return []
     set_current_session(sid)   # continue that session instead of forking a new file
     return _load(sid)
+
+
+def _resume_message_history(continue_session: bool) -> list:
+    """Structured Message history for a resumed session — real --continue, not the
+    6-line flat text tail. Must be called after ``load_session(root)`` has set the
+    current session. Empty for new sessions and legacy v1 files (those fall back
+    to the transcript tail via history_prefix)."""
+    if not continue_session:
+        return []
+    try:
+        from ronin_agent_patterns.react import trim_to_complete_pairs
+
+        from .sessions import current_session_id, load_session_messages
+        return trim_to_complete_pairs(load_session_messages(current_session_id()))
+    except Exception:  # noqa: BLE001 — a resume glitch must never block a new turn
+        return []
 
 
 def expand_file_mentions(task: str, root: Path | str, *, offline: bool = False) -> str:
@@ -1667,7 +1685,7 @@ def run_code_session(
     # prefix stays warm. ``transcript`` (text) lives on for /resume + display; this
     # is what actually feeds the model. Starts empty (a resumed session falls back
     # to the text tail for its first turn, then accumulates structured history).
-    message_history: list = []
+    message_history: list = _resume_message_history(continue_session)
 
     resumed = " · resumed" if (continue_session and transcript) else ""
     _welcome(console, config, root, yolo,
@@ -1910,7 +1928,7 @@ def run_code_session(
             save_stats(root, _rstats)   # learn from this outcome
         transcript.append(f"USER: {user}")
         transcript.append(f"ASSISTANT: {result.output}")
-        save_session(root, transcript)  # persist so `ronin code --continue` can resume
+        save_session(root, transcript, messages=message_history)
         # Adopt the structured conversation so the next turn keeps full context.
         # Adopt whenever messages are present — including a cap-hit turn
         # (success=False), whose react-trimmed messages are pairing-valid — so a
@@ -2000,7 +2018,7 @@ def run_unified_session(
     undo_stack: list = []
     transcript: list[str] = load_session(root) if continue_session else []
     # Structured cross-turn conversation (see run_code_session for the rationale).
-    message_history: list = []
+    message_history: list = _resume_message_history(continue_session)
     artifacts: list = []
     # media (image/video/speech) + data (stripe/linear/…) + persistent memory,
     # layered on the coding agent's machinery (streaming, diffs, gate, todos).
@@ -2266,7 +2284,7 @@ def run_unified_session(
             save_stats(root, _rstats)
         transcript.append(f"USER: {user}")
         transcript.append(f"ASSISTANT: {result.output}")
-        save_session(root, transcript)
+        save_session(root, transcript, messages=message_history)
         # auto-remember durable facts — only on substantive turns (saves rate limit
         # on trivial ones like "hey", which never yield facts anyway)
         if result.success and len(user) > 20:
