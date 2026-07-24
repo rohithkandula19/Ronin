@@ -151,9 +151,19 @@ def list_sessions(root: Path | str | None = None) -> list[dict]:
     return out
 
 
+import re as _re
+
+# Session ids are our own timestamp-uuid stamps (or legacy ``code-<hash>``);
+# never a path. Validate before building a filesystem path so a crafted id can't
+# traverse out of the sessions dir (defends the path expression below).
+_SAFE_SESSION_ID = _re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+
+
 def _read_session(session_id: str) -> dict | None:
     """Parse a session file. A corrupt file emits a one-line warning to stderr
     (never a silent empty result that looks like 'no history')."""
+    if not session_id or not _SAFE_SESSION_ID.fullmatch(session_id):
+        return None
     path = _dir() / f"{session_id}.json"
     if not path.is_file():
         return None
