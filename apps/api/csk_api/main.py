@@ -11,15 +11,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
-from .billing import (
-    BillingConfig,
-    apply_webhook_event,
-    create_checkout_session,
-    create_portal_session,
-    verify_stripe_signature,
-)
 from .config import generate_api_token, get_settings
-from .db import ALLOWED_SERVICES, Plan, init_db, session_scope
+from .db import ALLOWED_SERVICES, init_db, session_scope
 from .oauth import build_authorize_url, exchange_code
 from .services import (
     create_user,
@@ -304,52 +297,6 @@ def make_app() -> FastAPI:
         except (ValueError, RuntimeError) as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         return {"ok": True, "service": conn.service}
-
-    # ---------- Billing ----------
-
-    @app.post("/billing/checkout")
-    def billing_checkout(
-        plan: str,
-        user=Depends(current_user),
-    ) -> dict[str, str]:
-        try:
-            plan_enum = Plan(plan.lower())
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"unknown plan {plan!r}")
-        try:
-            url = create_checkout_session(user, plan_enum)
-        except (ValueError, RuntimeError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        return {"url": url}
-
-    @app.post("/billing/portal")
-    def billing_portal(
-        return_url: str | None = None,
-        user=Depends(current_user),
-    ) -> dict[str, str]:
-        """Open the Stripe Customer Portal — self-serve plan changes + cancel."""
-        try:
-            url = create_portal_session(user, return_url=return_url)
-        except (ValueError, RuntimeError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        return {"url": url}
-
-    @app.post("/webhooks/stripe")
-    async def stripe_webhook(
-        request: Request,
-        session: Session = Depends(db_dep),
-    ) -> dict[str, Any]:
-        payload = await request.body()
-        signature = request.headers.get("Stripe-Signature", "")
-        cfg = BillingConfig.from_env()
-        if cfg.webhook_secret and not verify_stripe_signature(payload, signature, cfg.webhook_secret):
-            raise HTTPException(status_code=400, detail="invalid signature")
-        try:
-            event = json.loads(payload.decode("utf-8"))
-        except Exception as exc:  # noqa: BLE001
-            raise HTTPException(status_code=400, detail=f"bad payload: {exc}")
-        message = apply_webhook_event(session, event)
-        return {"ok": True, "message": message}
 
     # ---------- Ronin AI OS API v1 (additive, mounted under /api/v1) ----------
     from .v1 import build_v1_router
