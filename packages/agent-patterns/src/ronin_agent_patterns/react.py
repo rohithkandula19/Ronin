@@ -26,6 +26,29 @@ OnReset = Callable[[], None]
 AfterTool = Callable[[str, dict, str, bool], None]
 
 
+def trim_to_complete_pairs(messages: list) -> list:
+    """Drop a dangling final tool-call round so history stays API-valid.
+
+    An assistant message carrying ``tool_calls`` must be followed by a ``tool``
+    message for every call id. When a turn is adopted after the iteration cap (or
+    an interrupt), the tail can be an assistant that requested calls whose results
+    were never appended — replaying that as history would orphan a ``tool_use``.
+    Truncate to just before that incomplete assistant message; everything earlier
+    (all completed rounds, every file already read) is preserved.
+    """
+    last = None
+    for idx in range(len(messages) - 1, -1, -1):
+        m = messages[idx]
+        if getattr(m, "role", None) == "assistant" and getattr(m, "tool_calls", None):
+            last = idx
+            break
+    if last is None:
+        return messages
+    needed = {tc.id for tc in messages[last].tool_calls}
+    have = {getattr(m, "tool_call_id", None) for m in messages[last + 1:]}
+    return messages if needed.issubset(have) else messages[:last]
+
+
 class ReActAgent(BaseModel):
     """ReAct agent with reflection text, tool error tolerance, and an iteration cap.
 
@@ -195,7 +218,10 @@ class ReActAgent(BaseModel):
             trace=trace,
             error=f"hit max_iterations={self.max_iterations}",
             usage=usage,
-            messages=messages,
+            # Preserve the structured history so the caller can adopt it — the
+            # next turn keeps every file read across these iterations instead of
+            # starting cold. Trim any dangling final tool-call round first.
+            messages=trim_to_complete_pairs(messages),
         )
 
     def _resolve_and_gate(self, tc, tools_by_name, before_tool, emit):

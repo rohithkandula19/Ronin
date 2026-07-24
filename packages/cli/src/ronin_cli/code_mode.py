@@ -1877,9 +1877,12 @@ def run_code_session(
         transcript.append(f"ASSISTANT: {result.output}")
         save_session(root, transcript)  # persist so `ronin code --continue` can resume
         # Adopt the structured conversation so the next turn keeps full context.
-        # Only on success — a failed/blocked turn returns no messages, so we keep
-        # the prior history intact rather than dropping a half-finished exchange in.
-        if result.success and result.messages:
+        # Adopt whenever messages are present — including a cap-hit turn
+        # (success=False), whose react-trimmed messages are pairing-valid — so a
+        # long task that exhausts the iteration cap doesn't start the next turn
+        # cold. A plain error (rate-limit) returns no messages, so prior history
+        # is kept intact.
+        if result.messages:
             message_history = result.messages
         if not result.success:
             console.print(f"\n{result.output}\n")   # clean error (e.g. rate-limit), session continues
@@ -2179,8 +2182,9 @@ def run_unified_session(
             )
         pending.extend(_iq.drain())
         _elapsed = _time.time() - _t0
-        # Adopt structured history on success so the next turn keeps full context.
-        if result.success and result.messages:
+        # Adopt structured history whenever present (incl. a cap-hit turn, whose
+        # messages are pairing-valid) so the next turn keeps full context.
+        if result.messages:
             message_history = result.messages
 
         # smarter agent: opt-in self-verification after a turn that made changes
