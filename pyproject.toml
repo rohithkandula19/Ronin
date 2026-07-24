@@ -21,7 +21,6 @@ members = [
     "packages/artifacts",
     "packages/research",
     "packages/tasks",
-    "packages/inference",
     "packages/platform",
     "packages/persistence",
     "packages/identity",

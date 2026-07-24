@@ -42,7 +42,7 @@ verify: test test-frontend security
 # in docs/audits/ronin-ai-os-public-beta-final-report.md, never faked.
 verify-public-beta: test test-frontend security
 	@echo "--- beta control packages (cost/quota/flags/access/env) ---"
-	uv run --frozen pytest packages/inference packages/platform -q
+	uv run --frozen pytest packages/platform -q
 	@echo "--- beta platform packages (identity/storage/billing/jobs/observability/support) ---"
 	uv run --frozen pytest packages/identity packages/storage packages/billing \
 		packages/jobs packages/observability packages/support -q

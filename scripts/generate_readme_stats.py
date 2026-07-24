@@ -63,6 +63,11 @@ def apply(text: str, tests: int, pkgs: int, games: int) -> str:
     text = re.sub(r"\b\d+\s+games\b", f"{games} games", text)
     # "N-game arcade" -> "<games>-game arcade"
     text = re.sub(r"\b\d+-game arcade\b", f"{games}-game arcade", text)
+    # "N-package workspace" -> "<pkgs>-package workspace"
+    text = re.sub(r"\b\d+-package workspace\b", f"{pkgs}-package workspace", text)
+    # "the other N are platform packages" -> total minus the 7 core
+    text = re.sub(r"the other \d+ are platform packages",
+                  f"the other {pkgs - 7} are platform packages", text)
     return text
 
 
