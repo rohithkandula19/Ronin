@@ -68,6 +68,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", default="training/adapters/ronin-code-1.5b-v4")
     ap.add_argument("--check", action="store_true",
                     help="validate config + data + frozen-split hash, then exit")
+    ap.add_argument("--qlora", action="store_true",
+                    help="4-bit QLoRA (bitsandbytes nf4) — fits a free Colab/Kaggle T4 (16GB)")
+    ap.add_argument("--fp16", action="store_true",
+                    help="fp16 mixed precision (T4 has no bf16)")
+    ap.add_argument("--save-steps", type=int, default=0,
+                    help="checkpoint every N steps (0 = per epoch); free-tier "
+                    "sessions disconnect — small N loses little")
+    ap.add_argument("--resume", action="store_true",
+                    help="resume from the latest checkpoint in --out/adapters")
     args = ap.parse_args(argv)
     data_dir = Path(args.data)
 
@@ -75,6 +84,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.check:
         print(json.dumps({"base_model": BASE_MODEL, "seed": SEED, "lora": LORA,
                           "train": TRAIN, "data": str(data_dir),
+                          "qlora": args.qlora, "fp16": args.fp16,
+                          "save_steps": args.save_steps,
                           "errors": errs}, indent=2))
         return 1 if errs else 0
     if errs:
@@ -102,8 +113,18 @@ def main(argv: list[str] | None = None) -> int:
         "valid": str(data_dir / "valid.jsonl")})
     ds = ds.map(render, remove_columns=ds["train"].column_names)
 
-    model = AutoModelForCausalLM.from_pretrained(
-        BASE_MODEL, torch_dtype=torch.bfloat16, device_map="auto")
+    if args.qlora:
+        from transformers import BitsAndBytesConfig
+        model = AutoModelForCausalLM.from_pretrained(
+            BASE_MODEL, device_map="auto",
+            quantization_config=BitsAndBytesConfig(
+                load_in_4bit=True, bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_use_double_quant=True))
+    else:
+        model = AutoModelForCausalLM.from_pretrained(
+            BASE_MODEL, torch_dtype=torch.float16 if args.fp16 else torch.bfloat16,
+            device_map="auto")
 
     out = Path(args.out)
     trainer = SFTTrainer(
@@ -121,11 +142,13 @@ def main(argv: list[str] | None = None) -> int:
             gradient_accumulation_steps=TRAIN["grad_accum"],
             max_length=TRAIN["max_seq_len"],
             warmup_ratio=TRAIN["warmup_ratio"],
-            logging_steps=20, eval_strategy="epoch", save_strategy="epoch",
-            bf16=True, seed=SEED, report_to=[],
+            logging_steps=20, eval_strategy="epoch",
+            save_strategy="steps" if args.save_steps else "epoch",
+            save_steps=args.save_steps or 500,
+            fp16=args.fp16, bf16=not args.fp16, seed=SEED, report_to=[],
             dataset_text_field="text"),
     )
-    result = trainer.train()
+    result = trainer.train(resume_from_checkpoint=True if args.resume else None)
     trainer.save_model(str(out / "adapters"))
 
     merged = trainer.model.merge_and_unload()
@@ -136,6 +159,7 @@ def main(argv: list[str] | None = None) -> int:
         "date": datetime.datetime.now().isoformat(timespec="seconds"),
         "base_model": BASE_MODEL, "git_sha": _git_sha(), "seed": SEED,
         "lora": LORA, "train": TRAIN,
+        "qlora": args.qlora, "fp16": args.fp16,
         "rows": {"train": sum(1 for _ in open(data_dir / "train.jsonl")),
                  "valid": sum(1 for _ in open(data_dir / "valid.jsonl"))},
         "test_split_sha256": (data_dir / "test.jsonl.sha256").read_text().strip(),
