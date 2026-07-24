@@ -303,6 +303,9 @@ def test_adapter_path_is_passed_to_mlx_load(monkeypatch: pytest.MonkeyPatch, tmp
     monkeypatch.setitem(_sys.modules, "mlx_lm", fake)
     adapter = tmp_path / "ronin_adapter"
     adapter.mkdir()
+    # the fail-closed guard requires a COMPLETE adapter dir (config + weights)
+    (adapter / "adapter_config.json").write_text("{}")
+    (adapter / "adapters.safetensors").write_bytes(b"\x00")
     prov = E.EmbeddedProvider(
         model="mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit",
         adapter_path=str(adapter),
@@ -399,3 +402,52 @@ def test_tools_to_openai_shape() -> None:
                        "properties": {"path": {"type": "string"}},
                        "required": ["path"]},
     }}]
+
+
+# ------------------------------------------------------------------ fail-closed
+# ronin-code-1.5b provider path: an adapter that can't be served must raise —
+# the provider never silently answers with the bare base model (Phase-5 Item 6).
+
+def test_validate_adapter_none_when_unset():
+    from ronin_cli.embedded_provider import validate_adapter_dir
+    assert validate_adapter_dir(None) is None
+    assert validate_adapter_dir("") is None
+    assert validate_adapter_dir("   ") is None
+
+
+def test_validate_adapter_missing_dir_fails_closed(tmp_path):
+    import pytest
+    from ronin_cli.embedded_provider import validate_adapter_dir
+    with pytest.raises(FileNotFoundError, match="not a directory"):
+        validate_adapter_dir(str(tmp_path / "nope"))
+
+
+def test_validate_adapter_stub_dir_without_weights_fails_closed(tmp_path):
+    import pytest
+    from ronin_cli.embedded_provider import validate_adapter_dir
+    stub = tmp_path / "adapter"
+    stub.mkdir()
+    (stub / "adapter_config.json").write_text("{}")
+    # adapters.safetensors missing → refuse; never serve the bare base silently
+    with pytest.raises(FileNotFoundError, match="refusing to fall back"):
+        validate_adapter_dir(str(stub))
+
+
+def test_validate_adapter_complete_stub_passes_guard(tmp_path):
+    from ronin_cli.embedded_provider import validate_adapter_dir
+    stub = tmp_path / "adapter"
+    stub.mkdir()
+    (stub / "adapter_config.json").write_text("{}")
+    (stub / "adapters.safetensors").write_bytes(b"\x00")
+    assert validate_adapter_dir(str(stub)) == str(stub)
+
+
+def test_mlx_load_guard_runs_before_engine_import(tmp_path, monkeypatch):
+    # The guard must fire even where mlx-lm can't import (this Linux box):
+    # proof the check precedes the heavy import, so a bad adapter NEVER
+    # reaches a half-loaded engine.
+    import pytest
+    from ronin_cli.embedded_provider import EmbeddedProvider
+    p = EmbeddedProvider(model="", adapter_path=str(tmp_path / "missing"))
+    with pytest.raises(FileNotFoundError):
+        p._load_mlx("mlx-community/whatever")

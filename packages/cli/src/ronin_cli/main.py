@@ -303,9 +303,11 @@ def init(
         border_style="cyan",
     ))
 
+    console.print("[dim]  local = the embedded in-process model — zero keys, zero egress; "
+                  "with RONIN_ADAPTER set it runs ronin-code-1.5b, ronin's own fine-tune.[/dim]")
     provider_choice = Prompt.ask(
         "LLM provider",
-        choices=["anthropic", "ollama", "openai", "together", "groq", "fireworks", "custom"],
+        choices=["anthropic", "local", "ollama", "openai", "together", "groq", "fireworks", "custom"],
         default="anthropic",
     )
     preset = PROVIDER_PRESETS.get(provider_choice, {})
@@ -323,7 +325,7 @@ def init(
     base_url: str | None = None
     if provider_choice == "custom":
         base_url = Prompt.ask("OpenAI-compatible base URL")
-    elif provider_choice not in ("anthropic", "ollama"):
+    elif provider_choice not in ("anthropic", "ollama", "local"):
         base_url = preset.get("base_url") or ""
 
     anthropic_key: str | None = None
@@ -334,7 +336,7 @@ def init(
             default=os.environ.get("ANTHROPIC_API_KEY") or "",
             password=True,
         ) or None
-    elif provider_choice != "ollama":
+    elif provider_choice not in ("ollama", "local"):
         openai_key = Prompt.ask(
             f"API key for {provider_choice} (your {provider_choice} key; input is hidden — paste ONCE)",
             default=os.environ.get("OPENAI_API_KEY") or "",
@@ -1430,6 +1432,35 @@ def eval_protocol(
     if baseline:
         argv += ["--baseline"]
     raise typer.Exit(_eval_main(argv))
+
+
+@util_app.command("models")
+def models_cmd() -> None:
+    """List the provider paths ronin can run on — including the embedded local
+    model and the ronin-code-1.5b adapter path (RONIN_ADAPTER)."""
+    import os as _os
+
+    table = Table(title="providers", box=box.ROUNDED)
+    table.add_column("provider", style="cyan", no_wrap=True)
+    table.add_column("default model")
+    table.add_column("needs key")
+    for name, preset in PROVIDER_PRESETS.items():
+        needs = "no (local)" if name in ("ollama", "local") else "yes"
+        table.add_row(name, preset.get("model") or "(auto by RAM)", needs)
+    console.print(table)
+    adapter = _os.environ.get("RONIN_ADAPTER", "")
+    if adapter:
+        from .embedded_provider import validate_adapter_dir
+        try:
+            validate_adapter_dir(adapter)
+            console.print(f"[green]✓[/green] local (ronin-code-1.5b): adapter [bold]{adapter}[/bold] valid")
+        except FileNotFoundError as e:
+            console.print(f"[red]x[/red] RONIN_ADAPTER is set but unusable — the local "
+                          f"provider will REFUSE to start (fail-closed): {e}")
+    else:
+        console.print("[dim]local runs the bare base model; set "
+                      "RONIN_ADAPTER=training/adapters/<name>/adapters for ronin-code-1.5b "
+                      "(train it with training/cuda/run.sh).[/dim]")
 
 
 # ---------- plugin (scaffold custom tools) ----------
