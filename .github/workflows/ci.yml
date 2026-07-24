@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+# Least privilege: CI only reads the repo (tests, build, smoke) — no write scope.
+permissions:
+  contents: read
+
 jobs:
   test:
     name: test (${{ matrix.os }} · py${{ matrix.python }})
