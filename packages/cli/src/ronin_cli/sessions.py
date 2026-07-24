@@ -180,17 +180,29 @@ def _session_path(session_id: str) -> Path | None:
 
 def _read_session(session_id: str) -> dict | None:
     """Parse a session file. A corrupt file emits a one-line warning to stderr
-    (never a silent empty result that looks like 'no history')."""
-    path = _session_path(session_id)
-    if path is None or not path.is_file():
+    (never a silent empty result that looks like 'no history').
+
+    The id (which can arrive from the command line, e.g. ``ronin replay <id>``)
+    is never concatenated into a path. Instead we enumerate the sessions dir and
+    match the id against each file's stem, so the path handed to ``read_text``
+    always comes from the directory listing — a crafted id cannot escape the
+    sessions dir or address an arbitrary file."""
+    if not session_id or session_id in (".", "..") or os.path.basename(session_id) != session_id:
         return None
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as e:
-        import sys
-        print(f"ronin: warning — session {session_id} is unreadable ({e}); "
-              "starting fresh for this turn.", file=sys.stderr)
+    d = _dir()
+    if not d.is_dir():
         return None
+    for f in d.glob("*.json"):
+        if f.stem != session_id:
+            continue
+        try:
+            return json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            import sys
+            print(f"ronin: warning — session {session_id} is unreadable ({e}); "
+                  "starting fresh for this turn.", file=sys.stderr)
+            return None
+    return None
 
 
 def load_session(session_id: str) -> list[str]:
