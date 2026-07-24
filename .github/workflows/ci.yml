@@ -55,7 +55,12 @@ jobs:
           cache: pnpm
 
       - name: Install Node deps
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
+
+      # Gate the web app for real (previously ungated): typecheck + production
+      # build, so a broken apps/web can't ship green.
+      - name: Build web (apps/web)
+        run: pnpm --filter @ronin/web build
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7

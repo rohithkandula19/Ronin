@@ -87,7 +87,7 @@ is in the `pyproject.toml` files (**currently `1.0.0rc2`** in all 6 — keep the
 sync with that). To release the current `1.0.0rc2`:
 
 ```bash
-cd /Users/rohithkandula/ronin
+cd $(git rev-parse --show-toplevel)
 git tag v1.0.0-rc.2
 git push origin v1.0.0-rc.2
 ```
@@ -136,7 +136,7 @@ If you'd rather not use the GitHub workflow, publish locally. **You still need t
 PyPI account + an API token** (step 1–2 above); you just don't add it to GitHub.
 
 ```bash
-cd /Users/rohithkandula/ronin
+cd $(git rev-parse --show-toplevel)
 
 # 1. Build all 6 packages into a clean dist/ (order doesn't matter for building).
 rm -rf dist
@@ -184,7 +184,7 @@ ronin --help
 Reproduce the clean-venv test end-to-end without publishing:
 
 ```bash
-cd /Users/rohithkandula/ronin
+cd $(git rev-parse --show-toplevel)
 rm -rf dist_release
 for p in agent-patterns eval-suite memory mcp-servers hardening cli; do
   uv build --package "ronin-$p" --out-dir dist_release
