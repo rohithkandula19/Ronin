@@ -200,6 +200,10 @@ def save_session(root: Path | str, transcript: list[str], *, messages: list | No
     restores real context, not just the flat text tail."""
     from .sessions import save_session as _archive
     _archive(root, transcript, messages=messages)
+    # Opt-in, local-only SFT trace capture (RONIN_CAPTURE_TRACES=<dir>). Off by
+    # default; never transmits; never raises into the session.
+    from .trace_capture import maybe_capture
+    maybe_capture(messages)
 
 
 def load_session(root: Path | str) -> list[str]:
