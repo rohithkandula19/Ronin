@@ -85,12 +85,14 @@ def save_session(root: Path | str, transcript: list[str], *,
     if not transcript:
         return None
     sid = session_id or current_session_id()
-    d = _dir()
+    path = _session_path(sid)
+    if path is None:
+        return None
+    d = path.parent
     try:
         d.mkdir(parents=True, exist_ok=True)
     except OSError:
         return None
-    path = d / f"{sid}.json"
     data = {
         "version": SCHEMA_VERSION,
         "id": sid,
@@ -151,21 +153,29 @@ def list_sessions(root: Path | str | None = None) -> list[dict]:
     return out
 
 
-import re as _re
+def _session_path(session_id: str) -> Path | None:
+    """Resolve the on-disk path for a session id, or None if the id is unsafe.
 
-# Session ids are our own timestamp-uuid stamps (or legacy ``code-<hash>``);
-# never a path. Validate before building a filesystem path so a crafted id can't
-# traverse out of the sessions dir (defends the path expression below).
-_SAFE_SESSION_ID = _re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+    Session ids are our own timestamp-uuid stamps (or legacy ``code-<hash>``),
+    never a path. Reject anything with path components, then confirm the resolved
+    path stays inside the sessions dir — so a crafted id can't traverse out (and
+    the path expression is provably confined, closing the injection vector)."""
+    if not session_id or session_id != Path(session_id).name or session_id in (".", ".."):
+        return None
+    base = _dir()
+    candidate = (base / f"{session_id}.json").resolve()
+    try:
+        candidate.relative_to(base.resolve())
+    except ValueError:
+        return None
+    return candidate
 
 
 def _read_session(session_id: str) -> dict | None:
     """Parse a session file. A corrupt file emits a one-line warning to stderr
     (never a silent empty result that looks like 'no history')."""
-    if not session_id or not _SAFE_SESSION_ID.fullmatch(session_id):
-        return None
-    path = _dir() / f"{session_id}.json"
-    if not path.is_file():
+    path = _session_path(session_id)
+    if path is None or not path.is_file():
         return None
     try:
         return json.loads(path.read_text(encoding="utf-8"))
