@@ -485,9 +485,11 @@ class EmbeddedProvider(LLMProvider):
         n = max_tokens or self.max_tokens_default
 
         if engine == "mlx":
+            # NOTE: mlx-lm has no GBNF support — the grammar lock below is a
+            # llama.cpp feature; on mlx we rely on the trained dialect alone.
             text, usage = self._generate_mlx(chat, n, tools)
         else:
-            text, usage = self._generate_llama_cpp(chat, n)
+            text, usage = self._generate_llama_cpp(chat, n, tools)
 
         # Small local models can emit ChatML control tokens verbatim — strip them
         # so callers (and the UI) get clean text.
@@ -515,8 +517,30 @@ class EmbeddedProvider(LLMProvider):
         )
         return text, {}
 
-    def _generate_llama_cpp(self, chat: list[dict[str, str]], n: int) -> tuple[str, dict[str, int]]:
-        out = self._model_obj.create_chat_completion(messages=chat, max_tokens=n)
+    def _grammar_for(self, tools: list[Tool] | None):
+        """A compiled LlamaGrammar locking the decode to Ronin's dialect —
+        default ON (RONIN_GRAMMAR=0 disables), generated from the canonical
+        ronin_dialect spec so it can never drift from the parser. Returns None
+        (graceful skip) when disabled, tool-less, or the backend lacks grammar
+        support — never fakes enforcement it can't provide."""
+        import os as _os
+        if not tools or _os.environ.get("RONIN_GRAMMAR", "1") == "0":
+            return None
+        try:
+            from llama_cpp import LlamaGrammar  # type: ignore
+            from ronin_dialect.gbnf import grammar_for_tools
+            return LlamaGrammar.from_string(
+                grammar_for_tools([t.name for t in tools]), verbose=False)
+        except Exception:  # noqa: BLE001 — no grammar support: run unconstrained
+            return None
+
+    def _generate_llama_cpp(self, chat: list[dict[str, str]], n: int,
+                            tools: list[Tool] | None = None) -> tuple[str, dict[str, int]]:
+        grammar = self._grammar_for(tools)
+        kwargs: dict[str, Any] = {"messages": chat, "max_tokens": n}
+        if grammar is not None:
+            kwargs["grammar"] = grammar
+        out = self._model_obj.create_chat_completion(**kwargs)
         choice = (out.get("choices") or [{}])[0]
         text = (choice.get("message") or {}).get("content", "") or ""
         u = out.get("usage") or {}

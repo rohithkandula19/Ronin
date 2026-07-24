@@ -451,3 +451,76 @@ def test_mlx_load_guard_runs_before_engine_import(tmp_path, monkeypatch):
     p = EmbeddedProvider(model="", adapter_path=str(tmp_path / "missing"))
     with pytest.raises(FileNotFoundError):
         p._load_mlx("mlx-community/whatever")
+
+
+# ------------------------------------------------------------------ grammar lock
+# RONIN_GRAMMAR=1 (default): the llama-cpp decode is constrained by the GBNF
+# grammar generated from ronin_dialect — malformed tool JSON becomes
+# unsamplable. Backends without grammar support skip gracefully.
+
+def _fake_llama_backend(monkeypatch, record, *, with_grammar_support=True):
+    import sys as _sys
+    import types as _types
+    fake = _types.ModuleType("llama_cpp")
+    if with_grammar_support:
+        class LlamaGrammar:
+            def __init__(self, text): self.text = text
+            @classmethod
+            def from_string(cls, text, verbose=False): return cls(text)
+        fake.LlamaGrammar = LlamaGrammar
+    monkeypatch.setitem(_sys.modules, "llama_cpp", fake)
+
+    class FakeModel:
+        def create_chat_completion(self, **kwargs):
+            record.update(kwargs)
+            return {"choices": [{"message": {"content":
+                '<tool_call>\n{"name": "read_file", "arguments": {"path": "a.py"}}\n</tool_call>'}}],
+                "usage": {}}
+    return FakeModel()
+
+
+def _tools():
+    from ronin_agent_patterns import Tool
+    return [Tool(name="read_file", description="d", handler=lambda **kw: "",
+                 input_schema={"type": "object", "properties": {"path": {"type": "string"}}})]
+
+
+def test_grammar_passed_to_llama_backend_by_default(monkeypatch, tmp_path):
+    monkeypatch.delenv("RONIN_GRAMMAR", raising=False)
+    record: dict = {}
+    prov = E.EmbeddedProvider(model="x")
+    prov._model_obj = _fake_llama_backend(monkeypatch, record)
+    text, _ = prov._generate_llama_cpp([{"role": "user", "content": "q"}], 64, _tools())
+    assert "grammar" in record, "grammar must be handed to the backend by default"
+    assert '"\\"read_file\\""' in record["grammar"].text     # locked to the tool set
+    # and the constrained output round-trips through the canonical parser
+    from ronin_dialect.gbnf import conforms
+    assert conforms(text, ["read_file"])
+
+
+def test_grammar_disabled_by_env(monkeypatch):
+    monkeypatch.setenv("RONIN_GRAMMAR", "0")
+    record: dict = {}
+    prov = E.EmbeddedProvider(model="x")
+    prov._model_obj = _fake_llama_backend(monkeypatch, record)
+    prov._generate_llama_cpp([{"role": "user", "content": "q"}], 64, _tools())
+    assert "grammar" not in record
+
+
+def test_grammar_skips_gracefully_without_backend_support(monkeypatch):
+    monkeypatch.delenv("RONIN_GRAMMAR", raising=False)
+    record: dict = {}
+    prov = E.EmbeddedProvider(model="x")
+    prov._model_obj = _fake_llama_backend(monkeypatch, record, with_grammar_support=False)
+    text, _ = prov._generate_llama_cpp([{"role": "user", "content": "q"}], 64, _tools())
+    assert "grammar" not in record          # skipped, not crashed, not faked
+    assert text                              # generation still ran
+
+
+def test_grammar_skipped_when_no_tools(monkeypatch):
+    monkeypatch.delenv("RONIN_GRAMMAR", raising=False)
+    record: dict = {}
+    prov = E.EmbeddedProvider(model="x")
+    prov._model_obj = _fake_llama_backend(monkeypatch, record)
+    prov._generate_llama_cpp([{"role": "user", "content": "q"}], 64, None)
+    assert "grammar" not in record

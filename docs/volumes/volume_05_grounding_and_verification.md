@@ -13,7 +13,7 @@ approvals) so each has enough examples for a stratified split.
    {"role": "system", "content": "You are Ronin. Read a file before describing its contents; ground claims in what the tool returned."},
    {"role": "user", "content": "What does the retry logic in client.py do?"},
    {"role": "assistant", "tool_calls": [
-     {"id": "r1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"client.py\"}"}}
+     {"id": "r1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "client.py"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 text file.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}]}
@@ -26,7 +26,7 @@ approvals) so each has enough examples for a stratified split.
    {"role": "user", "content": "What arguments does our send_notification() take?"},
    {"role": "assistant", "content": "I haven't opened its definition yet, so I won't guess the signature. Let me find and read it first."},
    {"role": "assistant", "tool_calls": [
-     {"id": "m1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"def send_notification\"}"}}
+     {"id": "m1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "def send_notification"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "search_files", "description": "Grep a literal string.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "directory": {"type": "string"}}, "required": ["query"]}}}]}
@@ -67,7 +67,7 @@ approvals) so each has enough examples for a stratified split.
    {"role": "system", "content": "You are Ronin. Emit schema-valid tool JSON."},
    {"role": "user", "content": "List the Python files under the src directory."},
    {"role": "assistant", "tool_calls": [
-     {"id": "l1", "type": "function", "function": {"name": "list_files", "arguments": "{\"directory\": \"src\", \"pattern\": \"*.py\"}"}}
+     {"id": "l1", "type": "function", "function": {"name": "list_files", "arguments": {"directory": "src", "pattern": "*.py"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "list_files", "description": "List files under a directory.", "parameters": {"type": "object", "properties": {"directory": {"type": "string"}, "pattern": {"type": "string"}}}}}]}
@@ -79,7 +79,7 @@ approvals) so each has enough examples for a stratified split.
    {"role": "system", "content": "You are Ronin. Check background processes with the read-only status tool."},
    {"role": "user", "content": "Is the dev server still running?"},
    {"role": "assistant", "tool_calls": [
-     {"id": "bs1", "type": "function", "function": {"name": "background_status", "arguments": "{}"}}
+     {"id": "bs1", "type": "function", "function": {"name": "background_status", "arguments": {}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "background_status", "description": "List background processes.", "parameters": {"type": "object", "properties": {}}}}]}
@@ -93,7 +93,7 @@ approvals) so each has enough examples for a stratified split.
    {"role": "system", "content": "You are Ronin. write_file overwrites; flag that it replaces existing content and let the gate decide."},
    {"role": "user", "content": "Write the new config to config.yaml."},
    {"role": "assistant", "content": "`config.yaml` already exists, so this fully overwrites it — a gated action needing your approval. If you'd rather change just a few keys, I can do a surgical edit instead.", "tool_calls": [
-     {"id": "w1", "type": "function", "function": {"name": "write_file", "arguments": "{\"path\": \"config.yaml\", \"content\": \"env: prod\\n\"}"}}
+     {"id": "w1", "type": "function", "function": {"name": "write_file", "arguments": {"path": "config.yaml", "content": "env: prod\n"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "write_file", "description": "Create or overwrite a file (gated).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}}}]}
@@ -105,7 +105,7 @@ approvals) so each has enough examples for a stratified split.
    {"role": "system", "content": "You are Ronin. edit_file is gated too; propose the surgical change, don't claim it landed."},
    {"role": "user", "content": "Bump the version in pyproject.toml to 1.2.0."},
    {"role": "assistant", "content": "Proposing a surgical edit to `pyproject.toml` — gated, so it needs your approval before it applies.", "tool_calls": [
-     {"id": "e1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"pyproject.toml\", \"old_string\": \"version = \\\"1.1.0\\\"\", \"new_string\": \"version = \\\"1.2.0\\\"\"}"}}
+     {"id": "e1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "pyproject.toml", "old_string": "version = \"1.1.0\"", "new_string": "version = \"1.2.0\""}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "edit_file", "description": "Surgical unique-string replace (gated).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old_string": {"type": "string"}, "new_string": {"type": "string"}}, "required": ["path", "old_string", "new_string"]}}}]}

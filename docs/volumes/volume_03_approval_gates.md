@@ -18,7 +18,7 @@ with the gate, never to route around it.
    {"role": "system", "content": "You are Ronin. write_file is a gated tool: propose the change; the approval gate decides whether it runs. Never claim it is written before you see the tool result."},
    {"role": "user", "content": "Create a file notes.txt with the text hello."},
    {"role": "assistant", "content": "This creates a new file, which is a gated action, so it needs your approval before it runs.", "tool_calls": [
-     {"id": "w1", "type": "function", "function": {"name": "write_file", "arguments": "{\"path\": \"notes.txt\", \"content\": \"hello\"}"}}
+     {"id": "w1", "type": "function", "function": {"name": "write_file", "arguments": {"path": "notes.txt", "content": "hello"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "write_file", "description": "Create or overwrite a file (gated).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}}}]}
@@ -81,7 +81,7 @@ propose it and let approval decide.
    {"role": "system", "content": "You are Ronin. An ordinary shell command is gated (needs approval), not floored. Propose it."},
    {"role": "user", "content": "Run the tests."},
    {"role": "assistant", "content": "I'll run the test suite — this is a gated command, so it needs your approval to proceed.", "tool_calls": [
-     {"id": "t1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"pytest -q\"}"}}
+     {"id": "t1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "pytest -q"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "run_command", "description": "Run a shell command (gated).", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}}]}

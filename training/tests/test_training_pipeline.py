@@ -59,7 +59,7 @@ def _row(**over):
             {"role": "user", "content": "read it"},
             {"role": "assistant", "tool_calls": [
                 {"id": "c1", "type": "function",
-                 "function": {"name": "read_file", "arguments": '{"path": "a.py"}'}}
+                 "function": {"name": "read_file", "arguments": {"path": "a.py"}}}
             ]},
         ],
     }
@@ -76,7 +76,7 @@ def test_unknown_tool_rejected():
         {"role": "user", "content": "x"},
         {"role": "assistant", "tool_calls": [
             {"id": "c1", "type": "function",
-             "function": {"name": "teleport", "arguments": "{}"}}
+             "function": {"name": "teleport", "arguments": {}}}
         ]},
     ])
     errs = validate_example(bad)
@@ -89,14 +89,17 @@ def test_bad_tool_arguments_rejected():
         {"role": "assistant", "tool_calls": [
             {"id": "c1", "type": "function",
              # read_file requires `path`; give it a wrong-typed/absent one
-             "function": {"name": "read_file", "arguments": '{"path": 123}'}}
+             "function": {"name": "read_file", "arguments": {"path": 123}}}
         ]},
     ])
     errs = validate_example(bad)
     assert any("schema" in e for e in errs)
 
 
-def test_non_json_tool_arguments_rejected():
+def test_non_object_tool_arguments_rejected():
+    # D2: the schema itself now forbids string-typed arguments — a "{not json}"
+    # string (or ANY string) never reaches the JSON-decode path; it dies at the
+    # schema gate.
     bad = _row(messages=[
         {"role": "user", "content": "x"},
         {"role": "assistant", "tool_calls": [
@@ -104,7 +107,8 @@ def test_non_json_tool_arguments_rejected():
              "function": {"name": "read_file", "arguments": "{not json}"}}
         ]},
     ])
-    assert any("not valid JSON" in e for e in validate_example(bad))
+    errs = validate_example(bad)
+    assert errs and "schema" in errs[0]
 
 
 def test_banned_license_rejected():
@@ -196,7 +200,7 @@ def test_build_is_strict_by_default(tmp_path):
         '{"id": "bad_1", "family": "f", "source_volume": "T", "license": "project-owned",'
         ' "messages": [{"role": "user", "content": "x"},'
         ' {"role": "assistant", "tool_calls": [{"id": "c", "type": "function",'
-        ' "function": {"name": "nonexistent_tool", "arguments": "{}"}}]}]}\n```\n'
+        ' "function": {"name": "nonexistent_tool", "arguments": {}}}]}]}\n```\n'
     )
     with pytest.raises(ValueError):
         build(bad, tmp_path / "out", strict=True)
@@ -213,7 +217,7 @@ def test_build_allow_invalid_excludes_bad_rows(tmp_path):
         '```ronin-sft\n{"id": "bad_1", "family": "f", "source_volume": "T",'
         ' "license": "project-owned", "messages": [{"role": "user", "content": "x"},'
         ' {"role": "assistant", "tool_calls": [{"id": "c", "type": "function",'
-        ' "function": {"name": "ghost", "arguments": "{}"}}]}]}\n```\n'
+        ' "function": {"name": "ghost", "arguments": {}}}]}]}\n```\n'
     )
     report = build(bad, tmp_path / "out", strict=False)
     assert report["valid"] == 1 and report["rejected"] == 1
