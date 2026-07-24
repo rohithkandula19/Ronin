@@ -26,12 +26,41 @@ Kaggle (also free) is the fallback if a Colab T4 isn't available.
      Qwen-1.5B's. The report (score/91, valid_tool_json/N, per-task PASS/FAIL,
      model + adapter + commit SHA) lands in `training/reports/`.
 5. **Read the score against the pre-committed gate:**
-   **valid_tool_json 4/4 AND >60/91.**
-   - Clears it → publish with your free HF account:
-     `hf upload <you>/ronin-code-1.5b <adapter-dir> --repo-type model`
-     and fill the numbers into `training/MODEL_CARD_ronin-code-1.5b.md`.
+   **valid_tool_json 4/4 AND >60/91** (pinned in
+   `training/config/publish_gate.json`).
    - Misses it → the honest outcome is archiving the checkpoint with its
      report. No massaged numbers, ever.
+   - Clears it → two commands take you from "trained" to "shipped and
+     default", still at $0:
+
+## Trained → shipped → default: the last two commands
+
+**1. Publish (gate-enforced — the script refuses a sub-gate checkpoint):**
+
+```bash
+bash training/publish_model.sh <adapter-dir> [your-hf-username]
+```
+
+One command: re-runs the honest eval (frozen, sha256-pinned set + baseline
+delta), checks the measured scores against the pinned gate **in code**
+(`ronin_training.publish_gate` — a sub-gate score exits non-zero before any
+upload), fills the model card's PENDING cells from the real report
+(SHA-stamped), and runs `hf upload` with your free HF account. Not logged in?
+It prints the exact upload commands and exits cleanly.
+
+**2. Wire it in as Ronin's default local model:**
+
+```bash
+export RONIN_ADAPTER=<adapter-dir>   # e.g. training/adapters/ronin-code-1.5b-v5/adapters
+ronin init                           # choose: local (ronin-code-1.5b)
+ronin util models                    # smoke: shows "local (ronin-code-1.5b): adapter ... valid"
+```
+
+Zero code changes — the wiring is already tested with a stub adapter
+(`packages/cli/tests/test_adapter_wirein.py`). The provider **fails closed**
+(a missing/half-baked adapter dir raises rather than silently serving the
+bare base model), and the GBNF grammar lock is **on by default** in this flow
+(`RONIN_GRAMMAR=1`, llama.cpp engine; adapters load on the mlx engine).
 
 ## Weak checkpoint ≠ broken runtime
 

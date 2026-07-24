@@ -1,0 +1,10 @@
+{
+  "_comment": "THE pre-committed ship gate for ronin-code-1.5b. publish_model.sh and ronin_training.publish_gate read the criteria from here — the gate is enforced in code, not trusted to the operator. Changing these numbers is a deliberate, reviewed act.",
+  "base_model": "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+  "hf_repo": "ronin-code-1.5b",
+  "model_card": "training/MODEL_CARD_ronin-code-1.5b.md",
+  "eval_set": "training/data/evals/ronin_protocol_eval.jsonl",
+  "expected_total": 91,
+  "require_all_pass_categories": ["valid_tool_json"],
+  "min_passed_exclusive": 60
+}

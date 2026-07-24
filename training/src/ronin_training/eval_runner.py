@@ -217,7 +217,7 @@ def hf_provider(model_path: str, *, adapter_path: str | None = None,
     tokenizer = AutoTokenizer.from_pretrained(model_path)   # pragma: no cover
     model = AutoModelForCausalLM.from_pretrained(           # pragma: no cover
         model_path, device_map="auto",
-        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32)
+        dtype=torch.float16 if torch.cuda.is_available() else torch.float32)
     if adapter_path:                                        # pragma: no cover
         from peft import PeftModel
         model = PeftModel.from_pretrained(model, adapter_path)
@@ -344,6 +344,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--repin", action="store_true",
                     help="deliberately re-pin the frozen eval-set hash (corpus "
                     "evolution only; forbidden mid-comparison)")
+    ap.add_argument("--scores-json", default=None,
+                    help="ALSO write machine-readable scores (per run: passed/"
+                    "total/by_category/provenance) — what publish_model.sh "
+                    "feeds the code-enforced ship gate")
     a = ap.parse_args(argv)
 
     frozen_errs = assert_frozen_eval_set(a.evals, repin=a.repin)
@@ -357,16 +361,18 @@ def main(argv: list[str] | None = None) -> int:
         runs.append(("baseline", None))
 
     scores: dict[str, EvalReport] = {}
+    prov: dict[str, dict] = {}
     make = hf_provider if a.provider == "hf" else mlx_provider
     for label, adapter in runs:
         provider = make(a.model, adapter_path=adapter, max_tokens=a.max_tokens)
         report = run_evals(cases, provider)
         scores[label] = report
+        prov[label] = {"model": a.model, "adapter": adapter or "(none)",
+                       "commit": _git_sha(), "eval_set_sha256": _sha256_file(a.evals),
+                       "timestamp": stamp}
         out = a.out or str(Path("training/reports") / f"eval{len(cases)}_{label}_{stamp}.md")
         write_report(report, out, title=f"{a.title} — {label}",
-                     provenance={"model": a.model, "adapter": adapter or "(none)",
-                                 "commit": _git_sha(), "eval_set_sha256": _sha256_file(a.evals),
-                                 "timestamp": stamp})
+                     provenance=prov[label])
         print(f"{a.title} [{label}]: {report.passed}/{report.total} passed "
               f"({report.pass_rate:.1%}) → {out}")
         for cat, (p, t) in report.by_category().items():
@@ -375,6 +381,14 @@ def main(argv: list[str] | None = None) -> int:
         d = scores["adapter"].passed - scores["baseline"].passed
         print(f"baseline delta: {d:+d} (adapter {scores['adapter'].passed} vs "
               f"base {scores['baseline'].passed} of {len(cases)})")
+    if a.scores_json:
+        payload = {label: {"passed": r.passed, "total": r.total,
+                           "by_category": {k: list(v) for k, v in r.by_category().items()},
+                           "provenance": prov[label]}
+                   for label, r in scores.items()}
+        Path(a.scores_json).write_text(json.dumps(payload, indent=2) + "\n",
+                                       encoding="utf-8")
+        print(f"scores json: {a.scores_json}")
     return 0
 
 
