@@ -138,79 +138,94 @@ class ReActAgent(BaseModel):
         trace: list[Step] = []
         usage = {"input_tokens": 0, "output_tokens": 0}
 
-        for i in range(self.max_iterations):
-            if self.compact_after_tokens is not None:
-                self._maybe_compact(messages, emit)
-            if on_text is not None:
-                # Streaming mode: forward text deltas live, then take the final
-                # assembled response from the terminal ``done`` event.
-                response = None
-                for ev in self.provider.stream(
-                    system=self.system,
-                    messages=messages,
-                    tools=self.tools,
-                    max_tokens=self.max_tokens,
-                ):
-                    if ev.type == "text" and ev.text:
-                        on_text(ev.text)
-                    elif ev.type == "reset":
-                        # A retry is re-streaming from scratch; drop the partial
-                        # we already forwarded so the answer isn't shown twice.
-                        if on_reset is not None:
-                            on_reset()
-                    elif ev.type == "done":
-                        response = ev.response
-                assert response is not None, "stream ended without a 'done' event"
-            else:
-                response = self.provider.complete(
-                    system=self.system,
-                    messages=messages,
-                    tools=self.tools,
-                    max_tokens=self.max_tokens,
-                )
-            usage["input_tokens"] += response.usage.get("input_tokens", 0)
-            usage["output_tokens"] += response.usage.get("output_tokens", 0)
-            # Carry prompt-cache counts when the provider reports them, so callers
-            # can show cache savings. Absent (e.g. non-Anthropic) → keys never appear.
-            for k in ("cache_read_input_tokens", "cache_creation_input_tokens"):
-                if k in response.usage:
-                    usage[k] = usage.get(k, 0) + response.usage[k]
+        try:
+            for i in range(self.max_iterations):
+                if self.compact_after_tokens is not None:
+                    self._maybe_compact(messages, emit)
+                if on_text is not None:
+                    # Streaming mode: forward text deltas live, then take the final
+                    # assembled response from the terminal ``done`` event.
+                    response = None
+                    for ev in self.provider.stream(
+                        system=self.system,
+                        messages=messages,
+                        tools=self.tools,
+                        max_tokens=self.max_tokens,
+                    ):
+                        if ev.type == "text" and ev.text:
+                            on_text(ev.text)
+                        elif ev.type == "reset":
+                            # A retry is re-streaming from scratch; drop the partial
+                            # we already forwarded so the answer isn't shown twice.
+                            if on_reset is not None:
+                                on_reset()
+                        elif ev.type == "done":
+                            response = ev.response
+                    assert response is not None, "stream ended without a 'done' event"
+                else:
+                    response = self.provider.complete(
+                        system=self.system,
+                        messages=messages,
+                        tools=self.tools,
+                        max_tokens=self.max_tokens,
+                    )
+                usage["input_tokens"] += response.usage.get("input_tokens", 0)
+                usage["output_tokens"] += response.usage.get("output_tokens", 0)
+                # Carry prompt-cache counts when the provider reports them, so callers
+                # can show cache savings. Absent (e.g. non-Anthropic) → keys never appear.
+                for k in ("cache_read_input_tokens", "cache_creation_input_tokens"):
+                    if k in response.usage:
+                        usage[k] = usage.get(k, 0) + response.usage[k]
 
-            if response.text:
-                emit(Step(kind="thought", content=response.text))
+                if response.text:
+                    emit(Step(kind="thought", content=response.text))
 
-            if not response.tool_calls:
-                final = response.text or "(no output)"
-                emit(Step(kind="final", content=final))
-                # Keep the final answer in the history so the next turn (when the
-                # caller feeds ``messages`` back as ``history``) sees what we said.
-                messages.append(Message(role="assistant", content=final))
-                return AgentResult(
-                    success=True,
-                    output=final,
-                    iterations=i + 1,
-                    trace=trace,
-                    usage=usage,
-                    messages=messages,
-                )
+                if not response.tool_calls:
+                    final = response.text or "(no output)"
+                    emit(Step(kind="final", content=final))
+                    # Keep the final answer in the history so the next turn (when the
+                    # caller feeds ``messages`` back as ``history``) sees what we said.
+                    messages.append(Message(role="assistant", content=final))
+                    return AgentResult(
+                        success=True,
+                        output=final,
+                        iterations=i + 1,
+                        trace=trace,
+                        usage=usage,
+                        messages=messages,
+                    )
 
-            messages.append(Message(
-                role="assistant",
-                content=response.text,
-                tool_calls=response.tool_calls,
-            ))
+                messages.append(Message(
+                    role="assistant",
+                    content=response.text,
+                    tool_calls=response.tool_calls,
+                ))
 
-            calls = list(response.tool_calls)
-            # Parallelise a batch only when EVERY call is declared safe (read-only
-            # / idempotent) by the caller — never writes, commands, or anything
-            # gated. Order of results is preserved to match the tool_call ids.
-            if (len(calls) > 1 and parallel_safe is not None
-                    and all(parallel_safe(tc.name) for tc in calls)):
-                self._run_parallel(calls, tools_by_name, before_tool, after_tool, emit, messages)
-            else:
-                for tc in calls:
-                    self._run_one(tc, tools_by_name, before_tool, after_tool, emit, messages)
+                calls = list(response.tool_calls)
+                # Parallelise a batch only when EVERY call is declared safe (read-only
+                # / idempotent) by the caller — never writes, commands, or anything
+                # gated. Order of results is preserved to match the tool_call ids.
+                if (len(calls) > 1 and parallel_safe is not None
+                        and all(parallel_safe(tc.name) for tc in calls)):
+                    self._run_parallel(calls, tools_by_name, before_tool, after_tool, emit, messages)
+                else:
+                    for tc in calls:
+                        self._run_one(tc, tools_by_name, before_tool, after_tool, emit, messages)
 
+        except KeyboardInterrupt:
+            # Ctrl-C ends the turn but must not throw away what the agent already
+            # did. Preserve the structured history (trimmed to complete pairs) so
+            # the next turn keeps every file read; mark it interrupted for context.
+            messages.append(Message(role="user", content="(previous turn interrupted by user before completion)"))
+            return AgentResult(
+                success=False,
+                output="(interrupted by user)",
+                iterations=i + 1,
+                trace=trace,
+                error="interrupted by user",
+                usage=usage,
+                messages=trim_to_complete_pairs(messages),
+            )
         return AgentResult(
             success=False,
             output="(iteration cap reached)",

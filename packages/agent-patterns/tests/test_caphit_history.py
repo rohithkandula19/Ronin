@@ -51,3 +51,32 @@ def test_trim_keeps_complete_pairs():
         Message(role="tool", content="ok", tool_call_id="a"),
     ]
     assert trim_to_complete_pairs(msgs) == msgs
+
+
+def test_interrupt_preserves_pairing_valid_history():
+    """F2 (interrupt half): Ctrl-C mid-turn returns the partial history instead
+    of raising, so the caller can adopt it."""
+    calls = {"n": 0}
+
+    def handler():
+        calls["n"] += 1
+        if calls["n"] >= 2:
+            raise KeyboardInterrupt  # simulate Ctrl-C during the 2nd tool run
+        return "FILE CONTENTS ABC"
+
+    tool = Tool(name="read", description="read",
+                input_schema={"type": "object", "properties": {}}, handler=handler)
+    provider = FakeProvider(responses=[
+        LLMResponse(text="", tool_calls=[ToolCall(id=f"t{i}", name="read", arguments={})],
+                    stop_reason="tool_use", usage={"input_tokens": 5, "output_tokens": 1})
+        for i in range(5)
+    ])
+    agent = ReActAgent(system="x", tools=[tool], provider=provider, max_iterations=5)
+    result = agent.run("read it")  # must NOT raise
+    assert result.success is False
+    assert result.error == "interrupted by user"
+    assert result.messages, "interrupt must preserve structured history"
+    last = result.messages[-1]
+    # trim drops the dangling assistant whose tool never ran
+    assert not (getattr(last, "role", None) == "assistant" and getattr(last, "tool_calls", None))
+    assert any("FILE CONTENTS ABC" in (getattr(m, "content", "") or "") for m in result.messages)
