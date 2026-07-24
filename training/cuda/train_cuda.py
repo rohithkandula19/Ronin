@@ -123,7 +123,7 @@ def main(argv: list[str] | None = None) -> int:
                 bnb_4bit_use_double_quant=True))
     else:
         model = AutoModelForCausalLM.from_pretrained(
-            BASE_MODEL, torch_dtype=torch.float16 if args.fp16 else torch.bfloat16,
+            BASE_MODEL, dtype=torch.float16 if args.fp16 else torch.bfloat16,
             device_map="auto")
 
     out = Path(args.out)

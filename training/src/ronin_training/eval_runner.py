@@ -217,7 +217,7 @@ def hf_provider(model_path: str, *, adapter_path: str | None = None,
     tokenizer = AutoTokenizer.from_pretrained(model_path)   # pragma: no cover
     model = AutoModelForCausalLM.from_pretrained(           # pragma: no cover
         model_path, device_map="auto",
-        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32)
+        dtype=torch.float16 if torch.cuda.is_available() else torch.float32)
     if adapter_path:                                        # pragma: no cover
         from peft import PeftModel
         model = PeftModel.from_pretrained(model, adapter_path)
