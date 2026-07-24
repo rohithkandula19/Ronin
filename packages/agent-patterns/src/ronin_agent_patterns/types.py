@@ -4,6 +4,12 @@ from typing import Any, Callable, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+# Sentinel key: when a provider cannot parse a tool call's JSON arguments, it
+# stows the raw string under this key instead of silently coercing to {}. The
+# executor detects it and returns a "malformed arguments" error so the model
+# fixes its JSON, rather than being mis-coached about argument names.
+MALFORMED_ARGS_KEY = "__ronin_malformed_args__"
+
 
 class Tool(BaseModel):
     """A tool the agent can invoke. Wraps a Python callable with a JSON-schema input contract."""
