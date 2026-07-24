@@ -654,6 +654,42 @@ def _selective_gate(
     return gate
 
 
+def _user_prompt_injection_gate(task, *, console=None, gate_cb=None):
+    """Trust polarity for F4: the user's OWN prompt is the TRUSTED channel, so a
+    scanner hit is a warning — never a hard block (which locked out people who
+    legitimately type injection strings, e.g. editing the injection tests). The
+    untrusted channel (fetched web content) is scanned+enveloped in web_tools.
+
+    Returns a blocked ``CodeRunResult`` only when an interactive user explicitly
+    declines; otherwise ``None`` (proceed).
+    """
+    import sys as _sys
+    scan = InjectionScanner().scan(task)
+    if not scan.flagged:
+        return None
+    labels = [h["label"] for h in scan.hits]
+    if console is not None:
+        console.print(
+            f"[#e0af68]\u26a0 your task matched prompt-injection patterns {labels}. "
+            "You are the trusted user \u2014 this is a warning, not a block.[/#e0af68]"
+        )
+    if console is not None and gate_cb is None and _sys.stdin.isatty():
+        try:
+            resp = input("  proceed anyway? [y/N] ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            resp = "n"
+        if resp not in ("y", "yes"):
+            return CodeRunResult(
+                success=False,
+                output="[cancelled] injection-scan warning declined.",
+                iterations=0,
+                error="user declined after injection warning",
+                blocked=True,
+            )
+    return None
+
+
+
 def run_code_agent(
     config: RoninConfig,
     task: str,
@@ -679,15 +715,14 @@ def run_code_agent(
     on_step_cb=None,
     gate_cb=None,
 ) -> CodeRunResult:
-    scan = InjectionScanner().scan(task)
-    if scan.flagged:
-        return CodeRunResult(
-            success=False,
-            output="[blocked] your task was flagged as a potential prompt-injection attempt.",
-            iterations=0,
-            error=f"injection-scan flagged: {[h['label'] for h in scan.hits]}",
-            blocked=True,
-        )
+    # Trust polarity: the user's OWN typed task is the TRUSTED channel, so a
+    # scanner hit here is a warning, not a hard block (hard-blocking locked out
+    # the exact people who legitimately type injection strings — e.g. someone
+    # editing the injection tests — with no override). The untrusted channel
+    # (fetched web pages / search results) is scanned + enveloped in web_tools.
+    _blocked = _user_prompt_injection_gate(task, console=console, gate_cb=gate_cb)
+    if _blocked is not None:
+        return _blocked
 
     # A read-only role (researcher / reviewer / architect) restricts the agent to
     # read-only tools — guidance that's also enforced, never a safety bypass.
