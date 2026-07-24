@@ -69,5 +69,8 @@ def test_provider_flag_parses(monkeypatch):
     monkeypatch.setattr(er, "assert_frozen_eval_set", lambda p, repin=False: [])
     monkeypatch.setattr(er, "load_cases", lambda p: [])
     monkeypatch.setattr(er, "write_report", lambda *a, **k: None)
+    # provenance hashes the eval FILE as a write_report argument — that file is
+    # generated (gitignored), absent on a clean CI checkout; stub it too
+    monkeypatch.setattr(er, "_sha256_file", lambda p: "stub")
     er.main(["--provider", "hf", "--model", "m", "--adapter", "x", "--out", "/dev/null"])
     assert seen == {"provider": "hf", "adapter": "x"}
