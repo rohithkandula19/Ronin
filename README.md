@@ -85,7 +85,7 @@ Regenerate the walkthrough anytime with [`vhs`](https://github.com/charmbracelet
 
 **One front door:** type **`ronin`** and you get a single agent that reads, writes, and runs code (every edit and shell command gated behind a diff preview and your approval, reads run freely), generates images/video/speech, and queries your connected data, all in one conversation, in plain language. It's **provider-agnostic**: the same agent runs on Claude or on free open models.
 
-It's also a **reference implementation for building agents the right way**. The CLI is a thin wrapper over seven core, independently-usable packages — `agent-patterns`, `eval-suite`, `memory`, `hardening`, `mcp-servers`, `relay`, and `cli` — part of a 23-package workspace (the other 16 are platform packages: identity, vault, billing, observability, and so on), backed by **4,102 tests** that run offline in CI. (`ronin code` is the focused coding agent; `ronin chat` is the talk/media surface, both available when you want a single-purpose mode.)
+It's also a **reference implementation for building agents the right way**. The CLI is a thin wrapper over seven core, independently-usable packages — `agent-patterns`, `eval-suite`, `memory`, `hardening`, `mcp-servers`, `relay`, and `cli` — part of a 22-package workspace (the other 15 are platform packages: identity, vault, billing, observability, and so on), backed by **4,102 tests** that run offline in CI. (`ronin code` is the focused coding agent; `ronin chat` is the talk/media surface, both available when you want a single-purpose mode.)
 
 ## 🛠 `ronin code` · the coding agent (Claude-Code shaped)
 
@@ -470,7 +470,7 @@ ronin is MIT-licensed and meant to be picked up by other people. A few notes if 
 
 ## 🧱 What's under the hood
 
-`ronin` is the user-facing wrapper. The substance lives in **seven core packages you can also use independently** (part of a 23-package workspace), this is the engineering core:
+`ronin` is the user-facing wrapper. The substance lives in **seven core packages you can also use independently** (part of a 22-package workspace), this is the engineering core:
 
 | Package | What it does | Tests |
 |---|---|---|
