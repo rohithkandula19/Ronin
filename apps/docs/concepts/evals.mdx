@@ -42,7 +42,7 @@ For agentic tasks, add `tool_use_correctness`. For RAG, add `citation_accuracy`.
 ## 3. Run + report
 
 ```python
-from ro_claude_kit_eval_suite import EvalSuite, Rubric, GoldenDataset, render_html_report
+from ronin_eval_suite import EvalSuite, Rubric, GoldenDataset, render_html_report
 
 dataset = GoldenDataset.from_jsonl("./golden.jsonl")
 suite = EvalSuite(
@@ -62,7 +62,7 @@ The HTML report shows summary bars, per-criterion histograms, and one collapsibl
 ## 4. Drift detection
 
 ```python
-from ro_claude_kit_eval_suite import detect_drift
+from ronin_eval_suite import detect_drift
 
 baseline = RunReport.model_validate_json(Path("baseline.json").read_text())
 candidate = RunReport.model_validate_json(Path("v0.4.0.json").read_text())

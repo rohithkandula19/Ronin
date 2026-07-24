@@ -28,7 +28,7 @@ flowchart LR
 ## Prompt-injection scanning
 
 ```python
-from ro_claude_kit_hardening import InjectionScanner
+from ronin_hardening import InjectionScanner
 
 scanner = InjectionScanner()
 result = scanner.scan(user_input)
@@ -53,7 +53,7 @@ For high-risk inputs, also use the **dual-LLM** pattern: keep untrusted text out
 Block hallucinated or attacker-crafted tool names *before* dispatch:
 
 ```python
-from ro_claude_kit_hardening import ToolAllowlist
+from ronin_hardening import ToolAllowlist
 
 allowlist = ToolAllowlist(allowed={"search", "fetch_doc"})
 allowlist.assert_allowed(tool_name)  # raises PermissionError if not allowed
@@ -66,7 +66,7 @@ The LLM might hallucinate `delete_user`. The allowlist refuses to dispatch it ev
 Writes, money movement, deletions — never let those fire without a human looking:
 
 ```python
-from ro_claude_kit_hardening import ApprovalGate
+from ronin_hardening import ApprovalGate
 
 gate = ApprovalGate()
 gate.register("delete_user", delete_user_handler)
@@ -85,7 +85,7 @@ If you need structured output, never let the agent return free-form text. Valida
 
 ```python
 from pydantic import BaseModel
-from ro_claude_kit_hardening import OutputValidator
+from ronin_hardening import OutputValidator
 
 class Verdict(BaseModel):
     classification: Literal["spam", "ham"]
@@ -103,7 +103,7 @@ On failure the validator feeds the Pydantic error back to the model so it can se
 ## Provider-agnostic tracing + PII redaction
 
 ```python
-from ro_claude_kit_hardening import TraceEmitter
+from ronin_hardening import TraceEmitter
 
 emitter = TraceEmitter(sink=lambda event: langfuse.create_event(event.model_dump()))
 trace_id = emitter.start_trace("research-agent", payload={"user": user_email})
