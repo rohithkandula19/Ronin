@@ -17,6 +17,7 @@ from __future__ import annotations
 import datetime
 import hashlib
 import json
+import os
 import uuid
 from pathlib import Path
 
@@ -157,18 +158,18 @@ def _session_path(session_id: str) -> Path | None:
     """Resolve the on-disk path for a session id, or None if the id is unsafe.
 
     Session ids are our own timestamp-uuid stamps (or legacy ``code-<hash>``),
-    never a path. Reject anything with path components, then confirm the resolved
-    path stays inside the sessions dir — so a crafted id can't traverse out (and
-    the path expression is provably confined, closing the injection vector)."""
-    if not session_id or session_id != Path(session_id).name or session_id in (".", ".."):
+    never a path. The filename is reduced to its last path component with
+    ``os.path.basename`` — CodeQL's recognised path-traversal barrier — and the
+    id is rejected unless it survives that reduction unchanged, so no separator
+    or ``..`` component can ever reach the filesystem join."""
+    if not session_id or session_id in (".", ".."):
         return None
-    base = _dir()
-    candidate = (base / f"{session_id}.json").resolve()
-    try:
-        candidate.relative_to(base.resolve())
-    except ValueError:
+    filename = f"{session_id}.json"
+    # os.path.basename strips any directory portion; if the result differs, the
+    # id contained a path separator (or was otherwise not a bare name) — reject.
+    if os.path.basename(filename) != filename:
         return None
-    return candidate
+    return _dir() / filename
 
 
 def _read_session(session_id: str) -> dict | None:
