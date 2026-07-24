@@ -16,13 +16,13 @@ def test_save_and_list(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
     # Save two queries
-    r1 = runner.invoke(app, ["save", "mrr", "what is our MRR right now"])
+    r1 = runner.invoke(app, ["util", "save", "mrr", "what is our MRR right now"])
     assert r1.exit_code == 0, r1.stdout
-    r2 = runner.invoke(app, ["save", "churn", "which customers churned this month", "--description", "weekly check"])
+    r2 = runner.invoke(app, ["util", "save", "churn", "which customers churned this month", "--description", "weekly check"])
     assert r2.exit_code == 0
 
     # List them
-    r3 = runner.invoke(app, ["queries"])
+    r3 = runner.invoke(app, ["util", "queries"])
     assert r3.exit_code == 0
     assert "mrr" in r3.stdout
     assert "churn" in r3.stdout
@@ -31,31 +31,31 @@ def test_save_and_list(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_save_invalid_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
-    r = runner.invoke(app, ["save", "has spaces", "x"])
+    r = runner.invoke(app, ["util", "save", "has spaces", "x"])
     assert r.exit_code == 2
     assert "invalid name" in r.stdout.lower()
 
 
 def test_unsave(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
-    runner.invoke(app, ["save", "tmp", "delete me"])
-    r = runner.invoke(app, ["unsave", "tmp"])
+    runner.invoke(app, ["util", "save", "tmp", "delete me"])
+    r = runner.invoke(app, ["util", "unsave", "tmp"])
     assert r.exit_code == 0
-    r2 = runner.invoke(app, ["unsave", "tmp"])
+    r2 = runner.invoke(app, ["util", "unsave", "tmp"])
     assert r2.exit_code == 2
 
 
 def test_run_missing_query(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    r = runner.invoke(app, ["run", "nonexistent"])
+    r = runner.invoke(app, ["util", "run", "nonexistent"])
     assert r.exit_code == 2
     assert "no saved query" in r.stdout.lower()
 
 
 def test_queries_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
-    r = runner.invoke(app, ["queries"])
+    r = runner.invoke(app, ["util", "queries"])
     assert r.exit_code == 0
     assert "no saved queries" in r.stdout.lower()
 
@@ -77,13 +77,13 @@ def test_run_saved_query_executes_with_fake_provider(tmp_path, monkeypatch) -> N
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
     runner.invoke(app, ["init", "--demo", "-y"])
-    runner.invoke(app, ["save", "mrr", "what is our MRR"])
+    runner.invoke(app, ["util", "save", "mrr", "what is our MRR"])
 
     provider = FakeProvider(responses=[
         LLMResponse(text="MRR is $78/mo from 2 active subscriptions.", stop_reason="end_turn",
                     usage={"input_tokens": 10, "output_tokens": 5}),
     ])
     with patch("ronin_cli.runner.build_provider", return_value=provider):
-        r = runner.invoke(app, ["run", "mrr"])
+        r = runner.invoke(app, ["util", "run", "mrr"])
     assert r.exit_code == 0
     assert "$78" in r.stdout

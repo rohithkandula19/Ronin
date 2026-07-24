@@ -146,7 +146,7 @@ def test_briefing_cli_shows_anomalies_section_with_seeded_history(
     for i, date in enumerate(["2026-04-06", "2026-04-13", "2026-04-20", "2026-04-27"]):
         save_snapshot(_snap(date, mrr_cents=100 + i, active_subs=2, failed_charges_7d=0))
 
-    r = runner.invoke(app, ["briefing", "--raw"])
+    r = runner.invoke(app, ["util", "briefing", "--raw"])
     assert r.exit_code == 0
     # Demo data has MRR=$334 (33400 cents) — huge spike over the seeded $1-ish
     assert "📊 Anomalies" in r.stdout
@@ -164,6 +164,6 @@ def test_briefing_cli_skips_anomalies_when_history_too_short(
     save_snapshot(_snap("2026-04-27", mrr_cents=100))
     save_snapshot(_snap("2026-05-04", mrr_cents=110))
 
-    r = runner.invoke(app, ["briefing", "--raw"])
+    r = runner.invoke(app, ["util", "briefing", "--raw"])
     assert r.exit_code == 0
     assert "📊 Anomalies" not in r.stdout

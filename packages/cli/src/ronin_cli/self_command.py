@@ -17,18 +17,37 @@ from functools import lru_cache
 
 
 @lru_cache(maxsize=1)
-def ronin_subcommands() -> frozenset[str]:
-    """The real registered CLI subcommands, straight from the Typer app."""
+def _command_paths() -> dict[str, tuple[str, ...]]:
+    """Every real CLI command name → the group path that reaches it, straight
+    from the Typer app (recursing into `dev`/`util`/nested groups). A user who
+    types ``ronin duel`` in chat still gets the real command even though it now
+    lives at ``ronin util duel``."""
     try:
         from .main import app
-        names = set()
-        for c in app.registered_commands:
-            name = c.name or (c.callback.__name__ if c.callback else None)
-            if name:
-                names.add(name.replace("_", "-"))
-        return frozenset(names)
+
+        paths: dict[str, tuple[str, ...]] = {}
+
+        def walk(t, prefix: tuple[str, ...]) -> None:
+            for c in t.registered_commands:
+                name = c.name or (c.callback.__name__ if c.callback else None)
+                if name:
+                    paths.setdefault(name.replace("_", "-"), prefix)
+            for g in t.registered_groups:
+                gname = g.name or ""
+                if gname:
+                    paths.setdefault(gname, prefix)
+                if g.typer_instance is not None:
+                    walk(g.typer_instance, prefix + ((gname,) if gname else ()))
+
+        walk(app, ())
+        return paths
     except Exception:  # noqa: BLE001 — never let detection crash the session
-        return frozenset()
+        return {}
+
+
+def ronin_subcommands() -> frozenset[str]:
+    """The real registered CLI subcommands (any depth), from the Typer app."""
+    return frozenset(_command_paths())
 
 
 def detect_self_command(user: str) -> str | None:
@@ -46,7 +65,12 @@ def detect_self_command(user: str) -> str | None:
         return None
     if parts[0].lower() not in ("ronin", "ro", "csk"):
         return None
-    if parts[1].replace("_", "-").lower() in ronin_subcommands():
-        # normalize the binary to `ronin` regardless of which alias was typed
-        return "ronin " + " ".join(parts[1:])
+    paths = _command_paths()
+    sub = parts[1].replace("_", "-").lower()
+    if sub in paths:
+        # normalize the binary to `ronin` and insert the group path (e.g.
+        # "ronin duel …" → "ronin util duel …") so the command actually runs.
+        prefix = " ".join(paths[sub])
+        rest = " ".join(parts[1:])
+        return f"ronin {prefix} {rest}" if prefix and parts[1] not in paths[sub] else "ronin " + rest
     return None

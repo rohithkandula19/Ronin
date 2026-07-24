@@ -69,6 +69,6 @@ def test_doctor_via_main(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     runner = CliRunner()
     runner.invoke(app, ["init", "--demo", "-y"])
-    result = runner.invoke(app, ["doctor"])
+    result = runner.invoke(app, ["util", "doctor"])
     assert result.exit_code == 0
     assert "provider" in result.stdout.lower()

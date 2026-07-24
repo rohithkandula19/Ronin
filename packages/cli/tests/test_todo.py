@@ -201,7 +201,7 @@ def test_todo_issues_dry_run_does_not_file(tmp_path: Path) -> None:
     calls: list = []
     with patch.object(gh_helper, "create_issue",
                       side_effect=lambda *a, **k: calls.append(a) or "url"):
-        r = CliRunner().invoke(app, ["todo", "--issues", "--root", str(tmp_path)])
+        r = CliRunner().invoke(app, ["dev", "todo", "--issues", "--root", str(tmp_path)])
     assert r.exit_code == 0
     assert "dry-run" in r.stdout
     assert "[FIXME]" in r.stdout and "[TODO]" in r.stdout
@@ -224,7 +224,7 @@ def test_todo_issues_only_filter_and_file(tmp_path: Path) -> None:
     with patch.object(gh_helper, "create_issue", side_effect=fake_create), \
          patch.object(gh_helper, "gh_available", return_value=True):
         r = CliRunner().invoke(
-            app, ["todo", "--issues", "--only", "FIXME", "--yes", "--root", str(tmp_path)])
+            app, ["dev", "todo", "--issues", "--only", "FIXME", "--yes", "--root", str(tmp_path)])
     assert r.exit_code == 0
     # only the FIXME marker was filed; the TODO was filtered out
     assert len(filed) == 1 and filed[0].startswith("[FIXME]")
@@ -238,6 +238,6 @@ def test_todo_issues_yes_without_gh_exits(tmp_path: Path) -> None:
 
     _repo_with_marker(tmp_path)
     with patch.object(gh_helper, "gh_available", return_value=False):
-        r = CliRunner().invoke(app, ["todo", "--issues", "--yes", "--root", str(tmp_path)])
+        r = CliRunner().invoke(app, ["dev", "todo", "--issues", "--yes", "--root", str(tmp_path)])
     assert r.exit_code == 2
     assert "gh" in r.stdout.lower()

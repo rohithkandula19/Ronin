@@ -207,7 +207,7 @@ def test_explain_error_offline_shows_frames_and_source(tmp_path: Path) -> None:
     trace = 'Traceback (most recent call last):\n  File "work.py", line 30, in work\n    boom\nValueError: nope'
     # No provider auth => offline path.
     with patch("ronin_cli.config.RoninConfig.has_provider_auth", return_value=False):
-        r = runner.invoke(app, ["explain-error", trace, "--root", str(tmp_path)])
+        r = runner.invoke(app, ["dev", "explain-error", trace, "--root", str(tmp_path)])
     assert r.exit_code == 0, r.output
     assert "ValueError: nope" in r.output
     assert "work.py:30" in r.output
@@ -222,7 +222,7 @@ def test_explain_error_with_provider(tmp_path: Path) -> None:
                     stop_reason="end_turn", usage={})])
     with patch("ronin_cli.runner.build_single_provider", return_value=provider), \
          patch("ronin_cli.config.RoninConfig.has_provider_auth", return_value=True):
-        r = runner.invoke(app, ["explain-error", trace, "--root", str(tmp_path)])
+        r = runner.invoke(app, ["dev", "explain-error", trace, "--root", str(tmp_path)])
     assert r.exit_code == 0, r.output
     assert "Root cause" in r.output
 
@@ -230,13 +230,13 @@ def test_explain_error_with_provider(tmp_path: Path) -> None:
 def test_explain_error_stdin_pipe(tmp_path: Path) -> None:
     trace = 'File "x.py", line 1, in f\nValueError: piped'
     with patch("ronin_cli.config.RoninConfig.has_provider_auth", return_value=False):
-        r = runner.invoke(app, ["explain-error", "--root", str(tmp_path)], input=trace)
+        r = runner.invoke(app, ["dev", "explain-error", "--root", str(tmp_path)], input=trace)
     assert r.exit_code == 0, r.output
     assert "ValueError: piped" in r.output
 
 
 def test_explain_error_no_input(tmp_path: Path) -> None:
     # No args and an empty piped stdin => usage error.
-    r = runner.invoke(app, ["explain-error", "--root", str(tmp_path)], input="")
+    r = runner.invoke(app, ["dev", "explain-error", "--root", str(tmp_path)], input="")
     assert r.exit_code == 2
     assert "nothing to explain" in r.output

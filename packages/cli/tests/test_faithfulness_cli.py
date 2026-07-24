@@ -77,7 +77,7 @@ def test_cli_grounded_renders_panel(tmp_path: Path) -> None:
     src = _write_source(tmp_path)
     res = runner.invoke(
         app,
-        ["faithfulness", "check", "login calls make_token and returns a Session.",
+        ["util", "faithfulness", "check", "login calls make_token and returns a Session.",
          "--sources", str(src)],
     )
     assert res.exit_code == 0
@@ -88,7 +88,7 @@ def test_cli_ungrounded_with_strict_exits_nonzero(tmp_path: Path) -> None:
     src = _write_source(tmp_path)
     res = runner.invoke(
         app,
-        ["faithfulness", "check", "login calls refresh_oauth_token.",
+        ["util", "faithfulness", "check", "login calls refresh_oauth_token.",
          "--sources", str(src), "--strict"],
     )
     assert res.exit_code == 1
@@ -99,7 +99,7 @@ def test_cli_json_output(tmp_path: Path) -> None:
     src = _write_source(tmp_path)
     res = runner.invoke(
         app,
-        ["faithfulness", "check", "PaymentGateway.charge validates the credit_card_number.",
+        ["util", "faithfulness", "check", "PaymentGateway.charge validates the credit_card_number.",
          "--sources", str(src), "--json"],
     )
     assert res.exit_code == 0
@@ -111,13 +111,13 @@ def test_cli_json_output(tmp_path: Path) -> None:
 def test_cli_strict_abstain_exits_two(tmp_path: Path) -> None:
     # No sources -> abstain -> strict exit code 2.
     res = runner.invoke(
-        app, ["faithfulness", "check", "login returns a Session.", "--strict"]
+        app, ["util", "faithfulness", "check", "login returns a Session.", "--strict"]
     )
     assert res.exit_code == 2
 
 
 def test_cli_empty_input_errors() -> None:
-    res = runner.invoke(app, ["faithfulness", "check", ""])
+    res = runner.invoke(app, ["util", "faithfulness", "check", ""])
     assert res.exit_code == 2
     assert "nothing to check" in res.stdout
 
@@ -125,7 +125,7 @@ def test_cli_empty_input_errors() -> None:
 def test_cli_reports_missing_source(tmp_path: Path) -> None:
     res = runner.invoke(
         app,
-        ["faithfulness", "check", "login calls make_token.",
+        ["util", "faithfulness", "check", "login calls make_token.",
          "--sources", str(tmp_path / "ghost.py")],
     )
     # Missing source -> no evidence -> abstain, plus a warning line.

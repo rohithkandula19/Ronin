@@ -17,7 +17,7 @@ def test_version_flag_prints_and_exits() -> None:
 
 
 def test_version_subcommand_still_works() -> None:
-    res = _runner.invoke(app, ["version"])
+    res = _runner.invoke(app, ["util", "version"])
     assert res.exit_code == 0
     assert display_version(__version__) in res.stdout
 

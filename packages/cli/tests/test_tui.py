@@ -30,7 +30,7 @@ def test_tui_without_auth_errors(tmp_path, monkeypatch: pytest.MonkeyPatch) -> N
     from ronin_cli import config as cfgmod
     monkeypatch.setattr(cfgmod, "PROJECT_DIR", tmp_path / ".ronin")
     monkeypatch.setattr(cfgmod, "USER_DIR", tmp_path / "user")
-    r = runner.invoke(app, ["tui"])
+    r = runner.invoke(app, ["util", "tui"])
     assert r.exit_code == 2
     assert "ronin init" in r.stdout
 
@@ -50,7 +50,7 @@ def test_tui_launches_run_tui(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None
     runner.invoke(app, ["init", "--demo", "-y"])
 
     with patch("ronin_cli.tui.run_tui") as mock_run:
-        r = runner.invoke(app, ["tui"])
+        r = runner.invoke(app, ["util", "tui"])
     assert r.exit_code == 0
     mock_run.assert_called_once()
 

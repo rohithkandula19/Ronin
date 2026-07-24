@@ -77,19 +77,19 @@ def test_cli_image_no_show(tmp_path: Path) -> None:
     fake_path = tmp_path / "ronin_image.png"
     fake_path.write_bytes(PNG_BYTES)
     with patch("ronin_cli.media.generate_image", return_value=fake_path):
-        r = runner.invoke(app, ["image", "a", "red", "panda", "--no-show", "--out", str(fake_path)])
+        r = runner.invoke(app, ["util", "image", "a", "red", "panda", "--no-show", "--out", str(fake_path)])
     assert r.exit_code == 0, r.stdout
     assert "saved" in r.stdout
 
 
 def test_cli_image_bad_size(tmp_path: Path) -> None:
-    r = runner.invoke(app, ["image", "x", "--size", "huge", "--no-show"])
+    r = runner.invoke(app, ["util", "image", "x", "--size", "huge", "--no-show"])
     assert r.exit_code == 2
     assert "--size" in r.stdout
 
 
 def test_cli_image_backend_error_is_clean() -> None:
     with patch("ronin_cli.media.generate_image", side_effect=RuntimeError("network down")):
-        r = runner.invoke(app, ["image", "x", "--no-show"])
+        r = runner.invoke(app, ["util", "image", "x", "--no-show"])
     assert r.exit_code == 1
     assert "failed" in r.stdout and "network down" in r.stdout

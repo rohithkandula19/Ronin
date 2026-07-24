@@ -285,7 +285,7 @@ def test_cli_orchestrate_offline_runs(monkeypatch) -> None:
     monkeypatch.setattr(orchestrate, "provider_for_spec", lambda b, s: base_provider)
     monkeypatch.setattr(orchestrate, "_tools_for_roles", lambda *a, **k: {})
 
-    result = runner.invoke(app, ["orchestrate", "explore the repo", "--offline"])
+    result = runner.invoke(app, ["util", "orchestrate", "explore the repo", "--offline"])
     assert result.exit_code == 0, result.output
     assert "look" in result.output
     assert "entry point" in result.output.lower()

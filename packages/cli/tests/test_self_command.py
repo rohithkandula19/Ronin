@@ -13,13 +13,14 @@ def test_real_subcommands_are_discovered() -> None:
 
 
 def test_detects_ronin_duel() -> None:
-    assert detect_self_command("ronin duel -a gemini") == "ronin duel -a gemini"
-    assert detect_self_command("ronin kaizen") == "ronin kaizen"
+    # grouped commands normalize to their real path (wedge cut: duel/kaizen → util)
+    assert detect_self_command("ronin duel -a gemini") == "ronin util duel -a gemini"
+    assert detect_self_command("ronin kaizen") == "ronin util kaizen"
 
 
 def test_normalizes_aliases() -> None:
-    assert detect_self_command("ro duel --against gemini") == "ronin duel --against gemini"
-    assert detect_self_command("csk kaizen") == "ronin kaizen"
+    assert detect_self_command("ro duel --against gemini") == "ronin util duel --against gemini"
+    assert detect_self_command("csk kaizen") == "ronin util kaizen"
 
 
 def test_ignores_plain_chat() -> None:

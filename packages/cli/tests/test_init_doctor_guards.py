@@ -133,7 +133,7 @@ def test_doctor_check_flag_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     runner.invoke(app, ["init", "--demo", "-y"])
     fake = _LiveCheck(status="[green]ok[/green]", ok=True)
     with patch.object(cli_main, "_provider_live_check", return_value=fake):
-        r = runner.invoke(app, ["doctor", "--check"])
+        r = runner.invoke(app, ["util", "doctor", "--check"])
     assert r.exit_code == 0
     assert "live check" in r.stdout
 
@@ -148,7 +148,7 @@ def test_doctor_check_exits_nonzero_when_live_check_fails(
     runner.invoke(app, ["init", "--demo", "-y"])
     fail = _LiveCheck(status="no key configured", remedy="Fix: set a key", ok=False)
     with patch.object(cli_main, "_provider_live_check", return_value=fail):
-        r = runner.invoke(app, ["doctor", "--check"])
+        r = runner.invoke(app, ["util", "doctor", "--check"])
     assert r.exit_code == 1, r.stdout          # the P2 fix
     assert "live check" in r.stdout            # still shows the honest reason row
 
@@ -159,5 +159,5 @@ def test_doctor_without_check_exits_zero(
     # Static doctor (no --check) only reports key presence — always exit 0.
     monkeypatch.chdir(tmp_path)
     runner.invoke(app, ["init", "--demo", "-y"])
-    r = runner.invoke(app, ["doctor"])
+    r = runner.invoke(app, ["util", "doctor"])
     assert r.exit_code == 0, r.stdout

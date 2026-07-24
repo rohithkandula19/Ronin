@@ -68,7 +68,7 @@ def test_briefing_cli_demo_mode_runs_offline(tmp_path: Path, monkeypatch: pytest
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     runner.invoke(app, ["init", "--demo", "-y"])
 
-    r = runner.invoke(app, ["briefing", "--raw"])
+    r = runner.invoke(app, ["util", "briefing", "--raw"])
     assert r.exit_code == 0
     assert "Founder briefing" in r.stdout
     assert "Revenue" in r.stdout
@@ -81,7 +81,7 @@ def test_briefing_writes_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     runner.invoke(app, ["init", "--demo", "-y"])
 
     out = tmp_path / "briefing.md"
-    r = runner.invoke(app, ["briefing", "--out", str(out), "--raw"])
+    r = runner.invoke(app, ["util", "briefing", "--out", str(out), "--raw"])
     assert r.exit_code == 0
     assert out.exists()
     content = out.read_text()

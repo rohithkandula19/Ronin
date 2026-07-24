@@ -152,7 +152,7 @@ def test_stash_save_list_pop_roundtrip_offline(tmp_path: Path) -> None:
     (tmp_path / "new.txt").write_text("brand new\n")
 
     # --no-ai => deterministic label, no provider needed.
-    r = runner.invoke(app, ["stash", "--no-ai", "--root", str(tmp_path)])
+    r = runner.invoke(app, ["util", "stash", "--no-ai", "--root", str(tmp_path)])
     assert r.exit_code == 0, r.output
     assert "stashed" in r.output
 
@@ -161,12 +161,12 @@ def test_stash_save_list_pop_roundtrip_offline(tmp_path: Path) -> None:
                             capture_output=True, text=True).stdout
     assert status.strip() == ""
 
-    listing = runner.invoke(app, ["stash", "list", "--root", str(tmp_path)])
+    listing = runner.invoke(app, ["util", "stash", "list", "--root", str(tmp_path)])
     assert listing.exit_code == 0
     assert "stash@{0}" in listing.output
     assert "wip:" in listing.output
 
-    popped = runner.invoke(app, ["stash", "pop", "--root", str(tmp_path)])
+    popped = runner.invoke(app, ["util", "stash", "pop", "--root", str(tmp_path)])
     assert popped.exit_code == 0
     assert "restored" in popped.output
     assert (tmp_path / "new.txt").exists()
@@ -181,7 +181,7 @@ def test_stash_save_uses_provider_label(tmp_path: Path) -> None:
         LLMResponse(text="tweak base content", stop_reason="end_turn", usage={})])
     with patch("ronin_cli.runner.build_provider", return_value=provider), \
          patch("ronin_cli.config.RoninConfig.has_provider_auth", return_value=True):
-        r = runner.invoke(app, ["stash", "--root", str(tmp_path)])
+        r = runner.invoke(app, ["util", "stash", "--root", str(tmp_path)])
     assert r.exit_code == 0, r.output
     listing = subprocess.run(["git", "-C", str(tmp_path), "stash", "list"],
                              capture_output=True, text=True).stdout
@@ -190,19 +190,19 @@ def test_stash_save_uses_provider_label(tmp_path: Path) -> None:
 
 def test_stash_clean_tree_noops(tmp_path: Path) -> None:
     _init_repo(tmp_path)
-    r = runner.invoke(app, ["stash", "--no-ai", "--root", str(tmp_path)])
+    r = runner.invoke(app, ["util", "stash", "--no-ai", "--root", str(tmp_path)])
     assert r.exit_code == 0
     assert "clean" in r.output
 
 
 def test_stash_list_empty(tmp_path: Path) -> None:
     _init_repo(tmp_path)
-    r = runner.invoke(app, ["stash", "list", "--root", str(tmp_path)])
+    r = runner.invoke(app, ["util", "stash", "list", "--root", str(tmp_path)])
     assert r.exit_code == 0
     assert "no stashes" in r.output
 
 
 def test_stash_not_a_repo(tmp_path: Path) -> None:
-    r = runner.invoke(app, ["stash", "--no-ai", "--root", str(tmp_path)])
+    r = runner.invoke(app, ["util", "stash", "--no-ai", "--root", str(tmp_path)])
     assert r.exit_code == 2
     assert "not a git repository" in r.output

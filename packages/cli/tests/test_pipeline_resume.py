@@ -156,7 +156,7 @@ def test_resume_mismatch_offers_restore(tmp_path, monkeypatch) -> None:
     snap = git_snapshot(tmp_path).model_dump()
     path = _saved_state(tmp_path, snap, checkpoint_id=cp.id)
     (tmp_path / "a.txt").write_text("CHANGED\n", encoding="utf-8")
-    res = _runner.invoke(app, ["pipeline", "--resume", str(path), "--dry-run"])
+    res = _runner.invoke(app, ["util", "pipeline", "--resume", str(path), "--dry-run"])
     assert res.exit_code == 2
     assert "restore-checkpoint" in res.stdout  # the offer is surfaced
 
@@ -169,7 +169,7 @@ def test_no_restore_offer_suppresses(tmp_path, monkeypatch) -> None:
     snap = git_snapshot(tmp_path).model_dump()
     path = _saved_state(tmp_path, snap, checkpoint_id=cp.id)
     (tmp_path / "a.txt").write_text("CHANGED\n", encoding="utf-8")
-    res = _runner.invoke(app, ["pipeline", "--resume", str(path), "--dry-run", "--no-restore-offer"])
+    res = _runner.invoke(app, ["util", "pipeline", "--resume", str(path), "--dry-run", "--no-restore-offer"])
     assert res.exit_code == 2
     assert "restore-checkpoint" not in res.stdout  # offer suppressed
     assert "refusing to resume" in res.stdout
@@ -183,7 +183,7 @@ def test_restore_declined_exits_safely(tmp_path, monkeypatch) -> None:
     snap = git_snapshot(tmp_path).model_dump()
     path = _saved_state(tmp_path, snap, checkpoint_id=cp.id)
     (tmp_path / "a.txt").write_text("CHANGED\n", encoding="utf-8")
-    res = _runner.invoke(app, ["pipeline", "--resume", str(path), "--dry-run",
+    res = _runner.invoke(app, ["util", "pipeline", "--resume", str(path), "--dry-run",
                                "--restore-checkpoint"], input="n\n")
     assert res.exit_code == 2
     assert "declined" in res.stdout
@@ -199,7 +199,7 @@ def test_restore_success_rechecks_and_continues(tmp_path, monkeypatch) -> None:
     snap = git_snapshot(tmp_path).model_dump()             # taken AFTER the checkpoint
     path = _saved_state(tmp_path, snap, checkpoint_id=cp.id)
     (tmp_path / "a.txt").write_text("CHANGED\n", encoding="utf-8")  # now dirty
-    res = _runner.invoke(app, ["pipeline", "--resume", str(path), "--dry-run",
+    res = _runner.invoke(app, ["util", "pipeline", "--resume", str(path), "--dry-run",
                                "--restore-checkpoint"], input="y\n")
     assert res.exit_code == 0
     assert "restored" in res.stdout.lower()
@@ -212,7 +212,7 @@ def test_resume_same_git_state_succeeds(tmp_path, monkeypatch) -> None:
     snap = git_snapshot(tmp_path).model_dump()
     path = _saved_state(tmp_path, snap)
     out = tmp_path.parent / "after.json"
-    res = _runner.invoke(app, ["pipeline", "--resume", str(path), "--dry-run", "--out", str(out)])
+    res = _runner.invoke(app, ["util", "pipeline", "--resume", str(path), "--dry-run", "--out", str(out)])
     assert res.exit_code == 0  # clean tree → no refusal
 
 
@@ -223,7 +223,7 @@ def test_resume_changed_git_state_refused(tmp_path, monkeypatch) -> None:
     path = _saved_state(tmp_path, snap)
     # change the tree after the snapshot
     (tmp_path / "a.txt").write_text("CHANGED\n", encoding="utf-8")
-    res = _runner.invoke(app, ["pipeline", "--resume", str(path), "--dry-run"])
+    res = _runner.invoke(app, ["util", "pipeline", "--resume", str(path), "--dry-run"])
     assert res.exit_code == 2
     assert "working tree changed" in res.stdout
     assert "--force-resume" in res.stdout
@@ -235,7 +235,7 @@ def test_force_resume_allows_changed_state(tmp_path, monkeypatch) -> None:
     snap = git_snapshot(tmp_path).model_dump()
     path = _saved_state(tmp_path, snap)
     (tmp_path / "a.txt").write_text("CHANGED\n", encoding="utf-8")
-    res = _runner.invoke(app, ["pipeline", "--resume", str(path), "--dry-run", "--force-resume"])
+    res = _runner.invoke(app, ["util", "pipeline", "--resume", str(path), "--dry-run", "--force-resume"])
     assert res.exit_code == 0
     assert "continuing despite" in res.stdout
 
@@ -244,7 +244,7 @@ def test_checkpoint_does_not_destroy_changes(tmp_path, monkeypatch) -> None:
     _init_repo(tmp_path)
     monkeypatch.chdir(tmp_path)
     (tmp_path / "a.txt").write_text("LOCAL EDIT\n", encoding="utf-8")  # uncommitted work
-    res = _runner.invoke(app, ["pipeline", "do x", "--dry-run", "--checkpoint"])
+    res = _runner.invoke(app, ["util", "pipeline", "do x", "--dry-run", "--checkpoint"])
     assert res.exit_code == 0
     assert "checkpoint #" in res.stdout
     # the local edit is untouched
@@ -273,7 +273,7 @@ def test_list_checkpoints_output(tmp_path, monkeypatch) -> None:
     cp = create_checkpoint(tmp_path, label="pipeline")
     snap = git_snapshot(tmp_path).model_dump()
     path = _saved_state(tmp_path, snap, checkpoint_id=cp.id)
-    res = _runner.invoke(app, ["pipeline", "--resume", str(path), "--dry-run",
+    res = _runner.invoke(app, ["util", "pipeline", "--resume", str(path), "--dry-run",
                                "--list-checkpoints", "--force-resume"])
     assert "available checkpoints" in res.stdout
     assert f"#{cp.id}" in res.stdout
@@ -287,7 +287,7 @@ def test_restore_latest_checkpoint_gated(tmp_path, monkeypatch) -> None:
     path = _saved_state(tmp_path, snap, checkpoint_id=cp.id)
     (tmp_path / "a.txt").write_text("CHANGED\n", encoding="utf-8")
     # decline first (gated): must NOT restore
-    res = _runner.invoke(app, ["pipeline", "--resume", str(path), "--dry-run",
+    res = _runner.invoke(app, ["util", "pipeline", "--resume", str(path), "--dry-run",
                                "--restore-latest-checkpoint"], input="n\n")
     assert res.exit_code == 2
     assert (tmp_path / "a.txt").read_text() == "CHANGED\n"  # untouched
@@ -300,7 +300,7 @@ def test_restore_specific_id_success_rechecks(tmp_path, monkeypatch) -> None:
     snap = git_snapshot(tmp_path).model_dump()
     path = _saved_state(tmp_path, snap, checkpoint_id=cp.id)
     (tmp_path / "a.txt").write_text("CHANGED\n", encoding="utf-8")
-    res = _runner.invoke(app, ["pipeline", "--resume", str(path), "--dry-run",
+    res = _runner.invoke(app, ["util", "pipeline", "--resume", str(path), "--dry-run",
                                "--restore-checkpoint-id", str(cp.id)], input="y\n")
     assert res.exit_code == 0
     assert "restored" in res.stdout.lower()
@@ -314,7 +314,7 @@ def test_restore_unknown_id_errors(tmp_path, monkeypatch) -> None:
     snap = git_snapshot(tmp_path).model_dump()
     path = _saved_state(tmp_path, snap, checkpoint_id=cp.id)
     (tmp_path / "a.txt").write_text("CHANGED\n", encoding="utf-8")
-    res = _runner.invoke(app, ["pipeline", "--resume", str(path), "--dry-run",
+    res = _runner.invoke(app, ["util", "pipeline", "--resume", str(path), "--dry-run",
                                "--restore-checkpoint-id", "999"])
     assert res.exit_code == 2
     assert "no checkpoint #999" in res.stdout

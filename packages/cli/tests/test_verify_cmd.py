@@ -113,14 +113,14 @@ _runner = CliRunner()
 
 
 def test_cli_verify_no_command(tmp_path: Path) -> None:
-    res = _runner.invoke(app, ["verify", "--root", str(tmp_path)])
+    res = _runner.invoke(app, ["dev", "verify", "--root", str(tmp_path)])
     assert res.exit_code == 2
     assert "no test command detected" in res.stdout
 
 
 def test_cli_verify_green(tmp_path: Path) -> None:
     (tmp_path / "Makefile").write_text("test:\n\t@echo ok\n")
-    res = _runner.invoke(app, ["verify", "--root", str(tmp_path)])
+    res = _runner.invoke(app, ["dev", "verify", "--root", str(tmp_path)])
     # make may be unavailable on a minimal image; only assert when it ran
     if "make" in res.stdout:
         assert res.exit_code == 0
@@ -129,7 +129,7 @@ def test_cli_verify_green(tmp_path: Path) -> None:
 
 def test_cli_verify_red_exit_code(tmp_path: Path) -> None:
     (tmp_path / "Makefile").write_text("test:\n\t@exit 1\n")
-    res = _runner.invoke(app, ["verify", "--root", str(tmp_path)])
+    res = _runner.invoke(app, ["dev", "verify", "--root", str(tmp_path)])
     if "make" in res.stdout:
         assert res.exit_code == 1
         assert "red" in res.stdout

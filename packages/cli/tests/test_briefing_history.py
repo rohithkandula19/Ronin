@@ -99,7 +99,7 @@ def test_briefing_cli_auto_saves(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     runner.invoke(app, ["init", "--demo", "-y"])
 
-    r = runner.invoke(app, ["briefing", "--raw"])
+    r = runner.invoke(app, ["util", "briefing", "--raw"])
     assert r.exit_code == 0
 
     briefings = list((tmp_path / ".ronin" / "briefings").glob("*.json"))
@@ -117,7 +117,7 @@ def test_briefing_history_subcommand(tmp_path: Path, monkeypatch: pytest.MonkeyP
     save_snapshot(BriefingSnapshot(date="2026-04-27", mrr_cents=10_000, active_subs=4))
     save_snapshot(BriefingSnapshot(date="2026-05-04", mrr_cents=12_000, active_subs=5))
 
-    r = runner.invoke(app, ["briefing", "--history"])
+    r = runner.invoke(app, ["util", "briefing", "--history"])
     assert r.exit_code == 0
     assert "Briefing history" in r.stdout
     assert "2026-04-27" in r.stdout
@@ -133,7 +133,7 @@ def test_briefing_includes_vs_last_week(tmp_path: Path, monkeypatch: pytest.Monk
     # Seed a prior snapshot with intentionally-different MRR so a delta surfaces
     save_snapshot(BriefingSnapshot(date="2026-05-04", mrr_cents=10_000, active_subs=4))
 
-    r = runner.invoke(app, ["briefing", "--raw"])
+    r = runner.invoke(app, ["util", "briefing", "--raw"])
     assert r.exit_code == 0
     assert "vs 2026-05-04" in r.stdout
 
@@ -143,7 +143,7 @@ def test_no_save_flag_skips_persistence(tmp_path: Path, monkeypatch: pytest.Monk
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     runner.invoke(app, ["init", "--demo", "-y"])
 
-    r = runner.invoke(app, ["briefing", "--raw", "--no-save"])
+    r = runner.invoke(app, ["util", "briefing", "--raw", "--no-save"])
     assert r.exit_code == 0
     briefings_dir = tmp_path / ".ronin" / "briefings"
     assert not briefings_dir.exists() or not any(briefings_dir.iterdir())

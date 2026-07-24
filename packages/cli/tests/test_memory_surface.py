@@ -53,7 +53,7 @@ def test_fixtures_really_look_like_secrets():
 
 @pytest.mark.parametrize("secret", SECRETS)
 def test_remember_refuses_a_secret(secret: str):
-    r = runner.invoke(app, ["remember", secret])
+    r = runner.invoke(app, ["util", "remember", secret])
     assert r.exit_code == 1, r.output
     assert "looks like a secret" in r.output
     assert memory_store.list_memories() == []      # nothing persisted
@@ -75,58 +75,58 @@ def test_placeholder_is_not_treated_as_a_secret():
 # ---------- remember / forget / timeline ----------
 
 def test_remember_stores_a_fact():
-    r = runner.invoke(app, ["remember", "I", "use", "Groq"])
+    r = runner.invoke(app, ["util", "remember", "I", "use", "Groq"])
     assert r.exit_code == 0, r.output
     assert "remembered" in r.output
     assert "I use Groq" in memory_store.list_memories()
 
 
 def test_remember_dedups():
-    runner.invoke(app, ["remember", "I", "use", "Groq"])
-    r = runner.invoke(app, ["remember", "I", "use", "Groq"])
+    runner.invoke(app, ["util", "remember", "I", "use", "Groq"])
+    r = runner.invoke(app, ["util", "remember", "I", "use", "Groq"])
     assert r.exit_code == 0
     assert "already known" in r.output
     assert memory_store.list_memories().count("I use Groq") == 1
 
 
 def test_forget_matching():
-    runner.invoke(app, ["remember", "I", "use", "Groq"])
-    r = runner.invoke(app, ["forget", "Groq"])
+    runner.invoke(app, ["util", "remember", "I", "use", "Groq"])
+    r = runner.invoke(app, ["util", "forget", "Groq"])
     assert r.exit_code == 0, r.output
     assert "forgot 1" in r.output
     assert memory_store.list_memories() == []
 
 
 def test_forget_all():
-    runner.invoke(app, ["remember", "one", "fact"])
-    runner.invoke(app, ["remember", "another", "fact"])
-    r = runner.invoke(app, ["forget", "--all"])
+    runner.invoke(app, ["util", "remember", "one", "fact"])
+    runner.invoke(app, ["util", "remember", "another", "fact"])
+    r = runner.invoke(app, ["util", "forget", "--all"])
     assert r.exit_code == 0, r.output
     assert memory_store.list_memories() == []
 
 
 def test_forget_without_pattern_exits_2():
-    r = runner.invoke(app, ["forget"])
+    r = runner.invoke(app, ["util", "forget"])
     assert r.exit_code == 2
 
 
 def test_timeline_is_chronological():
-    runner.invoke(app, ["remember", "first", "fact"])
-    runner.invoke(app, ["remember", "second", "fact"])
-    r = runner.invoke(app, ["timeline"])
+    runner.invoke(app, ["util", "remember", "first", "fact"])
+    runner.invoke(app, ["util", "remember", "second", "fact"])
+    r = runner.invoke(app, ["util", "timeline"])
     assert r.exit_code == 0, r.output
     assert r.output.index("first fact") < r.output.index("second fact")
 
 
 def test_timeline_empty():
-    r = runner.invoke(app, ["timeline"])
+    r = runner.invoke(app, ["util", "timeline"])
     assert r.exit_code == 0
     assert "nothing remembered yet" in r.output
 
 
 def test_timeline_json():
-    runner.invoke(app, ["remember", "I", "use", "Groq"])
-    r = runner.invoke(app, ["timeline", "--format", "json"])
+    runner.invoke(app, ["util", "remember", "I", "use", "Groq"])
+    r = runner.invoke(app, ["util", "timeline", "--format", "json"])
     assert r.exit_code == 0, r.output
     assert '"facts"' in r.output and "I use Groq" in r.output
 

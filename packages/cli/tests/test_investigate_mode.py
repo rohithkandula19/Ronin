@@ -77,7 +77,7 @@ def test_investigate_cli_without_key_errors(tmp_path: Path, monkeypatch: pytest.
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     runner.invoke(app, ["init", "--demo", "-y"])
-    r = runner.invoke(app, ["investigate", "failed payments spiked"])
+    r = runner.invoke(app, ["util", "investigate", "failed payments spiked"])
     assert r.exit_code == 2
     assert "investigate mode needs a real llm" in r.stdout.lower()
 
@@ -89,7 +89,7 @@ def test_investigate_cli_runs_with_fake_provider(tmp_path: Path, monkeypatch: py
     runner.invoke(app, ["init", "--demo", "-y"])
 
     with patch("ronin_cli.investigate_mode.build_provider", return_value=_bridge_provider()):
-        r = runner.invoke(app, ["investigate", "failed payments spiked", "--root", str(tmp_path)])
+        r = runner.invoke(app, ["util", "investigate", "failed payments spiked", "--root", str(tmp_path)])
 
     assert r.exit_code == 0, r.stdout
     assert "likely cause" in r.stdout.lower()

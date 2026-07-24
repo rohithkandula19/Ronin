@@ -55,7 +55,7 @@ def test_key_preview_masks_value() -> None:
 def test_set_key_writes_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    r = runner.invoke(app, ["set-key", "--provider", "groq"], input=GOOD_KEY + "\n")
+    r = runner.invoke(app, ["util", "set-key", "--provider", "groq"], input=GOOD_KEY + "\n")
     assert r.exit_code == 0, r.stdout
     assert "key saved" in r.stdout
     cfg = load_config()
@@ -66,20 +66,20 @@ def test_set_key_writes_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
 def test_set_key_rejects_double_paste(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    r = runner.invoke(app, ["set-key", "--provider", "groq"], input=LONG_KEY + "\n")
+    r = runner.invoke(app, ["util", "set-key", "--provider", "groq"], input=LONG_KEY + "\n")
     assert r.exit_code == 1
     assert "multiple times" in r.stdout
 
 
 def test_set_key_empty_aborts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
-    r = runner.invoke(app, ["set-key", "--provider", "groq"], input="\n")
+    r = runner.invoke(app, ["util", "set-key", "--provider", "groq"], input="\n")
     assert r.exit_code == 1
     assert "nothing changed" in r.stdout
 
 
 def test_set_key_ollama_noop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
-    r = runner.invoke(app, ["set-key", "--provider", "ollama"])
+    r = runner.invoke(app, ["util", "set-key", "--provider", "ollama"])
     assert r.exit_code == 0
     assert "no key" in r.stdout.lower()

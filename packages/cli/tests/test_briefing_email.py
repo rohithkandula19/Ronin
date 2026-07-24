@@ -109,7 +109,7 @@ def test_briefing_email_flag_without_key_errors(tmp_path: Path, monkeypatch: pyt
     monkeypatch.delenv("RESEND_API_KEY", raising=False)
     runner.invoke(app, ["init", "--demo", "-y"])
 
-    r = runner.invoke(app, ["briefing", "--email", "a@b.com", "--raw"])
+    r = runner.invoke(app, ["util", "briefing", "--email", "a@b.com", "--raw"])
     assert r.exit_code == 2
     assert "RESEND_API_KEY" in r.stdout
 
@@ -129,7 +129,7 @@ def test_briefing_email_flag_sends_when_configured(tmp_path: Path, monkeypatch: 
         return _ok()
 
     with patch.object(httpx.Client, "post", fake_post):
-        r = runner.invoke(app, ["briefing", "--email", "founder@startup.io", "--raw"])
+        r = runner.invoke(app, ["util", "briefing", "--email", "founder@startup.io", "--raw"])
 
     assert r.exit_code == 0, r.stdout
     assert "emailed to" in r.stdout

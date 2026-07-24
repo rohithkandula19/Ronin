@@ -94,7 +94,7 @@ def test_cli_uses_custom_template(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         'sections = ["revenue"]\n',
         encoding="utf-8",
     )
-    r = runner.invoke(app, ["briefing", "--template", str(tpl), "--raw"])
+    r = runner.invoke(app, ["util", "briefing", "--template", str(tpl), "--raw"])
     assert r.exit_code == 0
     assert "Custom —" in r.stdout
     assert "💰 Revenue" in r.stdout
@@ -113,7 +113,7 @@ def test_cli_auto_loads_project_template(tmp_path: Path, monkeypatch: pytest.Mon
         'title = "Auto-loaded — {{date}}"\nsections = ["revenue"]\n',
         encoding="utf-8",
     )
-    r = runner.invoke(app, ["briefing", "--raw"])
+    r = runner.invoke(app, ["util", "briefing", "--raw"])
     assert r.exit_code == 0
     assert "Auto-loaded —" in r.stdout
     assert "💳 Payments" not in r.stdout
