@@ -19,6 +19,8 @@ $ ronin code "explain @main.py and add tests" # @-mention files inline
 ```
 
 > The binary is **`ronin`**. `ro` also works as a short alias.
+>
+> **Platform support:** macOS and Linux are supported. Windows is supported via **WSL** (run the same install command inside a WSL shell) — native Windows is not yet supported. Requires Python 3.11+ and `git`.
 
 ## 🖥 Ronin AI OS — the web experience
 
