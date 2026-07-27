@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+import ronin_agent_patterns.react as react_module
 
 from ronin_agent_patterns import (
     FakeProvider,
@@ -77,6 +78,87 @@ def test_react_iteration_cap() -> None:
     assert not result.success
     assert "max_iterations" in (result.error or "")
     assert result.iterations == 3
+
+
+def test_react_stops_before_tools_when_token_budget_is_reached() -> None:
+    ran: list[str] = []
+    tool = Tool(
+        name="write_file",
+        description="write",
+        input_schema={"type": "object", "properties": {}},
+        handler=lambda: ran.append("ran") or "wrote",
+    )
+    provider = FakeProvider(responses=[
+        LLMResponse(
+            text="I need to write a file.",
+            tool_calls=[ToolCall(id="t1", name="write_file", arguments={})],
+            stop_reason="tool_use",
+            usage={"input_tokens": 7, "output_tokens": 3},
+        ),
+    ])
+
+    result = ReActAgent(
+        system="x", tools=[tool], provider=provider, max_total_tokens=10,
+    ).run("make a file")
+
+    assert not result.success
+    assert result.output == "I need to write a file."
+    assert "token budget" in (result.error or "")
+    assert result.iterations == 1
+    assert len(provider.calls) == 1
+    assert ran == []
+    assert result.messages[-1].role == "assistant"
+    assert result.messages[-1].tool_calls == []
+    assert result.trace[-1].kind == "error"
+    assert result.trace[-1].metadata["budget_exhausted"] is True
+
+
+def test_react_stops_on_reported_cost_budget_without_guessing_price() -> None:
+    provider = FakeProvider(responses=[
+        LLMResponse(
+            text="Partial answer.",
+            stop_reason="end_turn",
+            usage={"input_tokens": 4, "output_tokens": 2, "cost_usd": 0.015},
+        ),
+    ])
+
+    result = ReActAgent(
+        system="x", provider=provider, max_cost_usd=0.01,
+    ).run("answer")
+
+    assert not result.success
+    assert result.output == "Partial answer."
+    assert result.usage["cost_usd"] == pytest.approx(0.015)
+    assert "reported-cost budget" in (result.error or "")
+    assert len(provider.calls) == 1
+
+
+def test_react_stops_on_wall_clock_budget_before_running_tool(monkeypatch) -> None:
+    ticks = iter((0.0, 0.0, 1.25))
+    monkeypatch.setattr(react_module, "monotonic", lambda: next(ticks))
+    ran: list[str] = []
+    tool = Tool(
+        name="write_file",
+        description="write",
+        input_schema={"type": "object", "properties": {}},
+        handler=lambda: ran.append("ran") or "wrote",
+    )
+    provider = FakeProvider(responses=[
+        LLMResponse(
+            text="I need to write a file.",
+            tool_calls=[ToolCall(id="t1", name="write_file", arguments={})],
+            stop_reason="tool_use",
+        ),
+    ])
+
+    result = ReActAgent(
+        system="x", tools=[tool], provider=provider, max_wall_time_seconds=1,
+    ).run("make a file")
+
+    assert not result.success
+    assert "wall-clock budget" in (result.error or "")
+    assert ran == []
+    assert len(provider.calls) == 1
 
 
 def test_react_unknown_tool_does_not_crash() -> None:
