@@ -28,7 +28,8 @@ pip install ronin-cli
 - **Claude-Code-style coding agent** — `ronin code` opens a REPL where Claude
   reads, edits, and runs your code under a sandbox. Parallel tool calls,
   prompt caching, `/context` fullness bar, in-session `/cost` and `/router`,
-  per-file syntax-highlighted diffs, checkpoint & rewind, vision-in-the-loop.
+  incremental, syntax-highlighted diff previews with literal file content,
+  checkpoint & rewind, vision-in-the-loop.
 - **Provider-agnostic** — Claude, Gemini, Cerebras, Groq, Ollama, OpenRouter,
   OpenAI. Switch with `/model`, or let the **Self-tuning Router** pick the
   cheapest blade that reliably wins on your repo.

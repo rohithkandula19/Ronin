@@ -384,79 +384,14 @@ def _status_line(config: RoninConfig, result: "CodeRunResult", elapsed: float,
     return line
 
 
-_EXT_LANG = {
-    ".py": "python", ".js": "javascript", ".ts": "typescript", ".tsx": "tsx",
-    ".jsx": "jsx", ".json": "json", ".md": "markdown", ".sh": "bash", ".bash": "bash",
-    ".toml": "toml", ".yaml": "yaml", ".yml": "yaml", ".html": "html", ".css": "css",
-    ".go": "go", ".rs": "rust", ".java": "java", ".rb": "ruby", ".c": "c", ".h": "c",
-    ".cpp": "cpp", ".sql": "sql", ".php": "php", ".swift": "swift", ".kt": "kotlin",
-}
-
-
-def _lang_for(path: str | None) -> str:
-    if not path:
-        return "text"
-    import os
-    return _EXT_LANG.get(os.path.splitext(path)[1].lower(), "text")
-
-
 def _render_diff(console: Console, diff: str, path: str | None = None) -> None:
-    """Print a clean, line-numbered diff — Claude-Code style: a dim line-number
-    gutter, full-width green/red row backgrounds, **syntax-highlighted code**, and
-    no git ``--- a/`` / ``@@`` noise."""
+    """Print a fixed-width, markup-safe unified-diff preview."""
     if not diff.strip():
         return
-    from rich.syntax import Syntax
-    from rich.text import Text
+    from .streaming_diff import render_unified_diff
 
-    from .code_tools import diff_rows
-    rows = diff_rows(diff)
-    if not rows:  # not a unified diff we can parse → show raw, dimmed
-        for line in diff.splitlines():
-            console.print(f"[dim]{line}[/dim]")
-        return
-
-    # Collapse long writes/edits so a big new file does not flood the terminal:
-    # show a head, then a "... N more lines" summary (Claude-Code style).
-    MAX_DIFF_ROWS = 14
-    hidden = 0
-    if len(rows) > MAX_DIFF_ROWS + 2:
-        hidden = len(rows) - MAX_DIFF_ROWS
-        rows = rows[:MAX_DIFF_ROWS]
-
-    from .theme import CODE_THEME
-    syn = Syntax("", _lang_for(path), theme=CODE_THEME, background_color="default")
-    width = min(console.width or 100, 120)
-    add_bg, del_bg = "#15291c", "#2c161b"   # subtle full-row tints
-    sign_style = {"add": "bold #73daca", "del": "bold #f7768e", "ctx": "#3b4261"}
-
-    for r in rows:
-        if r["kind"] == "sep":
-            console.print(Text("       ⋮", style="#3b4261"))
-            continue
-        ln = f"{r['lineno']:>4}" if r["lineno"] is not None else "    "
-        sign = {"add": "+", "del": "-", "ctx": " "}[r["kind"]]
-        # syntax-highlight the code content (keywords/strings/numbers coloured)
-        code = r["text"]
-        hl = syn.highlight(code) if code.strip() else Text(code)
-        hl.rstrip()  # highlight() appends a newline — drop it
-        if r["kind"] == "del":            # dim the highlight a touch on removals
-            hl.stylize("dim")
-
-        row = Text(f" {ln} ", style="#3b4261")
-        row.append(f"{sign} ", style=sign_style[r["kind"]])
-        row.append_text(hl)
-        if r["kind"] in ("add", "del"):
-            pad = width - row.cell_len
-            if pad > 0:
-                row.append(" " * pad)
-            console.print(row, style=f"on {add_bg if r['kind'] == 'add' else del_bg}")
-        else:
-            console.print(row)
-
-    if hidden:
-        console.print(Text(f"       ... {hidden} more lines (full file written on approve)",
-                           style="#3b4261"))
+    for row in render_unified_diff(diff, path=path, width=console.width or 100):
+        console.print(row)
 
 
 def _is_floored_command(name: str, args: dict) -> bool:
