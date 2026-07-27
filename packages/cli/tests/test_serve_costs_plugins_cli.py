@@ -83,8 +83,15 @@ def test_costs_shows_summary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_serve_without_auth_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Keep this a true no-auth test even when the developer has configured a
+    # user-level Ronin provider locally.
+    from ronin_cli import config as config_module
+
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(config_module, "USER_DIR", tmp_path / "user-config")
+    monkeypatch.setattr(config_module, "LEGACY_USER_DIR", tmp_path / "legacy-user-config")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     r = runner.invoke(app, ["serve", "--port", "8123"])
     assert r.exit_code == 2
     assert "ronin init" in r.stdout

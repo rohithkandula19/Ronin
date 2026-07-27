@@ -31,6 +31,8 @@ from pathlib import Path
 
 from ronin_agent_patterns import Tool
 
+from .plugin_manifest import CAPABILITIES, PluginManifest, read_manifest
+
 
 PLUGIN_DIR_NAME = "plugins"
 
@@ -51,6 +53,7 @@ class PluginLoadResult:
     path: Path
     tools: list[Tool]
     error: str | None = None
+    manifest: PluginManifest | None = None
 
 
 def find_plugin_dir() -> Path:
@@ -85,28 +88,42 @@ def load_plugins(
     for py_file in sorted(plugin_dir.glob("*.py")):
         if py_file.name.startswith("_"):
             continue
+        try:
+            manifest = read_manifest(py_file)
+        except Exception as exc:  # noqa: BLE001 - malformed metadata must prevent import
+            results.append(PluginLoadResult(
+                py_file.stem, py_file, [], f"invalid manifest: {exc}", None,
+            ))
+            continue
         if require_trust and not _is_trusted(py_file):
             # Do NOT import it. Reporting the file is safe; executing it is not.
             results.append(PluginLoadResult(
                 py_file.stem, py_file, [],
                 "untrusted — not loaded. Review the file, then: "
                 f"ronin plugin trust {py_file.name}",
+                manifest,
             ))
             continue
         module_name = f"_csk_plugin_{py_file.stem}"
         try:
             spec = importlib.util.spec_from_file_location(module_name, py_file)
             if spec is None or spec.loader is None:
-                results.append(PluginLoadResult(py_file.stem, py_file, [], "could not build import spec"))
+                results.append(PluginLoadResult(
+                    py_file.stem, py_file, [], "could not build import spec", manifest,
+                ))
                 continue
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
             if not hasattr(module, "register_tools"):
-                results.append(PluginLoadResult(py_file.stem, py_file, [], "no register_tools() function"))
+                results.append(PluginLoadResult(
+                    py_file.stem, py_file, [], "no register_tools() function", manifest,
+                ))
                 continue
             raw = module.register_tools()
             if not isinstance(raw, list):
-                results.append(PluginLoadResult(py_file.stem, py_file, [], "register_tools() must return a list"))
+                results.append(PluginLoadResult(
+                    py_file.stem, py_file, [], "register_tools() must return a list", manifest,
+                ))
                 continue
             tools: list[Tool] = []
             for item in raw:
@@ -116,13 +133,16 @@ def load_plugins(
                     results.append(PluginLoadResult(
                         py_file.stem, py_file, [],
                         f"register_tools() returned a non-Tool item: {type(item).__name__}",
+                        manifest,
                     ))
                     tools = []
                     break
-            if tools:
-                results.append(PluginLoadResult(py_file.stem, py_file, tools))
+            if tools or raw == []:
+                results.append(PluginLoadResult(py_file.stem, py_file, tools, manifest=manifest))
         except Exception as exc:  # noqa: BLE001
-            results.append(PluginLoadResult(py_file.stem, py_file, [], f"{type(exc).__name__}: {exc}"))
+            results.append(PluginLoadResult(
+                py_file.stem, py_file, [], f"{type(exc).__name__}: {exc}", manifest,
+            ))
 
     return results
 
@@ -140,11 +160,14 @@ def load_plugin_tools(
             if tool.name in seen:
                 continue
             seen.add(tool.name)
-            tools.append(tool)
+            tools.append(harden(
+                tool,
+                capabilities=(result.manifest.capabilities if result.manifest else CAPABILITIES),
+            ))
     return tools
 
 
-def harden(tool: Tool) -> Tool:
+def harden(tool: Tool, *, capabilities: tuple[str, ...] = CAPABILITIES) -> Tool:
     """Wrap a tool's handler so any exception becomes a structured error instead of
     crashing the agent loop. A transient API hiccup (non-JSON, timeout, KeyError)
     in a plugin then surfaces as ``{"error": ...}`` the model can read and recover
@@ -158,8 +181,13 @@ def harden(tool: Tool) -> Tool:
             return {"error": f"{tool.name} failed: {type(exc).__name__}: {exc}"}
 
     # Plugin tools run arbitrary user/library code with full privileges, so mark
-    # them gated by default — the approval gate prompts once and 'always' remembers.
-    return tool.model_copy(update={"handler": safe_handler, "sensitive": True})
+    # them gated by default. Capabilities are host metadata, never trusted from a
+    # Tool instance returned by executable plugin code.
+    return tool.model_copy(update={
+        "handler": safe_handler,
+        "sensitive": True,
+        "capabilities": capabilities,
+    })
 
 
 def build_plugin_tools(root: str | Path = ".", *, console=None) -> list[Tool]:
@@ -180,5 +208,8 @@ def build_plugin_tools(root: str | Path = ".", *, console=None) -> list[Tool]:
         for tool in result.tools:
             if tool.name not in seen:
                 seen.add(tool.name)
-                tools.append(harden(tool))
+                tools.append(harden(
+                    tool,
+                    capabilities=(result.manifest.capabilities if result.manifest else CAPABILITIES),
+                ))
     return tools

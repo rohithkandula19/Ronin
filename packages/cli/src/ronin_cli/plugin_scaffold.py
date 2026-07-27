@@ -37,6 +37,14 @@ import httpx
 from ronin_agent_patterns import Tool
 
 
+PLUGIN = {{
+    "name": "{name}",
+    "version": "1",
+    "description": "{desc}",
+    "capabilities": ["network"],
+}}
+
+
 def {name}(query: str = "") -> dict:
     """{desc}
 

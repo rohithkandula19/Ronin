@@ -19,6 +19,9 @@ class Tool(BaseModel):
     # Built-in file/shell tools are gated by name on the host side, so they leave
     # this False; it's the signal for tools the host can't enumerate ahead of time.
     sensitive: bool = False
+    # Host-only metadata. Plugin loaders populate this after inspecting a
+    # non-executing manifest; providers do not receive it.
+    capabilities: tuple[str, ...] = ()
 
     def to_anthropic(self) -> dict[str, Any]:
         return {

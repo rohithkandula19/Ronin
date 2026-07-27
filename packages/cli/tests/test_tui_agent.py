@@ -95,6 +95,33 @@ def test_run_code_agent_gates_sensitive_mcp_plugin_tool(monkeypatch, tmp_path) -
     assert charged == []                 # denial respected → never ran
 
 
+def test_high_risk_plugin_capability_still_gates_under_yolo(monkeypatch, tmp_path) -> None:
+    """Manifest high-risk tags never become silent just because yolo is set."""
+    from ronin_agent_patterns import Tool
+
+    ran: list[bool] = []
+    plugin = Tool(
+        name="declared_runner",
+        description="runs a declared subprocess",
+        input_schema={"type": "object", "properties": {}},
+        handler=lambda: ran.append(True),
+        sensitive=True,
+        capabilities=("subprocess",),
+    )
+    provider = FakeProvider(responses=[
+        LLMResponse(text="", tool_calls=[ToolCall(id="1", name="declared_runner", arguments={})]),
+        LLMResponse(text="declined"),
+    ])
+    monkeypatch.setattr(code_mode, "build_provider", lambda cfg: provider)
+    gated: list[dict] = []
+    code_mode.run_code_agent(
+        _cfg(), "run it", root=tmp_path, console=None, yolo=True, extra_tools=[plugin],
+        gate_cb=lambda _name, args: (gated.append(args) or False),
+    )
+    assert gated == [{"__ronin_capability_floor": ["subprocess"]}]
+    assert ran == []
+
+
 def test_tui_imports_and_constructs() -> None:
     from ronin_cli.tui import ApprovalScreen, RoninApp
     app = RoninApp(config=_cfg(), root=".")

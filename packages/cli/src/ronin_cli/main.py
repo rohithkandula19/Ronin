@@ -1780,6 +1780,7 @@ def mcp_add_remote(
 @app.command()
 def plugins() -> None:
     """Discover and list user plugins from .ronin/plugins/."""
+    from .plugin_manifest import capability_label
     from .plugins import find_plugin_dir, load_plugins
 
     plugin_dir = find_plugin_dir()
@@ -1798,13 +1799,14 @@ def plugins() -> None:
     table = Table(title=f"Plugins from {plugin_dir}", box=box.ROUNDED)
     table.add_column("plugin", style="cyan", no_wrap=True)
     table.add_column("status", no_wrap=True)
+    table.add_column("capabilities", style="yellow", overflow="fold")
     table.add_column("tools / error", overflow="fold")
     for r in results:
         if r.error:
-            table.add_row(r.name, "[red]error[/red]", r.error)
+            table.add_row(r.name, "[red]error[/red]", capability_label(r.manifest), r.error)
         else:
             tool_names = ", ".join(t.name for t in r.tools) or "[dim](none)[/dim]"
-            table.add_row(r.name, "[green]ok[/green]", tool_names)
+            table.add_row(r.name, "[green]ok[/green]", capability_label(r.manifest), tool_names)
     console.print(table)
 
 

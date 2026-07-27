@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterable, Mapping
 
 from rich.console import Console
 
@@ -424,9 +424,40 @@ def _floored_payload(args: dict) -> str:
     return ""
 
 
+def _high_risk_plugin_capabilities(
+    name: str, capabilities_by_tool: Mapping[str, Iterable[str]] | None,
+) -> tuple[str, ...]:
+    """Declared plugin capabilities that require explicit confirmation."""
+    if not capabilities_by_tool:
+        return ()
+    from .plugin_manifest import HIGH_RISK_CAPABILITIES
+
+    values = capabilities_by_tool.get(name, ())
+    return tuple(sorted({str(value) for value in values} & HIGH_RISK_CAPABILITIES))
+
+
+def _approve_plugin_capability_floor(
+    console: Console | None, name: str, capabilities: tuple[str, ...],
+) -> "bool | str":
+    """Require a block-level approval for a high-risk plugin capability."""
+    if console is None:
+        return ("blocked: plugin declares " + ", ".join(capabilities)
+                + " capability; explicit interactive approval is required.")
+    from .approvals import approve
+
+    return approve({
+        "kind": "api_call",
+        "summary": f"run plugin tool '{name}' (declares {', '.join(capabilities)})",
+        "reversible": False,
+        "external": "payment" in capabilities,
+        "details": {"capability_floor": list(capabilities)},
+    }, console=console)
+
+
 def _selective_gate(
     console: Console | None, yolo: bool, root: _Path,
     *, extra_gated: set[str] | None = None, rules: "PermissionRules | None" = None,
+    capabilities_by_tool: Mapping[str, Iterable[str]] | None = None,
 ) -> Callable[[str, dict], "bool | str"]:
     """Auto-approve read tools; gate SENSITIVE_TOOLS (and ``extra_gated`` — the
     sensitive MCP/plugin tools) unless yolo.
@@ -482,6 +513,9 @@ def _selective_gate(
                 return ("blocked: destructive command not confirmed — pick a safer "
                         "approach (the safer alternative was shown above).")
             return True  # explicitly, deliberately confirmed
+        high_risk = _high_risk_plugin_capabilities(name, capabilities_by_tool)
+        if high_risk:
+            return _approve_plugin_capability_floor(console, name, high_risk)
         if name not in SENSITIVE_TOOLS and name not in gated:
             return True  # reads + media generation run freely (never destructive:
             #              the floor above already had its say on every tool)
@@ -795,6 +829,10 @@ def run_code_agent(
     # plus any tool that flags itself sensitive=True (MCP writes, user plugins).
     # These used to bypass approval entirely. Read-only MCP tools stay out of it.
     _sensitive_names = set(SENSITIVE_TOOLS) | {t.name for t in tools if getattr(t, "sensitive", False)}
+    _capabilities_by_tool = {
+        t.name: tuple(getattr(t, "capabilities", ())) for t in tools
+        if getattr(t, "capabilities", ())
+    }
     # Fail-closed drift guard: a known-mutating tool that reached the toolbelt but
     # not the gate would bypass approval. Refuse rather than run ungated.
     _ungated = ungated_mutators({t.name for t in tools}, _sensitive_names)
@@ -828,6 +866,13 @@ def run_code_agent(
             # entirely. The floor is the outermost authority or it is not a floor.
             if _is_floored_command(name, args):
                 return gate_cb(name, args)
+            high_risk = _high_risk_plugin_capabilities(name, _capabilities_by_tool)
+            if high_risk:
+                # The front end owns the confirmation UI. This metadata is used
+                # only for display by the callback, never passed to the handler.
+                approval_args = dict(args)
+                approval_args["__ronin_capability_floor"] = list(high_risk)
+                return gate_cb(name, approval_args)
             if name not in _sensitive_names:
                 return True
             if yolo:
@@ -837,7 +882,8 @@ def run_code_agent(
             return gate_cb(name, args)
     else:
         before_tool = _selective_gate(console, yolo, _gate_root,
-                                      extra_gated=_sensitive_names)
+                                      extra_gated=_sensitive_names,
+                                      capabilities_by_tool=_capabilities_by_tool)
 
     # Stream the model's reasoning + summary live (the Claude-Code feel) when we
     # have a console; fall back to the step-narrator for non-interactive runs.
@@ -1878,7 +1924,7 @@ def run_unified_session(
     from .mcp_client import build_mcp_tools
 
     media_tools = build_media_tools(artifacts, root=root)
-    data_tools = build_tools(config)
+    data_tools = build_tools(config, include_plugins=False)
     # console=None → load MCP tools silently (no "🔌 MCP fs · N tool(s)" chrome
     # at launch; Claude Code doesn't announce its tool wiring either).
     mcp_tools = build_mcp_tools(root, console=None)  # tools from .ronin/mcp.json servers

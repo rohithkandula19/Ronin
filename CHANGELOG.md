@@ -11,6 +11,7 @@ All notable changes to this project will be documented here. Format follows [Kee
 - Diff previews now use a chunk-aware, fixed-width renderer that treats diff content as literal terminal text, including raw fallback output.
 - Agent-facing checkpoint rewinds now offer a read-only preview, create a mandatory recovery snapshot before changing files, and atomically persist their local index.
 - Provider discovery now recognizes provider-specific environment keys (for example `GROQ_API_KEY` and `OPENROUTER_API_KEY`) ahead of the shared OpenAI-compatible fallback; health reporting names only the credential source, never a key value.
+- Plugins now support a literal, non-executing `PLUGIN` manifest for capability declarations. Malformed or dynamic manifests are rejected before import; undeclared legacy plugins receive a conservative full capability set. `subprocess` and `payment` declarations require an explicit approval even under `--yolo`.
 
 ## [1.0.0]
 
