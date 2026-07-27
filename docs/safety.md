@@ -36,6 +36,15 @@ the files a rewind would restore or remove without changing the tree, and every
 actual `rewind` first creates a recovery checkpoint. The rewind result names
 that checkpoint so the restore itself can be reversed.
 
+## Patch Preflight
+
+Before the coding tools write Python source, Ronin parses the complete proposed
+file and refuses a syntax error without touching the existing file. It also
+reports Python public API removals. TypeScript is parsed when the project has a
+local compiler; otherwise Ronin says it was not checked. This is structural
+guarding only, not proof of behavior: use the repository's test suite for the
+actual verification signal. See [coding_engine.md](coding_engine.md).
+
 ## Keys & data
 
 Provider keys live in a local TOML (`.ronin/config.toml` or `~/.config/ronin/config.toml`), plaintext, never sent anywhere except the provider you chose. There is **no telemetry**. `--offline` strips every network tool so nothing leaves the machine.
