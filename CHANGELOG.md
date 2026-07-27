@@ -9,6 +9,7 @@ All notable changes to this project will be documented here. Format follows [Kee
 - `ronin-agent-patterns` now supports per-run token, wall-clock, and provider-reported cost ceilings. Exhausted budgets return partial output with an explicit trace error and never execute newly requested tools.
 - `ronin-agent-patterns` now includes an opt-in, repository-scoped `PlanCache` for `PlannerExecutorAgent`, with atomic local writes, repository-change invalidation, bounded retention, and no raw task text in cache records.
 - Diff previews now use a chunk-aware, fixed-width renderer that treats diff content as literal terminal text, including raw fallback output.
+- Agent-facing checkpoint rewinds now offer a read-only preview, create a mandatory recovery snapshot before changing files, and atomically persist their local index.
 
 ## [1.0.0]
 

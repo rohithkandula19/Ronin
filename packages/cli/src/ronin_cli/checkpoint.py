@@ -62,7 +62,15 @@ def _load_meta(root: Path) -> list[dict]:
 def _save_meta(root: Path, rows: list[dict]) -> None:
     p = _meta_path(root)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(rows, indent=2), encoding="utf-8")
+    fd, temporary = tempfile.mkstemp(prefix="checkpoints-", suffix=".tmp", dir=p.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(rows, handle, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, p)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
 
 
 def create_checkpoint(root: Path | str, label: str = "", *, now: float | None = None) -> Checkpoint:
@@ -79,6 +87,11 @@ def create_checkpoint(root: Path | str, label: str = "", *, now: float | None = 
         env = {"GIT_INDEX_FILE": idx, **_AUTHOR_ENV}
         _git(root, "read-tree", "HEAD", env=env, check=False)  # seed (no-op on empty repo)
         _git(root, "add", "-A", env=env)
+        # The index is control-plane metadata, not user workspace state. Keep it
+        # out of snapshot commits so a restore cannot overwrite a newer recovery
+        # record after its safety snapshot has been created.
+        _git(root, "rm", "--cached", "--ignore-unmatch", _META.as_posix(),
+             env=env, check=False)
         tree = _git(root, "write-tree", env=env).stdout.strip()
         parent = _git(root, "rev-parse", "HEAD", check=False).stdout.strip()
         commit_args = ["commit-tree", tree, "-m", f"ronin-checkpoint: {label or 'snapshot'}"]
@@ -125,19 +138,39 @@ def checkpoint_details(root: Path | str) -> list[dict]:
 
 def _snapshot_files(root: Path, sha: str) -> set[str]:
     out = _git(root, "ls-tree", "-r", "--name-only", sha, check=False)
-    return {line for line in out.stdout.splitlines() if line}
+    return {line for line in out.stdout.splitlines() if line and line != _META.as_posix()}
 
 
 def _current_files(root: Path) -> set[str]:
     tracked = _git(root, "ls-files", check=False).stdout.splitlines()
     untracked = _git(root, "ls-files", "--others", "--exclude-standard",
                      check=False).stdout.splitlines()
-    return {f for f in tracked + untracked if f}
+    # The index records Ronin's own safety metadata after each snapshot. It must
+    # survive a rewind or the recovery checkpoint becomes undiscoverable.
+    return {f for f in tracked + untracked if f and f != _META.as_posix()}
+
+
+def restore_plan(root: Path | str, cid: int) -> dict | None:
+    """Describe a rewind without modifying the tree or checkpoint metadata."""
+    root = Path(root).resolve()
+    if not is_git_repo(root):
+        raise NotAGitRepo(f"{root} is not a git repository")
+    rows = _load_meta(root)
+    match = next((row for row in rows if row.get("id") == cid), None)
+    if match is None:
+        return None
+    snap = _snapshot_files(root, match["sha"])
+    current = _current_files(root)
+    return {
+        "id": cid,
+        "label": match["label"],
+        "restore": sorted(snap),
+        "would_remove": sorted(current - snap),
+    }
 
 
 def restore_checkpoint(root: Path | str, cid: int) -> str:
-    """Restore every file to checkpoint ``cid`` and delete files created since —
-    a true rewind. Ignored files (.venv, node_modules, …) are never touched."""
+    """Restore a checkpoint after taking a mandatory recovery snapshot."""
     root = Path(root).resolve()
     if not is_git_repo(root):
         raise NotAGitRepo(f"{root} is not a git repository")
@@ -146,9 +179,17 @@ def restore_checkpoint(root: Path | str, cid: int) -> str:
     if match is None:
         return f"no checkpoint #{cid} (use list_checkpoints to see them)"
     sha = match["sha"]
+    plan = restore_plan(root, cid)
+    assert plan is not None
 
-    snap = _snapshot_files(root, sha)
-    current = _current_files(root)
+    # A rewind replaces and deletes files. Do not begin unless its inverse has
+    # been captured successfully; the returned checkpoint id is the rollback.
+    try:
+        safety = create_checkpoint(root, f"pre-restore #{cid}")
+    except Exception as exc:  # noqa: BLE001 - restoration must fail closed
+        return f"restore aborted: could not create a safety checkpoint ({exc})"
+
+    snap = set(plan["restore"])
 
     # Restore the snapshot's files into the working tree via a throwaway index.
     fd, idx = tempfile.mkstemp(prefix="ronin-restore-index-")
@@ -162,7 +203,7 @@ def restore_checkpoint(root: Path | str, cid: int) -> str:
 
     # Remove files that were created after the checkpoint (true rewind).
     removed = 0
-    for rel in current - snap:
+    for rel in plan["would_remove"]:
         target = root / rel
         try:
             if target.is_file():
@@ -172,12 +213,12 @@ def restore_checkpoint(root: Path | str, cid: int) -> str:
             pass
 
     return (f"rewound to checkpoint #{cid} ({match['label']}): "
-            f"restored {len(snap)} file(s), removed {removed} created since.")
+            f"restored {len(snap)} file(s), removed {removed} created since; "
+            f"reversible via checkpoint #{safety.id}.")
 
 
 def build_checkpoint_tools(root: Path | str = "."):
-    """Three tools: checkpoint (snapshot), list_checkpoints (read-only), and
-    rewind (restore — SENSITIVE, gated like any destructive op)."""
+    """Four tools: checkpoint, list, read-only restore preview, and rewind."""
     from ronin_agent_patterns import Tool
 
     def checkpoint(label: str = "") -> str:
@@ -200,6 +241,18 @@ def build_checkpoint_tools(root: Path | str = "."):
         except NotAGitRepo as e:
             return f"cannot rewind: {e}"
 
+    def preview_rewind(id: int) -> str:
+        try:
+            plan = restore_plan(root, int(id))
+        except NotAGitRepo as e:
+            return f"cannot preview rewind: {e}"
+        if plan is None:
+            return f"no checkpoint #{id} (use list_checkpoints to see them)"
+        removed = plan["would_remove"]
+        return (f"restore plan for checkpoint #{id} ({plan['label']}): restore "
+                f"{len(plan['restore'])} file(s), remove {len(removed)} created since"
+                + (f" ({', '.join(removed[:8])})" if removed else "") + ".")
+
     def _tool(name, desc, schema, handler) -> Tool:
         return Tool(name=name, description=desc, input_schema=schema, handler=handler)
 
@@ -213,6 +266,10 @@ def build_checkpoint_tools(root: Path | str = "."):
         _tool("list_checkpoints", "List saved workspace checkpoints (id + label).",
               {"type": "object", "properties": {}},
               list_checkpoints_tool),
+        _tool("preview_rewind", "Show which files a checkpoint rewind would restore or remove. "
+              "Read-only; does not change the workspace. Args: id.",
+              {"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]},
+              preview_rewind),
         _tool("rewind",
               "Restore the WHOLE workspace to a checkpoint: every file goes back to its "
               "snapshot and files created since are removed. SENSITIVE — gated by approval. "

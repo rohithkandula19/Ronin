@@ -31,6 +31,11 @@ Read-only roles — **researcher, reviewer, architect, verifier** — are *enfor
 
 `ronin pipeline` is sequential and gated. A commit/PR happens **only after a passing verdict** and an explicit `y/N`; `--dry-run` changes nothing; checkpoint restore always confirms before overwriting and never resets/stashes silently.
 
+The agent-facing checkpoint tools are equally conservative: `preview_rewind` shows
+the files a rewind would restore or remove without changing the tree, and every
+actual `rewind` first creates a recovery checkpoint. The rewind result names
+that checkpoint so the restore itself can be reversed.
+
 ## Keys & data
 
 Provider keys live in a local TOML (`.ronin/config.toml` or `~/.config/ronin/config.toml`), plaintext, never sent anywhere except the provider you chose. There is **no telemetry**. `--offline` strips every network tool so nothing leaves the machine.
