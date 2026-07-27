@@ -20,7 +20,8 @@ CI runs the same command. If it's green locally, it'll be green in CI.
 - **New MCP servers** — read-only, following the pattern in `packages/mcp-servers/src/ronin_mcp_servers/`. Each server: a `*_ReadOnlyTools` Pydantic class + a `*_tools()` factory + tests with mocked `httpx`.
 - **New providers** — add a class subclassing `LLMProvider` in `packages/agent-patterns/src/ronin_agent_patterns/providers/`. See `openai_compat.py` for the template.
 - **Documentation** — typos, clarifications, new cookbook recipes in `apps/docs/`.
-- **CLI commands** — keep them small and composable. `csk` should feel like `git`, not `kubectl`.
+- **CLI commands** — keep them small and composable. `ronin` should feel like `git`, not `kubectl`.
+- **Roadmap workstreams** — use `docs/CONTRIBUTION_ROADMAP.md` to pick substantial areas that can become several focused PRs.
 
 ## What we don't want (please don't open PRs for these)
 
@@ -35,7 +36,7 @@ CI runs the same command. If it's green locally, it'll be green in CI.
 - **Python**: 3.11+. Type hints everywhere. Pydantic v2 for state.
 - **Imports**: standard library, then third-party, then local. Sorted alphabetically within each group.
 - **Tests**: pytest. Mock the network with `MagicMock(spec=httpx.Client)` or `FakeProvider`. No real API calls in tests.
-- **Commits**: imperative mood ("add X", not "added X"). One logical change per commit.
+- **Commits**: conventional-style scopes in imperative mood (`feat(agent): add planner cache`, not "added planner cache"). One logical change per commit.
 - **PR titles**: `<area>: <what changed>`. Examples: `cli: add --json flag to ask`, `mcp-servers: support Stripe usage records`.
 
 ## Adding a new MCP server (template)
