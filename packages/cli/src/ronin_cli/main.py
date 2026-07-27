@@ -5011,36 +5011,69 @@ def archaeology(
 def perf(
     command: list[str] = typer.Argument(..., help="The command to benchmark, e.g. \"pytest -q\"."),
     runs: int = typer.Option(5, "--runs", help="Timed runs (after a warmup)."),
+    warmup: int = typer.Option(1, "--warmup", help="Discarded warmup runs."),
+    timeout: int = typer.Option(300, "--timeout", help="Per-run timeout in seconds."),
+    json_out: Optional[Path] = typer.Option(None, "--json-out", help="Write a structured benchmark report."),
+    baseline: Optional[Path] = typer.Option(None, "--baseline", help="Compare this run with a saved report."),
+    max_regression_percent: float = typer.Option(
+        10.0, "--max-regression-percent", help="Fail when median latency rises above this percent.",
+    ),
     analyze: bool = typer.Option(False, "--analyze", help="Have ronin suggest where the time goes."),
     root: Path = typer.Option(Path("."), "--root", help="Working directory."),
 ) -> None:
-    """⏱  Benchmark a command (min / mean / median / max over N runs), with optional
-    AI analysis of where the time goes.
-    """
-    from .perf import benchmark
+    """Benchmark a command, optionally save JSON, compare a baseline, or analyze it."""
+    from .perf import compare_reports, load_report, run_benchmark, save_report
 
     cmd = " ".join(command)
-    console.print(f"[#7aa2f7]⏱ benchmarking[/#7aa2f7] [bold]{cmd}[/bold] [dim]({runs} runs + warmup)[/dim]")
+    console.print(f"[#7aa2f7]⏱ benchmarking[/#7aa2f7] [bold]{cmd}[/bold] "
+                  f"[dim]({runs} timed + {warmup} warmup)[/dim]")
     with console.status("[dim] running…[/dim]", spinner="dots"):
-        r = benchmark(cmd, runs=runs, root=root)
+        report = run_benchmark(cmd, runs=runs, warmup=warmup, timeout=timeout, root=root)
+    r = report.summary()
     if r["runs"] == 0:
-        console.print("[yellow]no successful runs.[/yellow]")
+        console.print("[yellow]no completed timed runs.[/yellow]")
         raise typer.Exit(1)
     console.print(f"  mean   [bold]{r['mean']:.3f}s[/bold]  [dim]± {r['stdev']:.3f}[/dim]")
-    console.print(f"  median {r['median']:.3f}s   min {r['min']:.3f}s   max {r['max']:.3f}s")
+    console.print(f"  median {r['median']:.3f}s   p95 {r['p95']:.3f}s   "
+                  f"min {r['min']:.3f}s   max {r['max']:.3f}s")
     if r["failures"]:
         console.print(f"  [yellow]{r['failures']} run(s) exited non-zero[/yellow]")
+    if json_out is not None:
+        try:
+            saved = save_report(report, json_out)
+        except OSError as exc:
+            console.print(f"[red]could not save benchmark report:[/red] {exc}")
+            raise typer.Exit(2)
+        console.print(f"  [dim]report:[/dim] {saved}")
+
+    comparison = None
+    if baseline is not None:
+        try:
+            comparison = compare_reports(
+                load_report(baseline), report,
+                max_regression_percent=max_regression_percent,
+            )
+        except ValueError as exc:
+            console.print(f"[red]could not compare baseline:[/red] {exc}")
+            raise typer.Exit(2)
+        color = {
+            "improved": "green", "unchanged": "yellow", "regressed": "red", "insufficient": "yellow",
+        }[comparison.status]
+        console.print(f"  [{color}]baseline {comparison.status}[/{color}]: {comparison.reason}")
     if analyze:
         config = load_config()
         if not config.has_provider_auth():
-            return
-        from .code_mode import run_code_agent
-        console.print("\n[#6b7089]analyzing…[/#6b7089]")
-        run_code_agent(
-            config,
-            f"`{cmd}` runs in ~{r['mean']:.3f}s (median {r['median']:.3f}s). Explore the "
-            "code it exercises and suggest the 1-3 highest-leverage speedups. Be specific.",
-            root=root, console=console, read_only=True, include_image_tool=False, max_iterations=10)
+            console.print("[dim]set a provider to enable analysis.[/dim]")
+        else:
+            from .code_mode import run_code_agent
+            console.print("\n[#6b7089]analyzing…[/#6b7089]")
+            run_code_agent(
+                config,
+                f"`{cmd}` runs in ~{r['mean']:.3f}s (median {r['median']:.3f}s). Explore the "
+                "code it exercises and suggest the 1-3 highest-leverage speedups. Be specific.",
+                root=root, console=console, read_only=True, include_image_tool=False, max_iterations=10)
+    if comparison is not None and comparison.status == "regressed":
+        raise typer.Exit(1)
 
 
 # ---------- debate (multi-round cross-vendor argument) ----------

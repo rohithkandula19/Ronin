@@ -13,6 +13,7 @@ All notable changes to this project will be documented here. Format follows [Kee
 - Provider discovery now recognizes provider-specific environment keys (for example `GROQ_API_KEY` and `OPENROUTER_API_KEY`) ahead of the shared OpenAI-compatible fallback; health reporting names only the credential source, never a key value.
 - Plugins now support a literal, non-executing `PLUGIN` manifest for capability declarations. Malformed or dynamic manifests are rejected before import; undeclared legacy plugins receive a conservative full capability set. `subprocess` and `payment` declarations require an explicit approval even under `--yolo`.
 - Python edits now receive a pre-write AST parse check, so invalid `write_file`, `edit_file`, and `multi_edit` proposals are rejected without changing the file. Valid Python edits report removed top-level public symbols; TypeScript syntax is checked opportunistically with a project-local compiler.
+- `ronin perf` now has a versioned JSON report format, deterministic benchmark executor seam, atomic report writes without captured command output, p95/failure summaries, and baseline comparison that can fail on a configurable median-latency or failed-run regression.
 
 ## [1.0.0]
 
