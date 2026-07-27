@@ -28,6 +28,7 @@ from ronin_agent_patterns import (
     Tool,
 )
 
+from .agent_catalog import AgentProfile, build_catalog, select_profiles
 from .config import RoninConfig
 
 # Default specialist roster. Each is provider-agnostic: the planner assigns
@@ -68,6 +69,46 @@ DEFAULT_DESCRIPTIONS: dict[str, str] = {
     "reviewer": "reviews a change for correctness and completeness",
     "tester": "writes and runs tests for a change and reports pass/fail",
 }
+
+_CORE_TIERS = {
+    "researcher": "explore",
+    "implementer": "write",
+    "reviewer": "explore",
+    "tester": "test",
+}
+
+
+def core_agent_profiles() -> tuple[AgentProfile, ...]:
+    """Return Ronin's always-available orchestration roles as catalog profiles."""
+    return tuple(AgentProfile(
+        key=role,
+        description=DEFAULT_DESCRIPTIONS[role],
+        system=system,
+        tags=(role,),
+        tier=_CORE_TIERS[role],
+        source="core",
+    ) for role, system in DEFAULT_ROLES.items())
+
+
+def agent_catalog(root: Path | str, *, manifest: Path | str | None = None) -> tuple[AgentProfile, ...]:
+    """Return the scalable specialist catalog for a repository."""
+    return build_catalog(core_agent_profiles(), root, manifest=manifest)
+
+
+def select_agents_for_goal(
+    goal: str,
+    root: Path | str,
+    *,
+    max_agents: int = 8,
+    manifest: Path | str | None = None,
+) -> tuple[AgentProfile, ...]:
+    """Select the bounded specialist team to expose to an orchestration planner."""
+    profiles = agent_catalog(root, manifest=manifest)
+    return select_profiles(
+        goal, profiles,
+        core_keys=DEFAULT_ROLES,
+        max_agents=max_agents,
+    )
 
 
 @dataclass
@@ -123,14 +164,19 @@ def role_label(base: RoninConfig, spec: str | None) -> str:
     return f"{cfg.provider}:{cfg.resolved_model()}"
 
 
-def roster_labels(base: RoninConfig, roster_spec: str | None) -> dict[str, str]:
+def roster_labels(
+    base: RoninConfig,
+    roster_spec: str | None,
+    profiles: "list[AgentProfile] | tuple[AgentProfile, ...] | None" = None,
+) -> dict[str, str]:
     """Map each built-in specialist role to the provider:model it will run on.
 
     This is the sub-agent tree the dashboard renders: the planner/synthesizer run
     on the base provider, and each role on its own (possibly different) vendor's
     model via ``--roster``. Pure label resolution — no providers are built."""
     parsed = parse_roster(roster_spec)
-    return {role: role_label(base, parsed.get(role)) for role in DEFAULT_ROLES}
+    roles = [profile.key for profile in profiles] if profiles is not None else list(DEFAULT_ROLES)
+    return {role: role_label(base, parsed.get(role)) for role in roles}
 
 
 def score_final_faithfulness(outcome: "OrchestrateOutcome") -> "dict[str, Any] | None":
@@ -208,6 +254,7 @@ class OrchestrateOutcome:
     error: str | None = None
     # In write mode, the diff captured from the isolated worktree (empty otherwise).
     diff: str = ""
+    agent_profiles: tuple[AgentProfile, ...] = ()
 
 
 def run_orchestrate(
@@ -220,6 +267,9 @@ def run_orchestrate(
     on_subtask_start=None,
     max_iterations: int = 12,
     read_only: bool = True,
+    profiles: "tuple[AgentProfile, ...] | list[AgentProfile] | None" = None,
+    max_agents: int = 8,
+    agent_manifest: Path | str | None = None,
 ) -> OrchestrateOutcome:
     """Run the orchestrator on ``goal``.
 
@@ -231,47 +281,64 @@ def run_orchestrate(
     so their edits never touch the main checkout; the captured diff is appended to
     the result. Read-only runs explore in place (no worktree needed).
     """
+    try:
+        selected = tuple(profiles) if profiles is not None else select_agents_for_goal(
+            goal, root, max_agents=max_agents, manifest=agent_manifest,
+        )
+    except ValueError as exc:
+        return OrchestrateOutcome(success=False, output="", error=str(exc))
+    if not selected:
+        return OrchestrateOutcome(success=False, output="", error="orchestration needs at least one agent profile")
+
     if not read_only:
         from .worktree import is_git_repo
         if is_git_repo(root):
             return _run_in_worktree(
                 base, goal, roster_spec=roster_spec, root=root, on_step=on_step,
                 on_subtask_start=on_subtask_start, max_iterations=max_iterations,
+                profiles=selected,
             )
         # Not a git repo: fall back to read-only so we never mutate the tree
         # uncontrolled. The CLI surfaces this; here we just stay safe.
         read_only = True
 
-    tools_for_role = _tools_for_roles(base, root, read_only=read_only, mutate_root=root)
+    tools_for_role = _tools_for_roles(
+        base, root, read_only=read_only, mutate_root=root, profiles=selected,
+    )
     return _run_core(
         base, goal, roster_spec=roster_spec, tools_for_role=tools_for_role,
         on_step=on_step, on_subtask_start=on_subtask_start,
-        max_iterations=max_iterations, diff="",
+        max_iterations=max_iterations, diff="", profiles=selected,
     )
 
 
 def _run_in_worktree(base, goal, *, roster_spec, root, on_step, on_subtask_start,
-                     max_iterations):
+                     max_iterations, profiles):
     """Run the mutating orchestration inside a throwaway worktree, capture the
     diff, and clean up — reusing the dojo's worktree isolation."""
     from .worktree import git_worktree, worktree_diff
 
     with git_worktree(root, label="orchestrate") as wt:
-        tools_for_role = _tools_for_roles(base, wt, read_only=False, mutate_root=wt)
+        tools_for_role = _tools_for_roles(
+            base, wt, read_only=False, mutate_root=wt, profiles=profiles,
+        )
         outcome = _run_core(
             base, goal, roster_spec=roster_spec, tools_for_role=tools_for_role,
             on_step=on_step, on_subtask_start=on_subtask_start,
-            max_iterations=max_iterations, diff="",
+            max_iterations=max_iterations, diff="", profiles=profiles,
         )
         outcome.diff = worktree_diff(wt)
     return outcome
 
 
 def _run_core(base, goal, *, roster_spec, tools_for_role, on_step, on_subtask_start,
-              max_iterations, diff):
+              max_iterations, diff, profiles):
     roster = parse_roster(roster_spec)
+    roles = {profile.key: profile.system for profile in profiles}
+    descriptions = {profile.key: profile.description for profile in profiles}
     subs = build_subagents(
-        base, roster, tools_for_role=tools_for_role, max_iterations=max_iterations,
+        base, roster, tools_for_role=tools_for_role, roles=roles,
+        descriptions=descriptions, max_iterations=max_iterations,
     )
     orch = OrchestratorAgent(
         provider=provider_for_spec(base, None),  # planner/synth = base provider
@@ -285,19 +352,22 @@ def _run_core(base, goal, *, roster_spec, tools_for_role, on_step, on_subtask_st
         subtask_results=[r.model_dump() for r in result.subtask_results],
         error=result.error,
         diff=diff,
+        agent_profiles=tuple(profiles),
     )
 
 
 def _tools_for_roles(
     base: RoninConfig, root: Path | str, *, read_only: bool,
     mutate_root: "Path | str | None" = None,
+    profiles: "tuple[AgentProfile, ...] | list[AgentProfile] | None" = None,
 ) -> dict[str, list[Tool]]:
     """Build the per-role tool subsets from ronin's code toolbelt.
 
-    Researcher/reviewer always get read-only explorer tools bound to ``root``.
-    The implementer gets the FULL code toolbelt bound to ``mutate_root`` (the
-    isolated worktree) only when the run is not read-only. Imported lazily so the
-    pure roster/provider helpers don't pull in the heavy code-tools graph."""
+    Explorer profiles always get read-only tools. Test-tier profiles may execute
+    existing commands in read-only mode and receive the full isolated-worktree
+    toolbelt only in write mode. Write-tier profiles receive mutations only in
+    that isolated worktree. Imported lazily so the pure catalog helpers do not
+    pull in the heavy code-tools graph."""
     try:
         from .code_tools import build_code_tools
     except Exception:  # noqa: BLE001 — keep the orchestrator usable without code tools
@@ -313,17 +383,19 @@ def _tools_for_roles(
     tester_readonly = [
         t for t in base_tools if t.name in (_READONLY | {"run_command"})
     ]
-    out: dict[str, list[Tool]] = {
-        "researcher": readonly_tools,
-        "reviewer": readonly_tools,
-    }
-    if read_only:
-        out["implementer"] = readonly_tools
-        out["tester"] = tester_readonly
-    else:
-        # Full toolbelt bound to the isolated worktree, so mutations (and any new
-        # test files the tester writes) land there, not the main checkout.
-        worktree_tools = build_code_tools(mutate_root or root, sandbox=sandbox)
-        out["implementer"] = worktree_tools
-        out["tester"] = worktree_tools
+    selected = tuple(profiles) if profiles is not None else core_agent_profiles()
+    worktree_tools: list[Tool] | None = None
+    out: dict[str, list[Tool]] = {}
+    for profile in selected:
+        if profile.tier == "explore":
+            out[profile.key] = readonly_tools
+            continue
+        if read_only:
+            out[profile.key] = tester_readonly if profile.tier == "test" else readonly_tools
+            continue
+        # Mutations and test writes are bound to the isolated worktree, never the
+        # checkout from which the orchestrator was invoked.
+        if worktree_tools is None:
+            worktree_tools = build_code_tools(mutate_root or root, sandbox=sandbox)
+        out[profile.key] = worktree_tools
     return out

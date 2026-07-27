@@ -17,6 +17,11 @@ What ronin does is make the per-subtask provider assignment first-class and full
 offline-testable, on top of the same agent loop and worktree isolation the rest
 of the project already uses.
 
+The orchestrator now selects from a scalable catalog of 1,170 generated domain
+specialist profiles plus optional project profiles. It activates only a bounded,
+task-relevant team; see [Specialist agents](agents.md) for the selection model
+and `.ronin/agents.json` format.
+
 ## Where it fits among ronin's multi-agent primitives
 
 - ReActAgent: one agent, one thread, one provider. The base loop.
@@ -45,8 +50,8 @@ Every orchestration run has three roles, and each can be a different provider:
 2. Sub-agents. Do the work. Each sub-agent has a role, a system prompt, a tool
    subset, and an assigned provider/model. Independent sub-agents run in
    parallel; a sub-agent with no provider of its own falls back to the base
-   provider. The CLI ships four built-in specialist roles, each pinnable to its
-   own provider via --roster:
+   provider. The CLI always includes four core roles and may add task-matching
+   specialists, each pinnable to its own provider via --roster:
    - researcher: read-only investigation; reports facts (read/list/search/glob).
    - implementer: edits and creates code (full toolbelt in --write mode).
    - reviewer: read-only critique of a change for correctness and completeness.

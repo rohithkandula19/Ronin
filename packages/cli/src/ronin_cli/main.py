@@ -2344,19 +2344,58 @@ def swarm(
 
 # ---------- orchestrate (plan -> provider-agnostic sub-agents -> synthesize) ----------
 
+@app.command("agents")
+def agents(
+    task: Optional[str] = typer.Argument(None, help="Optional task to rank specialist profiles for."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    max_agents: int = typer.Option(8, "--max-agents", help="Maximum task-relevant profiles to show."),
+    agent_manifest: Optional[Path] = typer.Option(
+        None, "--agent-manifest", help="Project profile manifest (default: .ronin/agents.json).",
+    ),
+) -> None:
+    """Show Ronin's scalable specialist catalog or the team selected for a task."""
+    from .orchestrate import agent_catalog, select_agents_for_goal
+
+    try:
+        catalog = agent_catalog(root, manifest=agent_manifest)
+        selected = select_agents_for_goal(
+            task or "", root, max_agents=max_agents, manifest=agent_manifest,
+        )
+    except ValueError as exc:
+        console.print(f"[red]✗[/red] {exc}")
+        raise typer.Exit(2)
+    project_count = sum(profile.source == "project" for profile in catalog)
+    console.print(
+        f"[#7aa2f7]agents[/#7aa2f7] [bold]{len(catalog):,}[/bold] available "
+        f"[dim]({project_count} project-defined; {len(selected)} selected)[/dim]"
+    )
+    table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+    table.add_column("Profile")
+    table.add_column("Tier")
+    table.add_column("Description")
+    for profile in selected:
+        table.add_row(profile.key, profile.tier, profile.description)
+    console.print(table)
+
 @app.command()
 def orchestrate(
     goal: str = typer.Argument(..., help="The high-level goal to decompose and work."),
     roster: str = typer.Option(
         None, "--roster", "-r",
         help="Role→provider, e.g. 'researcher=anthropic,implementer=cerebras,"
-             "reviewer=gemini,tester=groq'. Built-in roles: researcher, "
-             "implementer, reviewer, tester. Roles not listed run on the base provider."),
+             "reviewer=gemini,tester=groq'. Core and selected specialist profiles "
+             "not listed run on the base provider."),
     write: bool = typer.Option(
         False, "--write",
         help="Let implementer sub-agents edit code in isolated git worktrees (needs git). "
              "Default is read-only (research/plan)."),
     root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    max_agents: int = typer.Option(
+        8, "--max-agents", help="Maximum task-relevant specialist profiles (4-32).",
+    ),
+    agent_manifest: Optional[Path] = typer.Option(
+        None, "--agent-manifest", help="Project profile manifest (default: .ronin/agents.json).",
+    ),
     offline: bool = typer.Option(
         False, "--offline", help="Run on a local brain only; no network, no API keys."),
 ) -> None:
@@ -2369,13 +2408,14 @@ def orchestrate(
     reviewer pipeline) by letting the planner choose the subtasks and their
     dependencies dynamically.
 
-    Built-in specialist roles: researcher (read-only investigation), implementer
-    (edits code), reviewer (critiques a change), tester (writes and runs tests).
+    Core roles are researcher (read-only investigation), implementer (edits code),
+    reviewer (critiques a change), and tester (writes and runs tests). Ronin adds
+    task-matched profiles from its specialist catalog up to --max-agents.
 
     Example:  ronin orchestrate "add retry + tests to the http client" \\
               -r researcher=anthropic,implementer=cerebras,reviewer=gemini,tester=groq --write
     """
-    from .orchestrate import role_label, run_orchestrate
+    from .orchestrate import role_label, run_orchestrate, select_agents_for_goal
 
     config = load_config()
     if offline:
@@ -2391,9 +2431,16 @@ def orchestrate(
     if roster:
         from .orchestrate import parse_roster
         parsed = parse_roster(roster)
+    try:
+        selected = select_agents_for_goal(
+            goal, root, max_agents=max_agents, manifest=agent_manifest,
+        )
+    except ValueError as exc:
+        console.print(f"[red]✗[/red] {exc}")
+        raise typer.Exit(2)
     line = " · ".join(
-        f"{r}: [bold]{role_label(config, parsed.get(r))}[/bold]"
-        for r in ("researcher", "implementer", "reviewer", "tester")
+        f"{profile.key}: [bold]{role_label(config, parsed.get(profile.key))}[/bold]"
+        for profile in selected
     )
     console.print(f"[#7aa2f7]🧭 orchestrate[/#7aa2f7] {line}")
     if write:
@@ -2406,6 +2453,7 @@ def orchestrate(
         outcome = run_orchestrate(
             config, goal, roster_spec=roster, root=root,
             on_subtask_start=_on_subtask_start, read_only=not write,
+            profiles=selected, max_agents=max_agents, agent_manifest=agent_manifest,
         )
 
     console.print()
@@ -2431,7 +2479,7 @@ def orchestrate(
             goal,
             outcome,
             planner_label=role_label(config, None),
-            roster=roster_labels(config, roster),
+            roster=roster_labels(config, roster, outcome.agent_profiles),
         )
         record["faithfulness"] = final_faith
         save_run(record)
