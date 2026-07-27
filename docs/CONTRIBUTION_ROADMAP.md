@@ -31,7 +31,7 @@ Each track should be small enough to review, but substantial enough to include c
 | Track | Code | Tests | Docs and release notes |
 |---|---|---|---|
 | Memory compaction and retrieval improvements | Add persistent retrieval hooks and tune compaction boundaries. | Unit tests for recall ranking, expiry, secret non-storage, and fallback behavior. | Memory docs, limitations, migration note for stored formats. First slice shipped: dependency-free `SqliteBackend` for persistent local recall. |
-| Agent planning cache | Cache reusable plan fragments by repo/task fingerprint under `.ronin`. | Cache hit/miss tests, invalidation tests, budget tests. | Architecture note and CLI help update. |
+| Agent planning cache | Cache reusable plan fragments by repo/task fingerprint under `.ronin`. First slice shipped: opt-in atomic `PlanCache`, structured hit/miss trace metadata, repository invalidation, and bounded retention. | Cache hit/miss tests, invalidation tests, budget tests. | [Architecture note](architecture/planner_cache.md), agent-patterns docs, and changelog. |
 | Streaming diff renderer | Render incremental unified diffs with stable widths and no markup injection. | Snapshot/pure render tests, narrow terminal tests, `NO_COLOR` tests. | CLI UX docs and changelog. |
 | Better checkpoint recovery | Make agent-facing restores reversible and expose dry-run restore plans. | Restore-plan tests, dirty-tree tests, metadata atomicity tests. | Safety docs and rollback notes. |
 | Provider auto-discovery | Detect configured provider keys/endpoints and report capability/cost status honestly. | Provider matrix tests with fake env/config, unknown-price tests. | Provider docs and migration note if config changes. |

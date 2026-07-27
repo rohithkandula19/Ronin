@@ -45,6 +45,27 @@ for step in result.trace:
     print(f"[{step.kind}] {step.content}")
 ```
 
+## Planner Cache
+
+`PlannerExecutorAgent` can reuse an initial structured plan when the normalized
+task and repository state match. It is opt-in and local to the repository:
+
+```python
+from pathlib import Path
+from ronin_agent_patterns import PlanCache, PlannerExecutorAgent
+
+agent = PlannerExecutorAgent(
+    planner_system="Create a precise implementation plan.",
+    executor_system="Execute one verified step at a time.",
+    plan_cache=PlanCache(Path(".")),
+)
+```
+
+Entries live in `.ronin/plans/`, contain a task digest rather than the raw task,
+and are atomically written. A changed git revision or working tree selects a new
+entry; failed-execution replans always bypass the cache so their failure context
+reaches the planner.
+
 ## Run Budgets
 
 Use optional per-run ceilings to bound a loop without treating an incomplete
