@@ -10,6 +10,7 @@ All notable changes to this project will be documented here. Format follows [Kee
 - `ronin-agent-patterns` now includes an opt-in, repository-scoped `PlanCache` for `PlannerExecutorAgent`, with atomic local writes, repository-change invalidation, bounded retention, and no raw task text in cache records.
 - Diff previews now use a chunk-aware, fixed-width renderer that treats diff content as literal terminal text, including raw fallback output.
 - Agent-facing checkpoint rewinds now offer a read-only preview, create a mandatory recovery snapshot before changing files, and atomically persist their local index.
+- Provider discovery now recognizes provider-specific environment keys (for example `GROQ_API_KEY` and `OPENROUTER_API_KEY`) ahead of the shared OpenAI-compatible fallback; health reporting names only the credential source, never a key value.
 
 ## [1.0.0]
 

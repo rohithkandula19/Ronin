@@ -13,6 +13,11 @@ with first-class evals, memory, security hardening, and MCP tool integrations.
 Plug in Claude for top quality, or run it **free** on Gemini, Cerebras, Groq,
 or Ollama.
 
+Provider keys can stay outside config files. Ronin discovers standard
+provider-specific environment variables such as `GROQ_API_KEY`,
+`GEMINI_API_KEY`, `CEREBRAS_API_KEY`, and `OPENROUTER_API_KEY`; `/provider`
+reports readiness without printing secret values.
+
 ## Install
 
 ```bash

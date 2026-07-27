@@ -299,7 +299,7 @@ def _list_provider_models(config: RoninConfig) -> list[str]:
     base = config.resolved_base_url()
     if not base:
         return []
-    key = config.openai_api_key or _os.environ.get("OPENAI_API_KEY")
+    key = config.key_for(config.provider)
     try:
         import httpx
         headers = {"User-Agent": "ronin"}
