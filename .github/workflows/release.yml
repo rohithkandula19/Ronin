@@ -1,25 +1,34 @@
 name: Release
 
-# Tag-triggered: push a tag like v0.2.0 and this workflow builds + publishes
-# every workspace package (and the CLI binary) to PyPI.
-#
-# Setup once: add a PyPI API token as the repo secret PYPI_TOKEN
-# (https://pypi.org/help/#apitoken).
-
+# A release tag is the approval boundary. The workflow validates that every
+# published package and exact CLI dependency pin matches the tag before build.
 on:
   push:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to rebuild, for example v1.2.3-rc.1"
+        required: true
+        type: string
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v3
@@ -29,35 +38,62 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
-      - name: Run tests (publish gate)
-        run: |
-          uv sync --all-packages --all-groups
-          uv run --frozen pytest packages -q
+      - name: Install dependencies
+        run: uv sync --all-packages --all-groups
 
-      - name: Build all packages
+      - name: Validate release manifest
+        run: uv run --frozen python -m ronin_cli.release --root . --tag "$RELEASE_TAG" --print-package-dirs
+
+      - name: Run release test suite
+        run: uv run --frozen pytest packages apps training -q
+
+      - name: Build release packages
         run: |
-          set -e
-          for pkg in packages/agent-patterns \
-                    packages/eval-suite \
-                    packages/memory \
-                    packages/hardening \
-                    packages/mcp-servers \
-                    packages/cli; do
-            echo "::group::Building $pkg"
-            uv build "$pkg" --out-dir dist
+          mkdir -p dist
+          mapfile -t packages < <(uv run --frozen python -m ronin_cli.release --root . --tag "$RELEASE_TAG" --print-package-dirs)
+          for package in "${packages[@]}"; do
+            echo "::group::Building $package"
+            uv build "$package" --out-dir dist
             echo "::endgroup::"
           done
-          ls -la dist/
 
-      - name: Validate artifacts (twine check)
-        run: uvx twine check dist/*
+      - name: Validate package artifacts
+        run: |
+          uv run --frozen python -m ronin_cli.release --root . --tag "$RELEASE_TAG" --artifact-dir dist
+          uvx twine check dist/*.tar.gz dist/*.whl
+
+      - name: Verify standalone CLI install
+        run: bash scripts/test_clean_install.sh
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum -- *.whl *.tar.gz | sort > SHA256SUMS
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ronin-${{ env.RELEASE_TAG }}
+          path: dist/
+          if-no-files-found: error
 
       - name: Publish to PyPI
         env:
           UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
         run: |
           if [ -z "$UV_PUBLISH_TOKEN" ]; then
-            echo "PYPI_TOKEN secret is not set. Skipping publish."
+            echo "PYPI_TOKEN secret is not set. Skipping PyPI publish."
             exit 0
           fi
-          uv publish dist/*
+          uv publish dist/*.tar.gz dist/*.whl
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/*.tar.gz dist/*.whl dist/SHA256SUMS --clobber
+          else
+            gh release create "$RELEASE_TAG" dist/*.tar.gz dist/*.whl dist/SHA256SUMS \
+              --title "Ronin $RELEASE_TAG" --generate-notes
+          fi

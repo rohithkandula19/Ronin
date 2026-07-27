@@ -14,6 +14,7 @@ All notable changes to this project will be documented here. Format follows [Kee
 - Plugins now support a literal, non-executing `PLUGIN` manifest for capability declarations. Malformed or dynamic manifests are rejected before import; undeclared legacy plugins receive a conservative full capability set. `subprocess` and `payment` declarations require an explicit approval even under `--yolo`.
 - Python edits now receive a pre-write AST parse check, so invalid `write_file`, `edit_file`, and `multi_edit` proposals are rejected without changing the file. Valid Python edits report removed top-level public symbols; TypeScript syntax is checked opportunistically with a project-local compiler.
 - `ronin perf` now has a versioned JSON report format, deterministic benchmark executor seam, atomic report writes without captured command output, p95/failure summaries, and baseline comparison that can fail on a configurable median-latency or failed-run regression.
+- Release automation now validates a fixed seven-package manifest against the tag, synchronizes package versions and CLI pins, verifies wheel/sdist completeness and clean installs, emits `SHA256SUMS`, and uploads checked artifacts to the GitHub Release. The legacy `csk` release-script wording has been removed.
 
 ## [1.0.0]
 

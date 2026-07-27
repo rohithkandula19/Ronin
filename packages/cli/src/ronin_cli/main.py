@@ -4556,15 +4556,13 @@ def release(
     write_changelog: bool = typer.Option(True, "--changelog/--no-changelog", help="Prepend a CHANGELOG section."),
     root: Path = typer.Option(Path("."), "--root", help="Repo root."),
 ) -> None:
-    """🚀 Cut a release — bump the version everywhere it's declared, generate the
-    changelog from commits since the last tag, and optionally create the git tag.
-    """
-    from .release import bump_version, current_version, find_version_files, set_version_in_text
+    """🚀 Prepare a synchronized Ronin release and optionally create its git tag."""
+    from .release import bump_version, current_version, prepare_release, release_version_files, validate_release
 
-    files = find_version_files(root)
+    files = list(release_version_files(root))
     cur = current_version(files)
     if not cur:
-        console.print("[yellow]couldn't find a version (__version__ / pyproject).[/yellow]")
+        console.print("[yellow]couldn't find the Ronin release version.[/yellow]")
         raise typer.Exit(1)
     try:
         new = bump_version(cur, kind)
@@ -4572,17 +4570,13 @@ def release(
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(2)
     console.print(f"[#7aa2f7]🚀 release[/#7aa2f7] [bold]{cur} → {new}[/bold]")
-    changed = 0
-    for f in files:
-        try:
-            text = f.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        new_text, n = set_version_in_text(text, new)
-        if n:
-            f.write_text(new_text, encoding="utf-8")
-            changed += n
-    console.print(f"  [green]✓[/green] bumped {changed} version declaration(s)")
+    try:
+        changed = prepare_release(root, new)
+        validate_release(root, f"v{new}")
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(2)
+    console.print(f"  [green]✓[/green] synchronized {len(changed)} release version source(s)")
 
     if write_changelog:
         from .changelog import render_changelog
