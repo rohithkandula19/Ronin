@@ -14,8 +14,8 @@ name: "CodeQL Advanced"
 on:
   push:
     branches: [ "main", "feat/caching-lsp-parallel" ]
+  # No base filter: stacked PRs get scanned too (see ci.yml).
   pull_request:
-    branches: [ "main", "feat/caching-lsp-parallel" ]
   schedule:
     - cron: '42 5 * * 1'
 

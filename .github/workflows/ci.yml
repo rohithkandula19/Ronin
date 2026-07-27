@@ -3,8 +3,10 @@ name: CI
 on:
   push:
     branches: [main]
+  # No base filter: stacked PRs (base = another feature branch) must get the
+  # same matrix — PR #119 shipped with zero Actions runs until it was
+  # retargeted to main, which is exactly the gap this closes.
   pull_request:
-    branches: [main]
 
 # Least privilege: CI only reads the repo (tests, build, smoke) — no write scope.
 permissions:
