@@ -68,3 +68,14 @@ The planner sees only the selected profiles, assigns dependency-ordered
 subtasks, runs independent work in bounded parallel waves, and then synthesizes
 the evidence. This preserves broad specialization with small, reviewable
 execution teams.
+
+## Repository-Aware Routing
+
+Selection is not task text alone. Ronin also uses the local repository map's
+relevant files and symbols, file language, and root configuration markers such
+as `pyproject.toml`, `package.json`, and `Dockerfile`. `ronin agents` shows the
+reason for every choice (`task:...`, `repo:...`, or the core workflow role), so
+an operator can see why a specialist was invited before any model call.
+
+For workflow contracts, governed execution limits, durable task boards, and the
+offline regression suite, see [Agent control plane](agent_control_plane.md).

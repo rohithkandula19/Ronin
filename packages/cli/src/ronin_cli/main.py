@@ -1306,6 +1306,16 @@ def eval_default(
     render_report(console, config, outcomes, model=model)
 
 
+@eval_app.command("agents", help="Run deterministic routing, workflow, and governance regression cases.")
+def eval_agents() -> None:
+    """Evaluate the agent control plane without provider calls or credentials."""
+    from .agent_control_eval import render_agent_control_report, run_agent_control_eval
+
+    passed = render_agent_control_report(console, run_agent_control_eval())
+    if not passed:
+        raise typer.Exit(1)
+
+
 @eval_app.command("run", help="Run a golden dataset against a target model.")
 def eval_run(
     dataset: Path = typer.Argument(..., help="Path to JSONL dataset."),
@@ -2354,11 +2364,11 @@ def agents(
     ),
 ) -> None:
     """Show Ronin's scalable specialist catalog or the team selected for a task."""
-    from .orchestrate import agent_catalog, select_agents_for_goal
+    from .orchestrate import agent_catalog, select_agents_with_context
 
     try:
         catalog = agent_catalog(root, manifest=agent_manifest)
-        selected = select_agents_for_goal(
+        selection = select_agents_with_context(
             task or "", root, max_agents=max_agents, manifest=agent_manifest,
         )
     except ValueError as exc:
@@ -2367,14 +2377,20 @@ def agents(
     project_count = sum(profile.source == "project" for profile in catalog)
     console.print(
         f"[#7aa2f7]agents[/#7aa2f7] [bold]{len(catalog):,}[/bold] available "
-        f"[dim]({project_count} project-defined; {len(selected)} selected)[/dim]"
+        f"[dim]({project_count} project-defined; {len(selection.profiles)} selected)[/dim]"
     )
     table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
-    table.add_column("Profile")
+    table.add_column("Profile", no_wrap=True)
     table.add_column("Tier")
+    table.add_column("Why")
     table.add_column("Description")
-    for profile in selected:
-        table.add_row(profile.key, profile.tier, profile.description)
+    for profile in selection.profiles:
+        table.add_row(
+            profile.key,
+            profile.tier,
+            ", ".join(selection.reasons.get(profile.key, ("selected",))),
+            profile.description,
+        )
     console.print(table)
 
 @app.command()
@@ -2392,6 +2408,22 @@ def orchestrate(
     root: Path = typer.Option(Path("."), "--root", help="Project directory."),
     max_agents: int = typer.Option(
         8, "--max-agents", help="Maximum task-relevant specialist profiles (4-32).",
+    ),
+    max_parallel: int = typer.Option(
+        4, "--max-parallel", help="Maximum independent sub-agents running at once.",
+    ),
+    max_subtask_iterations: int = typer.Option(
+        12, "--max-subtask-iterations", help="Maximum ReAct turns reserved for each subtask.",
+    ),
+    max_subtask_tokens: Optional[int] = typer.Option(
+        None, "--max-subtask-tokens", help="Optional reported-token ceiling for each sub-agent.",
+    ),
+    max_total_subtask_iterations: Optional[int] = typer.Option(
+        None, "--max-total-subtask-iterations",
+        help="Global reservation ceiling across planned subtasks (default: team size x per-subtask limit).",
+    ),
+    agent_timeout: Optional[float] = typer.Option(
+        300.0, "--agent-timeout", help="Wall-clock seconds allowed for each sub-agent.",
     ),
     agent_manifest: Optional[Path] = typer.Option(
         None, "--agent-manifest", help="Project profile manifest (default: .ronin/agents.json).",
@@ -2415,6 +2447,8 @@ def orchestrate(
     Example:  ronin orchestrate "add retry + tests to the http client" \\
               -r researcher=anthropic,implementer=cerebras,reviewer=gemini,tester=groq --write
     """
+    from .agent_governance import OrchestrationGovernance
+    from .agent_workflow import workflow_for_goal
     from .orchestrate import role_label, run_orchestrate, select_agents_for_goal
 
     config = load_config()
@@ -2435,6 +2469,18 @@ def orchestrate(
         selected = select_agents_for_goal(
             goal, root, max_agents=max_agents, manifest=agent_manifest,
         )
+        governance = OrchestrationGovernance(
+            max_agents=max_agents,
+            max_parallel=max_parallel,
+            max_iterations_per_agent=max_subtask_iterations,
+            max_total_subtask_iterations=(
+                max_total_subtask_iterations
+                if max_total_subtask_iterations is not None
+                else max_agents * max_subtask_iterations
+            ),
+            max_wall_time_seconds_per_agent=agent_timeout,
+            max_tokens_per_agent=max_subtask_tokens,
+        )
     except ValueError as exc:
         console.print(f"[red]✗[/red] {exc}")
         raise typer.Exit(2)
@@ -2444,7 +2490,7 @@ def orchestrate(
     )
     console.print(f"[#7aa2f7]🧭 orchestrate[/#7aa2f7] {line}")
     if write:
-        console.print("[dim]✍️  implementer may edit code in isolated worktrees[/dim]")
+        console.print("[dim]✍️  implementation is worktree-isolated and requires review + test acceptance[/dim]")
 
     def _on_subtask_start(st, label) -> None:
         console.print(f"  [#bb9af7]◆[/#bb9af7] [bold]{st.id}[/bold] → [dim]{label}[/dim]: {st.description}")
@@ -2454,6 +2500,8 @@ def orchestrate(
             config, goal, roster_spec=roster, root=root,
             on_subtask_start=_on_subtask_start, read_only=not write,
             profiles=selected, max_agents=max_agents, agent_manifest=agent_manifest,
+            workflow=workflow_for_goal(goal, write=True) if write else None,
+            governance=governance,
         )
 
     console.print()
@@ -2482,6 +2530,10 @@ def orchestrate(
             roster=roster_labels(config, roster, outcome.agent_profiles),
         )
         record["faithfulness"] = final_faith
+        record["workflow"] = outcome.workflow
+        record["governance"] = outcome.governance
+        record["provider_health"] = outcome.provider_health
+        record["agent_task_run_id"] = outcome.run_id
         save_run(record)
     except Exception:  # noqa: BLE001 — archiving is never allowed to break a run
         pass

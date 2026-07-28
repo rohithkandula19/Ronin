@@ -82,6 +82,13 @@ missing dependencies, and self-dependencies are rejected. Subtasks are grouped
 into dependency waves; each wave is run in parallel, and a completed upstream
 subtask's output is passed as context to its dependents.
 
+For `--write`, the CLI also supplies an engineering workflow contract. It
+requires researcher -> implementer -> independent reviewer/tester handoffs,
+checks the role dependencies before execution, and forbids self-approval by
+role. The implementation has per-agent timeout/turn limits, a total planned
+iteration reservation ceiling, and a durable project-local task board. See
+[Agent control plane](agent_control_plane.md) for the data schema and controls.
+
 ## Library API (provider-agnostic core)
 
 The core lives in the agent-patterns package and has no CLI dependency:
@@ -137,6 +144,11 @@ Flags:
   tree uncontrolled.
 - --offline: force a local brain and strip network tools, so nothing leaves the
   machine.
+- --max-parallel: bound independent sub-agents running at once (default 4).
+- --max-subtask-iterations / --max-subtask-tokens /
+  --max-total-subtask-iterations: cap each ReAct loop, optionally cap reported
+  tokens, and reject a plan whose aggregate reservation exceeds the run budget.
+- --agent-timeout: set the existing per-agent wall-clock ceiling in seconds.
 
 ## Offline and free
 
