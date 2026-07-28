@@ -16,6 +16,7 @@ from typer.testing import CliRunner
 from ronin_agent_patterns import FakeProvider, LLMResponse
 
 from ronin_cli import orchestrate
+from ronin_cli.agent_catalog import AgentProfile, generated_profiles
 from ronin_cli.config import RoninConfig
 
 runner = CliRunner()
@@ -117,6 +118,17 @@ def test_tester_role_can_run_commands_in_readonly(tmp_path) -> None:
     assert "edit_file" not in tester_tools
 
 
+def test_generated_test_profile_can_run_commands_but_not_write_in_readonly(tmp_path) -> None:
+    _init_repo(tmp_path)
+    profile = next(profile for profile in generated_profiles() if profile.key == "testing-tester")
+    tools_for_role = orchestrate._tools_for_roles(
+        _cfg(), tmp_path, read_only=True, mutate_root=tmp_path, profiles=(profile,))
+    names = {tool.name for tool in tools_for_role[profile.key]}
+
+    assert "run_command" in names
+    assert "write_file" not in names
+
+
 # ---------- end-to-end run, fully offline ----------
 
 
@@ -185,6 +197,49 @@ def test_run_orchestrate_reports_planning_failure(monkeypatch) -> None:
     assert outcome.success is False
     assert outcome.plan_subtasks == []
     assert outcome.error
+
+
+def test_run_orchestrate_refuses_an_empty_explicit_roster() -> None:
+    outcome = orchestrate.run_orchestrate(_cfg(), "goal", profiles=(), read_only=True)
+
+    assert outcome.success is False
+    assert "at least one" in (outcome.error or "")
+
+
+def test_run_orchestrate_uses_an_explicit_specialist_profile(monkeypatch, tmp_path) -> None:
+    specialist = AgentProfile(
+        "payments-security-auditor",
+        "Audits payment security controls",
+        "Inspect payment security controls and report evidence.",
+        ("payments", "security"),
+    )
+    base = FakeProvider(model="base", responses=[
+        LLMResponse(text=(
+            "<plan>"
+            '{"goal": "g", "subtasks": ['
+            '{"id": "audit", "description": "audit payment controls", '
+            '"assignee": "payments-security-auditor", "depends_on": []}'
+            "]}"
+            "</plan>")),
+        LLMResponse(text="Payment controls reviewed."),
+    ])
+    specialist_provider = FakeProvider(model="specialist", responses=[
+        LLMResponse(text="Found a PCI scope boundary in payments.py."),
+    ])
+    monkeypatch.setattr(
+        orchestrate, "provider_for_spec",
+        lambda _base, spec: specialist_provider if spec == "gemini" else base,
+    )
+    monkeypatch.setattr(orchestrate, "_tools_for_roles", lambda *args, **kwargs: {})
+
+    outcome = orchestrate.run_orchestrate(
+        _cfg(), "audit payments", roster_spec="payments-security-auditor=gemini",
+        root=tmp_path, profiles=(specialist,), read_only=True,
+    )
+
+    assert outcome.success
+    assert outcome.agent_profiles == (specialist,)
+    assert "PCI" in outcome.subtask_results[0]["output"]
 
 
 # ---------- write mode: real git-worktree isolation ----------

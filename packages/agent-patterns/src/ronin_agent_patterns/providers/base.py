@@ -42,7 +42,8 @@ class LLMResponse(BaseModel):
     text: str = ""
     tool_calls: list[ToolCall] = Field(default_factory=list)
     stop_reason: str = "end_turn"  # "end_turn" | "tool_use" | "max_tokens" | "other"
-    usage: dict[str, int] = Field(default_factory=dict)
+    # Providers may also report a fractional ``cost_usd`` alongside token counts.
+    usage: dict[str, int | float] = Field(default_factory=dict)
 
 
 class StreamEvent(BaseModel):

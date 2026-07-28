@@ -271,6 +271,22 @@ def is_destructive(action: Any) -> bool:
     return any(marker in _haystack(normalize(action)) for marker in DESTRUCTIVE_MARKERS)
 
 
+def is_capability_block(action: Any) -> bool:
+    """True when the host marked an action with a high-risk plugin capability.
+
+    This narrow hook only escalates policy. Plugin code never controls it: the
+    loader adds the value after a non-executing manifest read, and an omitted
+    declaration receives every capability by default.
+    """
+    details = normalize(action).get("details") or {}
+    values = details.get("capability_floor") if isinstance(details, Mapping) else None
+    if isinstance(values, str):
+        values = [values]
+    if not isinstance(values, (list, tuple, set)):
+        return False
+    return bool({str(value) for value in values} & {"subprocess", "payment"})
+
+
 def _git_destructive(c: str) -> bool:
     """Git subcommands that irrecoverably discard working-tree / untracked work.
     Handled here (not as flat markers) because the danger is order-dependent — a
@@ -578,8 +594,9 @@ def gate_level(action: Any) -> str:
     """
     a = normalize(action)
 
-    # 1) Hard floor: money or clear destruction can never be auto-run.
-    if is_payment(a) or is_destructive(a):
+    # 1) Hard floor: money, clear destruction, or declared high-risk plugin
+    # capabilities can never be auto-run.
+    if is_payment(a) or is_destructive(a) or is_capability_block(a):
         return BLOCK
 
     reversible = a["reversible"]
@@ -619,6 +636,8 @@ def describe(action: Any) -> str:
         tags.append("MOVES MONEY")
     if is_destructive(a):
         tags.append("DESTRUCTIVE")
+    if is_capability_block(a):
+        tags.append("DECLARED HIGH-RISK CAPABILITY")
     if a["external"]:
         tags.append("external")
     cost = a["cost"]
@@ -711,6 +730,8 @@ def _render_block_warning(action: dict, console: Any) -> None:
             reasons.append("this MOVES MONEY")
     if is_destructive(action):
         reasons.append("this is DESTRUCTIVE / irreversible")
+    if is_capability_block(action):
+        reasons.append("the plugin declares a high-risk capability")
     if not reasons:
         # Reached block without a payment/destructive reason should be impossible,
         # but stay loud rather than silent if policy ever changes.

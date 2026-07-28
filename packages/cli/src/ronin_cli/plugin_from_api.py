@@ -59,6 +59,14 @@ import httpx
 from ronin_agent_patterns import Tool
 
 
+PLUGIN = {{
+    "name": "{name}",
+    "version": "1",
+    "description": "{desc}",
+    "capabilities": ["network"],
+}}
+
+
 def _get(obj, path):
     for part in path.split("."):
         if isinstance(obj, list):

@@ -1347,6 +1347,16 @@ def eval_default(
     render_report(console, config, outcomes, model=model)
 
 
+@eval_app.command("agents", help="Run deterministic routing, workflow, and governance regression cases.")
+def eval_agents() -> None:
+    """Evaluate the agent control plane without provider calls or credentials."""
+    from .agent_control_eval import render_agent_control_report, run_agent_control_eval
+
+    passed = render_agent_control_report(console, run_agent_control_eval())
+    if not passed:
+        raise typer.Exit(1)
+
+
 @eval_app.command("run", help="Run a golden dataset against a target model.")
 def eval_run(
     dataset: Path = typer.Argument(..., help="Path to JSONL dataset."),
@@ -2438,19 +2448,80 @@ def swarm(
 
 # ---------- orchestrate (plan -> provider-agnostic sub-agents -> synthesize) ----------
 
+@util_app.command("agents")
+def agents(
+    task: Optional[str] = typer.Argument(None, help="Optional task to rank specialist profiles for."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    max_agents: int = typer.Option(8, "--max-agents", help="Maximum task-relevant profiles to show."),
+    agent_manifest: Optional[Path] = typer.Option(
+        None, "--agent-manifest", help="Project profile manifest (default: .ronin/agents.json).",
+    ),
+) -> None:
+    """Show Ronin's scalable specialist catalog or the team selected for a task."""
+    from .orchestrate import agent_catalog, select_agents_with_context
+
+    try:
+        catalog = agent_catalog(root, manifest=agent_manifest)
+        selection = select_agents_with_context(
+            task or "", root, max_agents=max_agents, manifest=agent_manifest,
+        )
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    project_count = sum(profile.source == "project" for profile in catalog)
+    console.print(
+        f"[#7aa2f7]agents[/#7aa2f7] [bold]{len(catalog):,}[/bold] available "
+        f"[dim]({project_count} project-defined; {len(selection.profiles)} selected)[/dim]"
+    )
+    table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+    table.add_column("Profile", no_wrap=True)
+    table.add_column("Tier")
+    table.add_column("Why")
+    table.add_column("Description")
+    for profile in selection.profiles:
+        table.add_row(
+            profile.key,
+            profile.tier,
+            ", ".join(selection.reasons.get(profile.key, ("selected",))),
+            profile.description,
+        )
+    console.print(table)
+
 @util_app.command()
 def orchestrate(
     goal: str = typer.Argument(..., help="The high-level goal to decompose and work."),
     roster: str = typer.Option(
         None, "--roster", "-r",
         help="Role→provider, e.g. 'researcher=anthropic,implementer=cerebras,"
-             "reviewer=gemini,tester=groq'. Built-in roles: researcher, "
-             "implementer, reviewer, tester. Roles not listed run on the base provider."),
+             "reviewer=gemini,tester=groq'. Core and selected specialist profiles "
+             "not listed run on the base provider."),
     write: bool = typer.Option(
         False, "--write",
         help="Let implementer sub-agents edit code in isolated git worktrees (needs git). "
              "Default is read-only (research/plan)."),
     root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    max_agents: int = typer.Option(
+        8, "--max-agents", help="Maximum task-relevant specialist profiles (4-32).",
+    ),
+    max_parallel: int = typer.Option(
+        4, "--max-parallel", help="Maximum independent sub-agents running at once.",
+    ),
+    max_subtask_iterations: int = typer.Option(
+        12, "--max-subtask-iterations", help="Maximum ReAct turns reserved for each subtask.",
+    ),
+    max_subtask_tokens: Optional[int] = typer.Option(
+        None, "--max-subtask-tokens", help="Optional reported-token ceiling for each sub-agent.",
+    ),
+    max_total_subtask_iterations: Optional[int] = typer.Option(
+        None, "--max-total-subtask-iterations",
+        help="Global reservation ceiling across planned subtasks (default: team size x per-subtask limit).",
+    ),
+    agent_timeout: Optional[float] = typer.Option(
+        300.0, "--agent-timeout", help="Wall-clock seconds allowed for each sub-agent.",
+    ),
+    agent_manifest: Optional[Path] = typer.Option(
+        None, "--agent-manifest", help="Project profile manifest (default: .ronin/agents.json).",
+    ),
     offline: bool = typer.Option(
         False, "--offline", help="Run on a local brain only; no network, no API keys."),
 ) -> None:
@@ -2463,13 +2534,16 @@ def orchestrate(
     reviewer pipeline) by letting the planner choose the subtasks and their
     dependencies dynamically.
 
-    Built-in specialist roles: researcher (read-only investigation), implementer
-    (edits code), reviewer (critiques a change), tester (writes and runs tests).
+    Core roles are researcher (read-only investigation), implementer (edits code),
+    reviewer (critiques a change), and tester (writes and runs tests). Ronin adds
+    task-matched profiles from its specialist catalog up to --max-agents.
 
     Example:  ronin orchestrate "add retry + tests to the http client" \\
               -r researcher=anthropic,implementer=cerebras,reviewer=gemini,tester=groq --write
     """
-    from .orchestrate import role_label, run_orchestrate
+    from .agent_governance import OrchestrationGovernance
+    from .agent_workflow import workflow_for_goal
+    from .orchestrate import role_label, run_orchestrate, select_agents_for_goal
 
     config = load_config()
     if offline:
@@ -2485,13 +2559,32 @@ def orchestrate(
     if roster:
         from .orchestrate import parse_roster
         parsed = parse_roster(roster)
+    try:
+        selected = select_agents_for_goal(
+            goal, root, max_agents=max_agents, manifest=agent_manifest,
+        )
+        governance = OrchestrationGovernance(
+            max_agents=max_agents,
+            max_parallel=max_parallel,
+            max_iterations_per_agent=max_subtask_iterations,
+            max_total_subtask_iterations=(
+                max_total_subtask_iterations
+                if max_total_subtask_iterations is not None
+                else max_agents * max_subtask_iterations
+            ),
+            max_wall_time_seconds_per_agent=agent_timeout,
+            max_tokens_per_agent=max_subtask_tokens,
+        )
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
     line = " · ".join(
-        f"{r}: [bold]{role_label(config, parsed.get(r))}[/bold]"
-        for r in ("researcher", "implementer", "reviewer", "tester")
+        f"{profile.key}: [bold]{role_label(config, parsed.get(profile.key))}[/bold]"
+        for profile in selected
     )
     console.print(f"[#7aa2f7]🧭 orchestrate[/#7aa2f7] {line}")
     if write:
-        console.print("[dim]✍️  implementer may edit code in isolated worktrees[/dim]")
+        console.print("[dim]implementation is worktree-isolated and requires review + test acceptance[/dim]")
 
     def _on_subtask_start(st, label) -> None:
         console.print(f"  [#bb9af7]◆[/#bb9af7] [bold]{st.id}[/bold] → [dim]{label}[/dim]: {st.description}")
@@ -2500,6 +2593,9 @@ def orchestrate(
         outcome = run_orchestrate(
             config, goal, roster_spec=roster, root=root,
             on_subtask_start=_on_subtask_start, read_only=not write,
+            profiles=selected, max_agents=max_agents, agent_manifest=agent_manifest,
+            workflow=workflow_for_goal(goal, write=True) if write else None,
+            governance=governance,
         )
 
     console.print()
@@ -2525,9 +2621,13 @@ def orchestrate(
             goal,
             outcome,
             planner_label=role_label(config, None),
-            roster=roster_labels(config, roster),
+            roster=roster_labels(config, roster, outcome.agent_profiles),
         )
         record["faithfulness"] = final_faith
+        record["workflow"] = outcome.workflow
+        record["governance"] = outcome.governance
+        record["provider_health"] = outcome.provider_health
+        record["agent_task_run_id"] = outcome.run_id
         save_run(record)
     except Exception:  # noqa: BLE001 — archiving is never allowed to break a run
         pass
@@ -4174,15 +4274,13 @@ def release(
     write_changelog: bool = typer.Option(True, "--changelog/--no-changelog", help="Prepend a CHANGELOG section."),
     root: Path = typer.Option(Path("."), "--root", help="Repo root."),
 ) -> None:
-    """🚀 Cut a release — bump the version everywhere it's declared, generate the
-    changelog from commits since the last tag, and optionally create the git tag.
-    """
-    from .release import bump_version, current_version, find_version_files, set_version_in_text
+    """Prepare a synchronized Ronin release and optionally create its git tag."""
+    from .release import bump_version, current_version, prepare_release, release_version_files, validate_release
 
-    files = find_version_files(root)
+    files = list(release_version_files(root))
     cur = current_version(files)
     if not cur:
-        console.print("[yellow]couldn't find a version (__version__ / pyproject).[/yellow]")
+        console.print("[yellow]couldn't find the Ronin release version.[/yellow]")
         raise typer.Exit(1)
     try:
         new = bump_version(cur, kind)
@@ -4190,17 +4288,13 @@ def release(
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(2)
     console.print(f"[#7aa2f7]🚀 release[/#7aa2f7] [bold]{cur} → {new}[/bold]")
-    changed = 0
-    for f in files:
-        try:
-            text = f.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        new_text, n = set_version_in_text(text, new)
-        if n:
-            f.write_text(new_text, encoding="utf-8")
-            changed += n
-    console.print(f"  [green]✓[/green] bumped {changed} version declaration(s)")
+    try:
+        changed = prepare_release(root, new)
+        validate_release(root, f"v{new}")
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(2)
+    console.print(f"  [green]✓[/green] synchronized {len(changed)} release version source(s)")
 
     if write_changelog:
         from .changelog import render_changelog
@@ -4685,36 +4779,69 @@ def archaeology(
 def perf(
     command: list[str] = typer.Argument(..., help="The command to benchmark, e.g. \"pytest -q\"."),
     runs: int = typer.Option(5, "--runs", help="Timed runs (after a warmup)."),
+    warmup: int = typer.Option(1, "--warmup", help="Discarded warmup runs."),
+    timeout: int = typer.Option(300, "--timeout", help="Per-run timeout in seconds."),
+    json_out: Optional[Path] = typer.Option(None, "--json-out", help="Write a structured benchmark report."),
+    baseline: Optional[Path] = typer.Option(None, "--baseline", help="Compare this run with a saved report."),
+    max_regression_percent: float = typer.Option(
+        10.0, "--max-regression-percent", help="Fail when median latency rises above this percent.",
+    ),
     analyze: bool = typer.Option(False, "--analyze", help="Have ronin suggest where the time goes."),
     root: Path = typer.Option(Path("."), "--root", help="Working directory."),
 ) -> None:
-    """⏱  Benchmark a command (min / mean / median / max over N runs), with optional
-    AI analysis of where the time goes.
-    """
-    from .perf import benchmark
+    """Benchmark a command, optionally save JSON, compare a baseline, or analyze it."""
+    from .perf import compare_reports, load_report, run_benchmark, save_report
 
     cmd = " ".join(command)
-    console.print(f"[#7aa2f7]⏱ benchmarking[/#7aa2f7] [bold]{cmd}[/bold] [dim]({runs} runs + warmup)[/dim]")
+    console.print(f"[#7aa2f7]⏱ benchmarking[/#7aa2f7] [bold]{cmd}[/bold] "
+                  f"[dim]({runs} timed + {warmup} warmup)[/dim]")
     with console.status("[dim] running…[/dim]", spinner="dots"):
-        r = benchmark(cmd, runs=runs, root=root)
+        report = run_benchmark(cmd, runs=runs, warmup=warmup, timeout=timeout, root=root)
+    r = report.summary()
     if r["runs"] == 0:
-        console.print("[yellow]no successful runs.[/yellow]")
+        console.print("[yellow]no completed timed runs.[/yellow]")
         raise typer.Exit(1)
     console.print(f"  mean   [bold]{r['mean']:.3f}s[/bold]  [dim]± {r['stdev']:.3f}[/dim]")
-    console.print(f"  median {r['median']:.3f}s   min {r['min']:.3f}s   max {r['max']:.3f}s")
+    console.print(f"  median {r['median']:.3f}s   p95 {r['p95']:.3f}s   "
+                  f"min {r['min']:.3f}s   max {r['max']:.3f}s")
     if r["failures"]:
         console.print(f"  [yellow]{r['failures']} run(s) exited non-zero[/yellow]")
+    if json_out is not None:
+        try:
+            saved = save_report(report, json_out)
+        except OSError as exc:
+            console.print(f"[red]could not save benchmark report:[/red] {exc}")
+            raise typer.Exit(2)
+        console.print(f"  [dim]report:[/dim] {saved}")
+
+    comparison = None
+    if baseline is not None:
+        try:
+            comparison = compare_reports(
+                load_report(baseline), report,
+                max_regression_percent=max_regression_percent,
+            )
+        except ValueError as exc:
+            console.print(f"[red]could not compare baseline:[/red] {exc}")
+            raise typer.Exit(2)
+        color = {
+            "improved": "green", "unchanged": "yellow", "regressed": "red", "insufficient": "yellow",
+        }[comparison.status]
+        console.print(f"  [{color}]baseline {comparison.status}[/{color}]: {comparison.reason}")
     if analyze:
         config = load_config()
         if not config.has_provider_auth():
-            return
-        from .code_mode import run_code_agent
-        console.print("\n[#6b7089]analyzing…[/#6b7089]")
-        run_code_agent(
-            config,
-            f"`{cmd}` runs in ~{r['mean']:.3f}s (median {r['median']:.3f}s). Explore the "
-            "code it exercises and suggest the 1-3 highest-leverage speedups. Be specific.",
-            root=root, console=console, read_only=True, include_image_tool=False, max_iterations=10)
+            console.print("[dim]set a provider to enable analysis.[/dim]")
+        else:
+            from .code_mode import run_code_agent
+            console.print("\n[#6b7089]analyzing…[/#6b7089]")
+            run_code_agent(
+                config,
+                f"`{cmd}` runs in ~{r['mean']:.3f}s (median {r['median']:.3f}s). Explore the "
+                "code it exercises and suggest the 1-3 highest-leverage speedups. Be specific.",
+                root=root, console=console, read_only=True, include_image_tool=False, max_iterations=10)
+    if comparison is not None and comparison.status == "regressed":
+        raise typer.Exit(1)
 
 
 # ---------- debate (multi-round cross-vendor argument) ----------

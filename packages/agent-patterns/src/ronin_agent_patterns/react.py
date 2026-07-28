@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from time import monotonic
 from typing import Callable, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -69,6 +70,14 @@ class ReActAgent(BaseModel):
     max_iterations: int = 10
     max_tokens: int = 4096
 
+    # Optional ceilings for this individual run. They are evaluated before each
+    # provider request and after a provider reports usage. A provider can only
+    # report usage after a request finishes, so a single request may overshoot;
+    # the agent then stops before it runs tools or makes another provider call.
+    max_total_tokens: int | None = Field(default=None, gt=0)
+    max_wall_time_seconds: float | None = Field(default=None, gt=0)
+    max_cost_usd: float | None = Field(default=None, gt=0)
+
     # Context compaction: when the running message history exceeds this estimated
     # token budget, older tool-result payloads are truncated in place so long
     # sessions don't blow the context window. None disables it.
@@ -136,10 +145,16 @@ class ReActAgent(BaseModel):
         messages: list[Message] = list(history) if history else []
         messages.append(Message(role="user", content=user_message))
         trace: list[Step] = []
-        usage = {"input_tokens": 0, "output_tokens": 0}
+        usage: dict[str, int | float] = {"input_tokens": 0, "output_tokens": 0}
+        started_at = monotonic()
 
         try:
             for i in range(self.max_iterations):
+                budget_error = self._budget_error(usage, started_at)
+                if budget_error is not None:
+                    return self._budget_result(
+                        budget_error, "", i, trace, usage, messages, emit,
+                    )
                 if self.compact_after_tokens is not None:
                     self._maybe_compact(messages, emit)
                 if on_text is not None:
@@ -169,16 +184,20 @@ class ReActAgent(BaseModel):
                         tools=self.tools,
                         max_tokens=self.max_tokens,
                     )
-                usage["input_tokens"] += response.usage.get("input_tokens", 0)
-                usage["output_tokens"] += response.usage.get("output_tokens", 0)
-                # Carry prompt-cache counts when the provider reports them, so callers
-                # can show cache savings. Absent (e.g. non-Anthropic) → keys never appear.
-                for k in ("cache_read_input_tokens", "cache_creation_input_tokens"):
-                    if k in response.usage:
-                        usage[k] = usage.get(k, 0) + response.usage[k]
+                # Preserve every provider-reported usage dimension. In particular,
+                # max_cost_usd only acts on an explicit ``cost_usd`` value; it never
+                # guesses a price from a model name or token count.
+                for key, value in response.usage.items():
+                    usage[key] = usage.get(key, 0) + value
 
                 if response.text:
                     emit(Step(kind="thought", content=response.text))
+
+                budget_error = self._budget_error(usage, started_at)
+                if budget_error is not None:
+                    return self._budget_result(
+                        budget_error, response.text, i + 1, trace, usage, messages, emit,
+                    )
 
                 if not response.tool_calls:
                     final = response.text or "(no output)"
@@ -236,6 +255,52 @@ class ReActAgent(BaseModel):
             # Preserve the structured history so the caller can adopt it — the
             # next turn keeps every file read across these iterations instead of
             # starting cold. Trim any dangling final tool-call round first.
+            messages=trim_to_complete_pairs(messages),
+        )
+
+    def _budget_error(self, usage: dict[str, int | float], started_at: float) -> str | None:
+        """Return an honest limit message when this run cannot continue."""
+        if self.max_total_tokens is not None:
+            tokens = usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
+            if tokens >= self.max_total_tokens:
+                return ("run token budget reached: "
+                        f"{tokens:,.0f}/{self.max_total_tokens:,} reported input + output tokens")
+        if self.max_wall_time_seconds is not None:
+            elapsed = monotonic() - started_at
+            if elapsed >= self.max_wall_time_seconds:
+                return ("run wall-clock budget reached: "
+                        f"{elapsed:.2f}s/{self.max_wall_time_seconds:.2f}s")
+        if self.max_cost_usd is not None:
+            cost = usage.get("cost_usd", 0)
+            if cost >= self.max_cost_usd:
+                return ("run reported-cost budget reached: "
+                        f"${cost:.6f}/${self.max_cost_usd:.6f}")
+        return None
+
+    def _budget_result(
+        self,
+        error: str,
+        partial_output: str,
+        iterations: int,
+        trace: list[Step],
+        usage: dict[str, int | float],
+        messages: list[Message],
+        emit: OnStep,
+    ) -> AgentResult:
+        """Stop without executing a newly requested tool or fabricating success."""
+        emit(Step(kind="error", content=error, metadata={"budget_exhausted": True}))
+        output = partial_output or "(run budget reached)"
+        if partial_output:
+            # Do not persist unexecuted tool calls: providers require every tool
+            # call in history to have a paired result on the next turn.
+            messages.append(Message(role="assistant", content=partial_output))
+        return AgentResult(
+            success=False,
+            output=output,
+            iterations=iterations,
+            trace=trace,
+            error=error,
+            usage=usage,
             messages=trim_to_complete_pairs(messages),
         )
 

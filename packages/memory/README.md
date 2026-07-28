@@ -23,7 +23,7 @@ client.messages.create(
 mem.maybe_compress()
 ```
 
-## Long-term (vector store)
+## Long-term (persistent retrieval)
 
 ```python
 from ronin_memory import LongTermMemory
@@ -33,14 +33,20 @@ mem.remember("user prefers dark mode", namespace="alice", source="onboarding")
 hits = mem.recall("UI preferences", namespace="alice", k=3)
 ```
 
-In-memory backend uses Jaccard scoring — fine for dev/tests. For production, swap
-in any class satisfying `LongTermBackend` (`upsert` / `query` / `delete`):
+In-memory backend uses Jaccard scoring — fine for dev/tests. For persistent,
+local-first memory, use the dependency-free SQLite backend:
 
 ```python
-mem = LongTermMemory(backend=ChromaDBBackend(client, collection="memories"))
+from ronin_memory import LongTermMemory, SqliteBackend
+
+mem = LongTermMemory(backend=SqliteBackend("~/.ronin/memory.db"))
+mem.remember("user prefers terse answers", namespace="alice")
 ```
 
-The `chromadb` extra is declared but optional: `uv pip install ronin-memory[chromadb]`.
+`SqliteBackend` accepts an optional `score_fn(query, candidate) -> float`, so callers
+can plug in local embeddings or a stronger ranker without changing the
+`LongTermMemory` API. The package intentionally does not ship a ChromaDB dependency:
+that extra was removed because it was unused and carried an unpatched advisory.
 
 ## User preferences (namespaced KV with extraction)
 

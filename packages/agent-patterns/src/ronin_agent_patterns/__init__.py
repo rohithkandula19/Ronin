@@ -25,7 +25,8 @@ from .orchestrator import (
     Subtask,
     SubtaskResult,
 )
-from .planner_executor import Plan, PlannerExecutorAgent
+from .plan_cache import Plan, PlanCache, repository_fingerprint
+from .planner_executor import PlannerExecutorAgent
 from .providers import (
     AnthropicProvider,
     FailoverProvider,
@@ -63,9 +64,11 @@ __all__ = [
     "OrchestratorAgent",
     "OrchestratorSubAgent",
     "Plan",
+    "PlanCache",
     "PlannerExecutorAgent",
     "ReActAgent",
     "ReflexionAgent",
+    "repository_fingerprint",
     "Step",
     "StreamEvent",
     "SubAgent",

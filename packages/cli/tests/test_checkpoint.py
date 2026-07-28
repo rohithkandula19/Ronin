@@ -32,10 +32,40 @@ def test_checkpoint_and_rewind_restores_and_removes(tmp_path) -> None:
 
     msg = checkpoint.restore_checkpoint(tmp_path, 1)
     assert "rewound to checkpoint #1" in msg
+    assert "reversible via checkpoint #2" in msg
     # tracked file restored to snapshot
     assert (tmp_path / "main.py").read_text() == "print('v1')\n"
     # file created after the checkpoint is removed (true rewind)
     assert not (tmp_path / "newfile.py").exists()
+    assert [cp.id for cp in checkpoint.list_checkpoints(tmp_path)] == [1, 2]
+
+
+def test_restore_plan_is_read_only_and_reports_removals(tmp_path) -> None:
+    _init_repo(tmp_path)
+    checkpoint.create_checkpoint(tmp_path, "before changes", now=1.0)
+    (tmp_path / "main.py").write_text("print('changed')\n", encoding="utf-8")
+    (tmp_path / "newfile.py").write_text("new = True\n", encoding="utf-8")
+
+    plan = checkpoint.restore_plan(tmp_path, 1)
+
+    assert plan is not None
+    assert plan["restore"] == ["main.py"]
+    assert plan["would_remove"] == ["newfile.py"]
+    assert (tmp_path / "main.py").read_text() == "print('changed')\n"
+    assert (tmp_path / "newfile.py").exists()
+
+
+def test_rewind_can_be_reversed_with_its_safety_checkpoint(tmp_path) -> None:
+    _init_repo(tmp_path)
+    checkpoint.create_checkpoint(tmp_path, "before changes", now=1.0)
+    (tmp_path / "main.py").write_text("print('v2')\n", encoding="utf-8")
+    (tmp_path / "newfile.py").write_text("new = True\n", encoding="utf-8")
+
+    checkpoint.restore_checkpoint(tmp_path, 1)
+    checkpoint.restore_checkpoint(tmp_path, 2)
+
+    assert (tmp_path / "main.py").read_text() == "print('v2')\n"
+    assert (tmp_path / "newfile.py").read_text() == "new = True\n"
 
 
 def test_checkpoint_captures_untracked_then_restores_it(tmp_path) -> None:
@@ -71,13 +101,14 @@ def test_rewind_unknown_id(tmp_path) -> None:
 def test_checkpoint_tools_and_sensitivity(tmp_path) -> None:
     from ronin_cli.code_tools import SENSITIVE_TOOLS
     tools = {t.name: t for t in checkpoint.build_checkpoint_tools(tmp_path)}
-    assert set(tools) == {"checkpoint", "list_checkpoints", "rewind"}
+    assert set(tools) == {"checkpoint", "list_checkpoints", "preview_rewind", "rewind"}
     assert "rewind" in SENSITIVE_TOOLS  # destructive → gated
 
     _init_repo(tmp_path)
     out = tools["checkpoint"].handler(label="t1")
     assert "created checkpoint #1" in out
     assert "#1 t1" in tools["list_checkpoints"].handler()
+    assert "restore plan for checkpoint #1" in tools["preview_rewind"].handler(id=1)
 
 
 def test_checkpoint_tool_degrades_without_git(tmp_path) -> None:

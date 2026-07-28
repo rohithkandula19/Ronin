@@ -82,12 +82,22 @@ ronin plugin remove <name>
 ronin plugins                     # what's loaded (✓ in `library` marks installed)
 ```
 
+See [plugins.md](plugins.md) for the manifest contract, capability declarations,
+and the trust model for repository-local plugin code.
+
 ### Write your own in ~10 lines
 
 `.ronin/plugins/mytool.py`:
 
 ```python
 from ronin_agent_patterns import Tool
+
+PLUGIN = {
+    "name": "my_tool",
+    "version": "1",
+    "description": "What it does.",
+    "capabilities": [],
+}
 
 def my_tool(query: str) -> dict:
     # call any API, run any logic

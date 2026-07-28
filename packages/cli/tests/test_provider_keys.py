@@ -39,6 +39,31 @@ def test_key_for_env_fallback(monkeypatch) -> None:
     assert cfg.key_for("openai") == "env-key"
 
 
+def test_key_for_discovers_provider_specific_environment(monkeypatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("GROQ_API_KEY", "gsk-from-env")
+    cfg = RoninConfig(provider="groq")
+
+    assert cfg.key_for() == "gsk-from-env"
+    assert cfg.provider_key_source() == "environment"
+
+
+def test_provider_key_source_never_returns_a_secret(monkeypatch) -> None:
+    monkeypatch.setenv("CEREBRAS_API_KEY", "csk-secret-value")
+    cfg = RoninConfig(provider="cerebras")
+
+    assert cfg.provider_key_source() == "environment"
+    assert "secret" not in cfg.provider_key_source()
+
+
+def test_provider_specific_environment_beats_shared_openai_fallback(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "shared-key")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "router-key")
+    cfg = RoninConfig(provider="openrouter")
+
+    assert cfg.key_for() == "router-key"
+
+
 def test_key_for_ollama_is_none() -> None:
     cfg = RoninConfig(provider="ollama")
     assert cfg.key_for("ollama") is None

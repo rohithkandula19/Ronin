@@ -6,6 +6,7 @@ from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
+from ronin_cli import config as config_mod
 from ronin_cli.config import RoninConfig
 from ronin_cli import main as main_mod
 from ronin_cli.main import app
@@ -65,7 +66,11 @@ def test_tools_after_demo_init(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
 
 def test_ask_without_auth_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(config_mod, "USER_DIR", tmp_path / "user-config")
+    monkeypatch.setattr(config_mod, "LEGACY_USER_DIR", tmp_path / "legacy-user-config")
+    monkeypatch.setattr(config_mod, "LEGACY_HOME_DIR", tmp_path / "legacy-home-config")
+    for env_key in set(config_mod.PROVIDER_ENV_KEYS.values()) | {"OPENAI_API_KEY"}:
+        monkeypatch.delenv(env_key, raising=False)
 
     result = runner.invoke(app, ["ask", "anything"])
     assert result.exit_code == 2

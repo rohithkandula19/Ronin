@@ -55,6 +55,8 @@ class OrchestratorSubAgent(BaseModel):
     tools: list[Tool] = Field(default_factory=list)
     provider: LLMProvider | None = None
     max_iterations: int = 8
+    max_total_tokens: int | None = Field(default=None, gt=0)
+    max_wall_time_seconds: float | None = Field(default=None, gt=0)
 
     def label(self, default_provider: LLMProvider | None = None) -> str:
         prov = self.provider or default_provider
@@ -92,6 +94,7 @@ class SubtaskResult(BaseModel):
     output: str = ""
     error: str | None = None
     iterations: int = 0
+    provider: str = ""
 
 
 class OrchestrationResult(BaseModel):
@@ -150,6 +153,14 @@ class OrchestratorAgent(BaseModel):
     max_parallel: int = 4
     max_planner_tokens: int = 2048
     max_synth_tokens: int = 1024
+    # Optional host-owned plan contract.  These are role-level requirements so
+    # the core stays independent of any one CLI's workflow vocabulary.
+    required_roles: set[str] = Field(default_factory=set)
+    role_dependencies: dict[str, set[str]] = Field(default_factory=dict)
+    acceptance_roles: set[str] = Field(default_factory=set)
+    # A reservation ceiling, not an estimate: the plan's sum of per-subtask
+    # iteration caps must fit before any provider call begins.
+    max_total_subtask_iterations: int | None = Field(default=None, gt=0)
 
     # Backward-compat shortcuts (used only if provider is not supplied):
     model: str | None = None
@@ -223,6 +234,43 @@ class OrchestratorAgent(BaseModel):
                 if dep == st.id:
                     raise ValueError(f"subtask '{st.id}' depends on itself")
 
+        roles_in_plan = {st.assignee for st in plan.subtasks}
+        missing_roles = sorted(self.required_roles - roles_in_plan)
+        if missing_roles:
+            raise ValueError(
+                "plan is missing required workflow roles: " + ", ".join(missing_roles)
+            )
+        by_id = {st.id: st for st in plan.subtasks}
+        for role, upstream_roles in self.role_dependencies.items():
+            for st in plan.subtasks:
+                if st.assignee != role:
+                    continue
+                direct_roles = {by_id[dep].assignee for dep in st.depends_on}
+                missing_upstream = sorted(set(upstream_roles) - direct_roles)
+                if missing_upstream:
+                    raise ValueError(
+                        f"subtask '{st.id}' assigned to '{role}' must directly depend on "
+                        f"a subtask from: {', '.join(missing_upstream)}"
+                    )
+        # An acceptance role must be a different registered specialist from the
+        # role it accepts.  The host supplies dependency constraints that make
+        # the accepted work explicit; this prevents self-approval by role.
+        for role in self.acceptance_roles:
+            if role not in roles_in_plan:
+                raise ValueError(f"plan is missing required acceptance role: {role}")
+            if role in self.role_dependencies.get(role, set()):
+                raise ValueError(f"acceptance role '{role}' cannot depend on itself")
+
+        if self.max_total_subtask_iterations is not None:
+            by_role = {sa.role: sa for sa in self.sub_agents}
+            reserved = sum(by_role[st.assignee].max_iterations for st in plan.subtasks)
+            if reserved > self.max_total_subtask_iterations:
+                raise ValueError(
+                    "plan reserves "
+                    f"{reserved} subtask iterations, above governance limit "
+                    f"{self.max_total_subtask_iterations}"
+                )
+
     # ---- scheduling -----------------------------------------------------
 
     @staticmethod
@@ -255,6 +303,7 @@ class OrchestratorAgent(BaseModel):
         on_subtask_start: OnSubtaskStart | None,
     ) -> SubtaskResult:
         provider = sub.provider or self.provider
+        provider_model = str(getattr(provider, "model", "?"))
         if on_subtask_start is not None:
             try:
                 on_subtask_start(subtask, sub.label(self.provider))
@@ -265,6 +314,8 @@ class OrchestratorAgent(BaseModel):
             tools=sub.tools,
             provider=provider,
             max_iterations=sub.max_iterations,
+            max_total_tokens=sub.max_total_tokens,
+            max_wall_time_seconds=sub.max_wall_time_seconds,
         )
         prompt = subtask.description
         if context:
@@ -278,6 +329,7 @@ class OrchestratorAgent(BaseModel):
             return SubtaskResult(
                 subtask_id=subtask.id, assignee=subtask.assignee,
                 success=False, error=f"{type(exc).__name__}: {exc}",
+                provider=provider_model,
             )
         return SubtaskResult(
             subtask_id=subtask.id,
@@ -286,6 +338,7 @@ class OrchestratorAgent(BaseModel):
             output=res.output,
             error=res.error,
             iterations=res.iterations,
+            provider=provider_model,
         )
 
     def _synthesize(self, goal: str, results: list[SubtaskResult]) -> tuple[str, dict[str, int]]:
@@ -398,6 +451,7 @@ class OrchestratorAgent(BaseModel):
                         "success": res.success,
                         "output": res.output,
                         "error": res.error,
+                        "provider": res.provider,
                     },
                     metadata={"iterations": res.iterations},
                 ))

@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- `ronin-memory` now includes a dependency-free `SqliteBackend` for persistent, local-first long-term memory with namespace isolation, bounded retention, and pluggable scoring.
+- `ronin-agent-patterns` now supports per-run token, wall-clock, and provider-reported cost ceilings. Exhausted budgets return partial output with an explicit trace error and never execute newly requested tools.
+- `ronin-agent-patterns` now includes an opt-in, repository-scoped `PlanCache` for `PlannerExecutorAgent`, with atomic local writes, repository-change invalidation, bounded retention, and no raw task text in cache records.
+- Diff previews now use a chunk-aware, fixed-width renderer that treats diff content as literal terminal text, including raw fallback output.
+- Agent-facing checkpoint rewinds now offer a read-only preview, create a mandatory recovery snapshot before changing files, and atomically persist their local index.
+- Provider discovery now recognizes provider-specific environment keys (for example `GROQ_API_KEY` and `OPENROUTER_API_KEY`) ahead of the shared OpenAI-compatible fallback; health reporting names only the credential source, never a key value.
+- Plugins now support a literal, non-executing `PLUGIN` manifest for capability declarations. Malformed or dynamic manifests are rejected before import; undeclared legacy plugins receive a conservative full capability set. `subprocess` and `payment` declarations require an explicit approval even under `--yolo`.
+- Python edits now receive a pre-write AST parse check, so invalid `write_file`, `edit_file`, and `multi_edit` proposals are rejected without changing the file. Valid Python edits report removed top-level public symbols; TypeScript syntax is checked opportunistically with a project-local compiler.
+- `ronin dev perf` now has a versioned JSON report format, deterministic benchmark executor seam, atomic report writes without captured command output, p95/failure summaries, and baseline comparison that can fail on a configurable median-latency or failed-run regression.
+- Release automation now validates a fixed seven-package manifest against the tag, synchronizes package versions and CLI pins, verifies wheel/sdist completeness and clean installs, emits `SHA256SUMS`, and uploads checked artifacts to the GitHub Release. The legacy `csk` release-script wording has been removed.
+- `ronin orchestrate` now selects a bounded, task-relevant team from a 1,170-profile generated specialist catalog and optional non-executing `.ronin/agents.json` project profiles. `ronin agents` shows the catalog and selected team; all write-capable profiles remain worktree-isolated and approval-gated.
+- Agent routing now combines task tags with local repository-map evidence (relevant files, symbols, language, and project markers) and explains every selected specialist. Write orchestrations enforce a researcher -> implementer -> independent reviewer/tester workflow contract before any provider call, with per-agent time/turn ceilings, an optional token ceiling, bounded parallelism, a total plan reservation limit, and observed provider-health reporting. Live task state is atomically persisted under `.ronin/agent-runs/`; `ronin eval agents` adds provider-free regression coverage for routing, workflow, and governance. Existing installations need no migration; the new local task-board history is removable independently.
+
 ## [1.0.0]
 
 Package version `1.0.0` (PEP 440); displays as `v1.0.0`. The 1.0.0 line is rc.3 plus two release-readiness fixes. It carries forward all of the RC-series hardening (fail-closed budget, relay traversal confinement, tool-gate drift guard, destructive-floor coverage of `git reset --hard` / forced `git clean`), the honesty fixes (eval skips, graceful errors, deterministic offline eval), and standalone packaging (proven clean-install, run in CI). Full notes: `docs/release/v1.0.0-notes.md`.

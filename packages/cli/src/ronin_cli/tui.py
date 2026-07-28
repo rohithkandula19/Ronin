@@ -109,6 +109,7 @@ class ApprovalScreen(ModalScreen[bool]):
     }}
     ApprovalScreen #ap-title {{ color: {TEAL}; text-style: bold; }}
     ApprovalScreen #ap-preview {{ color: {MUTED}; padding: 1 0; }}
+    ApprovalScreen #ap-capability {{ color: {DEL_FG}; }}
     ApprovalScreen #ap-hint {{ color: {MUTED}; }}
     ApprovalScreen #ap-hint .k {{ color: {TEAL}; text-style: bold; }}
     """
@@ -143,8 +144,17 @@ class ApprovalScreen(ModalScreen[bool]):
         return "```json\n" + json.dumps(a, indent=2, default=str)[:900] + "\n```"
 
     def compose(self) -> ComposeResult:
+        capability_floor = self._args.get("__ronin_capability_floor")
+        title = f"Approve  {_esc(self._tool)} ?"
+        if isinstance(capability_floor, list) and capability_floor:
+            title = f"Explicit approval required  {_esc(self._tool)}"
         with Vertical(id="box"):
-            yield Static(f"Approve  {_esc(self._tool)} ?", id="ap-title")
+            yield Static(title, id="ap-title")
+            if isinstance(capability_floor, list) and capability_floor:
+                yield Static(
+                    "Declared high-risk capability: " + _esc(", ".join(map(str, capability_floor))),
+                    id="ap-capability",
+                )
             yield Markdown(self._preview(), id="ap-preview")
             yield Static(
                 "[b]y[/b] approve     [b]n[/b] deny     [b]esc[/b] cancel",

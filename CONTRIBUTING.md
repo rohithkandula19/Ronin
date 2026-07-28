@@ -22,6 +22,7 @@ CI runs the same command. If it's green locally, it'll be green in CI.
 - **New providers** — add a class subclassing `LLMProvider` in `packages/agent-patterns/src/ronin_agent_patterns/providers/`. See `openai_compat.py` for the template.
 - **Documentation** — typos, clarifications, new cookbook recipes in `apps/docs/`.
 - **CLI commands** — keep them small and composable. `ronin` should feel like `git`, not `kubectl`.
+- **Roadmap workstreams** — use `docs/CONTRIBUTION_ROADMAP.md` to pick substantial areas that can become several focused PRs.
 
 ## What we don't want (please don't open PRs for these)
 

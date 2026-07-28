@@ -175,6 +175,7 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None,
     None leaves every tool's behavior unchanged.
     """
     root_path = Path(root).resolve()
+    from .patch_verify import verify_patch
 
     def _denied(p: Path) -> bool:
         if deny is None:
@@ -207,6 +208,13 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None,
             return
         prior = target.read_text(encoding="utf-8") if target.is_file() else None
         undo_stack.append((str(target), prior))
+
+    def _preflight(path: str, target: Path, before: str, after: str) -> tuple[bool, str | None]:
+        verification = verify_patch(target, before, after, root=root_path)
+        if not verification.valid:
+            return False, (f"ERROR: patch verification failed for {path}: {verification.summary()}. "
+                           "No changes written.")
+        return True, verification.summary() if verification.checked else None
 
     # ---- read_file ----
     def read_file(path: str) -> str:
@@ -272,10 +280,14 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None,
     # ---- write_file (SENSITIVE) ----
     def write_file(path: str, content: str) -> str:
         target = _resolve_path(path)
+        verified, verification = _preflight(path, target, "", content)
+        if not verified:
+            return verification or "ERROR: patch verification failed. No changes written."
         _record_undo(target)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
-        return f"wrote {len(content)} chars to {path}"
+        suffix = f" ({verification})" if verification else ""
+        return f"wrote {len(content)} chars to {path}{suffix}"
 
     # ---- edit_file (SENSITIVE) — Claude Code's core primitive: surgical replace ----
     def edit_file(path: str, old_string: str, new_string: str) -> str:
@@ -294,9 +306,14 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None,
                 f"ERROR: old_string appears {count} times in {path} — it must be unique. "
                 "Include more surrounding context to disambiguate."
             )
+        after = content.replace(old_string, new_string)
+        verified, verification = _preflight(path, target, content, after)
+        if not verified:
+            return verification or "ERROR: patch verification failed. No changes written."
         _record_undo(target)
-        target.write_text(content.replace(old_string, new_string), encoding="utf-8")
-        return f"edited {path}: replaced 1 occurrence ({len(old_string)}→{len(new_string)} chars)"
+        target.write_text(after, encoding="utf-8")
+        suffix = f" ({verification})" if verification else ""
+        return f"edited {path}: replaced 1 occurrence ({len(old_string)}→{len(new_string)} chars){suffix}"
 
     # ---- glob (find files by pattern) ----
     def glob(pattern: str, directory: str = ".", path: str | None = None) -> list[str]:
@@ -332,9 +349,13 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None,
             if c > 1:
                 return f"ERROR: edit #{i + 1}: old_string appears {c} times — must be unique. Add context."
             working = working.replace(old, new, 1)
+        verified, verification = _preflight(path, target, content, working)
+        if not verified:
+            return verification or "ERROR: patch verification failed. No changes written."
         _record_undo(target)
         target.write_text(working, encoding="utf-8")
-        return f"applied {len(edits)} edit(s) to {path}"
+        suffix = f" ({verification})" if verification else ""
+        return f"applied {len(edits)} edit(s) to {path}{suffix}"
 
     # ---- run_command (SENSITIVE) ----
     # Full-access mode gets a longer timeout + bigger output caps.

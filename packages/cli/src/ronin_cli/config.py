@@ -98,6 +98,20 @@ PROVIDER_PRESETS: dict[str, dict[str, str]] = {
     "openrouter": {"model": "qwen/qwen3-coder:free", "base_url": "https://openrouter.ai/api/v1"},
 }
 
+# Provider-specific environment variables are discovered at read time rather
+# than copied into config files. ``OPENAI_API_KEY`` remains a backward-compatible
+# fallback for OpenAI-compatible hosts, but never masks a provider's own key.
+PROVIDER_ENV_KEYS: dict[str, str] = {
+    "anthropic": "ANTHROPIC_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "together": "TOGETHER_API_KEY",
+    "groq": "GROQ_API_KEY",
+    "fireworks": "FIREWORKS_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+    "cerebras": "CEREBRAS_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+}
+
 
 class RoninConfig(BaseModel):
     """csk configuration. Each service is optional — only configured ones get tools registered."""
@@ -250,11 +264,32 @@ class RoninConfig(BaseModel):
         provider = provider or self.provider
         if provider in self.provider_keys and self.provider_keys[provider]:
             return self.provider_keys[provider]
-        if provider == "anthropic":
-            return self.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY")
         if provider in ("ollama", "local"):
             return None  # local, no key
+        if provider == "anthropic" and self.anthropic_api_key:
+            return self.anthropic_api_key
+        env_key = PROVIDER_ENV_KEYS.get(provider)
+        if env_key and os.environ.get(env_key):
+            return os.environ[env_key]
         return self.openai_api_key or os.environ.get("OPENAI_API_KEY")
+
+    def provider_key_source(self, provider: str | None = None) -> str:
+        """Return an honest, non-secret credential source for provider health."""
+        provider = provider or self.provider
+        if provider in ("ollama", "local"):
+            return "keyless"
+        if self.provider_keys.get(provider):
+            return "config"
+        if provider == "anthropic" and self.anthropic_api_key:
+            return "config"
+        env_key = PROVIDER_ENV_KEYS.get(provider)
+        if env_key and os.environ.get(env_key):
+            return "environment"
+        if self.openai_api_key:
+            return "config"
+        if os.environ.get("OPENAI_API_KEY"):
+            return "environment"
+        return "missing"
 
     def set_key_for(self, provider: str, key: str) -> None:
         """Store ``key`` for ``provider`` without disturbing other providers'

@@ -17,6 +17,11 @@ What ronin does is make the per-subtask provider assignment first-class and full
 offline-testable, on top of the same agent loop and worktree isolation the rest
 of the project already uses.
 
+The orchestrator now selects from a scalable catalog of 1,170 generated domain
+specialist profiles plus optional project profiles. It activates only a bounded,
+task-relevant team; see [Specialist agents](agents.md) for the selection model
+and `.ronin/agents.json` format.
+
 ## Where it fits among ronin's multi-agent primitives
 
 - ReActAgent: one agent, one thread, one provider. The base loop.
@@ -45,8 +50,8 @@ Every orchestration run has three roles, and each can be a different provider:
 2. Sub-agents. Do the work. Each sub-agent has a role, a system prompt, a tool
    subset, and an assigned provider/model. Independent sub-agents run in
    parallel; a sub-agent with no provider of its own falls back to the base
-   provider. The CLI ships four built-in specialist roles, each pinnable to its
-   own provider via --roster:
+   provider. The CLI always includes four core roles and may add task-matching
+   specialists, each pinnable to its own provider via --roster:
    - researcher: read-only investigation; reports facts (read/list/search/glob).
    - implementer: edits and creates code (full toolbelt in --write mode).
    - reviewer: read-only critique of a change for correctness and completeness.
@@ -76,6 +81,13 @@ The plan is validated before anything runs: unknown assignees, duplicate ids,
 missing dependencies, and self-dependencies are rejected. Subtasks are grouped
 into dependency waves; each wave is run in parallel, and a completed upstream
 subtask's output is passed as context to its dependents.
+
+For `--write`, the CLI also supplies an engineering workflow contract. It
+requires researcher -> implementer -> independent reviewer/tester handoffs,
+checks the role dependencies before execution, and forbids self-approval by
+role. The implementation has per-agent timeout/turn limits, a total planned
+iteration reservation ceiling, and a durable project-local task board. See
+[Agent control plane](agent_control_plane.md) for the data schema and controls.
 
 ## Library API (provider-agnostic core)
 
@@ -107,19 +119,19 @@ packages/agent-patterns/tests/test_orchestrator.py.
 
 ## CLI
 
-    ronin orchestrate "GOAL" [--roster ROLE=PROVIDER,...] [--write] [--offline]
+    ronin util orchestrate "GOAL" [--roster ROLE=PROVIDER,...] [--write] [--offline]
 
 Examples:
 
     # read-only research/plan, default provider for every role
-    ronin orchestrate "explain how auth and rate limiting fit together"
+    ronin util orchestrate "explain how auth and rate limiting fit together"
 
     # provider-agnostic roster: each role on a different vendor's model
-    ronin orchestrate "add retry + tests to the http client" \
+    ronin util orchestrate "add retry + tests to the http client" \
       -r researcher=anthropic,implementer=cerebras,reviewer=gemini,tester=groq --write
 
     # fully offline (local brain only, zero egress)
-    ronin orchestrate "summarize the module layout" --offline
+    ronin util orchestrate "summarize the module layout" --offline
 
 Flags:
 
@@ -132,6 +144,11 @@ Flags:
   tree uncontrolled.
 - --offline: force a local brain and strip network tools, so nothing leaves the
   machine.
+- --max-parallel: bound independent sub-agents running at once (default 4).
+- --max-subtask-iterations / --max-subtask-tokens /
+  --max-total-subtask-iterations: cap each ReAct loop, optionally cap reported
+  tokens, and reject a plan whose aggregate reservation exceeds the run budget.
+- --agent-timeout: set the existing per-agent wall-clock ceiling in seconds.
 
 ## Offline and free
 
@@ -148,4 +165,4 @@ paid API.
 - packages/cli/src/ronin_cli/orchestrate.py: the CLI bridge (provider assignment,
   worktree isolation, tool subsets).
 - packages/cli/tests/test_orchestrate.py: offline bridge + CLI command tests.
-- packages/cli/src/ronin_cli/main.py: the `ronin orchestrate` command.
+- packages/cli/src/ronin_cli/main.py: the `ronin util orchestrate` command.

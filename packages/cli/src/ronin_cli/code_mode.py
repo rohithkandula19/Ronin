@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterable, Mapping
 
 from rich.console import Console
 
@@ -321,7 +321,7 @@ def _list_provider_models(config: RoninConfig) -> list[str]:
     base = config.resolved_base_url()
     if not base:
         return []
-    key = config.openai_api_key or _os.environ.get("OPENAI_API_KEY")
+    key = config.key_for(config.provider)
     try:
         import httpx
         headers = {"User-Agent": "ronin"}
@@ -406,79 +406,14 @@ def _status_line(config: RoninConfig, result: "CodeRunResult", elapsed: float,
     return line
 
 
-_EXT_LANG = {
-    ".py": "python", ".js": "javascript", ".ts": "typescript", ".tsx": "tsx",
-    ".jsx": "jsx", ".json": "json", ".md": "markdown", ".sh": "bash", ".bash": "bash",
-    ".toml": "toml", ".yaml": "yaml", ".yml": "yaml", ".html": "html", ".css": "css",
-    ".go": "go", ".rs": "rust", ".java": "java", ".rb": "ruby", ".c": "c", ".h": "c",
-    ".cpp": "cpp", ".sql": "sql", ".php": "php", ".swift": "swift", ".kt": "kotlin",
-}
-
-
-def _lang_for(path: str | None) -> str:
-    if not path:
-        return "text"
-    import os
-    return _EXT_LANG.get(os.path.splitext(path)[1].lower(), "text")
-
-
 def _render_diff(console: Console, diff: str, path: str | None = None) -> None:
-    """Print a clean, line-numbered diff — Claude-Code style: a dim line-number
-    gutter, full-width green/red row backgrounds, **syntax-highlighted code**, and
-    no git ``--- a/`` / ``@@`` noise."""
+    """Print a fixed-width, markup-safe unified-diff preview."""
     if not diff.strip():
         return
-    from rich.syntax import Syntax
-    from rich.text import Text
+    from .streaming_diff import render_unified_diff
 
-    from .code_tools import diff_rows
-    rows = diff_rows(diff)
-    if not rows:  # not a unified diff we can parse → show raw, dimmed
-        for line in diff.splitlines():
-            console.print(f"[dim]{line}[/dim]")
-        return
-
-    # Collapse long writes/edits so a big new file does not flood the terminal:
-    # show a head, then a "... N more lines" summary (Claude-Code style).
-    MAX_DIFF_ROWS = 14
-    hidden = 0
-    if len(rows) > MAX_DIFF_ROWS + 2:
-        hidden = len(rows) - MAX_DIFF_ROWS
-        rows = rows[:MAX_DIFF_ROWS]
-
-    from .theme import CODE_THEME
-    syn = Syntax("", _lang_for(path), theme=CODE_THEME, background_color="default")
-    width = min(console.width or 100, 120)
-    add_bg, del_bg = "#15291c", "#2c161b"   # subtle full-row tints
-    sign_style = {"add": "bold #73daca", "del": "bold #f7768e", "ctx": "#3b4261"}
-
-    for r in rows:
-        if r["kind"] == "sep":
-            console.print(Text("       ⋮", style="#3b4261"))
-            continue
-        ln = f"{r['lineno']:>4}" if r["lineno"] is not None else "    "
-        sign = {"add": "+", "del": "-", "ctx": " "}[r["kind"]]
-        # syntax-highlight the code content (keywords/strings/numbers coloured)
-        code = r["text"]
-        hl = syn.highlight(code) if code.strip() else Text(code)
-        hl.rstrip()  # highlight() appends a newline — drop it
-        if r["kind"] == "del":            # dim the highlight a touch on removals
-            hl.stylize("dim")
-
-        row = Text(f" {ln} ", style="#3b4261")
-        row.append(f"{sign} ", style=sign_style[r["kind"]])
-        row.append_text(hl)
-        if r["kind"] in ("add", "del"):
-            pad = width - row.cell_len
-            if pad > 0:
-                row.append(" " * pad)
-            console.print(row, style=f"on {add_bg if r['kind'] == 'add' else del_bg}")
-        else:
-            console.print(row)
-
-    if hidden:
-        console.print(Text(f"       ... {hidden} more lines (full file written on approve)",
-                           style="#3b4261"))
+    for row in render_unified_diff(diff, path=path, width=console.width or 100):
+        console.print(row)
 
 
 def _is_floored_command(name: str, args: dict) -> bool:
@@ -511,9 +446,40 @@ def _floored_payload(args: dict) -> str:
     return ""
 
 
+def _high_risk_plugin_capabilities(
+    name: str, capabilities_by_tool: Mapping[str, Iterable[str]] | None,
+) -> tuple[str, ...]:
+    """Declared plugin capabilities that require explicit confirmation."""
+    if not capabilities_by_tool:
+        return ()
+    from .plugin_manifest import HIGH_RISK_CAPABILITIES
+
+    values = capabilities_by_tool.get(name, ())
+    return tuple(sorted({str(value) for value in values} & HIGH_RISK_CAPABILITIES))
+
+
+def _approve_plugin_capability_floor(
+    console: Console | None, name: str, capabilities: tuple[str, ...],
+) -> "bool | str":
+    """Require a block-level approval for a high-risk plugin capability."""
+    if console is None:
+        return ("blocked: plugin declares " + ", ".join(capabilities)
+                + " capability; explicit interactive approval is required.")
+    from .approvals import approve
+
+    return approve({
+        "kind": "api_call",
+        "summary": f"run plugin tool '{name}' (declares {', '.join(capabilities)})",
+        "reversible": False,
+        "external": "payment" in capabilities,
+        "details": {"capability_floor": list(capabilities)},
+    }, console=console)
+
+
 def _selective_gate(
     console: Console | None, yolo: bool, root: _Path,
     *, extra_gated: set[str] | None = None, rules: "PermissionRules | None" = None,
+    capabilities_by_tool: Mapping[str, Iterable[str]] | None = None,
 ) -> Callable[[str, dict], "bool | str"]:
     """Auto-approve read tools; gate SENSITIVE_TOOLS (and ``extra_gated`` — the
     sensitive MCP/plugin tools) unless yolo.
@@ -569,6 +535,9 @@ def _selective_gate(
                 return ("blocked: destructive command not confirmed — pick a safer "
                         "approach (the safer alternative was shown above).")
             return True  # explicitly, deliberately confirmed
+        high_risk = _high_risk_plugin_capabilities(name, capabilities_by_tool)
+        if high_risk:
+            return _approve_plugin_capability_floor(console, name, high_risk)
         if name not in SENSITIVE_TOOLS and name not in gated:
             return True  # reads + media generation run freely (never destructive:
             #              the floor above already had its say on every tool)
@@ -917,6 +886,10 @@ def run_code_agent(
     # plus any tool that flags itself sensitive=True (MCP writes, user plugins).
     # These used to bypass approval entirely. Read-only MCP tools stay out of it.
     _sensitive_names = set(SENSITIVE_TOOLS) | {t.name for t in tools if getattr(t, "sensitive", False)}
+    _capabilities_by_tool = {
+        t.name: tuple(getattr(t, "capabilities", ())) for t in tools
+        if getattr(t, "capabilities", ())
+    }
     # Fail-closed drift guard: a known-mutating tool that reached the toolbelt but
     # not the gate would bypass approval. Refuse rather than run ungated.
     _ungated = ungated_mutators({t.name for t in tools}, _sensitive_names)
@@ -950,6 +923,13 @@ def run_code_agent(
             # entirely. The floor is the outermost authority or it is not a floor.
             if _is_floored_command(name, args):
                 return gate_cb(name, args)
+            high_risk = _high_risk_plugin_capabilities(name, _capabilities_by_tool)
+            if high_risk:
+                # The front end owns the confirmation UI. This metadata is used
+                # only for display by the callback, never passed to the handler.
+                approval_args = dict(args)
+                approval_args["__ronin_capability_floor"] = list(high_risk)
+                return gate_cb(name, approval_args)
             if name not in _sensitive_names:
                 return True
             if yolo:
@@ -959,7 +939,8 @@ def run_code_agent(
             return gate_cb(name, args)
     else:
         before_tool = _selective_gate(console, yolo, _gate_root,
-                                      extra_gated=_sensitive_names)
+                                      extra_gated=_sensitive_names,
+                                      capabilities_by_tool=_capabilities_by_tool)
 
     # Stream the model's reasoning + summary live (the Claude-Code feel) when we
     # have a console; fall back to the step-narrator for non-interactive runs.
@@ -2029,7 +2010,7 @@ def run_unified_session(
     from .mcp_client import build_mcp_tools
 
     media_tools = build_media_tools(artifacts, root=root)
-    data_tools = build_tools(config)
+    data_tools = build_tools(config, include_plugins=False)
     # console=None → load MCP tools silently (no "🔌 MCP fs · N tool(s)" chrome
     # at launch; Claude Code doesn't announce its tool wiring either).
     mcp_tools = build_mcp_tools(root, console=None)  # tools from .ronin/mcp.json servers

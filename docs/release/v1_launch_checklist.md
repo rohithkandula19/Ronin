@@ -43,7 +43,7 @@ Nothing below has been run. Exact commands when you're ready:
 
 ```bash
 # 1. (optional) bump version across packages, if going to a real tag
-#    e.g. edit pyproject versions or use: ronin release --type <patch|minor|major>
+#    e.g. edit pyproject versions or use: ronin dev release <patch|minor|major>
 
 # 2. tag a release candidate (recommended first)
 git tag v1.0.0

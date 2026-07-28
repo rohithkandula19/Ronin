@@ -35,13 +35,18 @@ def test_valid_plugin_name(name, ok) -> None:
     assert valid_plugin_name(name) is ok
 
 
-def test_template_is_valid_python_with_register_tools() -> None:
+def test_template_is_valid_python_with_register_tools(tmp_path) -> None:
     import ast
+    from ronin_cli.plugin_manifest import read_manifest
+
     src = plugin_template("weather", "Current weather")
     ast.parse(src)                                   # parses
     assert "def register_tools(" in src
     assert "def weather(" in src
     assert "Current weather" in src
+    path = tmp_path / "weather.py"
+    path.write_text(src, encoding="utf-8")
+    assert read_manifest(path).capabilities == ("network",)
 
 
 def test_write_plugin_then_load_into_agent(tmp_path) -> None:

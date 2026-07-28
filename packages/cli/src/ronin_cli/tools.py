@@ -223,8 +223,8 @@ def postgres_real_tools(database_url: str) -> list[Tool]:
     ]
 
 
-def build_tools(config: RoninConfig) -> list[Tool]:
-    """Assemble the full tool list for the configured/demo services + any user plugins."""
+def build_tools(config: RoninConfig, *, include_plugins: bool = True) -> list[Tool]:
+    """Assemble configured/demo services and, optionally, hardened user plugins."""
     from .plugins import load_plugin_tools
 
     tools: list[Tool] = []
@@ -243,6 +243,8 @@ def build_tools(config: RoninConfig) -> list[Tool]:
         if config.database_url:
             tools.extend(postgres_real_tools(config.database_url))
 
-    # User plugins always loaded last so they can override or supplement built-ins.
-    tools.extend(load_plugin_tools())
+    # The loader hardens plugin tools before every runtime sees them. The unified
+    # session supplies root-aware plugin tools itself, avoiding duplicate names.
+    if include_plugins:
+        tools.extend(load_plugin_tools())
     return tools

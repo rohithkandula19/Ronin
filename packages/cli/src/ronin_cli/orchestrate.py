@@ -28,6 +28,16 @@ from ronin_agent_patterns import (
     Tool,
 )
 
+from .agent_catalog import (
+    AgentProfile,
+    ProfileSelection,
+    build_catalog,
+    repository_signals,
+    select_profiles_for_repository,
+)
+from .agent_governance import OrchestrationGovernance, provider_health
+from .agent_state import AgentTaskStateStore
+from .agent_workflow import WorkflowContract, inspect_handoffs
 from .config import RoninConfig
 
 # Default specialist roster. Each is provider-agnostic: the planner assigns
@@ -68,6 +78,60 @@ DEFAULT_DESCRIPTIONS: dict[str, str] = {
     "reviewer": "reviews a change for correctness and completeness",
     "tester": "writes and runs tests for a change and reports pass/fail",
 }
+
+_CORE_TIERS = {
+    "researcher": "explore",
+    "implementer": "write",
+    "reviewer": "explore",
+    "tester": "test",
+}
+
+
+def core_agent_profiles() -> tuple[AgentProfile, ...]:
+    """Return Ronin's always-available orchestration roles as catalog profiles."""
+    return tuple(AgentProfile(
+        key=role,
+        description=DEFAULT_DESCRIPTIONS[role],
+        system=system,
+        tags=(role,),
+        tier=_CORE_TIERS[role],
+        source="core",
+    ) for role, system in DEFAULT_ROLES.items())
+
+
+def agent_catalog(root: Path | str, *, manifest: Path | str | None = None) -> tuple[AgentProfile, ...]:
+    """Return the scalable specialist catalog for a repository."""
+    return build_catalog(core_agent_profiles(), root, manifest=manifest)
+
+
+def select_agents_for_goal(
+    goal: str,
+    root: Path | str,
+    *,
+    max_agents: int = 8,
+    manifest: Path | str | None = None,
+) -> tuple[AgentProfile, ...]:
+    """Select the bounded specialist team to expose to an orchestration planner."""
+    return select_agents_with_context(
+        goal, root, max_agents=max_agents, manifest=manifest,
+    ).profiles
+
+
+def select_agents_with_context(
+    goal: str,
+    root: Path | str,
+    *,
+    max_agents: int = 8,
+    manifest: Path | str | None = None,
+) -> ProfileSelection:
+    """Return the selected team plus explainable local repository evidence."""
+    profiles = agent_catalog(root, manifest=manifest)
+    return select_profiles_for_repository(
+        goal, profiles,
+        core_keys=DEFAULT_ROLES,
+        repository=repository_signals(goal, root),
+        max_agents=max_agents,
+    )
 
 
 @dataclass
@@ -123,14 +187,19 @@ def role_label(base: RoninConfig, spec: str | None) -> str:
     return f"{cfg.provider}:{cfg.resolved_model()}"
 
 
-def roster_labels(base: RoninConfig, roster_spec: str | None) -> dict[str, str]:
+def roster_labels(
+    base: RoninConfig,
+    roster_spec: str | None,
+    profiles: "list[AgentProfile] | tuple[AgentProfile, ...] | None" = None,
+) -> dict[str, str]:
     """Map each built-in specialist role to the provider:model it will run on.
 
     This is the sub-agent tree the dashboard renders: the planner/synthesizer run
     on the base provider, and each role on its own (possibly different) vendor's
     model via ``--roster``. Pure label resolution — no providers are built."""
     parsed = parse_roster(roster_spec)
-    return {role: role_label(base, parsed.get(role)) for role in DEFAULT_ROLES}
+    roles = [profile.key for profile in profiles] if profiles is not None else list(DEFAULT_ROLES)
+    return {role: role_label(base, parsed.get(role)) for role in roles}
 
 
 def score_final_faithfulness(outcome: "OrchestrateOutcome") -> "dict[str, Any] | None":
@@ -175,6 +244,8 @@ def build_subagents(
     roles: "dict[str, str] | None" = None,
     descriptions: "dict[str, str] | None" = None,
     max_iterations: int = 12,
+    max_total_tokens: int | None = None,
+    max_wall_time_seconds: float | None = None,
 ) -> list[OrchestratorSubAgent]:
     """Build the provider-agnostic sub-agent roster for the orchestrator.
 
@@ -195,6 +266,8 @@ def build_subagents(
             tools=tools_for_role.get(role, []),
             provider=provider_for_spec(base, spec),
             max_iterations=max_iterations,
+            max_total_tokens=max_total_tokens,
+            max_wall_time_seconds=max_wall_time_seconds,
         ))
     return subs
 
@@ -208,6 +281,12 @@ class OrchestrateOutcome:
     error: str | None = None
     # In write mode, the diff captured from the isolated worktree (empty otherwise).
     diff: str = ""
+    agent_profiles: tuple[AgentProfile, ...] = ()
+    workflow: dict[str, Any] = field(default_factory=dict)
+    governance: dict[str, Any] = field(default_factory=dict)
+    provider_health: dict[str, dict[str, Any]] = field(default_factory=dict)
+    handoffs: dict[str, Any] = field(default_factory=dict)
+    run_id: str | None = None
 
 
 def run_orchestrate(
@@ -220,6 +299,12 @@ def run_orchestrate(
     on_subtask_start=None,
     max_iterations: int = 12,
     read_only: bool = True,
+    profiles: "tuple[AgentProfile, ...] | list[AgentProfile] | None" = None,
+    max_agents: int = 8,
+    agent_manifest: Path | str | None = None,
+    workflow: WorkflowContract | None = None,
+    governance: OrchestrationGovernance | None = None,
+    persist_state: bool = True,
 ) -> OrchestrateOutcome:
     """Run the orchestrator on ``goal``.
 
@@ -231,73 +316,190 @@ def run_orchestrate(
     so their edits never touch the main checkout; the captured diff is appended to
     the result. Read-only runs explore in place (no worktree needed).
     """
+    governance = governance or OrchestrationGovernance(
+        max_agents=max_agents,
+        max_parallel=min(4, max_agents),
+        max_total_subtask_iterations=max(12, max_agents * max_iterations),
+        max_iterations_per_agent=max_iterations,
+    )
+    try:
+        selection = (
+            ProfileSelection(tuple(profiles), {p.key: ("explicit profile",) for p in profiles})
+            if profiles is not None else select_agents_with_context(
+                goal, root, max_agents=max_agents, manifest=agent_manifest,
+            )
+        )
+        selected = selection.profiles
+        governance.validate_team(len(selected))
+    except ValueError as exc:
+        return OrchestrateOutcome(success=False, output="", error=str(exc))
+    if not selected:
+        return OrchestrateOutcome(success=False, output="", error="orchestration needs at least one agent profile")
+
+    state_store: AgentTaskStateStore | None = AgentTaskStateStore(root) if persist_state else None
+    state: dict[str, Any] | None = None
+    if state_store is not None:
+        state = state_store.create(
+            goal,
+            selection={
+                "profiles": [profile.key for profile in selected],
+                "reasons": {key: list(value) for key, value in selection.reasons.items()},
+                "repository": {
+                    "tags": list(selection.repository.tags),
+                    "relevant_files": list(selection.repository.relevant_files),
+                    "symbols": list(selection.repository.symbols),
+                },
+            },
+            workflow=workflow.as_dict() if workflow else None,
+            governance=governance.as_dict(),
+        )
+
+    def _on_step(step) -> None:
+        if state_store is not None and state is not None:
+            state_store.apply_step(state, step)
+        if on_step is not None:
+            on_step(step)
+
+    def _on_subtask_start(subtask, label) -> None:
+        if state_store is not None and state is not None:
+            state_store.mark_started(state, subtask, label)
+        if on_subtask_start is not None:
+            on_subtask_start(subtask, label)
+
     if not read_only:
         from .worktree import is_git_repo
         if is_git_repo(root):
-            return _run_in_worktree(
-                base, goal, roster_spec=roster_spec, root=root, on_step=on_step,
-                on_subtask_start=on_subtask_start, max_iterations=max_iterations,
-            )
+            try:
+                outcome = _run_in_worktree(
+                    base, goal, roster_spec=roster_spec, root=root, on_step=_on_step,
+                    on_subtask_start=_on_subtask_start, max_iterations=max_iterations,
+                    profiles=selected, workflow=workflow, governance=governance,
+                )
+            except Exception as exc:  # noqa: BLE001 - state must survive provider/setup failures
+                outcome = OrchestrateOutcome(
+                    success=False, output="", error=f"{type(exc).__name__}: {exc}",
+                    agent_profiles=selected,
+                    workflow=workflow.as_dict() if workflow else {},
+                    governance=governance.as_dict(),
+                )
+            return _finish_outcome(outcome, state_store, state)
         # Not a git repo: fall back to read-only so we never mutate the tree
         # uncontrolled. The CLI surfaces this; here we just stay safe.
         read_only = True
 
-    tools_for_role = _tools_for_roles(base, root, read_only=read_only, mutate_root=root)
-    return _run_core(
-        base, goal, roster_spec=roster_spec, tools_for_role=tools_for_role,
-        on_step=on_step, on_subtask_start=on_subtask_start,
-        max_iterations=max_iterations, diff="",
+    tools_for_role = _tools_for_roles(
+        base, root, read_only=read_only, mutate_root=root, profiles=selected,
     )
+    try:
+        outcome = _run_core(
+            base, goal, roster_spec=roster_spec, tools_for_role=tools_for_role,
+            on_step=_on_step, on_subtask_start=_on_subtask_start,
+            max_iterations=max_iterations, diff="", profiles=selected,
+            workflow=workflow, governance=governance,
+        )
+    except Exception as exc:  # noqa: BLE001 - return an honest, persisted setup failure
+        outcome = OrchestrateOutcome(
+            success=False, output="", error=f"{type(exc).__name__}: {exc}",
+            agent_profiles=selected,
+            workflow=workflow.as_dict() if workflow else {},
+            governance=governance.as_dict(),
+        )
+    return _finish_outcome(outcome, state_store, state)
 
 
 def _run_in_worktree(base, goal, *, roster_spec, root, on_step, on_subtask_start,
-                     max_iterations):
+                     max_iterations, profiles, workflow, governance):
     """Run the mutating orchestration inside a throwaway worktree, capture the
     diff, and clean up — reusing the dojo's worktree isolation."""
     from .worktree import git_worktree, worktree_diff
 
     with git_worktree(root, label="orchestrate") as wt:
-        tools_for_role = _tools_for_roles(base, wt, read_only=False, mutate_root=wt)
+        tools_for_role = _tools_for_roles(
+            base, wt, read_only=False, mutate_root=wt, profiles=profiles,
+        )
         outcome = _run_core(
             base, goal, roster_spec=roster_spec, tools_for_role=tools_for_role,
             on_step=on_step, on_subtask_start=on_subtask_start,
-            max_iterations=max_iterations, diff="",
+            max_iterations=max_iterations, diff="", profiles=profiles,
+            workflow=workflow, governance=governance,
         )
         outcome.diff = worktree_diff(wt)
     return outcome
 
 
 def _run_core(base, goal, *, roster_spec, tools_for_role, on_step, on_subtask_start,
-              max_iterations, diff):
+              max_iterations, diff, profiles, workflow, governance):
     roster = parse_roster(roster_spec)
+    roles = {profile.key: profile.system for profile in profiles}
+    descriptions = {profile.key: profile.description for profile in profiles}
     subs = build_subagents(
-        base, roster, tools_for_role=tools_for_role, max_iterations=max_iterations,
+        base, roster, tools_for_role=tools_for_role, roles=roles,
+        descriptions=descriptions,
+        max_iterations=governance.max_iterations_per_agent,
+        max_total_tokens=governance.max_tokens_per_agent,
+        max_wall_time_seconds=governance.max_wall_time_seconds_per_agent,
     )
     orch = OrchestratorAgent(
         provider=provider_for_spec(base, None),  # planner/synth = base provider
         sub_agents=subs,
+        goal_system=workflow.planner_instructions() if workflow else "",
+        max_parallel=governance.max_parallel,
+        required_roles=set(workflow.required_roles) if workflow else set(),
+        role_dependencies={
+            role: set(upstream) for role, upstream in (workflow.role_dependencies.items() if workflow else [])
+        },
+        acceptance_roles=(set(workflow.acceptance_roles)
+                          if workflow and governance.require_independent_acceptance else set()),
+        max_total_subtask_iterations=governance.max_total_subtask_iterations,
     )
     result = orch.run(goal, on_step=on_step, on_subtask_start=on_subtask_start)
+    result_dicts = [r.model_dump() for r in result.subtask_results]
     return OrchestrateOutcome(
         success=result.success,
         output=result.output,
         plan_subtasks=[st.model_dump() for st in (result.plan.subtasks if result.plan else [])],
-        subtask_results=[r.model_dump() for r in result.subtask_results],
+        subtask_results=result_dicts,
         error=result.error,
         diff=diff,
+        agent_profiles=tuple(profiles),
+        workflow=workflow.as_dict() if workflow else {},
+        governance=governance.as_dict(),
+        provider_health=provider_health(result_dicts),
+        handoffs=inspect_handoffs(goal, result_dicts),
     )
+
+
+def _finish_outcome(
+    outcome: OrchestrateOutcome,
+    state_store: AgentTaskStateStore | None,
+    state: dict[str, Any] | None,
+) -> OrchestrateOutcome:
+    """Persist final state after either the normal or worktree execution path."""
+    if state_store is not None and state is not None:
+        state_store.finish(
+            state,
+            success=outcome.success,
+            output=outcome.output,
+            error=outcome.error,
+            provider_health=outcome.provider_health,
+            handoffs=outcome.handoffs,
+        )
+        outcome.run_id = str(state.get("id"))
+    return outcome
 
 
 def _tools_for_roles(
     base: RoninConfig, root: Path | str, *, read_only: bool,
     mutate_root: "Path | str | None" = None,
+    profiles: "tuple[AgentProfile, ...] | list[AgentProfile] | None" = None,
 ) -> dict[str, list[Tool]]:
     """Build the per-role tool subsets from ronin's code toolbelt.
 
-    Researcher/reviewer always get read-only explorer tools bound to ``root``.
-    The implementer gets the FULL code toolbelt bound to ``mutate_root`` (the
-    isolated worktree) only when the run is not read-only. Imported lazily so the
-    pure roster/provider helpers don't pull in the heavy code-tools graph."""
+    Explorer profiles always get read-only tools. Test-tier profiles may execute
+    existing commands in read-only mode and receive the full isolated-worktree
+    toolbelt only in write mode. Write-tier profiles receive mutations only in
+    that isolated worktree. Imported lazily so the pure catalog helpers do not
+    pull in the heavy code-tools graph."""
     try:
         from .code_tools import build_code_tools
     except Exception:  # noqa: BLE001 — keep the orchestrator usable without code tools
@@ -313,17 +515,19 @@ def _tools_for_roles(
     tester_readonly = [
         t for t in base_tools if t.name in (_READONLY | {"run_command"})
     ]
-    out: dict[str, list[Tool]] = {
-        "researcher": readonly_tools,
-        "reviewer": readonly_tools,
-    }
-    if read_only:
-        out["implementer"] = readonly_tools
-        out["tester"] = tester_readonly
-    else:
-        # Full toolbelt bound to the isolated worktree, so mutations (and any new
-        # test files the tester writes) land there, not the main checkout.
-        worktree_tools = build_code_tools(mutate_root or root, sandbox=sandbox)
-        out["implementer"] = worktree_tools
-        out["tester"] = worktree_tools
+    selected = tuple(profiles) if profiles is not None else core_agent_profiles()
+    worktree_tools: list[Tool] | None = None
+    out: dict[str, list[Tool]] = {}
+    for profile in selected:
+        if profile.tier == "explore":
+            out[profile.key] = readonly_tools
+            continue
+        if read_only:
+            out[profile.key] = tester_readonly if profile.tier == "test" else readonly_tools
+            continue
+        # Mutations and test writes are bound to the isolated worktree, never the
+        # checkout from which the orchestrator was invoked.
+        if worktree_tools is None:
+            worktree_tools = build_code_tools(mutate_root or root, sandbox=sandbox)
+        out[profile.key] = worktree_tools
     return out
