@@ -8,8 +8,11 @@ from pathlib import Path
 from .agent_observability import provider_observations
 from .agent_queue import AgentQueue
 from .agent_state import AgentTaskStateStore
+from .autonomy_ledger import AutonomyLedger, verify_ledger
+from .constitution import RepositoryConstitution
 from .config import RoninConfig
 from .embeddings import semantic_search
+from .project_memory import ProjectMemory
 from .sandbox_policy import inspect_sandbox_policy
 
 
@@ -29,6 +32,9 @@ def run_agent_platform_eval() -> list[PlatformEvalOutcome]:
             _telemetry_case(root),
             _semantic_case(root),
             _sandbox_case(),
+            _constitution_case(root),
+            _ledger_case(root),
+            _memory_case(root),
         ]
     return outcomes
 
@@ -87,3 +93,23 @@ def _sandbox_case() -> PlatformEvalOutcome:
     status = inspect_sandbox_policy("docker:agent", executable=lambda _name: None)
     passed = status.status == "blocked" and status.fail_closed
     return PlatformEvalOutcome("sandbox fail-closed", passed, "unavailable requested sandbox blocks host fallback")
+
+
+def _constitution_case(root: Path) -> PlatformEvalOutcome:
+    policy = RepositoryConstitution(protected_paths=("migrations/**",))
+    target = root / "migrations" / "001.sql"
+    target.parent.mkdir(exist_ok=True)
+    target.write_text("select 1", encoding="utf-8")
+    return PlatformEvalOutcome("repository constitution", policy.protects(target, root=root), "protected writes are policy-addressable")
+
+
+def _ledger_case(root: Path) -> PlatformEvalOutcome:
+    AutonomyLedger(root).append("eval", run_id="eval-1", goal="private", payload={"success": True})
+    report = verify_ledger(root)
+    return PlatformEvalOutcome("autonomy ledger", report.valid and report.events == 1, "local hash chain verifies")
+
+
+def _memory_case(root: Path) -> PlatformEvalOutcome:
+    ProjectMemory(root).remember("Use the local test suite before merging", tags=["test"])
+    rows = ProjectMemory(root).recall("how should we test", k=1)
+    return PlatformEvalOutcome("project memory", bool(rows), "SQLite hashing retrieval remains local")

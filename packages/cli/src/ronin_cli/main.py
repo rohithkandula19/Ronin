@@ -2609,6 +2609,263 @@ def agent_queue_run_next(
     console.print(outcome.output)
 
 
+@agent_queue_app.command("run")
+def agent_queue_run(
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    max_jobs: int = typer.Option(4, "--max-jobs", min=1, max=100, help="Maximum queued jobs to claim."),
+    max_parallel: int = typer.Option(2, "--max-parallel", min=1, max=32, help="Maximum jobs to execute together."),
+    offline: bool = typer.Option(False, "--offline", help="Run each worker on a local provider only."),
+) -> None:
+    """Claim and run a bounded backlog batch; every job retains its own outcome."""
+    from .agent_queue import AgentQueue, QueueExecution
+    from .agent_workflow import workflow_for_goal
+    from .orchestrate import run_orchestrate
+
+    config = load_config()
+    if offline:
+        config = config.model_copy(update={
+            "provider": "local", "model": None, "base_url": None,
+            "failover": [], "offline": True,
+        })
+    if not offline and not config.has_provider_auth():
+        console.print(f"[red]x[/red] no credentials for {config.provider}")
+        raise typer.Exit(2)
+
+    def worker(job):
+        try:
+            outcome = run_orchestrate(
+                config, job.goal, root=root, read_only=not job.write,
+                workflow=workflow_for_goal(job.goal, write=True) if job.write else None,
+            )
+            return QueueExecution(outcome.success, outcome.error, outcome.run_id)
+        except Exception as exc:  # noqa: BLE001 - queue stores the terminal failure
+            return QueueExecution(False, f"{type(exc).__name__}: {exc}")
+
+    try:
+        finished = AgentQueue(root).run_pending(worker, max_jobs=max_jobs, max_parallel=max_parallel)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    if not finished:
+        console.print("[dim]no queued agent jobs.[/dim]")
+        return
+    complete = sum(job.status == "completed" for job in finished)
+    console.print(f"[green]{complete} completed[/green], [red]{len(finished) - complete} failed[/red] from {len(finished)} claimed jobs")
+
+
+constitution_app = typer.Typer(help="Repository-owned guardrails for agent work.", no_args_is_help=True)
+util_app.add_typer(constitution_app, name="constitution")
+
+
+@constitution_app.command("init")
+def constitution_init(
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Create a conservative, editable `.ronin/constitution.json` starter."""
+    from .constitution import write_starter
+
+    try:
+        path = write_starter(root)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(1)
+    console.print(f"[green]created[/green] {path}")
+
+
+@constitution_app.command("show")
+def constitution_show(
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Print the effective local constitution, including the permissive default."""
+    from .constitution import load_constitution
+
+    try:
+        policy = load_constitution(root)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    import json
+    console.print_json(json.dumps(policy.as_dict()))
+
+
+ledger_app = typer.Typer(help="Inspect the local, hash-chained autonomy ledger.", no_args_is_help=True)
+util_app.add_typer(ledger_app, name="ledger")
+
+
+@ledger_app.command("verify")
+def ledger_verify(
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Verify the ledger hash chain without contacting any external service."""
+    from .autonomy_ledger import verify_ledger
+
+    report = verify_ledger(root)
+    if report.valid:
+        console.print(f"[green]verified[/green] {report.events} ledger event(s)")
+        return
+    console.print(f"[red]invalid[/red] after {report.events} event(s): {report.error}")
+    raise typer.Exit(1)
+
+
+@ledger_app.command("show")
+def ledger_show(
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    limit: int = typer.Option(20, "--limit", min=1, max=200, help="Maximum recent events."),
+) -> None:
+    """Show bounded event metadata. Goals and raw model output are never stored."""
+    from .autonomy_ledger import recent_events
+
+    rows = recent_events(root, limit=limit)
+    if not rows:
+        console.print("[dim]no autonomy ledger events.[/dim]")
+        return
+    table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+    table.add_column("At")
+    table.add_column("Kind")
+    table.add_column("Run")
+    table.add_column("Result")
+    for row in rows:
+        payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+        table.add_row(str(row.get("at", "")), str(row.get("kind", "")), str(row.get("run_id") or "-"), str(payload.get("success", "-")))
+    console.print(table)
+
+
+project_memory_app = typer.Typer(help="Durable local project facts for human-approved agent recall.", no_args_is_help=True)
+util_app.add_typer(project_memory_app, name="project-memory")
+
+
+@project_memory_app.command("add")
+def project_memory_add(
+    text: str = typer.Argument(..., help="Durable project decision or fact."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    tags: str = typer.Option("", "--tags", help="Comma-separated retrieval tags."),
+) -> None:
+    """Add a local project fact. Likely credentials and private keys are refused."""
+    from .project_memory import ProjectMemory
+
+    try:
+        record_id = ProjectMemory(root).remember(text, tags=[tag for tag in tags.split(",") if tag.strip()])
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(f"[green]remembered[/green] {record_id}")
+
+
+@project_memory_app.command("search")
+def project_memory_search(
+    query: str = typer.Argument(..., help="Fact or decision to recall."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    limit: int = typer.Option(5, "--limit", min=1, max=20, help="Maximum matching facts."),
+) -> None:
+    """Search project memory with deterministic local hashing embeddings."""
+    from .project_memory import ProjectMemory
+
+    rows = ProjectMemory(root).recall(query, k=limit)
+    if not rows:
+        console.print("[dim]no matching project memory.[/dim]")
+        return
+    table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+    table.add_column("Score")
+    table.add_column("Fact", overflow="fold")
+    for row in rows:
+        table.add_row(str(row["score"]), str(row["text"]))
+    console.print(table)
+
+
+@util_app.command("agent-route")
+def route_agents(
+    goal: str = typer.Argument(..., help="Goal whose selected roles should be routed."),
+    models: str = typer.Option(..., "--models", help="Comma-separated provider:model[:quality:cost:latency] candidates."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    max_agents: int = typer.Option(8, "--max-agents", min=1, max=32, help="Maximum selected roles."),
+) -> None:
+    """Recommend a provider/model per role from explicit evidence and local health."""
+    from .agent_observability import provider_observations
+    from .agent_routing import parse_candidates, roster_from_decisions, route_profiles
+    from .orchestrate import select_agents_for_goal
+
+    try:
+        decisions = route_profiles(
+            select_agents_for_goal(goal, root, max_agents=max_agents),
+            parse_candidates(models), provider_observations(root),
+        )
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+    table.add_column("Role")
+    table.add_column("Model")
+    table.add_column("Score")
+    table.add_column("Reason")
+    for decision in decisions:
+        table.add_row(decision.role, decision.spec, str(decision.score), decision.reason)
+    console.print(table)
+    console.print(f"[dim]Suggested roster:[/dim] {roster_from_decisions(decisions)}")
+    console.print("[dim]Use it with `ronin util orchestrate --roster ...`; routing never changes a run implicitly.[/dim]")
+
+
+trials_app = typer.Typer(help="Run competing isolated teams and choose a verified candidate only.", no_args_is_help=True)
+util_app.add_typer(trials_app, name="trials")
+
+
+@trials_app.command("run")
+def trials_run(
+    goal: str = typer.Argument(..., help="Goal every competing team receives."),
+    candidate: List[str] = typer.Option(..., "--candidate", help="Repeat NAME=role=provider,... for each team."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    write: bool = typer.Option(False, "--write", help="Let candidates edit only in their own worktrees."),
+    max_parallel: int = typer.Option(2, "--max-parallel", min=1, max=8, help="Maximum candidate teams running together."),
+    offline: bool = typer.Option(False, "--offline", help="Use a local provider only."),
+) -> None:
+    """Execute explicit competing teams and rank only verified, finding-free outcomes."""
+    from .agent_workflow import workflow_for_goal
+    from .orchestrate import run_orchestrate
+    from .worktree_trials import TrialCandidate, choose_trial, run_trials
+
+    candidates = []
+    for raw in candidate:
+        name, separator, roster = raw.partition("=")
+        if not separator or not name.strip() or not roster.strip():
+            console.print("[red]x[/red] candidates must be NAME=role=provider,...")
+            raise typer.Exit(2)
+        candidates.append(TrialCandidate(name.strip(), roster.strip()))
+    if len(candidates) < 2:
+        console.print("[red]x[/red] trials need at least two explicit candidates")
+        raise typer.Exit(2)
+    config = load_config()
+    if offline:
+        from .offline import apply_offline
+        config = apply_offline(config.model_copy(update={"offline": True}))
+    elif not config.has_provider_auth():
+        console.print(f"[red]x[/red] no credentials for {config.provider}")
+        raise typer.Exit(2)
+
+    def runner(item):
+        return run_orchestrate(
+            config, goal, roster_spec=item.roster, root=root, read_only=not write,
+            workflow=workflow_for_goal(goal, write=True) if write else None,
+        )
+
+    try:
+        results = run_trials(candidates, runner, max_parallel=max_parallel)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    decision = choose_trial(results)
+    table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+    table.add_column("Candidate")
+    table.add_column("Success")
+    table.add_column("Verified")
+    table.add_column("Quality")
+    for result in results:
+        table.add_row(result.name, str(result.success), str(result.verifier_passed), str(round(result.quality, 3)))
+    console.print(table)
+    if decision.winner is None:
+        console.print("[red]no trial met the acceptance rule; no diff was applied.[/red]")
+        raise typer.Exit(1)
+    console.print(f"[green]selected[/green] {decision.winner.name}; inspect its stored run and diff before applying anything.")
+
+
 @util_app.command("agent-runs")
 def agent_runs(
     root: Path = typer.Option(Path("."), "--root", help="Project directory."),

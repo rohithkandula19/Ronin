@@ -17,6 +17,7 @@ brain) the whole thing runs with zero egress.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,7 @@ from .agent_catalog import (
 from .agent_governance import OrchestrationGovernance, provider_health
 from .agent_state import AgentTaskStateStore
 from .agent_workflow import WorkflowContract, inspect_handoffs
+from .constitution import RepositoryConstitution, load_constitution
 from .config import RoninConfig
 
 # Default specialist roster. Each is provider-agnostic: the planner assigns
@@ -289,6 +291,7 @@ class OrchestrateOutcome:
     # Every write-capable role receives its own detached worktree. The diff map
     # keeps the resulting patches attributable and reviewable.
     worktree_diffs: dict[str, str] = field(default_factory=dict)
+    constitution: dict[str, Any] = field(default_factory=dict)
     run_id: str | None = None
 
 
@@ -334,6 +337,13 @@ def run_orchestrate(
         )
         selected = selection.profiles
         governance.validate_team(len(selected))
+        constitution = load_constitution(root)
+        goal_tags = tuple(re.findall(r"[a-z0-9]+", goal.lower()))
+        constitution.validate_team(
+            (profile.key for profile in selected),
+            tags=(*selection.repository.tags, *goal_tags),
+            write=not read_only,
+        )
     except ValueError as exc:
         return OrchestrateOutcome(success=False, output="", error=str(exc))
     if not selected:
@@ -356,6 +366,8 @@ def run_orchestrate(
             workflow=workflow.as_dict() if workflow else None,
             governance=governance.as_dict(),
         )
+        state["constitution"] = constitution.as_dict()
+        state_store.save(state)
 
     def _on_step(step) -> None:
         if state_store is not None and state is not None:
@@ -377,6 +389,7 @@ def run_orchestrate(
                     base, goal, roster_spec=roster_spec, root=root, on_step=_on_step,
                     on_subtask_start=_on_subtask_start, max_iterations=max_iterations,
                     profiles=selected, workflow=workflow, governance=governance,
+                    constitution=constitution,
                 )
             except Exception as exc:  # noqa: BLE001 - state must survive provider/setup failures
                 outcome = OrchestrateOutcome(
@@ -385,13 +398,15 @@ def run_orchestrate(
                     workflow=workflow.as_dict() if workflow else {},
                     governance=governance.as_dict(),
                 )
-            return _finish_outcome(outcome, state_store, state)
+            outcome.constitution = constitution.as_dict()
+            return _finish_outcome(outcome, state_store, state, root=root, goal=goal)
         # Not a git repo: fall back to read-only so we never mutate the tree
         # uncontrolled. The CLI surfaces this; here we just stay safe.
         read_only = True
 
     tools_for_role = _tools_for_roles(
         base, root, read_only=read_only, mutate_root=root, profiles=selected,
+        constitution=constitution,
     )
     try:
         outcome = _run_core(
@@ -407,11 +422,12 @@ def run_orchestrate(
             workflow=workflow.as_dict() if workflow else {},
             governance=governance.as_dict(),
         )
-    return _finish_outcome(outcome, state_store, state)
+    outcome.constitution = constitution.as_dict()
+    return _finish_outcome(outcome, state_store, state, root=root, goal=goal)
 
 
 def _run_in_worktree(base, goal, *, roster_spec, root, on_step, on_subtask_start,
-                     max_iterations, profiles, workflow, governance):
+                     max_iterations, profiles, workflow, governance, constitution):
     """Run each write role in an isolated worktree and capture attributed diffs.
 
     Review and test roles see the implementer's tree, so their dependent steps
@@ -429,6 +445,7 @@ def _run_in_worktree(base, goal, *, roster_spec, root, on_step, on_subtask_start
         visible_roots = {profile.key: worktrees.get(profile.key, worktrees[primary]) for profile in profiles}
         tools_for_role = _tools_for_roles(
             base, root, read_only=False, profiles=profiles, worktree_roots=visible_roots,
+            constitution=constitution,
         )
         outcome = _run_core(
             base, goal, roster_spec=roster_spec, tools_for_role=tools_for_role,
@@ -492,6 +509,9 @@ def _finish_outcome(
     outcome: OrchestrateOutcome,
     state_store: AgentTaskStateStore | None,
     state: dict[str, Any] | None,
+    *,
+    root: Path | str,
+    goal: str,
 ) -> OrchestrateOutcome:
     """Persist final state after either the normal or worktree execution path."""
     if state_store is not None and state is not None:
@@ -509,6 +529,12 @@ def _finish_outcome(
             handoffs=outcome.handoffs,
         )
         outcome.run_id = str(state.get("id"))
+    try:
+        from .autonomy_ledger import record_orchestration
+
+        record_orchestration(root, outcome=outcome, goal=goal)
+    except Exception:
+        pass
     return outcome
 
 
@@ -517,6 +543,7 @@ def _tools_for_roles(
     mutate_root: "Path | str | None" = None,
     profiles: "tuple[AgentProfile, ...] | list[AgentProfile] | None" = None,
     worktree_roots: "dict[str, Path] | None" = None,
+    constitution: RepositoryConstitution | None = None,
 ) -> dict[str, list[Tool]]:
     """Build the per-role tool subsets from ronin's code toolbelt.
 
@@ -538,7 +565,14 @@ def _tools_for_roles(
     def _tools_at(location: Path | str) -> list[Tool]:
         path = Path(location).resolve()
         if path not in toolsets:
-            toolsets[path] = build_code_tools(path, sandbox=sandbox)
+            toolsets[path] = build_code_tools(
+                path,
+                sandbox=sandbox,
+                write_deny=(
+                    (lambda target, tool_root=path: constitution.protects(target, root=tool_root))
+                    if constitution is not None else None
+                ),
+            )
         return toolsets[path]
 
     out: dict[str, list[Tool]] = {}

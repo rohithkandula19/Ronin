@@ -61,6 +61,12 @@ Provider transport retries remain provider-owned. Ronin records observed
 subtask/provider health as `healthy` or `degraded` based on actual outcomes; it
 does not invent a health check or claim a provider is available without evidence.
 
+`ronin util agent-route` consumes explicit quality/cost/latency model evidence and
+these local observations to produce a role-to-model roster recommendation. It
+uses higher quality weighting for writers and higher efficiency weighting for
+exploration. The command does not perform implicit failover or mutate provider
+configuration; an operator may pass its printed roster to orchestration.
+
 ## Shared Task State
 
 While an orchestration runs, Ronin writes an atomic JSON record at:
@@ -104,4 +110,15 @@ specialist routing, workflow selection, and governance bounds stay stable in
 CI. It complements `ronin eval`, which measures live agent outcomes.
 
 `ronin eval platform` adds offline coverage for the durable queue, local
-semantic retrieval fallback, task telemetry, and fail-closed sandbox policy.
+semantic retrieval fallback, task telemetry, fail-closed sandbox policy,
+repository constitution enforcement, hash-chain ledger verification, and
+local durable project memory.
+
+### Migration and Rollback for Platform Primitives
+
+The queue, ledger, SQLite memory, and constitution are project-local under
+`.ronin/`. Existing installations require no migration. Remove the respective
+local file to discard its history or memory; remove `constitution.json` to
+return to the permissive policy default. Removing a ledger or memory store does
+not change repository files, Git history, provider configuration, or archived
+run records.

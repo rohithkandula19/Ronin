@@ -160,7 +160,8 @@ def _resolve(root: Path, rel: str) -> Path:
 
 def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None,
                      sandbox: bool = True,
-                     deny: "Callable[[Path], bool] | None" = None) -> list[Tool]:
+                     deny: "Callable[[Path], bool] | None" = None,
+                     write_deny: "Callable[[Path], bool] | None" = None) -> list[Tool]:
     """Build the coding tools rooted at ``root``.
 
     ``undo_stack``: optional list the write/edit tools push (path, prior_content
@@ -173,6 +174,9 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None,
     True for a resolved path, the read tools (read_file/list_files/search_files/
     glob) refuse or skip that path instead of returning its contents. Default
     None leaves every tool's behavior unchanged.
+    ``write_deny``: optional independent predicate for writes. Repository
+    constitutions use this to protect files while still allowing agents to read
+    the policy-controlled code needed to reason about a change.
     """
     root_path = Path(root).resolve()
     from .patch_verify import verify_patch
@@ -183,6 +187,14 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None,
         try:
             return bool(deny(p))
         except Exception:  # noqa: BLE001 - a broken predicate must fail safe (skip)
+            return True
+
+    def _write_denied(p: Path) -> bool:
+        if write_deny is None:
+            return False
+        try:
+            return bool(write_deny(p))
+        except Exception:  # noqa: BLE001 - policy evaluation failure must block mutation
             return True
 
     def _resolve_path(rel: str) -> Path:
@@ -280,6 +292,8 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None,
     # ---- write_file (SENSITIVE) ----
     def write_file(path: str, content: str) -> str:
         target = _resolve_path(path)
+        if _write_denied(target):
+            return "refused: that path is protected by the repository constitution"
         verified, verification = _preflight(path, target, "", content)
         if not verified:
             return verification or "ERROR: patch verification failed. No changes written."
@@ -292,6 +306,8 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None,
     # ---- edit_file (SENSITIVE) — Claude Code's core primitive: surgical replace ----
     def edit_file(path: str, old_string: str, new_string: str) -> str:
         target = _resolve_path(path)
+        if _write_denied(target):
+            return "refused: that path is protected by the repository constitution"
         if not target.is_file():
             return f"ERROR: {path} does not exist (use write_file to create it)"
         content = target.read_text(encoding="utf-8")
@@ -336,6 +352,8 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None,
     # ---- multi_edit (SENSITIVE) — several surgical replaces in ONE file/approval ----
     def multi_edit(path: str, edits: list) -> str:
         target = _resolve_path(path)
+        if _write_denied(target):
+            return "refused: that path is protected by the repository constitution"
         if not target.is_file():
             return f"ERROR: {path} does not exist (use write_file to create it)"
         content = target.read_text(encoding="utf-8")

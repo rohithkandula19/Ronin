@@ -5,6 +5,10 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Added
+- Repository-owned agent constitutions now enforce protected write paths, team caps, specialist-role requirements, and optional sandbox requirements from `.ronin/constitution.json`. Orchestration and interactive coding fail safely on malformed policy. Completed orchestrations append compact, hash-chained local ledger events verifiable with `ronin util ledger verify`.
+- Ronin now has durable local SQLite project memory with deterministic hashing retrieval, sensitive agent writes, and likely-secret rejection; compatible `RONIN.md`, `CLAUDE.md`, and `AGENTS.md` behavior remains unchanged. New `project-memory` commands manage explicit facts without cloud storage.
+- The agent control plane adds bounded parallel queue workers, explicit evidence-led per-role model-routing recommendations, and competing worktree trial execution with verified-only selection. Trial selection never merges or applies a candidate diff automatically.
+- `ronin eval platform` now covers constitution policy, ledger verification, and local project memory alongside queue, telemetry, retrieval, and sandbox regressions.
 - The agent platform now gives each implementation orchestration role a separate detached Git worktree, keeps review/test views on the candidate implementation tree, attributes resulting diffs by role, and never writes to the parent checkout. Project-local agent queues, terminal run/provider dashboards, a sandbox-policy inspector, and `ronin eval platform` provide controlled scheduling and observable offline operation. Semantic code retrieval now has a deterministic local hashing fallback and is available to coding runs without credentials or network egress.
 - `ronin-memory` now includes a dependency-free `SqliteBackend` for persistent, local-first long-term memory with namespace isolation, bounded retention, and pluggable scoring.
 - `ronin-agent-patterns` now supports per-run token, wall-clock, and provider-reported cost ceilings. Exhausted budgets return partial output with an explicit trace error and never execute newly requested tools.

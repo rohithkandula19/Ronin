@@ -9,12 +9,15 @@ between a user, cron/CI, and ``ronin util agent-queue run-next``.
 from __future__ import annotations
 
 import datetime as _datetime
+import concurrent.futures
 import json
 import os
 import tempfile
+import threading
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Callable
 
 
 SCHEMA_VERSION = 1
@@ -69,6 +72,15 @@ class AgentQueueJob:
         )
 
 
+@dataclass(frozen=True)
+class QueueExecution:
+    """Terminal result returned by a queue worker without retaining raw output."""
+
+    success: bool
+    error: str | None = None
+    run_id: str | None = None
+
+
 class AgentQueue:
     """Atomic JSON queue for one project.
 
@@ -80,34 +92,58 @@ class AgentQueue:
     def __init__(self, root: Path | str) -> None:
         self.root = Path(root).resolve()
         self.path = self.root / ".ronin" / "agent-queue.json"
+        self._lock = threading.RLock()
 
     def list(self) -> list[AgentQueueJob]:
-        return self._load()
+        with self._lock:
+            return self._load()
 
     def enqueue(self, goal: str, *, write: bool = False) -> AgentQueueJob:
-        text = goal.strip()
-        if not text:
-            raise ValueError("agent queue goal must not be empty")
-        now = _now()
-        job = AgentQueueJob(id=_new_id(), goal=text, write=write, created=now, updated=now)
-        jobs = self._load()
-        jobs.append(job)
-        self._save(jobs)
-        return job
+        with self._lock:
+            text = goal.strip()
+            if not text:
+                raise ValueError("agent queue goal must not be empty")
+            now = _now()
+            job = AgentQueueJob(id=_new_id(), goal=text, write=write, created=now, updated=now)
+            jobs = self._load()
+            jobs.append(job)
+            self._save(jobs)
+            return job
 
     def claim_next(self) -> AgentQueueJob | None:
-        jobs = self._load()
-        for index, job in enumerate(jobs):
-            if job.status != "queued":
-                continue
-            claimed = AgentQueueJob(
-                **{**job.to_dict(), "status": "running", "attempts": job.attempts + 1,
-                   "updated": _now(), "error": None},
-            )
-            jobs[index] = claimed
-            self._save(jobs)
+        with self._lock:
+            jobs = self._load()
+            for index, job in enumerate(jobs):
+                if job.status != "queued":
+                    continue
+                claimed = AgentQueueJob(
+                    **{**job.to_dict(), "status": "running", "attempts": job.attempts + 1,
+                       "updated": _now(), "error": None},
+                )
+                jobs[index] = claimed
+                self._save(jobs)
+                return claimed
+            return None
+
+    def claim_many(self, limit: int) -> list[AgentQueueJob]:
+        """Claim a bounded batch before workers begin, preventing duplicate local runs."""
+        if not 1 <= limit <= 100:
+            raise ValueError("queue batch limit must be between 1 and 100")
+        with self._lock:
+            jobs = self._load()
+            claimed: list[AgentQueueJob] = []
+            for index, job in enumerate(jobs):
+                if job.status != "queued" or len(claimed) >= limit:
+                    continue
+                running = AgentQueueJob(
+                    **{**job.to_dict(), "status": "running", "attempts": job.attempts + 1,
+                       "updated": _now(), "error": None},
+                )
+                jobs[index] = running
+                claimed.append(running)
+            if claimed:
+                self._save(jobs)
             return claimed
-        return None
 
     def finish(
         self,
@@ -117,31 +153,58 @@ class AgentQueue:
         error: str | None = None,
         run_id: str | None = None,
     ) -> AgentQueueJob | None:
-        jobs = self._load()
-        for index, job in enumerate(jobs):
-            if job.id != job_id or job.status != "running":
-                continue
-            finished = AgentQueueJob(
-                **{**job.to_dict(), "status": "completed" if success else "failed",
-                   "updated": _now(), "error": (error or None), "run_id": run_id},
-            )
-            jobs[index] = finished
-            self._save(jobs)
-            return finished
-        return None
+        with self._lock:
+            jobs = self._load()
+            for index, job in enumerate(jobs):
+                if job.id != job_id or job.status != "running":
+                    continue
+                finished = AgentQueueJob(
+                    **{**job.to_dict(), "status": "completed" if success else "failed",
+                       "updated": _now(), "error": (error or None), "run_id": run_id},
+                )
+                jobs[index] = finished
+                self._save(jobs)
+                return finished
+            return None
 
     def cancel(self, job_id: str) -> AgentQueueJob | None:
-        jobs = self._load()
-        for index, job in enumerate(jobs):
-            if job.id != job_id or job.status != "queued":
-                continue
-            cancelled = AgentQueueJob(
-                **{**job.to_dict(), "status": "cancelled", "updated": _now()},
-            )
-            jobs[index] = cancelled
-            self._save(jobs)
-            return cancelled
-        return None
+        with self._lock:
+            jobs = self._load()
+            for index, job in enumerate(jobs):
+                if job.id != job_id or job.status != "queued":
+                    continue
+                cancelled = AgentQueueJob(
+                    **{**job.to_dict(), "status": "cancelled", "updated": _now()},
+                )
+                jobs[index] = cancelled
+                self._save(jobs)
+                return cancelled
+            return None
+
+    def run_pending(
+        self,
+        runner: Callable[[AgentQueueJob], QueueExecution],
+        *,
+        max_jobs: int = 1,
+        max_parallel: int = 1,
+    ) -> list[AgentQueueJob]:
+        """Run a claimed batch with explicit, bounded local worker concurrency."""
+        if not 1 <= max_parallel <= 100:
+            raise ValueError("queue max_parallel must be between 1 and 100")
+        jobs = self.claim_many(max_jobs)
+        if not jobs:
+            return []
+
+        def execute(job: AgentQueueJob) -> AgentQueueJob:
+            try:
+                result = runner(job)
+            except Exception as exc:  # noqa: BLE001 - each job gets an honest terminal state
+                result = QueueExecution(False, f"{type(exc).__name__}: {exc}")
+            finished = self.finish(job.id, success=result.success, error=result.error, run_id=result.run_id)
+            return finished or job
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(max_parallel, len(jobs))) as pool:
+            return list(pool.map(execute, jobs))
 
     def _load(self) -> list[AgentQueueJob]:
         try:
