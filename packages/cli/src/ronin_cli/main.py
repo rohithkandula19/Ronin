@@ -1357,6 +1357,16 @@ def eval_agents() -> None:
         raise typer.Exit(1)
 
 
+@eval_app.command("platform", help="Run offline queue, telemetry, semantic-memory, and sandbox regressions.")
+def eval_platform() -> None:
+    """Evaluate the integrated agent platform without provider calls or credentials."""
+    from .agent_platform_eval import render_agent_platform_report, run_agent_platform_eval
+
+    passed = render_agent_platform_report(console, run_agent_platform_eval())
+    if not passed:
+        raise typer.Exit(1)
+
+
 @eval_app.command("run", help="Run a golden dataset against a target model.")
 def eval_run(
     dataset: Path = typer.Argument(..., help="Path to JSONL dataset."),
@@ -2487,6 +2497,176 @@ def agents(
         )
     console.print(table)
 
+
+agent_queue_app = typer.Typer(
+    help="Project-local queue for governed orchestration jobs. Jobs run only when a worker claims them.",
+    no_args_is_help=True,
+)
+util_app.add_typer(agent_queue_app, name="agent-queue")
+
+
+@agent_queue_app.command("add")
+def agent_queue_add(
+    goal: str = typer.Argument(..., help="Goal to run through the agent control plane."),
+    write: bool = typer.Option(False, "--write", help="Run in reviewed, isolated worktrees when claimed."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Queue a governed agent goal; this command never starts an agent by itself."""
+    from .agent_queue import AgentQueue
+
+    try:
+        job = AgentQueue(root).enqueue(goal, write=write)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    mode = "write worktree" if write else "read-only"
+    console.print(f"[green]queued[/green] [cyan]{job.id}[/cyan] [dim]({mode})[/dim]")
+
+
+@agent_queue_app.command("list")
+def agent_queue_list(
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Show durable queued, running, and completed agent jobs for a project."""
+    from .agent_queue import AgentQueue
+
+    jobs = AgentQueue(root).list()
+    if not jobs:
+        console.print("[dim]no queued agent jobs.[/dim]")
+        return
+    table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+    table.add_column("Job", no_wrap=True)
+    table.add_column("Status")
+    table.add_column("Mode")
+    table.add_column("Attempts", justify="right")
+    table.add_column("Goal", overflow="fold")
+    for job in jobs:
+        table.add_row(job.id, job.status, "write" if job.write else "read", str(job.attempts), job.goal)
+    console.print(table)
+
+
+@agent_queue_app.command("cancel")
+def agent_queue_cancel(
+    job_id: str = typer.Argument(..., help="Queued job id."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Cancel a waiting job. Running and terminal jobs stay immutable."""
+    from .agent_queue import AgentQueue
+
+    if AgentQueue(root).cancel(job_id) is None:
+        console.print(f"[red]x[/red] no queued job named {job_id!r}")
+        raise typer.Exit(1)
+    console.print(f"[green]cancelled[/green] [cyan]{job_id}[/cyan]")
+
+
+@agent_queue_app.command("run-next")
+def agent_queue_run_next(
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    offline: bool = typer.Option(False, "--offline", help="Run on a local provider only."),
+) -> None:
+    """Claim and execute one queued job with normal governance and approvals."""
+    from .agent_queue import AgentQueue
+    from .agent_workflow import workflow_for_goal
+    from .orchestrate import run_orchestrate
+
+    queue = AgentQueue(root)
+    job = queue.claim_next()
+    if job is None:
+        console.print("[dim]no queued agent jobs.[/dim]")
+        return
+    config = load_config()
+    if offline:
+        # A queued offline worker must not depend on a localhost daemon from the
+        # interactive profile. The embedded provider is process-local, and the
+        # offline policy will retain it while stripping network tools.
+        config = config.model_copy(update={
+            "provider": "local", "model": None, "base_url": None,
+            "failover": [], "offline": True,
+        })
+    if not offline and not config.has_provider_auth():
+        message = f"no credentials for {config.provider}"
+        queue.finish(job.id, success=False, error=message)
+        console.print(f"[red]x[/red] {message}")
+        raise typer.Exit(2)
+    try:
+        outcome = run_orchestrate(
+            config, job.goal, root=root, read_only=not job.write,
+            workflow=workflow_for_goal(job.goal, write=True) if job.write else None,
+        )
+    except Exception as exc:  # noqa: BLE001 - queue must keep a terminal outcome
+        outcome = None
+        error = f"{type(exc).__name__}: {exc}"
+    else:
+        error = outcome.error
+    queue.finish(
+        job.id, success=bool(outcome and outcome.success), error=error,
+        run_id=outcome.run_id if outcome is not None else None,
+    )
+    if outcome is None or not outcome.success:
+        console.print(f"[red]x[/red] job failed: {error or 'unknown error'}")
+        raise typer.Exit(1)
+    console.print(f"[green]completed[/green] [cyan]{job.id}[/cyan] [dim]run {outcome.run_id or 'not persisted'}[/dim]")
+    console.print(outcome.output)
+
+
+@util_app.command("agent-runs")
+def agent_runs(
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    limit: int = typer.Option(20, "--limit", min=1, max=200, help="Maximum recent runs to show."),
+) -> None:
+    """Show a local terminal dashboard of agent work, isolation, and providers."""
+    from .agent_observability import dashboard_counts, list_agent_runs, provider_observations
+
+    runs = list_agent_runs(root, limit=limit)
+    counts = dashboard_counts(root)
+    console.print("[bold]agent runs[/bold] " + " ".join(f"{status}={count}" for status, count in sorted(counts.items())))
+    if not runs:
+        console.print("[dim]no project-local agent task state yet.[/dim]")
+        return
+    table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+    table.add_column("Run", no_wrap=True)
+    table.add_column("Status")
+    table.add_column("Agents", justify="right")
+    table.add_column("Subtasks", justify="right")
+    table.add_column("Isolation")
+    table.add_column("Goal", overflow="fold")
+    for run in runs:
+        table.add_row(run.id, run.status, str(run.agents), str(run.subtasks), run.isolation, run.goal)
+    console.print(table)
+    health = provider_observations(root)
+    if health:
+        console.print("\n[bold]provider observations[/bold]")
+        providers = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+        providers.add_column("Provider")
+        providers.add_column("Status")
+        providers.add_column("Attempts", justify="right")
+        providers.add_column("Failures", justify="right")
+        providers.add_column("Roles")
+        for provider, observation in sorted(health.items()):
+            providers.add_row(
+                provider, str(observation["status"]), str(observation["attempts"]),
+                str(observation["failures"]), ", ".join(observation["roles"]),
+            )
+        console.print(providers)
+
+
+@util_app.command("sandbox")
+def sandbox_status() -> None:
+    """Inspect the requested command sandbox without executing a command."""
+    from .backends import requested_backend
+    from .sandbox_policy import inspect_sandbox_policy
+
+    status = inspect_sandbox_policy(requested_backend())
+    table = Table(box=box.SIMPLE, show_header=False)
+    table.add_column("field", style="cyan", no_wrap=True)
+    table.add_column("value")
+    table.add_row("requested", status.requested or "local")
+    table.add_row("mode", status.mode)
+    table.add_row("status", status.status)
+    table.add_row("fail closed", "yes" if status.fail_closed else "not requested")
+    table.add_row("detail", status.detail)
+    console.print(table)
+
 @util_app.command()
 def orchestrate(
     goal: str = typer.Argument(..., help="The high-level goal to decompose and work."),
@@ -2634,10 +2814,11 @@ def orchestrate(
     console.print()
     from rich.markdown import Markdown
     console.print(Markdown(outcome.output or "_(no output)_"))
-    if write and outcome.diff.strip():
-        console.print("\n[bold]diff (in isolated worktree — review before applying)[/bold]:")
+    if write and outcome.worktree_diffs:
         from .kaizen import _print_diff
-        _print_diff(console, outcome.diff)
+        for role, diff in outcome.worktree_diffs.items():
+            console.print(f"\n[bold]diff ({role} isolated worktree — review before applying)[/bold]:")
+            _print_diff(console, diff)
     if not outcome.success:
         raise typer.Exit(1)
 

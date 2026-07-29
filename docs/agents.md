@@ -18,9 +18,11 @@ ronin util orchestrate "audit payment API security" --max-agents 8
 ronin util orchestrate "add retry coverage for the Python client" --write --max-agents 10
 ```
 
-`--write` keeps all mutating specialists inside an isolated git worktree. The
-agent's tier only controls its tool subset; every write and command still uses
-Ronin's normal approval and destructive-command policies.
+`--write` gives each implementation specialist its own isolated Git worktree.
+Review and test roles inspect the candidate implementation tree, while the
+parent checkout remains untouched. The agent's tier only controls its tool
+subset; every write and command still uses Ronin's normal approval and
+destructive-command policies.
 
 ## Project Profiles
 
@@ -78,4 +80,5 @@ reason for every choice (`task:...`, `repo:...`, or the core workflow role), so
 an operator can see why a specialist was invited before any model call.
 
 For workflow contracts, governed execution limits, durable task boards, and the
-offline regression suite, see [Agent control plane](agent_control_plane.md).
+offline regression suite, see [Agent control plane](agent_control_plane.md) and
+[Agent platform operations](agent_platform.md).

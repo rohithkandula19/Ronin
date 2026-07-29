@@ -5,6 +5,7 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Added
+- The agent platform now gives each implementation orchestration role a separate detached Git worktree, keeps review/test views on the candidate implementation tree, attributes resulting diffs by role, and never writes to the parent checkout. Project-local agent queues, terminal run/provider dashboards, a sandbox-policy inspector, and `ronin eval platform` provide controlled scheduling and observable offline operation. Semantic code retrieval now has a deterministic local hashing fallback and is available to coding runs without credentials or network egress.
 - `ronin-memory` now includes a dependency-free `SqliteBackend` for persistent, local-first long-term memory with namespace isolation, bounded retention, and pluggable scoring.
 - `ronin-agent-patterns` now supports per-run token, wall-clock, and provider-reported cost ceilings. Exhausted budgets return partial output with an explicit trace error and never execute newly requested tools.
 - `ronin-agent-patterns` now includes an opt-in, repository-scoped `PlanCache` for `PlannerExecutorAgent`, with atomic local writes, repository-change invalidation, bounded retention, and no raw task text in cache records.

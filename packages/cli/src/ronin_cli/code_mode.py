@@ -732,6 +732,11 @@ def run_code_agent(
     # are read-only, so they're available even in plan mode and to sub-agents.
     from .lsp import build_lsp_tools
     tools = tools + build_lsp_tools(root)
+    # Semantic file retrieval stays available without credentials. Its fallback
+    # is a deterministic local hashing index, so offline runs never send project
+    # content to an embedding provider.
+    from .embeddings import build_semantic_tools
+    tools = tools + build_semantic_tools(config, root)
     # Web tools (web_search + fetch_url): read-only and safe, so the coding
     # agent gets them even in plan mode — look up docs/errors while it works.
     # Offline mode strips them below (NETWORK_TOOLS).

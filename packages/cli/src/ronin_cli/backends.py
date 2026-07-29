@@ -93,6 +93,16 @@ DEFAULT_BACKEND: dict = {"type": "local"}
 _SSH_HOST_RE = re.compile(r"^(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9._-]+$")
 
 
+def _host_shell(cmd: str) -> list[str]:
+    """Return the native host-shell argv without changing container semantics."""
+    if platform.system() == "Windows":
+        # ``cmd.exe`` is present on supported Windows hosts. Keep the command as
+        # one argv element, just as the POSIX wrapper does, so backend metadata
+        # cannot splice flags or a second command around it.
+        return ["cmd.exe", "/d", "/s", "/c", cmd]
+    return ["sh", "-lc", cmd]
+
+
 def _validate_ssh_host(host: str) -> str:
     """Return ``host`` if it is a safe ``[user@]host`` token, else raise.
 
@@ -130,9 +140,9 @@ def wrap_command(cmd: str, backend: dict) -> list[str]:
     btype = backend.get("type", "local")
 
     if btype == "local":
-        # Host shell. -l (login) so PATH/aliases match the user's interactive
-        # shell; -c takes the command as a single argument.
-        return ["sh", "-lc", cmd]
+        # Native host shell. The command remains one argv element on both POSIX
+        # and Windows; Docker continues to use its container's POSIX shell.
+        return _host_shell(cmd)
 
     if btype == "docker":
         container = backend.get("container")

@@ -33,3 +33,7 @@ Keys are stored per-provider in a local config (`.ronin/config.toml` or `~/.conf
 ## Smart routing (optional)
 
 `/route <fast> <strong>` runs cheap/free turns on one model and complex turns on another; a self-tuning router escalates a cheap blade that proves unreliable in a repo. `/router` shows what it has learned. `ronin doctor --check` does a live key+model ping.
+
+For orchestrated work, `ronin util agent-runs` also reports project-local
+provider observations from completed subtasks. These are historical outcomes,
+not a synthetic health check: a provider with no row has no recorded evidence.

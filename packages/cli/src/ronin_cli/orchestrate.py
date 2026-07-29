@@ -286,6 +286,9 @@ class OrchestrateOutcome:
     governance: dict[str, Any] = field(default_factory=dict)
     provider_health: dict[str, dict[str, Any]] = field(default_factory=dict)
     handoffs: dict[str, Any] = field(default_factory=dict)
+    # Every write-capable role receives its own detached worktree. The diff map
+    # keeps the resulting patches attributable and reviewable.
+    worktree_diffs: dict[str, str] = field(default_factory=dict)
     run_id: str | None = None
 
 
@@ -409,13 +412,23 @@ def run_orchestrate(
 
 def _run_in_worktree(base, goal, *, roster_spec, root, on_step, on_subtask_start,
                      max_iterations, profiles, workflow, governance):
-    """Run the mutating orchestration inside a throwaway worktree, capture the
-    diff, and clean up — reusing the dojo's worktree isolation."""
-    from .worktree import git_worktree, worktree_diff
+    """Run each write role in an isolated worktree and capture attributed diffs.
 
-    with git_worktree(root, label="orchestrate") as wt:
+    Review and test roles see the implementer's tree, so their dependent steps
+    inspect the candidate patch rather than the untouched parent checkout. A
+    reviewer never receives mutation tools; the shared view is for evidence,
+    not for bypassing the approval boundary.
+    """
+    from .worktree import git_worktree_pool, worktree_diff
+
+    writers = [profile.key for profile in profiles if profile.tier == "write"]
+    if not writers:
+        raise ValueError("write orchestration needs at least one write-capable agent")
+    primary = "implementer" if "implementer" in writers else writers[0]
+    with git_worktree_pool(root, writers) as worktrees:
+        visible_roots = {profile.key: worktrees.get(profile.key, worktrees[primary]) for profile in profiles}
         tools_for_role = _tools_for_roles(
-            base, wt, read_only=False, mutate_root=wt, profiles=profiles,
+            base, root, read_only=False, profiles=profiles, worktree_roots=visible_roots,
         )
         outcome = _run_core(
             base, goal, roster_spec=roster_spec, tools_for_role=tools_for_role,
@@ -423,7 +436,13 @@ def _run_in_worktree(base, goal, *, roster_spec, root, on_step, on_subtask_start
             max_iterations=max_iterations, diff="", profiles=profiles,
             workflow=workflow, governance=governance,
         )
-        outcome.diff = worktree_diff(wt)
+        outcome.worktree_diffs = {
+            role: diff for role, path in worktrees.items()
+            if (diff := worktree_diff(path)).strip()
+        }
+        outcome.diff = "\n\n".join(
+            f"# worktree: {role}\n{diff}" for role, diff in outcome.worktree_diffs.items()
+        )
     return outcome
 
 
@@ -476,6 +495,11 @@ def _finish_outcome(
 ) -> OrchestrateOutcome:
     """Persist final state after either the normal or worktree execution path."""
     if state_store is not None and state is not None:
+        if outcome.worktree_diffs:
+            state["isolation"] = {
+                "mode": "per-write-role-worktree",
+                "roles": sorted(outcome.worktree_diffs),
+            }
         state_store.finish(
             state,
             success=outcome.success,
@@ -492,6 +516,7 @@ def _tools_for_roles(
     base: RoninConfig, root: Path | str, *, read_only: bool,
     mutate_root: "Path | str | None" = None,
     profiles: "tuple[AgentProfile, ...] | list[AgentProfile] | None" = None,
+    worktree_roots: "dict[str, Path] | None" = None,
 ) -> dict[str, list[Tool]]:
     """Build the per-role tool subsets from ronin's code toolbelt.
 
@@ -507,27 +532,30 @@ def _tools_for_roles(
 
     _READONLY = {"read_file", "list_files", "search_files", "glob"}
     sandbox = not getattr(base, "full_access", False)
-    base_tools = build_code_tools(root, sandbox=sandbox)
-    readonly_tools = [t for t in base_tools if t.name in _READONLY]
-    # The tester needs to actually RUN a suite, so it gets the explorer tools plus
-    # run_command even in read-only mode (it can run an existing suite without
-    # editing production code).
-    tester_readonly = [
-        t for t in base_tools if t.name in (_READONLY | {"run_command"})
-    ]
     selected = tuple(profiles) if profiles is not None else core_agent_profiles()
-    worktree_tools: list[Tool] | None = None
+    toolsets: dict[Path, list[Tool]] = {}
+
+    def _tools_at(location: Path | str) -> list[Tool]:
+        path = Path(location).resolve()
+        if path not in toolsets:
+            toolsets[path] = build_code_tools(path, sandbox=sandbox)
+        return toolsets[path]
+
     out: dict[str, list[Tool]] = {}
     for profile in selected:
+        location = (worktree_roots or {}).get(profile.key, Path(root))
+        base_tools = _tools_at(location)
+        readonly_tools = [t for t in base_tools if t.name in _READONLY]
+        # The tester needs to actually RUN a suite, so it gets the explorer tools
+        # plus run_command even in read-only mode.
+        tester_readonly = [t for t in base_tools if t.name in (_READONLY | {"run_command"})]
         if profile.tier == "explore":
             out[profile.key] = readonly_tools
             continue
         if read_only:
             out[profile.key] = tester_readonly if profile.tier == "test" else readonly_tools
             continue
-        # Mutations and test writes are bound to the isolated worktree, never the
-        # checkout from which the orchestrator was invoked.
-        if worktree_tools is None:
-            worktree_tools = build_code_tools(mutate_root or root, sandbox=sandbox)
-        out[profile.key] = worktree_tools
+        # Mutations and test writes are bound to a role-specific isolated
+        # worktree, never the checkout from which the orchestration was invoked.
+        out[profile.key] = _tools_at((worktree_roots or {}).get(profile.key, mutate_root or root))
     return out

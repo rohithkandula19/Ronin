@@ -75,6 +75,14 @@ final output. A stopped run therefore remains inspectable rather than looking
 as if it silently completed. The regular user-level run archive continues to
 power `ronin ui` and records the task-state id for correlation.
 
+Implementation roles receive separate detached Git worktrees. Review and test
+roles inspect the implementation candidate tree, and the final state records
+which roles produced an isolated diff. The parent checkout remains untouched.
+
+Use `ronin util agent-runs` for a terminal view of task state and provider
+observations. It reports only real subtask outcomes; no provider is marked
+available or healthy without observed successful work.
+
 ### Migration and Rollback
 
 This is schema version 1 and introduces no config migration or database. Older
@@ -94,3 +102,6 @@ ronin eval agents
 The suite uses fixture repository signals and no provider call. It checks that
 specialist routing, workflow selection, and governance bounds stay stable in
 CI. It complements `ronin eval`, which measures live agent outcomes.
+
+`ronin eval platform` adds offline coverage for the durable queue, local
+semantic retrieval fallback, task telemetry, and fail-closed sandbox policy.

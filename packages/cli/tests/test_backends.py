@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pytest
 
+import ronin_cli.backends as backends
 from ronin_cli.backends import (
     DEFAULT_BACKEND,
     parse_backend,
@@ -32,6 +33,11 @@ def test_wrap_local_is_default_shape() -> None:
 def test_wrap_missing_type_defaults_to_local() -> None:
     # An empty dict means "no type" → local, so an absent backend never escapes.
     assert wrap_command("pwd", {}) == ["sh", "-lc", "pwd"]
+
+
+def test_wrap_local_uses_native_windows_shell(monkeypatch) -> None:
+    monkeypatch.setattr(backends.platform, "system", lambda: "Windows")
+    assert wrap_command("dir", {"type": "local"}) == ["cmd.exe", "/d", "/s", "/c", "dir"]
 
 
 def test_wrap_command_carries_command_as_single_argv_element() -> None:
