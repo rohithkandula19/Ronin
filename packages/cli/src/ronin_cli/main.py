@@ -2507,6 +2507,109 @@ def agents(
     console.print(table)
 
 
+fleet_app = typer.Typer(
+    help="Create and inspect bounded multi-wave specialist fleet plans.",
+    no_args_is_help=True,
+)
+util_app.add_typer(fleet_app, name="fleet")
+
+
+@fleet_app.command("plan")
+def fleet_plan(
+    goal: str = typer.Argument(..., help="Goal used to select and schedule specialist profiles."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    write: bool = typer.Option(False, "--write", help="Include a planned implementation phase; does not permit writes."),
+    max_profiles: int = typer.Option(32, "--max-profiles", min=4, max=512, help="Maximum relevant profiles across all waves."),
+    max_parallel: int = typer.Option(8, "--max-parallel", min=1, max=32, help="Maximum profiles scheduled in one wave."),
+    agent_manifest: Optional[Path] = typer.Option(None, "--agent-manifest", help="Project profile manifest (default: .ronin/agents.json)."),
+) -> None:
+    """Persist a local multi-wave plan without starting agents or modifying code."""
+    from .agent_catalog import repository_signals
+    from .agent_fleet import FleetPlanStore, plan_fleet
+    from .orchestrate import agent_catalog, core_agent_profiles
+
+    try:
+        catalog = agent_catalog(root, manifest=agent_manifest)
+        plan = plan_fleet(
+            goal, catalog, core_keys=(profile.key for profile in core_agent_profiles()),
+            repository=repository_signals(goal, root), write=write,
+            max_profiles=max_profiles, max_parallel=max_parallel,
+        )
+        FleetPlanStore(root).save(plan)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    _print_fleet_plan(plan)
+    console.print(
+        f"[green]saved[/green] [cyan]{plan.id}[/cyan] "
+        "[dim](a plan only; no agent, command, or write was started)[/dim]"
+    )
+
+
+@fleet_app.command("list")
+def fleet_list(
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    limit: int = typer.Option(20, "--limit", min=1, max=200, help="Maximum recent plans to show."),
+) -> None:
+    """List saved project-local fleet plans."""
+    from .agent_fleet import FleetPlanStore
+
+    plans = FleetPlanStore(root).list(limit=limit)
+    if not plans:
+        console.print("[dim]no saved fleet plans.[/dim]")
+        return
+    table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+    table.add_column("Plan", no_wrap=True)
+    table.add_column("Mode")
+    table.add_column("Profiles", justify="right")
+    table.add_column("Waves", justify="right")
+    table.add_column("Goal", overflow="fold")
+    for plan in plans:
+        table.add_row(
+            plan.id, "write plan" if plan.write else "read plan", str(len(plan.members)),
+            str(len(plan.waves)), plan.goal,
+        )
+    console.print(table)
+
+
+@fleet_app.command("show")
+def fleet_show(
+    plan_id: str = typer.Argument(..., help="Saved fleet plan id."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Show an inspectable phase/wave schedule without starting any agent."""
+    from .agent_fleet import FleetPlanStore
+
+    try:
+        plan = FleetPlanStore(root).load(plan_id)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    _print_fleet_plan(plan)
+
+
+def _print_fleet_plan(plan) -> None:
+    console.print(
+        f"[bold]fleet plan[/bold] {plan.id} [dim]catalog={plan.catalog_size}, "
+        f"selected={len(plan.members)}, wave cap={plan.max_parallel}[/dim]"
+    )
+    table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+    table.add_column("Wave", justify="right")
+    table.add_column("Phase")
+    table.add_column("Active", justify="right")
+    table.add_column("Waits for")
+    table.add_column("Profiles", overflow="fold")
+    for wave in plan.waves:
+        waits_for = ", ".join(str(number) for number in wave.waits_for) or "-"
+        table.add_row(
+            str(wave.number), wave.phase, str(wave.parallelism), waits_for,
+            ", ".join(wave.profile_keys),
+        )
+    console.print(table)
+    if plan.repository.tags:
+        console.print(f"[dim]routing evidence: {', '.join(plan.repository.tags)}[/dim]")
+
+
 agent_queue_app = typer.Typer(
     help="Project-local queue for governed orchestration jobs. Jobs run only when a worker claims them.",
     no_args_is_help=True,
@@ -3124,6 +3227,7 @@ def agent_operations(
     summary.add_row("scorecards", str(len(snapshot["scorecards"])))
     proposals = snapshot["proposals"]
     summary.add_row("proposals", f"{len(proposals)} ({sum(proposal.status == 'ready' for proposal in proposals)} ready)")
+    summary.add_row("fleet plans", str(len(snapshot["fleet_plans"])))
     console.print(summary)
     if snapshot["providers"]:
         console.print("\n[bold]provider health[/bold]")

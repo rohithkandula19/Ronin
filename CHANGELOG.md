@@ -5,6 +5,11 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Added
+- **Bounded fleet planning.** `ronin util fleet plan` converts up to 512
+  relevant specialist profiles into persisted research, implementation, and
+  acceptance waves with a hard 32-profile per-wave ceiling. The local `list`
+  and `show` surfaces expose routing evidence and dependencies without starting
+  agents, provider calls, shell commands, edits, or merges.
 - **Retained agent proposals.** Write orchestrations now archive each isolated
   role's non-empty patch under `.ronin/agent-proposals`, bound to the exact
   source `HEAD` and protected by a content digest. `ronin util proposals list`,

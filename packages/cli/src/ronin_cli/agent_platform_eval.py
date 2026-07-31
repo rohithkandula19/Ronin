@@ -8,7 +8,8 @@ from pathlib import Path
 
 from .agent_observability import provider_observations
 from .agent_proposals import AgentProposalStore
-from .agent_catalog import AgentProfile
+from .agent_catalog import AgentProfile, RepositorySignals
+from .agent_fleet import FleetPlanStore, plan_fleet
 from .agent_recovery import load_recovery_context
 from .agent_routing import ModelCandidate, route_profiles
 from .agent_queue import AgentQueue
@@ -48,6 +49,7 @@ def run_agent_platform_eval() -> list[PlatformEvalOutcome]:
             _scorecard_case(root),
             _structured_patch_case(root),
             _proposal_case(root),
+            _fleet_case(root),
         ]
     return outcomes
 
@@ -209,3 +211,31 @@ def _proposal_case(root: Path) -> PlatformEvalOutcome:
     except (OSError, subprocess.CalledProcessError, ValueError):
         passed = False
     return PlatformEvalOutcome("worktree proposal gate", passed, "verified patches stage only after base and clean-tree checks")
+
+
+def _fleet_case(root: Path) -> PlatformEvalOutcome:
+    profiles = (
+        AgentProfile("researcher", "research", "research", ("research",)),
+        AgentProfile("implementer", "implement", "implement", ("implementation",), tier="write"),
+        AgentProfile("reviewer", "review", "review", ("review",)),
+        AgentProfile("tester", "test", "test", ("testing",), tier="test"),
+        AgentProfile("payments-security-auditor", "audit", "audit", ("payments", "security")),
+    )
+    try:
+        plan = plan_fleet(
+            "audit payment security", profiles,
+            core_keys=("researcher", "implementer", "reviewer", "tester"),
+            repository=RepositorySignals(tags=("payments", "security")),
+            write=True, max_profiles=5, max_parallel=2,
+        )
+        FleetPlanStore(root).save(plan)
+        restored = FleetPlanStore(root).load(plan.id)
+        phases = [wave.phase for wave in restored.waves]
+        passed = (
+            len(restored.members) == 5
+            and all(wave.parallelism <= 2 for wave in restored.waves)
+            and phases == ["research", "implementation", "acceptance"]
+        )
+    except ValueError:
+        passed = False
+    return PlatformEvalOutcome("fleet planning", passed, "large specialist sets become bounded persisted waves")

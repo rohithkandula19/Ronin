@@ -32,6 +32,25 @@ or any dirty index/worktree. It only stages the patch for ordinary Git review;
 it never creates a commit, pushes a branch, resolves conflicts, or performs a
 three-way merge.
 
+## Fleet Planning
+
+For projects that match a broad span of expertise, turn the generated catalog
+into a local, multi-wave schedule:
+
+```bash
+ronin util fleet plan "harden the payments API" --write --max-profiles 96 --max-parallel 8
+ronin util fleet list
+ronin util fleet show fleet-20260731-120000-abc123
+```
+
+Fleet planning can rank up to 512 task-relevant profiles, but it schedules no
+more than 32 profiles in one wave. Write plans are separated into research,
+implementation, and acceptance phases; read-only plans omit implementation.
+Plans persist under `.ronin/fleet-plans/` with the selected profile keys and
+local routing evidence, but no prompts, providers, agents, shell commands,
+queue workers, edits, or merges are started by these commands. A fleet plan is
+an inspectable scheduling boundary, not autonomous execution.
+
 ## Queue and Worker
 
 Use the project-local queue when a person, CI job, or cron task should hand an
@@ -247,7 +266,7 @@ compare local models, while `ronin dev perf` measures repeatable local commands.
 ## Evaluation
 
 `ronin eval platform` is a provider-free regression suite for the queue,
-project telemetry, local semantic fallback, sandbox fail-closed policy,
+fleet planning, project telemetry, local semantic fallback, sandbox fail-closed policy,
 repository constitution, autonomy ledger, durable project memory, recovery,
 provider-health recovery, evaluation scorecards, and structured patch checks.
 Existing `ronin eval agents` continues to cover profile routing, workflow
