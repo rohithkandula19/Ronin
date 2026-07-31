@@ -40,6 +40,23 @@ scheduler, CI job, or human decides when to invoke it. It does not create a
 hidden daemon or bypass provider authentication, sandboxing, workflow checks,
 or tool approvals.
 
+## Recovery and Checkpoints
+
+Ronin already creates reversible workspace checkpoints for coding and pipeline
+work. Orchestrations additionally persist a live task record, so an interrupted
+or failed team can be resumed with an honest handoff:
+
+```bash
+ronin util agent-runs
+ronin util agent-recover agent-20260730-120000-abc123 --mode original
+```
+
+Recovery starts a **new linked run**. It preserves the original selected roles,
+roster, and read/write mode, then gives the replacement planner only the prior
+subtask statuses: completed, failed, and unfinished. It never treats prior
+output as proof or silently skips verification; the new team replans from the
+current repository state. Completed runs are not recoverable.
+
 ## Repository Constitution
 
 Projects can own a small policy file at `.ronin/constitution.json`:
@@ -87,6 +104,31 @@ Coding agents can recall this memory; writing a new fact is approval-gated and
 likely API keys or private keys are refused. This store has no cloud dependency
 and can be removed independently of source code and instruction files.
 
+## Provider Intelligence and Evaluation Evidence
+
+Every completed orchestration contributes its actual subtask outcome to
+`.ronin/provider-health.json`. A failed provider is temporarily marked
+`cooling-down`; a later successful observed run clears that temporary state.
+Ronin does not send synthetic pings or claim a provider is reachable without a
+real outcome.
+
+```bash
+ronin util provider-health
+ronin util bench --models "anthropic,gemini,ollama:qwen" --root .
+ronin util scorecards import swebench-report.json
+ronin util scorecards show
+```
+
+`bench` stores objective pass-rate, latency, and estimated-cost evidence as
+local model scorecards. Imported SWE-bench and judge reports can add quality
+evidence without copying prompt or completion text. Feed matching scorecards
+into an explicit routing recommendation with:
+
+```bash
+ronin util agent-route "add retry handling" \
+  --models "anthropic:sonnet,ollama:qwen" --use-scorecards
+```
+
 ## Evidence-Led Model Routing
 
 Ronin can recommend different models for different selected roles from explicit
@@ -102,6 +144,30 @@ latency more heavily. Degraded observed providers are penalized, while unseen
 providers are labelled `unknown` rather than assumed healthy. Routing prints a
 roster recommendation for an explicit `--roster`; it never changes a run behind
 the operator's back.
+
+## Patch Verification and Plugins
+
+Before an agent mutates source, Ronin parses Python, TypeScript/TSX when a
+local compiler is available, JSON, and TOML. Invalid structured files are
+rejected before disk mutation. This is a preflight, not a replacement for the
+repository test suite.
+
+Plugins use a literal non-executing `PLUGIN` manifest, capability metadata, and
+an explicit trust gate. High-risk `subprocess` and `payment` capabilities still
+need interactive approval under `--yolo`; use `ronin util plugins` to inspect
+the installed surface.
+
+## Operations View
+
+```bash
+ronin util agent-ops
+```
+
+The local terminal view joins run/queue counts, recoverable tasks, provider
+health, ledger integrity, and available scorecards. It reads local state only
+and makes no model or network request. The existing release automation,
+reproducible package validation, Docker support, and Windows command handling
+remain the release/runtime substrate for these operations.
 
 ## Competing Worktree Trials
 
@@ -166,7 +232,8 @@ compare local models, while `ronin dev perf` measures repeatable local commands.
 
 `ronin eval platform` is a provider-free regression suite for the queue,
 project telemetry, local semantic fallback, sandbox fail-closed policy,
-repository constitution, autonomy ledger, and durable project memory.
+repository constitution, autonomy ledger, durable project memory, recovery,
+provider-health recovery, evaluation scorecards, and structured patch checks.
 Existing `ronin eval agents` continues to cover profile routing, workflow
 contracts, and governance limits. For model coding quality, use the existing
 SWE-bench-style and agent evaluation surfaces with real providers.

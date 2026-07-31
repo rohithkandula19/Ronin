@@ -963,6 +963,7 @@ def bench(
     ),
     threshold: float = typer.Option(
         0.8, "--threshold", help="Pass-rate bar (0..1) a model must clear to be recommended."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory for durable benchmark evidence."),
 ) -> None:
     """Run the objective eval battery across several models and recommend the
     CHEAPEST one that clears the quality bar.
@@ -980,6 +981,14 @@ def bench(
     with console.status("[dim] running evals…[/dim]", spinner="dots"):
         result = run_bench(config, specs, threshold=threshold)
     render_bench(console, result)
+    try:
+        from .model_scorecards import ModelScorecardStore
+
+        saved = ModelScorecardStore(root).record_bench(result)
+        if saved:
+            console.print(f"[dim]saved {len(saved)} model scorecard(s) under {Path(root) / '.ronin'}[/dim]")
+    except OSError as exc:
+        console.print(f"[yellow]benchmark evidence was not saved: {exc}[/yellow]")
 
 
 # ---------- tools ----------
@@ -2778,16 +2787,24 @@ def route_agents(
     models: str = typer.Option(..., "--models", help="Comma-separated provider:model[:quality:cost:latency] candidates."),
     root: Path = typer.Option(Path("."), "--root", help="Project directory."),
     max_agents: int = typer.Option(8, "--max-agents", min=1, max=32, help="Maximum selected roles."),
+    use_scorecards: bool = typer.Option(False, "--use-scorecards", help="Use stored local evaluation quality for matching model specs."),
 ) -> None:
     """Recommend a provider/model per role from explicit evidence and local health."""
     from .agent_observability import provider_observations
     from .agent_routing import parse_candidates, roster_from_decisions, route_profiles
+    from .model_scorecards import ModelScorecardStore, apply_scorecards
     from .orchestrate import select_agents_for_goal
+    from .provider_health_store import ProviderHealthStore
 
     try:
+        candidates = parse_candidates(models)
+        if use_scorecards:
+            candidates = apply_scorecards(candidates, ModelScorecardStore(root).list())
+        health = provider_observations(root)
+        health.update(ProviderHealthStore(root).view())
         decisions = route_profiles(
             select_agents_for_goal(goal, root, max_agents=max_agents),
-            parse_candidates(models), provider_observations(root),
+            candidates, health,
         )
     except ValueError as exc:
         console.print(f"[red]x[/red] {exc}")
@@ -2802,6 +2819,50 @@ def route_agents(
     console.print(table)
     console.print(f"[dim]Suggested roster:[/dim] {roster_from_decisions(decisions)}")
     console.print("[dim]Use it with `ronin util orchestrate --roster ...`; routing never changes a run implicitly.[/dim]")
+
+
+scorecards_app = typer.Typer(help="Project-local model evaluation evidence for routing decisions.", no_args_is_help=True)
+util_app.add_typer(scorecards_app, name="scorecards")
+
+
+@scorecards_app.command("import")
+def scorecards_import(
+    report: Path = typer.Argument(..., exists=True, readable=True, help="SWE-bench or judge-report JSON."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    model: Optional[str] = typer.Option(None, "--model", help="Override a missing report model label."),
+) -> None:
+    """Import a model score from a generated evaluation report."""
+    from .model_scorecards import ModelScorecardStore
+
+    try:
+        card = ModelScorecardStore(root).import_report(report, model=model)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(f"[green]saved[/green] {card.model}: {card.quality:.1%} from {card.source}")
+
+
+@scorecards_app.command("show")
+def scorecards_show(
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Show the local benchmark and evaluation evidence available to routing."""
+    from .model_scorecards import ModelScorecardStore
+
+    cards = ModelScorecardStore(root).list()
+    if not cards:
+        console.print("[dim]no model scorecards. Run `ronin util bench` or import an evaluation report.[/dim]")
+        return
+    table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+    table.add_column("Model")
+    table.add_column("Quality", justify="right")
+    table.add_column("Cases", justify="right")
+    table.add_column("Source")
+    table.add_column("Latency", justify="right")
+    for card in sorted(cards.values(), key=lambda item: (-item.quality, item.model)):
+        latency = "-" if card.latency_seconds is None else f"{card.latency_seconds:.2f}s"
+        table.add_row(card.model, f"{card.quality:.1%}", str(card.cases), card.source, latency)
+    console.print(table)
 
 
 trials_app = typer.Typer(help="Run competing isolated teams and choose a verified candidate only.", no_args_is_help=True)
@@ -2905,6 +2966,96 @@ def agent_runs(
                 str(observation["failures"]), ", ".join(observation["roles"]),
             )
         console.print(providers)
+
+
+@util_app.command("agent-recover")
+def agent_recover(
+    run_id: str = typer.Argument(..., help="Interrupted or failed project-local agent run id."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    mode: str = typer.Option("original", "--mode", help="original, read, or write."),
+    offline: bool = typer.Option(False, "--offline", help="Run the replacement task on a local provider only."),
+) -> None:
+    """Start a linked replacement run with a status-only recovery handoff."""
+    from .agent_recovery import load_recovery_context, recover_profiles
+    from .agent_workflow import workflow_for_goal
+    from .orchestrate import agent_catalog, run_orchestrate
+
+    try:
+        context = load_recovery_context(root, run_id)
+        profiles = recover_profiles(root, context, agent_catalog(root, manifest=context.agent_manifest))
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    chosen = mode.strip().lower()
+    if chosen not in {"original", "read", "write"}:
+        console.print("[red]x[/red] --mode must be original, read, or write")
+        raise typer.Exit(2)
+    write = context.write if chosen == "original" else chosen == "write"
+    config = load_config()
+    if offline:
+        from .offline import apply_offline
+        config = apply_offline(config.model_copy(update={"offline": True}))
+    elif not config.has_provider_auth():
+        console.print(f"[red]x[/red] no credentials for {config.provider}; pass --offline for a local recovery")
+        raise typer.Exit(2)
+    console.print(f"[dim]recovering {context.run_id}: {len(context.failed)} failed, {len(context.unfinished)} unfinished subtask(s)[/dim]")
+    with console.status("[dim]replanning recovery run...[/dim]", spinner="dots"):
+        outcome = run_orchestrate(
+            config, context.goal, roster_spec=context.roster_spec, root=root,
+            read_only=not write, profiles=profiles, max_agents=max(context.max_agents, len(profiles)),
+            workflow=workflow_for_goal(context.goal, write=True) if write else None,
+            resume_from=context.run_id, resume_summary=context.planner_context(),
+        )
+    if not outcome.success:
+        console.print(f"[red]x[/red] recovery failed: {outcome.error or 'no plan'}")
+        raise typer.Exit(1)
+    console.print(f"[green]recovered[/green] as {outcome.run_id or 'unpersisted run'}")
+    console.print(outcome.output)
+
+
+@util_app.command("provider-health")
+def provider_health(
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Show durable, observation-only health and cooldown state for providers."""
+    from .provider_health_store import ProviderHealthStore
+
+    rows = ProviderHealthStore(root).view()
+    if not rows:
+        console.print("[dim]no provider outcomes recorded yet.[/dim]")
+        return
+    table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+    table.add_column("Provider")
+    table.add_column("Status")
+    table.add_column("Attempts", justify="right")
+    table.add_column("Failures", justify="right")
+    table.add_column("Roles")
+    for label, row in sorted(rows.items()):
+        table.add_row(label, str(row["status"]), str(row["attempts"]), str(row["failures"]), ", ".join(row["roles"]))
+    console.print(table)
+
+
+@util_app.command("agent-ops")
+def agent_operations(
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Show local agent operations: queue, recovery, provider health, ledger, and eval evidence."""
+    from .agent_operations import operations_snapshot
+
+    snapshot = operations_snapshot(root)
+    summary = Table(box=box.SIMPLE, show_header=False)
+    summary.add_column("Surface", style="cyan")
+    summary.add_column("State")
+    summary.add_row("runs", ", ".join(f"{key}={value}" for key, value in sorted(snapshot["runs"].items())) or "none")
+    summary.add_row("queue", ", ".join(f"{key}={value}" for key, value in sorted(snapshot["queue"].items())) or "empty")
+    summary.add_row("recoverable", str(len(snapshot["recoverable"])))
+    summary.add_row("ledger", f"{'valid' if snapshot['ledger'].valid else 'INVALID'} ({snapshot['ledger'].events} events)")
+    summary.add_row("scorecards", str(len(snapshot["scorecards"])))
+    console.print(summary)
+    if snapshot["providers"]:
+        console.print("\n[bold]provider health[/bold]")
+        for label, row in sorted(snapshot["providers"].items()):
+            console.print(f"  {label}: {row['status']} ({row['attempts']} attempt(s), {row['failures']} failure(s))")
 
 
 @util_app.command("sandbox")

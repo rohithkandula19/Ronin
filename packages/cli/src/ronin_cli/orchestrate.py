@@ -311,6 +311,8 @@ def run_orchestrate(
     workflow: WorkflowContract | None = None,
     governance: OrchestrationGovernance | None = None,
     persist_state: bool = True,
+    resume_from: str | None = None,
+    resume_summary: str | None = None,
 ) -> OrchestrateOutcome:
     """Run the orchestrator on ``goal``.
 
@@ -349,6 +351,10 @@ def run_orchestrate(
     if not selected:
         return OrchestrateOutcome(success=False, output="", error="orchestration needs at least one agent profile")
 
+    agent_goal = goal
+    if resume_summary:
+        agent_goal = f"{goal}\n\nRecovery context:\n{resume_summary.strip()}"
+
     state_store: AgentTaskStateStore | None = AgentTaskStateStore(root) if persist_state else None
     state: dict[str, Any] | None = None
     if state_store is not None:
@@ -365,8 +371,16 @@ def run_orchestrate(
             },
             workflow=workflow.as_dict() if workflow else None,
             governance=governance.as_dict(),
+            execution={
+                "roster_spec": roster_spec,
+                "read_only": read_only,
+                "max_agents": max_agents,
+                "agent_manifest": str(agent_manifest) if agent_manifest is not None else None,
+            },
         )
         state["constitution"] = constitution.as_dict()
+        if resume_from:
+            state["recovery"] = {"resumed_from": resume_from}
         state_store.save(state)
 
     def _on_step(step) -> None:
@@ -386,7 +400,7 @@ def run_orchestrate(
         if is_git_repo(root):
             try:
                 outcome = _run_in_worktree(
-                    base, goal, roster_spec=roster_spec, root=root, on_step=_on_step,
+                    base, agent_goal, roster_spec=roster_spec, root=root, on_step=_on_step,
                     on_subtask_start=_on_subtask_start, max_iterations=max_iterations,
                     profiles=selected, workflow=workflow, governance=governance,
                     constitution=constitution,
@@ -410,7 +424,7 @@ def run_orchestrate(
     )
     try:
         outcome = _run_core(
-            base, goal, roster_spec=roster_spec, tools_for_role=tools_for_role,
+            base, agent_goal, roster_spec=roster_spec, tools_for_role=tools_for_role,
             on_step=_on_step, on_subtask_start=_on_subtask_start,
             max_iterations=max_iterations, diff="", profiles=selected,
             workflow=workflow, governance=governance,
@@ -533,6 +547,12 @@ def _finish_outcome(
         from .autonomy_ledger import record_orchestration
 
         record_orchestration(root, outcome=outcome, goal=goal)
+    except Exception:
+        pass
+    try:
+        from .provider_health_store import ProviderHealthStore
+
+        ProviderHealthStore(root).observe(outcome.provider_health)
     except Exception:
         pass
     return outcome

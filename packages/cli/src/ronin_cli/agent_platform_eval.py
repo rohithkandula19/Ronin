@@ -6,6 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .agent_observability import provider_observations
+from .agent_catalog import AgentProfile
+from .agent_recovery import load_recovery_context
+from .agent_routing import ModelCandidate, route_profiles
 from .agent_queue import AgentQueue
 from .agent_state import AgentTaskStateStore
 from .autonomy_ledger import AutonomyLedger, verify_ledger
@@ -13,6 +16,9 @@ from .constitution import RepositoryConstitution
 from .config import RoninConfig
 from .embeddings import semantic_search
 from .project_memory import ProjectMemory
+from .provider_health_store import ProviderHealthStore
+from .model_scorecards import ModelScorecardStore, apply_scorecards
+from .patch_verify import verify_patch
 from .sandbox_policy import inspect_sandbox_policy
 
 
@@ -35,6 +41,10 @@ def run_agent_platform_eval() -> list[PlatformEvalOutcome]:
             _constitution_case(root),
             _ledger_case(root),
             _memory_case(root),
+            _recovery_case(root),
+            _provider_health_case(root),
+            _scorecard_case(root),
+            _structured_patch_case(root),
         ]
     return outcomes
 
@@ -113,3 +123,49 @@ def _memory_case(root: Path) -> PlatformEvalOutcome:
     ProjectMemory(root).remember("Use the local test suite before merging", tags=["test"])
     rows = ProjectMemory(root).recall("how should we test", k=1)
     return PlatformEvalOutcome("project memory", bool(rows), "SQLite hashing retrieval remains local")
+
+
+def _recovery_case(root: Path) -> PlatformEvalOutcome:
+    store = AgentTaskStateStore(root)
+    state = store.create(
+        "repair retry", selection={"profiles": ["researcher"]}, workflow={}, governance={},
+        execution={"read_only": True},
+    )
+    state["status"] = "failed"
+    state["plan"] = [{"id": "inspect"}, {"id": "retry"}]
+    state["subtasks"] = {"inspect": {"status": "completed", "success": True}}
+    store.save(state)
+    context = load_recovery_context(root, state["id"])
+    passed = context.completed == ("inspect",) and context.unfinished == ("retry",)
+    return PlatformEvalOutcome("agent recovery", passed, "replacement planner receives a status-only handoff")
+
+
+def _provider_health_case(root: Path) -> PlatformEvalOutcome:
+    health = ProviderHealthStore(root)
+    health.observe({"local:model": {"attempts": 1, "failures": 1, "roles": ["tester"]}}, now=10)
+    cooling = health.view(now=11).get("local:model", {})
+    health.observe({"local:model": {"attempts": 1, "failures": 0, "roles": ["tester"]}}, now=50)
+    recovered = health.view(now=51).get("local:model", {})
+    passed = cooling.get("status") == "cooling-down" and recovered.get("status") == "healthy"
+    return PlatformEvalOutcome("provider recovery", passed, "observed success clears a temporary failure cooldown")
+
+
+def _scorecard_case(root: Path) -> PlatformEvalOutcome:
+    store = ModelScorecardStore(root)
+    report = root / "eval.json"
+    report.write_text('{"model":"cheap","summary":{"resolved_rate":0.95,"total":4}}', encoding="utf-8")
+    store.import_report(report)
+    candidates = apply_scorecards(
+        [ModelCandidate("cheap", quality=.5, cost=.05), ModelCandidate("strong", quality=.85, cost=.8)],
+        store.list(),
+    )
+    profile = AgentProfile("writer", "writes", "write", ("code",), tier="write")
+    passed = route_profiles([profile], candidates)[0].spec == "cheap"
+    return PlatformEvalOutcome("evaluation scorecard", passed, "stored eval quality guides explicit routing")
+
+
+def _structured_patch_case(root: Path) -> PlatformEvalOutcome:
+    json_result = verify_patch(root / "package.json", "", "{broken")
+    toml_result = verify_patch(root / "pyproject.toml", "", "[project\nname='x'")
+    passed = json_result.checked and not json_result.valid and toml_result.checked and not toml_result.valid
+    return PlatformEvalOutcome("structured patch checks", passed, "invalid JSON and TOML are rejected before writes")
