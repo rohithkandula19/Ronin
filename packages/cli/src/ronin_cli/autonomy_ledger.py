@@ -80,6 +80,10 @@ def record_orchestration(root: Path | str, *, outcome: Any, goal: str) -> None:
         },
         "worktree_roles": sorted(diffs),
         "diff_digest": digest(str(getattr(outcome, "diff", "") or "")),
+        "proposal": {
+            "run_id": getattr(outcome, "proposal", {}).get("run_id"),
+            "status": getattr(outcome, "proposal", {}).get("status"),
+        } if isinstance(getattr(outcome, "proposal", None), dict) else None,
     }
     AutonomyLedger(root).append("orchestration.completed", run_id=getattr(outcome, "run_id", None), goal=goal, payload=payload)
 

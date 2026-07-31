@@ -5,6 +5,12 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Added
+- **Retained agent proposals.** Write orchestrations now archive each isolated
+  role's non-empty patch under `.ronin/agent-proposals`, bound to the exact
+  source `HEAD` and protected by a content digest. `ronin util proposals list`,
+  `show`, and explicit `apply --yes` complete the review path without automatic
+  merges. Apply fails closed for unverified runs, altered patches, a moved base
+  revision, and non-clean Git trees; it stages only and never commits or pushes.
 - Interrupted or failed orchestrations can now start a linked recovery run with the original selected profiles, roster, mode, and a bounded status-only handoff. `ronin util agent-recover` never treats prior output as verification or silently resumes a completed run.
 - Real subtask outcomes now feed a durable local provider-health store with temporary exponential cooldown and success-based recovery. Benchmark and imported SWE-bench/judge reports become project-local model scorecards that `agent-route --use-scorecards` can use as explicit routing quality evidence. `ronin util agent-ops` joins run, queue, recovery, ledger, provider, and scorecard status without provider calls.
 - Patch preflight now validates JSON and TOML in addition to Python and locally available TypeScript parsing, preventing malformed structured configuration writes before disk mutation.

@@ -183,7 +183,7 @@ def test_agent_platform_cli_queue_dashboard_sandbox_and_eval(tmp_path: Path, mon
 
     platform = runner.invoke(app, ["eval", "platform"])
     assert platform.exit_code == 0, platform.stdout
-    assert "11/11 passed" in platform.stdout
+    assert "12/12 passed" in platform.stdout
 
 
 def test_queued_offline_worker_uses_embedded_provider(tmp_path: Path, monkeypatch) -> None:

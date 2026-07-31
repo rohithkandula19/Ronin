@@ -1,11 +1,13 @@
 """Offline regression checks for the integrated agent-platform surfaces."""
 from __future__ import annotations
 
+import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 from .agent_observability import provider_observations
+from .agent_proposals import AgentProposalStore
 from .agent_catalog import AgentProfile
 from .agent_recovery import load_recovery_context
 from .agent_routing import ModelCandidate, route_profiles
@@ -45,6 +47,7 @@ def run_agent_platform_eval() -> list[PlatformEvalOutcome]:
             _provider_health_case(root),
             _scorecard_case(root),
             _structured_patch_case(root),
+            _proposal_case(root),
         ]
     return outcomes
 
@@ -169,3 +172,40 @@ def _structured_patch_case(root: Path) -> PlatformEvalOutcome:
     toml_result = verify_patch(root / "pyproject.toml", "", "[project\nname='x'")
     passed = json_result.checked and not json_result.valid and toml_result.checked and not toml_result.valid
     return PlatformEvalOutcome("structured patch checks", passed, "invalid JSON and TOML are rejected before writes")
+
+
+def _proposal_case(root: Path) -> PlatformEvalOutcome:
+    repo = root / "proposal-repo"
+    repo.mkdir()
+    try:
+        for args in (
+            ("init",), ("config", "user.email", "eval@example.test"),
+            ("config", "user.name", "Ronin Eval"),
+        ):
+            subprocess.run(["git", "-C", str(repo), *args], capture_output=True, check=True)
+        (repo / ".gitignore").write_text(".ronin/\n", encoding="utf-8")
+        target = repo / "sample.txt"
+        target.write_text("before\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(repo), "add", "."], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-m", "seed"], capture_output=True, check=True)
+        from .agent_proposals import git_head
+
+        base = git_head(repo)
+        target.write_text("after\n", encoding="utf-8")
+        diff = subprocess.run(
+            ["git", "-C", str(repo), "diff"], capture_output=True, text=True, check=True,
+        ).stdout
+        subprocess.run(["git", "-C", str(repo), "checkout", "--", "sample.txt"], capture_output=True, check=True)
+        proposal = AgentProposalStore(repo).record(
+            run_id="eval-proposal", base_revision=base or "", diffs={"implementer": diff},
+            success=True, subtask_results=[{"success": True}],
+        )
+        applied = AgentProposalStore(repo).apply(proposal.run_id)
+        staged = subprocess.run(
+            ["git", "-C", str(repo), "diff", "--cached", "--", "sample.txt"],
+            capture_output=True, text=True, check=True,
+        ).stdout
+        passed = proposal.verified and applied.roles == ("implementer",) and "+after" in staged
+    except (OSError, subprocess.CalledProcessError, ValueError):
+        passed = False
+    return PlatformEvalOutcome("worktree proposal gate", passed, "verified patches stage only after base and clean-tree checks")

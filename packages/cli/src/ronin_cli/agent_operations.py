@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .agent_observability import dashboard_counts
+from .agent_proposals import AgentProposalStore
 from .agent_queue import AgentQueue
 from .agent_recovery import list_recoverable_runs
 from .autonomy_ledger import verify_ledger
@@ -23,5 +24,6 @@ def operations_snapshot(root: Path | str) -> dict[str, Any]:
         "recoverable": list_recoverable_runs(root, limit=50),
         "providers": ProviderHealthStore(root).view(),
         "scorecards": ModelScorecardStore(root).list(),
+        "proposals": AgentProposalStore(root).list(),
         "ledger": ledger,
     }

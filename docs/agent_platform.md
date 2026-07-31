@@ -16,6 +16,22 @@ Those diffs are proposals, not automatic merges. Review and apply them through
 the normal approval and Git workflow. A repository without Git falls back to a
 read-only orchestration rather than writing uncontrolled files.
 
+Ronin retains every non-empty role patch from a write run under
+`.ronin/agent-proposals/<run-id>/`, together with its SHA-256 digest and the
+exact `HEAD` revision from which the isolated worktree started. The archive is
+not an automatic merge. Inspect and explicitly stage a verified proposal with:
+
+```bash
+ronin util proposals list
+ronin util proposals show agent-20260730-120000-abc123 --role implementer
+ronin util proposals apply agent-20260730-120000-abc123 --yes
+```
+
+`apply` refuses a failed source run, a modified patch archive, a moved `HEAD`,
+or any dirty index/worktree. It only stages the patch for ordinary Git review;
+it never creates a commit, pushes a branch, resolves conflicts, or performs a
+three-way merge.
+
 ## Queue and Worker
 
 Use the project-local queue when a person, CI job, or cron task should hand an

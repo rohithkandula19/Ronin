@@ -291,6 +291,10 @@ class OrchestrateOutcome:
     # Every write-capable role receives its own detached worktree. The diff map
     # keeps the resulting patches attributable and reviewable.
     worktree_diffs: dict[str, str] = field(default_factory=dict)
+    # Captured before isolated work begins, so a proposal cannot be applied to
+    # a different repository revision later.
+    base_revision: str | None = None
+    proposal: dict[str, Any] | None = None
     constitution: dict[str, Any] = field(default_factory=dict)
     run_id: str | None = None
 
@@ -449,11 +453,15 @@ def _run_in_worktree(base, goal, *, roster_spec, root, on_step, on_subtask_start
     reviewer never receives mutation tools; the shared view is for evidence,
     not for bypassing the approval boundary.
     """
+    from .agent_proposals import git_head
     from .worktree import git_worktree_pool, worktree_diff
 
     writers = [profile.key for profile in profiles if profile.tier == "write"]
     if not writers:
         raise ValueError("write orchestration needs at least one write-capable agent")
+    base_revision = git_head(root)
+    if base_revision is None:
+        raise ValueError("write orchestration needs a Git repository with an initial commit")
     primary = "implementer" if "implementer" in writers else writers[0]
     with git_worktree_pool(root, writers) as worktrees:
         visible_roots = {profile.key: worktrees.get(profile.key, worktrees[primary]) for profile in profiles}
@@ -474,6 +482,7 @@ def _run_in_worktree(base, goal, *, roster_spec, root, on_step, on_subtask_start
         outcome.diff = "\n\n".join(
             f"# worktree: {role}\n{diff}" for role, diff in outcome.worktree_diffs.items()
         )
+        outcome.base_revision = base_revision
     return outcome
 
 
@@ -543,6 +552,23 @@ def _finish_outcome(
             handoffs=outcome.handoffs,
         )
         outcome.run_id = str(state.get("id"))
+    if outcome.worktree_diffs and outcome.run_id and outcome.base_revision:
+        try:
+            from .agent_proposals import AgentProposalStore
+
+            proposal = AgentProposalStore(root).record(
+                run_id=outcome.run_id,
+                base_revision=outcome.base_revision,
+                diffs=outcome.worktree_diffs,
+                success=outcome.success,
+                subtask_results=outcome.subtask_results,
+            )
+            outcome.proposal = proposal.as_dict()
+            if state_store is not None and state is not None:
+                state["proposal"] = outcome.proposal
+                state_store.save(state)
+        except Exception:
+            pass
     try:
         from .autonomy_ledger import record_orchestration
 

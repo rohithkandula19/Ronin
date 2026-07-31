@@ -2865,6 +2865,77 @@ def scorecards_show(
     console.print(table)
 
 
+proposals_app = typer.Typer(
+    help="Review and explicitly stage verified isolated-worktree proposals.", no_args_is_help=True,
+)
+util_app.add_typer(proposals_app, name="proposals")
+
+
+@proposals_app.command("list")
+def proposals_list(
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """List local patches retained from write orchestrations."""
+    from .agent_proposals import AgentProposalStore
+
+    proposals = AgentProposalStore(root).list()
+    if not proposals:
+        console.print("[dim]no isolated-worktree proposals recorded yet.[/dim]")
+        return
+    table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+    table.add_column("Run", no_wrap=True)
+    table.add_column("Status")
+    table.add_column("Roles")
+    table.add_column("Base")
+    for proposal in proposals:
+        table.add_row(
+            proposal.run_id, proposal.status, ", ".join(patch.role for patch in proposal.patches),
+            proposal.base_revision[:12],
+        )
+    console.print(table)
+
+
+@proposals_app.command("show")
+def proposals_show(
+    run_id: str = typer.Argument(..., help="Agent run id owning the proposal."),
+    role: str = typer.Option(..., "--role", help="Role patch to display."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Print one retained role patch without modifying the repository."""
+    from .agent_proposals import AgentProposalStore
+
+    try:
+        patch = AgentProposalStore(root).read_patch(run_id, role)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(patch, end="" if patch.endswith("\n") else "\n")
+
+
+@proposals_app.command("apply")
+def proposals_apply(
+    run_id: str = typer.Argument(..., help="Agent run id owning the proposal."),
+    role: List[str] | None = typer.Option(None, "--role", help="Apply only this role; repeat to select several."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    yes: bool = typer.Option(False, "--yes", help="Explicitly stage a clean, verified proposal; never commits."),
+) -> None:
+    """Stage a verified proposal only after exact-revision and clean-tree checks."""
+    if not yes:
+        console.print("[yellow]proposal not staged[/yellow] (review it, then rerun with --yes)")
+        raise typer.Exit(2)
+    from .agent_proposals import AgentProposalStore
+
+    try:
+        applied = AgentProposalStore(root).apply(run_id, roles=role)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(
+        f"[green]staged[/green] {applied.run_id}: {', '.join(applied.roles)} "
+        "(review with `git diff --cached`; no commit was created)"
+    )
+
+
 trials_app = typer.Typer(help="Run competing isolated teams and choose a verified candidate only.", no_args_is_help=True)
 util_app.add_typer(trials_app, name="trials")
 
@@ -3051,6 +3122,8 @@ def agent_operations(
     summary.add_row("recoverable", str(len(snapshot["recoverable"])))
     summary.add_row("ledger", f"{'valid' if snapshot['ledger'].valid else 'INVALID'} ({snapshot['ledger'].events} events)")
     summary.add_row("scorecards", str(len(snapshot["scorecards"])))
+    proposals = snapshot["proposals"]
+    summary.add_row("proposals", f"{len(proposals)} ({sum(proposal.status == 'ready' for proposal in proposals)} ready)")
     console.print(summary)
     if snapshot["providers"]:
         console.print("\n[bold]provider health[/bold]")
@@ -3227,6 +3300,11 @@ def orchestrate(
         for role, diff in outcome.worktree_diffs.items():
             console.print(f"\n[bold]diff ({role} isolated worktree — review before applying)[/bold]:")
             _print_diff(console, diff)
+        if outcome.proposal:
+            console.print(
+                f"[dim]retained proposal: {outcome.proposal['run_id']} — review with "
+                "`ronin util proposals show <run> --role <role>`; staging still needs --yes[/dim]"
+            )
     if not outcome.success:
         raise typer.Exit(1)
 
