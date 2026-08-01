@@ -255,3 +255,67 @@ def test_skills_returns_real_crystallized_skills(client: TestClient) -> None:
     assert len(skills) == 1
     assert skills[0]["name"] == "deploy-staging"
     assert "deploy to staging" in skills[0]["body"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Real data: agent operations
+# ---------------------------------------------------------------------------
+
+def test_agent_operation_endpoints_return_real_saved_data(client: TestClient) -> None:
+    from ronin_cli.agent_catalog import AgentProfile, RepositorySignals
+    from ronin_cli.agent_fleet import FleetPlanStore, plan_fleet
+    from ronin_cli.agent_proposals import AgentProposalStore
+
+    profiles = (
+        AgentProfile("researcher", "research", "research", ("research",)),
+        AgentProfile("implementer", "implement", "implement", ("implementation",), tier="write"),
+        AgentProfile("reviewer", "review", "review", ("review",)),
+        AgentProfile("tester", "test", "test", ("testing",), tier="test"),
+    )
+    plan = plan_fleet(
+        "improve dashboard observability", profiles,
+        core_keys=("researcher", "implementer", "reviewer", "tester"),
+        repository=RepositorySignals(tags=("dashboard",)), write=True,
+        max_profiles=4, max_parallel=2,
+    )
+    FleetPlanStore(Path.cwd()).save(plan)
+    proposal = AgentProposalStore(Path.cwd()).record(
+        run_id="agent-ui-1", base_revision="a" * 40,
+        diffs={"implementer": "diff --git a/a b/a\n"}, success=True,
+        subtask_results=[{"success": True}],
+    )
+
+    plans = client.get("/ui/fleet-plans").json()
+    assert plans == [
+        {
+            "id": plan.id,
+            "created": plan.created,
+            "goal": "improve dashboard observability",
+            "write": True,
+            "catalog_size": 4,
+            "member_count": 4,
+            "max_parallel": 2,
+            "waves": [
+                {
+                    "number": wave.number,
+                    "phase": wave.phase,
+                    "parallelism": wave.parallelism,
+                    "waits_for": list(wave.waits_for),
+                }
+                for wave in plan.waves
+            ],
+        }
+    ]
+
+    proposals = client.get("/ui/proposals").json()
+    assert proposals == [
+        {
+            "run_id": "agent-ui-1",
+            "created": proposal.created,
+            "status": "ready",
+            "base_revision": "a" * 40,
+            "roles": ["implementer"],
+            "patch_count": 1,
+            "failed_subtasks": 0,
+        }
+    ]
