@@ -9,6 +9,8 @@ surfaces data the rest of ronin actually wrote to disk:
                         per-subtask results, faithfulness)
 - memory entries     -> ``ronin_cli.memory_store`` (``~/.ronin/memory.json``)
 - skills             -> ``ronin_cli.muscle_memory`` (``.ronin/commands/*.md``)
+- fleet plans        -> ``ronin_cli.agent_fleet`` (``.ronin/fleet-plans``)
+- patch proposals    -> ``ronin_cli.agent_proposals`` (``.ronin/agent-proposals``)
 
 Everything honours ``RONIN_HOME``/the current working directory exactly as the
 CLI does, so a test can point a temp ``.ronin`` home at these helpers and get the
@@ -219,3 +221,70 @@ def skill_entries(root: str | Path = ".") -> list[dict[str, Any]]:
             body = ""
         out.append({"name": name, "body": body[:4000]})
     return out
+
+
+# ---------------------------------------------------------------------------
+# Agent operations
+# ---------------------------------------------------------------------------
+
+def fleet_plan_entries(root: str | Path = ".", limit: int = 50) -> list[dict[str, Any]]:
+    """Inspectable summaries of saved agent-fleet plans for ``root``.
+
+    Planning a fleet does not start workers. The dashboard deliberately exposes
+    only stored plan metadata and wave scheduling so viewing it remains read-only.
+    """
+    try:
+        from ronin_cli.agent_fleet import FleetPlanStore
+    except Exception:  # noqa: BLE001
+        return []
+
+    try:
+        plans = FleetPlanStore(root).list(limit=limit)
+    except Exception:  # noqa: BLE001
+        return []
+    return [
+        {
+            "id": plan.id,
+            "created": plan.created,
+            "goal": plan.goal,
+            "write": plan.write,
+            "catalog_size": plan.catalog_size,
+            "member_count": len(plan.members),
+            "max_parallel": plan.max_parallel,
+            "waves": [
+                {
+                    "number": wave.number,
+                    "phase": wave.phase,
+                    "parallelism": wave.parallelism,
+                    "waits_for": list(wave.waits_for),
+                }
+                for wave in plan.waves
+            ],
+        }
+        for plan in plans
+    ]
+
+
+def proposal_entries(root: str | Path = ".", limit: int = 50) -> list[dict[str, Any]]:
+    """Inspectable summaries of retained isolated-worktree patch proposals."""
+    try:
+        from ronin_cli.agent_proposals import AgentProposalStore
+    except Exception:  # noqa: BLE001
+        return []
+
+    try:
+        proposals = AgentProposalStore(root).list()
+    except Exception:  # noqa: BLE001
+        return []
+    return [
+        {
+            "run_id": proposal.run_id,
+            "created": proposal.created,
+            "status": proposal.status,
+            "base_revision": proposal.base_revision,
+            "roles": [patch.role for patch in proposal.patches],
+            "patch_count": len(proposal.patches),
+            "failed_subtasks": proposal.failed_subtasks,
+        }
+        for proposal in proposals[: max(1, limit)]
+    ]

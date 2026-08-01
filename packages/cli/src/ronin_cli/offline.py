@@ -29,7 +29,7 @@ _LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1", "0.0.0.0")
 
 def is_local_provider(config: RoninConfig) -> bool:
     """True if the configured provider runs on this machine (no egress)."""
-    if config.provider == "ollama":
+    if config.provider in {"ollama", "local"}:
         return True
     base = (config.resolved_base_url() or "").lower()
     return any(host in base for host in _LOCAL_HOSTS)

@@ -45,6 +45,7 @@ class AgentTaskStateStore:
         selection: Mapping[str, Any],
         workflow: Mapping[str, Any] | None,
         governance: Mapping[str, Any],
+        execution: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         state: dict[str, Any] = {
             "schema_version": SCHEMA_VERSION,
@@ -56,6 +57,7 @@ class AgentTaskStateStore:
             "selection": dict(selection),
             "workflow": dict(workflow or {}),
             "governance": dict(governance),
+            "execution": dict(execution or {}),
             "plan": [],
             "subtasks": {},
             "events": [],

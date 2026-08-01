@@ -7,7 +7,14 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from ronin_cli.agent_catalog import AgentProfile, build_catalog, generated_profiles, select_profiles
+from ronin_cli.agent_catalog import (
+    AgentProfile,
+    RepositorySignals,
+    build_catalog,
+    generated_profiles,
+    rank_profiles_for_fleet,
+    select_profiles,
+)
 from ronin_cli.main import app
 from ronin_cli.orchestrate import core_agent_profiles, select_agents_for_goal
 
@@ -38,6 +45,20 @@ def test_selection_matches_singular_task_terms_to_plural_domain_tags(tmp_path: P
     selected = select_agents_for_goal("audit payment security", tmp_path, max_agents=8)
 
     assert "payments-security-auditor" in {profile.key for profile in selected}
+
+
+def test_fleet_ranking_can_consider_more_than_the_active_team_limit(tmp_path: Path) -> None:
+    core = core_agent_profiles()
+    selected = rank_profiles_for_fleet(
+        "python api backend cloud security devops testing performance reliability",
+        build_catalog(core, tmp_path),
+        core_keys=(profile.key for profile in core),
+        repository=RepositorySignals(tags=("python", "api", "backend", "cloud", "security")),
+        max_profiles=64,
+    )
+
+    assert len(selected.profiles) == 64
+    assert [profile.key for profile in selected.profiles[:4]] == [profile.key for profile in core]
 
 
 def test_project_manifest_profiles_are_selected_without_code_execution(tmp_path: Path) -> None:

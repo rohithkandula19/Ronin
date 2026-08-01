@@ -1,6 +1,7 @@
 """Deterministic coverage for repository routing, contracts, governance, and state."""
 from __future__ import annotations
 
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ from ronin_cli.agent_control_eval import run_agent_control_eval
 from ronin_cli.agent_governance import OrchestrationGovernance, provider_health
 from ronin_cli.agent_state import AgentTaskStateStore, load_agent_task_state
 from ronin_cli.agent_workflow import workflow_for_goal
+from ronin_cli.config import RoninConfig
 from ronin_cli.orchestrate import core_agent_profiles
 from ronin_cli.main import app
 
@@ -151,3 +153,56 @@ def test_agent_control_eval_cli_needs_no_provider_credentials() -> None:
     result = CliRunner().invoke(app, ["eval", "agents"])
     assert result.exit_code == 0, result.stdout
     assert "3/3 passed" in result.stdout
+
+
+def test_agent_platform_cli_queue_dashboard_sandbox_and_eval(tmp_path: Path, monkeypatch) -> None:
+    runner = CliRunner()
+    queued = runner.invoke(app, [
+        "util", "agent-queue", "add", "inspect retries", "--write", "--root", str(tmp_path),
+    ])
+    assert queued.exit_code == 0, queued.stdout
+    listed = runner.invoke(app, ["util", "agent-queue", "list", "--root", str(tmp_path)])
+    assert listed.exit_code == 0, listed.stdout
+    assert "inspect retries" in listed.stdout
+
+    store = AgentTaskStateStore(tmp_path)
+    state = store.create("inspect retries", selection={"profiles": ["researcher"]}, workflow={}, governance={})
+    store.finish(
+        state, success=True, output="done", error=None,
+        provider_health={"local:model": {"attempts": 1, "failures": 0, "roles": ["researcher"]}},
+    )
+    dashboard = runner.invoke(app, ["util", "agent-runs", "--root", str(tmp_path)])
+    assert dashboard.exit_code == 0, dashboard.stdout
+    assert "provider observations" in dashboard.stdout
+    assert "local:model" in dashboard.stdout
+
+    monkeypatch.setenv("RONIN_BACKEND", "docker:agent")
+    sandbox = runner.invoke(app, ["util", "sandbox"])
+    assert sandbox.exit_code == 0, sandbox.stdout
+    assert "fail closed" in sandbox.stdout
+
+    platform = runner.invoke(app, ["eval", "platform"])
+    assert platform.exit_code == 0, platform.stdout
+    assert "13/13 passed" in platform.stdout
+
+
+def test_queued_offline_worker_uses_embedded_provider(tmp_path: Path, monkeypatch) -> None:
+    import ronin_cli.main as main_module
+    import ronin_cli.orchestrate as orchestrate_module
+
+    runner = CliRunner()
+    assert runner.invoke(app, ["util", "agent-queue", "add", "inspect retry", "--root", str(tmp_path)]).exit_code == 0
+    seen = {}
+
+    def fake_run(config, goal, **kwargs):
+        seen["provider"] = config.provider
+        seen["offline"] = config.offline
+        seen["goal"] = goal
+        return SimpleNamespace(success=True, error=None, run_id="agent-1", output="done")
+
+    monkeypatch.setattr(main_module, "load_config", lambda: RoninConfig(provider="ollama"))
+    monkeypatch.setattr(orchestrate_module, "run_orchestrate", fake_run)
+    result = runner.invoke(app, ["util", "agent-queue", "run-next", "--offline", "--root", str(tmp_path)])
+
+    assert result.exit_code == 0, result.stdout
+    assert seen == {"provider": "local", "offline": True, "goal": "inspect retry"}

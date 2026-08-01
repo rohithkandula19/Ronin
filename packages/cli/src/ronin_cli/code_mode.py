@@ -173,7 +173,7 @@ _MENTION_RE = _re.compile(r"(?:^|\s)@([\w./\-]+)")
 _URL_MENTION_RE = _re.compile(r"(?:^|\s)@(https?://[^\s]+)")
 
 # read-only tool subset (for plan mode — explore but don't mutate)
-_READONLY_CODE_TOOLS = {"read_file", "list_files", "search_files", "glob"}
+_READONLY_CODE_TOOLS = {"read_file", "list_files", "search_files", "glob", "project_memory_recall"}
 # Fast mode keeps only the essential coding tools — the heavy extras (LSP, web,
 # git, vision, semantic, background, checkpoint, …) are dropped so the per-call
 # tool payload (and thus latency + token cost) is a fraction of the full set.
@@ -724,7 +724,21 @@ def run_code_agent(
     # Full-access mode lifts the filesystem sandbox (and auto-approve is set by
     # the session via yolo). Otherwise stay confined to the project root.
     _sandbox = not getattr(config, "full_access", False)
-    tools = build_code_tools(root, undo_stack=undo_stack, sandbox=_sandbox, deny=deny)
+    try:
+        from .constitution import load_constitution
+
+        constitution = load_constitution(root)
+    except ValueError as exc:
+        return CodeRunResult(
+            success=False, output=f"[blocked] invalid repository constitution: {exc}",
+            iterations=0, error=str(exc), blocked=True,
+        )
+    tools = build_code_tools(
+        root, undo_stack=undo_stack, sandbox=_sandbox, deny=deny,
+        write_deny=lambda target: constitution.protects(target, root=root),
+    )
+    from .project_memory import build_project_memory_tools
+    tools = tools + build_project_memory_tools(root)
     if read_only:
         # plan mode: explore but never mutate
         tools = [t for t in tools if t.name in _READONLY_CODE_TOOLS]
@@ -732,6 +746,11 @@ def run_code_agent(
     # are read-only, so they're available even in plan mode and to sub-agents.
     from .lsp import build_lsp_tools
     tools = tools + build_lsp_tools(root)
+    # Semantic file retrieval stays available without credentials. Its fallback
+    # is a deterministic local hashing index, so offline runs never send project
+    # content to an embedding provider.
+    from .embeddings import build_semantic_tools
+    tools = tools + build_semantic_tools(config, root)
     # Web tools (web_search + fetch_url): read-only and safe, so the coding
     # agent gets them even in plan mode — look up docs/errors while it works.
     # Offline mode strips them below (NETWORK_TOOLS).

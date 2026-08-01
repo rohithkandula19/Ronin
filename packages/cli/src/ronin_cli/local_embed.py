@@ -23,16 +23,13 @@ This module is the local-first answer. ``embed`` tries a LOCAL embedder first an
 Everything here is stdlib only (``hashlib`` + ``math``, plus ``urllib`` for the
 *optional, localhost-only* Ollama call). It never calls a remote cloud API.
 
-Integration (intentionally NOT wired here — see ``integration_note()``)
-------------------------------------------------------------------------
-``embeddings.get_backend`` returns ``None`` when no embeddings key/provider is
-configured, and ``semantic_search`` then returns ``None`` so callers drop to
-BM25. A local-first wiring would, when ``config.offline`` is set (or no embedding
-key is available), build a tiny ``EmbeddingBackend`` whose ``.embed`` delegates
-to :func:`embed` with ``prefer_local=True`` — so semantic search keeps working
-offline instead of disappearing. The same applies to ``ronin recall`` if/when it
-grows vector recall: call :func:`embed` rather than any hosted embedder whenever
-offline. :func:`pick_backend` encodes the policy (offline ⇒ never remote).
+Integration
+-----------
+``embeddings.get_backend`` now selects a local hashing adapter whenever Ronin is
+offline or the configured provider has no embedding endpoint. That keeps
+``semantic_search`` available to coding runs without credentials or network
+egress. The optional Ollama and OpenAI-compatible adapters remain available
+when intentionally configured.
 """
 from __future__ import annotations
 
@@ -252,41 +249,24 @@ def embed(texts: list[str], *, prefer_local: bool = True,
 
 
 # --------------------------------------------------------------------------- #
-# Integration note (returned, not applied — per the brief)
+# Integration note
 # --------------------------------------------------------------------------- #
 def integration_note() -> str:
-    """How ``embeddings.py`` / ``recall`` could adopt this for offline use.
-
-    Returned as text on purpose: this module does not modify ``embeddings.py``,
-    ``offline.py``, ``config.py``, or ``main.py`` — wiring is left to the caller.
-    """
+    """Describe the active local-first embedding integration."""
     return (
-        "Local-first embeddings wiring (not applied here):\n"
+        "Local-first embeddings wiring:\n"
         "\n"
-        "1. In embeddings.get_backend(config): when `config.offline` is True, OR\n"
-        "   when no embeddings key is available for the provider (the branch that\n"
-        "   currently returns None and forces a BM25 fallback), return a small\n"
-        "   backend backed by this module instead of None, e.g.:\n"
+        "1. embeddings.get_backend(config) returns a local hashing backend when\n"
+        "   config.offline is True or no configured provider exposes embeddings.\n"
+        "   Offline runs therefore never use OpenAIEmbeddingBackend.\n"
         "\n"
-        "       class LocalEmbeddingBackend(EmbeddingBackend):\n"
-        "           name = 'local'\n"
-        "           def embed(self, texts):\n"
-        "               from . import local_embed\n"
-        "               return local_embed.embed(texts, prefer_local=True)\n"
+        "2. SemanticIndex keys its disk cache by backend.name, so local hashing\n"
+        "   vectors stay separate from Ollama or hosted vectors. hashing_embed is\n"
+        "   deterministic, so the content-hash cache remains valid across runs.\n"
         "\n"
-        "   Gate it on `config.offline` first so offline NEVER reaches the hosted\n"
-        "   OpenAIEmbeddingBackend; pick_backend(offline=True, ...) guarantees the\n"
-        "   choice stays local (Ollama when up, else the hashing embedder).\n"
-        "\n"
-        "2. SemanticIndex already keys its disk cache by `backend.name`, so giving\n"
-        "   this backend a distinct name ('local') keeps offline hashing vectors\n"
-        "   from colliding with cloud/Ollama vectors in the cache. hashing_embed is\n"
-        "   deterministic, so the content-hash cache stays valid across runs.\n"
-        "\n"
-        "3. For `ronin recall`: it is keyword/BM25 today (session_search.recall).\n"
-        "   If it grows vector recall, embed both stored chunks and the query via\n"
-        "   local_embed.embed(...) whenever config.offline, and rank with\n"
-        "   local_embed.cosine — so recall stays fully on-device and air-gapped."
+        "3. Persistent user-memory recall remains lexical today. A future vector\n"
+        "   recall layer should use local_embed.embed and local_embed.cosine when\n"
+        "   offline so it preserves the same on-device guarantee."
     )
 
 

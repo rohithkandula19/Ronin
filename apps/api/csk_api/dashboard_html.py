@@ -159,6 +159,13 @@ h2.dh{font-size:16px;margin:0 0 4px;font-weight:700}
 .transcript .line{padding:4px 0;border-bottom:1px solid #1b2129;white-space:pre-wrap;word-break:break-word}
 .transcript .line.user{color:var(--accent)}
 .transcript .line.assistant{color:var(--fg)}
+.ops-list{list-style:none;margin:0;padding:0}
+.ops-item{padding:10px 0;border-bottom:1px solid #1b2129}
+.ops-item:last-child{border-bottom:0}
+.ops-title{font-weight:700;word-break:break-word}
+.ops-meta{display:flex;gap:7px;flex-wrap:wrap;margin-top:5px;color:var(--dim);font-size:11px}
+.wave-list{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}
+.wave{font-size:10.5px;padding:2px 6px;border:1px solid var(--border);border-radius:4px;color:var(--muted);background:var(--panel2)}
 </style>
 </head>
 <body>
@@ -176,6 +183,7 @@ h2.dh{font-size:16px;margin:0 0 4px;font-weight:700}
   <main class="main">
     <div class="tabs">
       <div class="tab active" data-pane="run">Run detail</div>
+      <div class="tab" data-pane="operations">Operations</div>
       <div class="tab" data-pane="memory">Memory</div>
       <div class="tab" data-pane="skills">Skills</div>
     </div>
@@ -185,6 +193,7 @@ h2.dh{font-size:16px;margin:0 0 4px;font-weight:700}
         <div>Select a run on the left to see its sub-agent tree.</div>
       </div>
     </div>
+    <div class="panel-pane" id="pane-operations"><div class="loading">loading...</div></div>
     <div class="panel-pane" id="pane-memory"><div class="loading">loading...</div></div>
     <div class="panel-pane" id="pane-skills"><div class="loading">loading...</div></div>
   </main>
@@ -196,7 +205,9 @@ var API = {
   runs: "/ui/runs",
   run: function(id){ return "/ui/runs/" + encodeURIComponent(id); },
   memory: "/ui/memory",
-  skills: "/ui/skills"
+  skills: "/ui/skills",
+  fleetPlans: "/ui/fleet-plans",
+  proposals: "/ui/proposals"
 };
 var state = { runs: [], activeId: null };
 
@@ -369,6 +380,50 @@ function renderSessionDetail(pane, d){
   pane.innerHTML = html;
 }
 
+// ---- agent operations ----
+function operationsEmpty(message){
+  return '<div class="empty"><span class="big">&#9783;</span>'+message+'</div>';
+}
+
+function fleetPlanHtml(plan){
+  var mode = plan.write ? "write-enabled" : "read-only";
+  var waves = (plan.waves || []).map(function(wave){
+    var wait = (wave.waits_for || []).length ? ' after '+wave.waits_for.join(",") : "";
+    return '<span class="wave">wave '+esc(wave.number)+' '+esc(wave.phase)+' &middot; '+esc(wave.parallelism)+' agents'+esc(wait)+'</span>';
+  }).join("");
+  return '<li class="ops-item">'+
+    '<div class="ops-title">'+esc(plan.goal)+'</div>'+
+    '<div class="ops-meta"><span class="badge neutral">'+mode+'</span><span>'+esc(plan.member_count)+' selected of '+esc(plan.catalog_size)+'</span><span>max '+esc(plan.max_parallel)+' parallel</span><span>'+esc(fmtDate(plan.created))+'</span></div>'+
+    '<div class="wave-list">'+waves+'</div>'+
+  '</li>';
+}
+
+function proposalHtml(proposal){
+  var ready = proposal.status === "ready";
+  var status = '<span class="badge '+(ready ? "green" : "amber")+'">'+esc(proposal.status)+'</span>';
+  var failed = proposal.failed_subtasks ? '<span>'+esc(proposal.failed_subtasks)+' failed subtasks</span>' : "";
+  return '<li class="ops-item">'+
+    '<div class="ops-title">'+esc(proposal.run_id)+'</div>'+
+    '<div class="ops-meta">'+status+'<span>'+esc((proposal.roles || []).join(", "))+'</span><span>'+esc(proposal.patch_count)+' patches</span>'+failed+'<span>base '+esc((proposal.base_revision || "").slice(0,12))+'</span><span>'+esc(fmtDate(proposal.created))+'</span></div>'+
+  '</li>';
+}
+
+async function loadOperations(){
+  var pane = document.getElementById("pane-operations");
+  pane.innerHTML = '<div class="loading">loading...</div>';
+  try{
+    var data = await Promise.all([getJSON(API.fleetPlans), getJSON(API.proposals)]);
+    var plans = data[0], proposals = data[1];
+    var html = '<div class="card"><h3>Fleet plans ('+plans.length+')</h3>';
+    html += plans.length ? '<ul class="ops-list">'+plans.map(fleetPlanHtml).join("")+'</ul>' : operationsEmpty('No fleet plans saved for this project.');
+    html += '</div><div class="card"><h3>Retained patch proposals ('+proposals.length+')</h3>';
+    html += proposals.length ? '<ul class="ops-list">'+proposals.map(proposalHtml).join("")+'</ul>' : operationsEmpty('No isolated-worktree proposals saved for this project.');
+    pane.innerHTML = html;
+  }catch(e){
+    pane.innerHTML = '<div class="empty">Could not load operations ('+esc(e.message)+').</div>';
+  }
+}
+
 // ---- memory ----
 async function loadMemory(){
   var pane = document.getElementById("pane-memory");
@@ -431,6 +486,7 @@ function switchTab(name){
   document.querySelectorAll(".panel-pane").forEach(function(p){
     p.classList.toggle("active", p.id==="pane-"+name);
   });
+  if(name==="operations") loadOperations();
   if(name==="memory") loadMemory();
   if(name==="skills") loadSkills();
 }

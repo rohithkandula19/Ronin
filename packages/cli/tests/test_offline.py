@@ -37,6 +37,12 @@ def test_apply_offline_keeps_local_provider() -> None:
     assert out.resolved_model() == "llama3.1"
 
 
+def test_apply_offline_keeps_embedded_local_provider() -> None:
+    cfg = RoninConfig(provider="local", offline=True)
+    out = offline.apply_offline(cfg)
+    assert out.provider == "local"
+
+
 def test_apply_offline_noop_when_not_offline() -> None:
     cfg = RoninConfig(provider="anthropic", offline=False)
     assert offline.apply_offline(cfg) is cfg

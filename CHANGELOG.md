@@ -5,6 +5,25 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Added
+- **Bounded fleet planning.** `ronin util fleet plan` converts up to 512
+  relevant specialist profiles into persisted research, implementation, and
+  acceptance waves with a hard 32-profile per-wave ceiling. The local `list`
+  and `show` surfaces expose routing evidence and dependencies without starting
+  agents, provider calls, shell commands, edits, or merges.
+- **Retained agent proposals.** Write orchestrations now archive each isolated
+  role's non-empty patch under `.ronin/agent-proposals`, bound to the exact
+  source `HEAD` and protected by a content digest. `ronin util proposals list`,
+  `show`, and explicit `apply --yes` complete the review path without automatic
+  merges. Apply fails closed for unverified runs, altered patches, a moved base
+  revision, and non-clean Git trees; it stages only and never commits or pushes.
+- Interrupted or failed orchestrations can now start a linked recovery run with the original selected profiles, roster, mode, and a bounded status-only handoff. `ronin util agent-recover` never treats prior output as verification or silently resumes a completed run.
+- Real subtask outcomes now feed a durable local provider-health store with temporary exponential cooldown and success-based recovery. Benchmark and imported SWE-bench/judge reports become project-local model scorecards that `agent-route --use-scorecards` can use as explicit routing quality evidence. `ronin util agent-ops` joins run, queue, recovery, ledger, provider, and scorecard status without provider calls.
+- Patch preflight now validates JSON and TOML in addition to Python and locally available TypeScript parsing, preventing malformed structured configuration writes before disk mutation.
+- Repository-owned agent constitutions now enforce protected write paths, team caps, specialist-role requirements, and optional sandbox requirements from `.ronin/constitution.json`. Orchestration and interactive coding fail safely on malformed policy. Completed orchestrations append compact, hash-chained local ledger events verifiable with `ronin util ledger verify`.
+- Ronin now has durable local SQLite project memory with deterministic hashing retrieval, sensitive agent writes, and likely-secret rejection; compatible `RONIN.md`, `CLAUDE.md`, and `AGENTS.md` behavior remains unchanged. New `project-memory` commands manage explicit facts without cloud storage.
+- The agent control plane adds bounded parallel queue workers, explicit evidence-led per-role model-routing recommendations, and competing worktree trial execution with verified-only selection. Trial selection never merges or applies a candidate diff automatically.
+- `ronin eval platform` now covers constitution policy, ledger verification, and local project memory alongside queue, telemetry, retrieval, and sandbox regressions.
+- The agent platform now gives each implementation orchestration role a separate detached Git worktree, keeps review/test views on the candidate implementation tree, attributes resulting diffs by role, and never writes to the parent checkout. Project-local agent queues, terminal run/provider dashboards, a sandbox-policy inspector, and `ronin eval platform` provide controlled scheduling and observable offline operation. Semantic code retrieval now has a deterministic local hashing fallback and is available to coding runs without credentials or network egress.
 - `ronin-memory` now includes a dependency-free `SqliteBackend` for persistent, local-first long-term memory with namespace isolation, bounded retention, and pluggable scoring.
 - `ronin-agent-patterns` now supports per-run token, wall-clock, and provider-reported cost ceilings. Exhausted budgets return partial output with an explicit trace error and never execute newly requested tools.
 - `ronin-agent-patterns` now includes an opt-in, repository-scoped `PlanCache` for `PlannerExecutorAgent`, with atomic local writes, repository-change invalidation, bounded retention, and no raw task text in cache records.

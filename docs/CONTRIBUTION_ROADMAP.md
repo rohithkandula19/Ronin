@@ -14,7 +14,7 @@ For the detailed subsystem design, read:
 | Area | Why it matters | Example deliverables |
 |---|---|---|
 | Core agent architecture | The runtime should plan, act, verify, and resume without losing the safety floor. | Planning engine improvements, execution engine seams, durable run journals, budget enforcement. |
-| Multi-agent orchestration | Larger tasks need role separation and independent review. First slice shipped: a 1,170-profile generated specialist catalog, safe project manifests, task ranking, bounded active teams, provider routing, and isolated write tiers. | Architect -> implementer -> reviewer -> tester -> verifier flows, bounded repair loops, role-specific artifacts. |
+| Multi-agent orchestration | Larger tasks need role separation and independent review. First slice shipped: a 1,170-profile generated specialist catalog, safe project manifests, task ranking, persisted multi-wave fleet plans (up to 512 selected profiles and 32 active per wave), bounded active teams, provider routing, and isolated write tiers. | Architect -> implementer -> reviewer -> tester -> verifier flows, bounded repair loops, role-specific artifacts. |
 | Context and memory | Ronin should remember useful project facts without storing secrets or bypassing approvals. | Long-term memory, local semantic search, retrieval tuning, memory migration tools. |
 | Coding engine | Patches should be precise, reviewable, and validated against the repository shape. | Smarter diffs, AST-aware editing checks, patch verification, changed-file impact analysis. |
 | Safety | Autonomous work only earns trust when dangerous actions remain gated everywhere. | Destructive command protection, tool sandboxing, approval policy tests, browser/MCP/plugin floor coverage. |

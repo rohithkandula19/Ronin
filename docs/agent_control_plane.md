@@ -61,6 +61,19 @@ Provider transport retries remain provider-owned. Ronin records observed
 subtask/provider health as `healthy` or `degraded` based on actual outcomes; it
 does not invent a health check or claim a provider is available without evidence.
 
+`ronin util agent-route` consumes explicit quality/cost/latency model evidence and
+these local observations to produce a role-to-model roster recommendation. It
+uses higher quality weighting for writers and higher efficiency weighting for
+exploration. The command does not perform implicit failover or mutate provider
+configuration; an operator may pass its printed roster to orchestration.
+
+Objective benchmark rows from `ronin util bench` are saved as local model
+scorecards. SWE-bench or judge reports may be imported with `ronin util
+scorecards import`; `agent-route --use-scorecards` then substitutes a matching
+stored quality score while preserving the caller's explicit cost and latency
+assumptions. Provider health is observational: a temporary cooldown follows a
+real failure and a later real success clears it.
+
 ## Shared Task State
 
 While an orchestration runs, Ronin writes an atomic JSON record at:
@@ -74,6 +87,20 @@ subtask status, event log, provider-health observations, handoff report, and
 final output. A stopped run therefore remains inspectable rather than looking
 as if it silently completed. The regular user-level run archive continues to
 power `ronin ui` and records the task-state id for correlation.
+
+Implementation roles receive separate detached Git worktrees. Review and test
+roles inspect the implementation candidate tree, and the final state records
+which roles produced an isolated diff. The parent checkout remains untouched.
+
+Failed or interrupted records can be resumed with `ronin util agent-recover
+RUN_ID`. Recovery creates a new task record linked to the original and hands
+the planner only bounded status data for the predecessor's planned subtasks.
+It never marks old output as validated or automatically reuses an unreviewed
+patch.
+
+Use `ronin util agent-runs` for a terminal view of task state and provider
+observations. It reports only real subtask outcomes; no provider is marked
+available or healthy without observed successful work.
 
 ### Migration and Rollback
 
@@ -94,3 +121,19 @@ ronin eval agents
 The suite uses fixture repository signals and no provider call. It checks that
 specialist routing, workflow selection, and governance bounds stay stable in
 CI. It complements `ronin eval`, which measures live agent outcomes.
+
+`ronin eval platform` adds offline coverage for the durable queue, local
+semantic retrieval fallback, task telemetry, fail-closed sandbox policy,
+repository constitution enforcement, hash-chain ledger verification, and
+local durable project memory. It also checks linked recovery handoffs,
+provider cooldown recovery, scorecard-guided routing, and JSON/TOML preflight
+rejection.
+
+### Migration and Rollback for Platform Primitives
+
+The queue, ledger, SQLite memory, and constitution are project-local under
+`.ronin/`. Existing installations require no migration. Remove the respective
+local file to discard its history or memory; remove `constitution.json` to
+return to the permissive policy default. Removing a ledger or memory store does
+not change repository files, Git history, provider configuration, or archived
+run records.

@@ -11,6 +11,7 @@ import ast
 import json
 import shutil
 import subprocess
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -74,6 +75,10 @@ def verify_patch(
     suffix = target.suffix.lower()
     if suffix in {".py", ".pyi"}:
         return _verify_python(before, after)
+    if suffix == ".json":
+        return _verify_json(after)
+    if suffix == ".toml":
+        return _verify_toml(after)
     if suffix in {".ts", ".tsx", ".mts", ".cts"}:
         parser = typescript_parser or _typescript_diagnostics
         try:
@@ -99,6 +104,30 @@ def verify_patch(
         valid=True,
         skip_reason="syntax verification not available for this file type",
     )
+
+
+def _verify_json(after: str) -> PatchVerification:
+    try:
+        json.loads(after)
+    except json.JSONDecodeError as exc:
+        return PatchVerification(
+            language="json", checked=True, valid=False,
+            diagnostics=(PatchDiagnostic(exc.msg, exc.lineno, exc.colno),),
+        )
+    return PatchVerification(language="json", checked=True, valid=True)
+
+
+def _verify_toml(after: str) -> PatchVerification:
+    try:
+        tomllib.loads(after)
+    except tomllib.TOMLDecodeError as exc:
+        # Python's TOML decoder guarantees a readable message but does not
+        # expose a stable line/column API across supported Python releases.
+        return PatchVerification(
+            language="toml", checked=True, valid=False,
+            diagnostics=(PatchDiagnostic(str(exc)),),
+        )
+    return PatchVerification(language="toml", checked=True, valid=True)
 
 
 def _verify_python(before: str, after: str) -> PatchVerification:

@@ -47,6 +47,18 @@ def test_unknown_file_type_is_explicitly_skipped(tmp_path: Path) -> None:
     assert "not available" in result.summary()
 
 
+def test_json_and_toml_are_parsed_without_evaluating_a_patch(tmp_path: Path) -> None:
+    valid_json = verify_patch(tmp_path / "package.json", "", '{"name": "ronin"}')
+    invalid_json = verify_patch(tmp_path / "package.json", "", "{bad")
+    valid_toml = verify_patch(tmp_path / "pyproject.toml", "", "[project]\nname = 'ronin'\n")
+    invalid_toml = verify_patch(tmp_path / "pyproject.toml", "", "[project\nname = 'ronin'\n")
+
+    assert valid_json.checked and valid_json.valid
+    assert invalid_json.checked and not invalid_json.valid
+    assert valid_toml.checked and valid_toml.valid
+    assert invalid_toml.checked and not invalid_toml.valid
+
+
 def test_typescript_uses_injected_parser_without_evaluating_source(tmp_path: Path) -> None:
     seen: list[str] = []
 

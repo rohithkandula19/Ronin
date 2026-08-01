@@ -22,6 +22,8 @@ MAX_MANIFEST_BYTES = 5 * 1024 * 1024
 MAX_PROFILE_INSTRUCTIONS = 6_000
 MAX_PROFILE_DESCRIPTION = 500
 MAX_PROFILE_TAGS = 32
+MAX_ACTIVE_AGENTS = 32
+MAX_FLEET_PROFILES = 512
 
 # Repository traits that map cleanly onto the generated domain catalog.  These
 # are deliberately coarse: routing should give the planner useful context, not
@@ -314,7 +316,9 @@ def _selection_details(
     profiles: Iterable[AgentProfile],
     *,
     core_keys: Iterable[str],
-    max_agents: int = 8,
+    max_profiles: int,
+    max_allowed: int,
+    limit_name: str,
     repository: RepositorySignals | None = None,
 ) -> ProfileSelection:
     """Select a roster and retain the task/repository evidence behind it."""
@@ -324,10 +328,10 @@ def _selection_details(
     if len(core) != len(core_set):
         missing = sorted(core_set - {profile.key for profile in core})
         raise ValueError(f"agent catalog is missing core roles: {', '.join(missing)}")
-    if max_agents < len(core):
-        raise ValueError(f"max_agents must be at least {len(core)} to retain the core team")
-    if max_agents > 32:
-        raise ValueError("max_agents cannot exceed 32; split larger work into orchestration waves")
+    if max_profiles < len(core):
+        raise ValueError(f"{limit_name} must be at least {len(core)} to retain the core team")
+    if max_profiles > max_allowed:
+        raise ValueError(f"{limit_name} cannot exceed {max_allowed}")
 
     repository = repository or RepositorySignals()
     task_terms = _task_terms(task)
@@ -358,7 +362,7 @@ def _selection_details(
         )
         ranked.append((score, profile.key, profile, why))
     ranked.sort(key=lambda item: (-item[0], item[1]))
-    extras = ranked[:max_agents - len(core)]
+    extras = ranked[:max_profiles - len(core)]
     for _score, key, _profile, why in extras:
         reasons[key] = why
     return ProfileSelection(
@@ -382,7 +386,8 @@ def select_profiles(
     becoming a large prompt or an unbounded bill.
     """
     return _selection_details(
-        task, profiles, core_keys=core_keys, max_agents=max_agents,
+        task, profiles, core_keys=core_keys, max_profiles=max_agents,
+        max_allowed=MAX_ACTIVE_AGENTS, limit_name="max_agents",
     ).profiles
 
 
@@ -400,6 +405,28 @@ def select_profiles_for_repository(
     fixture signals without touching the filesystem or the BM25 index.
     """
     return _selection_details(
-        task, profiles, core_keys=core_keys, max_agents=max_agents,
+        task, profiles, core_keys=core_keys, max_profiles=max_agents,
+        max_allowed=MAX_ACTIVE_AGENTS, limit_name="max_agents",
+        repository=repository,
+    )
+
+
+def rank_profiles_for_fleet(
+    task: str,
+    profiles: Iterable[AgentProfile],
+    *,
+    core_keys: Iterable[str],
+    repository: RepositorySignals,
+    max_profiles: int = 32,
+) -> ProfileSelection:
+    """Rank a larger, still bounded specialist set for a multi-wave fleet plan.
+
+    The normal orchestrator continues to cap active profiles at 32. A fleet
+    plan may consider more relevant specialists, but it only describes waves;
+    it never creates a larger concurrent team or starts a provider call.
+    """
+    return _selection_details(
+        task, profiles, core_keys=core_keys, max_profiles=max_profiles,
+        max_allowed=MAX_FLEET_PROFILES, limit_name="max_profiles",
         repository=repository,
     )

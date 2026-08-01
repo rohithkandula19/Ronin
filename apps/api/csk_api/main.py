@@ -170,6 +170,16 @@ def make_app() -> FastAPI:
         from .dashboard import skill_entries
         return skill_entries(".")
 
+    @app.get("/ui/fleet-plans")
+    def ui_fleet_plans(limit: int = 50) -> list[dict]:
+        from .dashboard import fleet_plan_entries
+        return fleet_plan_entries(".", limit=max(1, min(200, limit)))
+
+    @app.get("/ui/proposals")
+    def ui_proposals(limit: int = 50) -> list[dict]:
+        from .dashboard import proposal_entries
+        return proposal_entries(".", limit=max(1, min(200, limit)))
+
     @app.post("/signup", response_model=SignupOut, status_code=201)
     def signup(body: SignupIn, session: Session = Depends(db_dep)) -> SignupOut:
         token = generate_api_token(settings.api_token_bytes)
