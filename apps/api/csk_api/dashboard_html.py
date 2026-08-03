@@ -210,6 +210,7 @@ var API = {
   fleetRuns: "/ui/fleet-runs",
   missions: "/ui/missions",
   candidates: "/ui/candidates",
+  remoteWorkerJobs: "/ui/remote-worker-jobs",
   proposals: "/ui/proposals"
 };
 var state = { runs: [], activeId: null };
@@ -455,12 +456,25 @@ function candidateHtml(candidate){
   '</li>';
 }
 
+function remoteWorkerJobHtml(job){
+  var stateClass = job.status === "completed" ? "green" : (job.status === "failed" ? "red" : "amber");
+  var worker = job.worker_id ? '<span>worker '+esc(job.worker_id)+'</span>' : '<span>unclaimed</span>';
+  var error = job.error ? '<span>'+esc(job.error)+'</span>' : '';
+  return '<li class="ops-item">'+
+    '<div class="ops-title">'+esc(job.id)+'</div>'+
+    '<div class="ops-meta"><span class="badge '+stateClass+'">'+esc(job.status)+'</span>'+worker+
+    '<span>mission '+esc(job.mission_id)+'</span><span>'+esc(job.attempts)+' attempts</span>'+error+
+    '<span>'+esc(fmtDate(job.updated))+'</span></div>'+
+    '<div class="wave-list"><span>evidence '+esc(job.outcome)+' &middot; '+esc(job.duration_seconds)+'s</span></div>'+
+  '</li>';
+}
+
 async function loadOperations(){
   var pane = document.getElementById("pane-operations");
   pane.innerHTML = '<div class="loading">loading...</div>';
   try{
-    var data = await Promise.all([getJSON(API.missions), getJSON(API.candidates), getJSON(API.fleetPlans), getJSON(API.fleetRuns), getJSON(API.proposals)]);
-    var missions = data[0], candidates = data[1], plans = data[2], runs = data[3], proposals = data[4];
+    var data = await Promise.all([getJSON(API.missions), getJSON(API.candidates), getJSON(API.fleetPlans), getJSON(API.fleetRuns), getJSON(API.remoteWorkerJobs), getJSON(API.proposals)]);
+    var missions = data[0], candidates = data[1], plans = data[2], runs = data[3], workerJobs = data[4], proposals = data[5];
     var html = '<div class="card"><h3>Missions ('+missions.length+')</h3>';
     html += missions.length ? '<ul class="ops-list">'+missions.map(missionHtml).join("")+'</ul>' : operationsEmpty('No durable issue-to-PR missions saved for this project.');
     html += '</div><div class="card"><h3>Candidate workspaces ('+candidates.length+')</h3>';
@@ -469,6 +483,8 @@ async function loadOperations(){
     html += plans.length ? '<ul class="ops-list">'+plans.map(fleetPlanHtml).join("")+'</ul>' : operationsEmpty('No fleet plans saved for this project.');
     html += '</div><div class="card"><h3>Fleet runs ('+runs.length+')</h3>';
     html += runs.length ? '<ul class="ops-list">'+runs.map(fleetRunHtml).join("")+'</ul>' : operationsEmpty('No fleet executions started for this project.');
+    html += '</div><div class="card"><h3>Remote verification jobs ('+workerJobs.length+')</h3>';
+    html += workerJobs.length ? '<ul class="ops-list">'+workerJobs.map(remoteWorkerJobHtml).join("")+'</ul>' : operationsEmpty('No remote candidate verification jobs queued for this project.');
     html += '</div><div class="card"><h3>Retained patch proposals ('+proposals.length+')</h3>';
     html += proposals.length ? '<ul class="ops-list">'+proposals.map(proposalHtml).join("")+'</ul>' : operationsEmpty('No isolated-worktree proposals saved for this project.');
     pane.innerHTML = html;

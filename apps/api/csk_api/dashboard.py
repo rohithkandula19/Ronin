@@ -13,6 +13,7 @@ surfaces data the rest of ronin actually wrote to disk:
 - missions           -> ``ronin_cli.mission_store`` (``.ronin/missions``)
 - candidate workspaces -> ``ronin_cli.candidate_workspace`` (local metadata only)
 - patch proposals    -> ``ronin_cli.agent_proposals`` (``.ronin/agent-proposals``)
+- remote workers     -> ``ronin_cli.remote_workers`` (status-only lease metadata)
 
 Everything honours ``RONIN_HOME``/the current working directory exactly as the
 CLI does, so a test can point a temp ``.ronin`` home at these helpers and get the
@@ -350,6 +351,38 @@ def mission_entries(root: str | Path = ".", limit: int = 50) -> list[dict[str, A
             "pr_draft_status": mission.artifacts.pull_request_draft.status if mission.artifacts.pull_request_draft else "not_drafted",
         }
         for mission in missions
+    ]
+
+
+def remote_worker_job_entries(root: str | Path = ".", limit: int = 50) -> list[dict[str, Any]]:
+    """Safe lifecycle state for remote candidate verification jobs.
+
+    Patch content, command text, repository URLs, and lease-token digests are
+    intentionally private to the authenticated worker protocol.
+    """
+    try:
+        from ronin_cli.remote_workers import RemoteWorkerStore
+    except Exception:  # noqa: BLE001
+        return []
+    try:
+        jobs = RemoteWorkerStore(root).list(limit=limit)
+    except Exception:  # noqa: BLE001
+        return []
+    return [
+        {
+            "id": job.id,
+            "mission_id": job.mission_id,
+            "candidate_id": job.candidate_id,
+            "status": job.status,
+            "attempts": job.attempts,
+            "worker_id": job.worker_id,
+            "lease_expires": job.lease_expires,
+            "outcome": job.evidence.outcome if job.evidence else "pending",
+            "duration_seconds": job.evidence.duration_seconds if job.evidence else 0.0,
+            "error": job.error,
+            "updated": job.updated,
+        }
+        for job in jobs
     ]
 
 

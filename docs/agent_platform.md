@@ -175,6 +175,43 @@ Mission Control displays the imported source reference alongside the existing
 read-only audit and evidence state. It continues to omit issue bodies and
 tokens.
 
+### Sandboxed Remote Verification Workers
+
+Ronin can hand a candidate verification to a separately operated worker without
+giving it the controller checkout, Git credentials, approval authority, or any
+path to publish code:
+
+```bash
+# Run once on the controller. The token is shown once; Ronin stores only a digest.
+ronin util mission worker auth-init --yes
+
+# Snapshot the active candidate's current patch for a Docker test job.
+ronin util mission worker enqueue mission-20260803-120000-abcdef "pytest -q" \
+  --repository-url https://github.com/owner/repository.git
+
+# On a trusted worker with the token in its environment.
+RONIN_WORKER_TOKEN='...' ronin util mission worker run \
+  --endpoint https://controller.example --worker-id build-east-1 --yes
+```
+
+The worker endpoint authenticates with the controller token, then issues a
+one-time lease token and immutable dispatch: credential-free HTTPS clone URL,
+base revision, bounded patch, Docker image, command, and timeout. The worker
+clones into a temporary directory, applies the patch with Git, and runs only
+the configured command in Docker with no network, dropped capabilities,
+`no-new-privileges`, PID/memory limits, and a disposable workspace bind mount.
+Only exit status, duration, and a bounded status summary return to the
+controller; raw logs do not.
+
+Before accepting completion, the controller rechecks that the candidate's
+mission, base revision, and patch digest are unchanged. A changed candidate,
+expired lease, wrong worker, or wrong one-time token cannot advance the mission.
+Passed remote evidence uses the same budgeted test gate as local verification;
+failed evidence returns to implementation or fails within the existing repair
+limits. Remote workers cannot stage, commit, push, create a PR, or approve a
+release. Keep a non-local controller behind HTTPS; HTTP is accepted only for
+localhost development.
+
 ## Fleet Execution
 
 Turn an approved saved plan into an explicit, durable local run:

@@ -7,7 +7,7 @@ from typing import Any, Iterator
 
 from fastapi import Depends, FastAPI, HTTPException, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
@@ -194,6 +194,66 @@ def make_app() -> FastAPI:
     def ui_proposals(limit: int = 50) -> list[dict]:
         from .dashboard import proposal_entries
         return proposal_entries(".", limit=max(1, min(200, limit)))
+
+    @app.get("/ui/remote-worker-jobs")
+    def ui_remote_worker_jobs(limit: int = 50) -> list[dict]:
+        from .dashboard import remote_worker_job_entries
+        return remote_worker_job_entries(".", limit=max(1, min(200, limit)))
+
+    # ---------- remote mission workers ----------
+    #
+    # These endpoints are not part of the read-only dashboard. A controller
+    # token is created explicitly with `ronin util mission worker auth-init`;
+    # its digest stays project-local. Workers receive an immutable patch bundle
+    # and return bounded evidence, never controller filesystem paths or logs.
+
+    def require_remote_worker_token(token: str | None) -> None:
+        from ronin_cli.remote_workers import RemoteWorkerAuth
+
+        if not RemoteWorkerAuth(".").verify(token):
+            raise HTTPException(status_code=401, detail="invalid remote worker token")
+
+    @app.post("/worker/v1/claim", response_model=None)
+    def remote_worker_claim(
+        body: dict[str, Any],
+        x_ronin_worker_token: str | None = Header(default=None),
+    ) -> dict | Response:
+        require_remote_worker_token(x_ronin_worker_token)
+        worker_id = body.get("worker_id")
+        if not isinstance(worker_id, str):
+            raise HTTPException(status_code=422, detail="worker_id is required")
+        from ronin_cli.remote_workers import RemoteWorkerStore
+
+        try:
+            dispatch = RemoteWorkerStore(".").claim_next(worker_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if dispatch is None:
+            return Response(status_code=204)
+        return {"dispatch": dispatch.as_dict()}
+
+    @app.post("/worker/v1/complete")
+    def remote_worker_complete(
+        body: dict[str, Any],
+        x_ronin_worker_token: str | None = Header(default=None),
+    ) -> dict:
+        require_remote_worker_token(x_ronin_worker_token)
+        from ronin_cli.remote_workers import RemoteVerificationCoordinator, RemoteWorkerEvidence
+
+        required = ("job_id", "worker_id", "lease_id", "lease_token")
+        if not all(isinstance(body.get(field), str) for field in required):
+            raise HTTPException(status_code=422, detail="remote worker completion fields are required")
+        evidence = RemoteWorkerEvidence.from_dict(body.get("evidence"))
+        if evidence is None:
+            raise HTTPException(status_code=422, detail="remote worker evidence is invalid")
+        try:
+            job = RemoteVerificationCoordinator(".").complete(
+                body["job_id"], worker_id=body["worker_id"], lease_id=body["lease_id"],
+                lease_token=body["lease_token"], evidence=evidence,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"job": job.as_dict()}
 
     @app.post("/signup", response_model=SignupOut, status_code=201)
     def signup(body: SignupIn, session: Session = Depends(db_dep)) -> SignupOut:

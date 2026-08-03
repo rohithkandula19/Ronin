@@ -26,6 +26,13 @@ All notable changes to this project will be documented here. Format follows [Kee
   `gh`; GitLab requires an environment-provided token and an HTTPS endpoint.
   Tokens, issue bodies, and source URLs remain out of the Operations API, and
   importing records operator-attributed audit evidence rather than an agent run.
+- **Sandboxed remote verification workers.** A mission candidate can now be
+  snapshotted into a leased, authenticated remote verification job. Workers
+  clone a credential-free HTTPS origin at the exact revision, apply the bounded
+  candidate patch, and execute only the approved command in no-network Docker.
+  One-time lease tokens, patch-digest revalidation, compact evidence, explicit
+  release recovery, and Mission Control lifecycle status prevent workers from
+  advancing stale work or gaining merge, publish, or approval authority.
 - **Governed fleet execution.** Saved fleet plans can now become durable local
   fleet runs. `ronin util fleet start`, `runs`, and `run-next` claim exactly one
   dependency-ready wave at a time, persist terminal agent/proposal evidence,

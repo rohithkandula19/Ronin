@@ -2519,6 +2519,12 @@ mission_workspace_app = typer.Typer(
 )
 mission_app.add_typer(mission_workspace_app, name="workspace")
 
+mission_worker_app = typer.Typer(
+    help="Dispatch bounded candidate verification jobs to authenticated remote Docker workers.",
+    no_args_is_help=True,
+)
+mission_app.add_typer(mission_worker_app, name="worker")
+
 
 @mission_app.command("create")
 def mission_create(
@@ -2968,6 +2974,133 @@ def mission_workspace_destroy(
         console.print(f"[red]x[/red] {exc}")
         raise typer.Exit(2)
     console.print(f"[green]destroyed[/green] [cyan]{candidate.id}[/cyan]")
+
+
+@mission_worker_app.command("auth-init")
+def mission_worker_auth_init(
+    root: Path = typer.Option(Path("."), "--root", help="Controller project directory."),
+    rotate: bool = typer.Option(False, "--rotate", help="Replace the existing worker token."),
+    yes: bool = typer.Option(False, "--yes", help="Confirm token creation or rotation."),
+) -> None:
+    """Create the controller token once; store only a salted digest locally."""
+    if not yes:
+        console.print("[yellow]not initialized[/yellow] (rerun with --yes after choosing where workers receive the token)")
+        raise typer.Exit(2)
+    from .remote_workers import RemoteWorkerAuth
+
+    try:
+        token = RemoteWorkerAuth(root).provision(rotate=rotate)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print("[green]remote worker token created[/green] [bold]shown once below[/bold]")
+    console.print(token, markup=False)
+    console.print("[dim]Set this as RONIN_WORKER_TOKEN on each trusted worker; it is not stored in clear text.[/dim]")
+
+
+@mission_worker_app.command("enqueue")
+def mission_worker_enqueue(
+    mission_id: str = typer.Argument(..., help="Mission in implementing state with an active candidate."),
+    command: str = typer.Argument(..., help="Verification command that the remote Docker worker may run."),
+    root: Path = typer.Option(Path("."), "--root", help="Controller project directory."),
+    repository_url: Optional[str] = typer.Option(
+        None, "--repository-url", help="Credential-free HTTPS clone URL; defaults to origin.",
+    ),
+    timeout: int = typer.Option(600, "--timeout", min=1, max=3_600, help="Remote Docker deadline in seconds."),
+) -> None:
+    """Snapshot a candidate patch for remote verification; this does not run it."""
+    from .remote_workers import RemoteVerificationCoordinator
+
+    try:
+        job = RemoteVerificationCoordinator(root).enqueue(
+            mission_id, command, timeout_seconds=timeout, repository_url=repository_url,
+        )
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(
+        f"[green]queued[/green] [cyan]{job.id}[/cyan] for [bold]{job.mission_id}[/bold] "
+        f"[dim](patch {job.patch_digest[:12]}; no worker started)[/dim]"
+    )
+
+
+@mission_worker_app.command("list")
+def mission_worker_list(
+    root: Path = typer.Option(Path("."), "--root", help="Controller project directory."),
+    limit: int = typer.Option(20, "--limit", min=1, max=200, help="Maximum recent jobs."),
+) -> None:
+    """List remote verification lifecycle state without revealing patch contents."""
+    from .remote_workers import RemoteWorkerStore
+
+    jobs = RemoteWorkerStore(root).list(limit=limit)
+    if not jobs:
+        console.print("[dim]no remote verification jobs saved for this project.[/dim]")
+        return
+    table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+    table.add_column("Job", no_wrap=True)
+    table.add_column("Status")
+    table.add_column("Worker")
+    table.add_column("Attempts", justify="right")
+    table.add_column("Mission", no_wrap=True)
+    table.add_column("Evidence")
+    for job in jobs:
+        table.add_row(
+            job.id, job.status, job.worker_id or "-", str(job.attempts), job.mission_id,
+            job.evidence.outcome if job.evidence else "pending",
+        )
+    console.print(table)
+
+
+@mission_worker_app.command("release")
+def mission_worker_release(
+    job_id: str = typer.Argument(..., help="Leased job whose worker has definitely stopped."),
+    root: Path = typer.Option(Path("."), "--root", help="Controller project directory."),
+    yes: bool = typer.Option(False, "--yes", help="Confirm that the leased worker is no longer running."),
+) -> None:
+    """Explicitly requeue an interrupted worker lease; it never starts a worker."""
+    if not yes:
+        console.print("[yellow]not released[/yellow] (confirm the worker stopped, then rerun with --yes)")
+        raise typer.Exit(2)
+    from .remote_workers import RemoteWorkerStore
+
+    try:
+        job = RemoteWorkerStore(root).release(job_id)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(f"[green]requeued[/green] [cyan]{job.id}[/cyan]")
+
+
+@mission_worker_app.command("run")
+def mission_worker_run(
+    endpoint: str = typer.Option(..., "--endpoint", help="HTTPS controller endpoint; localhost HTTP is allowed for development."),
+    worker_id: str = typer.Option(..., "--worker-id", help="Stable id for this worker."),
+    token_env: str = typer.Option("RONIN_WORKER_TOKEN", "--token-env", help="Environment variable containing the controller token."),
+    yes: bool = typer.Option(False, "--yes", help="Confirm clone, patch application, and Docker-only execution."),
+) -> None:
+    """Claim one job, run it in a disposable Docker checkout, and return bounded evidence."""
+    if not yes:
+        console.print("[yellow]not run[/yellow] (rerun with --yes after reviewing the trusted controller endpoint)")
+        raise typer.Exit(2)
+    token = os.environ.get(token_env, "")
+    if not token:
+        console.print(f"[red]x[/red] worker token environment variable {token_env} is not set")
+        raise typer.Exit(2)
+    from .remote_workers import RemoteWorkerClient
+
+    try:
+        job = RemoteWorkerClient(endpoint, token).run_once(worker_id)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    if job is None:
+        console.print("[dim]no remote verification job is ready.[/dim]")
+        return
+    outcome = job.evidence.outcome if job.evidence else "unknown"
+    mark = "[green]completed[/green]" if job.status == "completed" else "[red]failed[/red]"
+    console.print(f"{mark} [cyan]{job.id}[/cyan] [dim]evidence={outcome}[/dim]")
+    if job.status != "completed":
+        raise typer.Exit(1)
 
 
 def _print_mission_evaluation(gate) -> None:

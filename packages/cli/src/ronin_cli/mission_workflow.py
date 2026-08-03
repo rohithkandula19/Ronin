@@ -82,11 +82,49 @@ class MissionWorkflow:
             )
 
         result = self.candidates.run_command(candidate.id, command, timeout=timeout, run_fn=run_fn)
+        return self._record_test_result(testing, command, result, actor="test-gate")
+
+    def record_remote_verification(
+        self,
+        mission_id: str,
+        result: CandidateCommandResult,
+        *,
+        worker_id: str,
+    ) -> MissionRecord:
+        """Record a leased worker's Docker result after the controller revalidated it.
+
+        The remote-worker coordinator owns lease, patch-digest, and candidate
+        revalidation. This method still owns the mission state transition and
+        budget accounting, so a worker cannot bypass an evidence gate.
+        """
+        if not worker_id or len(worker_id) > 80:
+            raise ValueError("remote worker id is invalid")
+        mission = self._require_stage(mission_id, MissionStage.IMPLEMENTING)
+        self._candidate_for(mission)
+        actor = f"remote-worker:{worker_id}"
+        testing = self.store.transition(
+            mission.id, MissionStage.TESTING, actor=actor, summary="remote candidate verification started",
+        )
+        if testing.usage.tool_calls >= testing.budget.max_tool_calls:
+            return self._record_blocked_test(
+                testing, result.command, "mission tool-call budget is exhausted before verification", actor=actor,
+            )
+        return self._record_test_result(testing, result.command, result, actor=actor)
+
+    def _record_test_result(
+        self,
+        testing: MissionRecord,
+        command: str,
+        result: CandidateCommandResult,
+        *,
+        actor: str,
+    ) -> MissionRecord:
         usage = self._usage_after_test(testing.usage, result)
-        testing = self.store.set_usage(testing.id, usage, actor="test-gate")
+        testing = self.store.set_usage(testing.id, usage, actor=actor)
         report = _test_report(command, result, repair_attempt=usage.repair_attempts)
         testing = self.store.save_artifacts(
             testing.id, testing.artifacts.model_copy(update={"test_report": report}),
+            actor=actor,
         )
         if (
             not result.passed
@@ -97,7 +135,7 @@ class MissionWorkflow:
             return self.store.transition(
                 testing.id,
                 MissionStage.FAILED,
-                actor="test-gate",
+                actor=actor,
                 summary="candidate test retry budget exhausted",
                 error=f"verification failed after {usage.repair_attempts} repair attempt(s); retry budget exhausted",
             )
@@ -106,26 +144,26 @@ class MissionWorkflow:
             return self.store.transition(
                 testing.id,
                 MissionStage.FAILED,
-                actor="test-gate",
+                actor=actor,
                 summary="mission resource budget exceeded during verification",
                 error="verification exceeded mission budget: " + ", ".join(exceeded),
             )
         if result.passed:
             return self.store.transition(
-                testing.id, MissionStage.REVIEWING, actor="test-gate", summary="candidate verification passed",
+                testing.id, MissionStage.REVIEWING, actor=actor, summary="candidate verification passed",
             )
         if result.blocked or result.timed_out:
             return self.store.transition(
                 testing.id,
                 MissionStage.FAILED,
-                actor="test-gate",
+                actor=actor,
                 summary="candidate verification was blocked",
                 error=_failure_reason(result),
             )
         return self.store.transition(
             testing.id,
             MissionStage.IMPLEMENTING,
-            actor="test-gate",
+            actor=actor,
             summary=f"candidate test failed; repair attempt {usage.repair_attempts} is allowed",
         )
 
@@ -236,7 +274,14 @@ class MissionWorkflow:
             "repair_attempts": usage.repair_attempts + (0 if result.passed else 1),
         })
 
-    def _record_blocked_test(self, mission: MissionRecord, command: str, reason: str) -> MissionRecord:
+    def _record_blocked_test(
+        self,
+        mission: MissionRecord,
+        command: str,
+        reason: str,
+        *,
+        actor: str = "test-gate",
+    ) -> MissionRecord:
         report = TestReport(
             suites=[TestSuiteResult(name="candidate", command=command, status="blocked", output_summary=reason)],
             repair_attempt=mission.usage.repair_attempts,
@@ -244,9 +289,10 @@ class MissionWorkflow:
         )
         blocked = self.store.save_artifacts(
             mission.id, mission.artifacts.model_copy(update={"test_report": report}),
+            actor=actor,
         )
         return self.store.transition(
-            blocked.id, MissionStage.FAILED, actor="test-gate", summary="candidate verification blocked", error=reason,
+            blocked.id, MissionStage.FAILED, actor=actor, summary="candidate verification blocked", error=reason,
         )
 
 
