@@ -51,6 +51,65 @@ local routing evidence, but no prompts, providers, agents, shell commands,
 queue workers, edits, or merges are started by these commands. A fleet plan is
 an inspectable scheduling boundary, not autonomous execution.
 
+## Mission Foundation
+
+Ronin's issue-to-PR foundation uses structured artifacts rather than an
+unbounded chat transcript. A mission holds the inspected issue intent,
+planning artifact, independent test report, review findings, security scan,
+budget ceiling, and an append-only local audit chain.
+
+```bash
+ronin util mission create "Harden retry behavior" \
+  "Retry transient transport failures and add regression coverage." \
+  --source github --source-id 123 --acceptance "Retries stop after the configured limit."
+ronin util mission list
+ronin util mission advance mission-20260802-120000-abcdef inspecting
+ronin util mission audit mission-20260802-120000-abcdef
+```
+
+The deliberate state path is `pending -> inspecting -> planning ->
+implementing -> testing -> reviewing -> security -> awaiting_approval ->
+staging -> completed`. A failed implementation or test may return to its
+permitted earlier planning or implementation state; invalid shortcuts are
+rejected. The mission store persists a mutable typed snapshot under
+`.ronin/missions/` and a hash-chained `.events.jsonl` file alongside it.
+`mission audit` verifies both the chain and that its final event still matches
+the snapshot. These commands only record operator evidence; they do not call a
+provider, run a shell command, edit code, or create a pull request.
+
+Each mission has hard token, cost, wall-clock, tool-call, concurrency, and
+repair-attempt ceilings. The new contract makes those values durable before an
+issue worker is attached, so the eventual worker cannot reinterpret a mission
+as an unbounded autonomous task. Existing installations require no migration:
+all mission records are project-local and removable with `.ronin/` metadata.
+
+### Candidate Workspaces
+
+Before an implementation is trusted, create a disposable candidate checkout:
+
+```bash
+ronin util mission workspace create mission-20260802-120000-abcdef \
+  --image python:3.14-alpine
+ronin util mission workspace list
+ronin util mission workspace diff candidate-20260802-120010-fedcba
+ronin util mission workspace run candidate-20260802-120010-fedcba "pytest -q" --yes
+ronin util mission workspace destroy candidate-20260802-120010-fedcba --yes
+```
+
+Creation uses a detached Git worktree at the committed source revision, leaving
+the caller's checkout untouched. A candidate may be inspected and diffed, but
+it never executes on the host: `workspace run` requires the image supplied at
+creation and uses Docker with dropped capabilities, `no-new-privileges`, PID
+and memory limits, a candidate-only bind mount, and no network. There is no
+host fallback. Destruction removes only that detached candidate checkout after
+an explicit `--yes`; its terminal metadata remains under
+`.ronin/candidate-workspaces/` for auditability.
+
+`ronin ui` exposes mission stages, audit status, evidence verdicts, and safe
+candidate metadata in its read-only Operations tab. It intentionally does not
+publish issue bodies, artifact content, or filesystem paths through the status
+API.
+
 ## Fleet Execution
 
 Turn an approved saved plan into an explicit, durable local run:

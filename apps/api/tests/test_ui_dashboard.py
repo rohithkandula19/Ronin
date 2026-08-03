@@ -371,3 +371,59 @@ def test_fleet_runs_return_real_execution_state(client: TestClient) -> None:
             ],
         }
     ]
+
+
+def test_missions_and_candidates_return_real_local_state(client: TestClient) -> None:
+    import subprocess
+
+    from ronin_cli.candidate_workspace import CandidateWorkspaceService
+    from ronin_cli.mission_models import MissionSpec, MissionStage
+    from ronin_cli.mission_store import MissionStore
+
+    project = Path.cwd()
+    subprocess.run(["git", "init", "-q"], check=True, capture_output=True, text=True)
+    subprocess.run(["git", "config", "user.email", "dashboard@example.invalid"], check=True, capture_output=True, text=True)
+    subprocess.run(["git", "config", "user.name", "Dashboard tests"], check=True, capture_output=True, text=True)
+    (project / "example.py").write_text("VALUE = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "example.py"], check=True, capture_output=True, text=True)
+    subprocess.run(["git", "commit", "-qm", "initial"], check=True, capture_output=True, text=True)
+
+    missions = MissionStore(project)
+    mission = missions.create(MissionSpec(title="Verify UI mission", issue_text="Show real mission data."))
+    mission = missions.transition(mission.id, MissionStage.INSPECTING)
+    candidate = CandidateWorkspaceService(project).create(mission.id, image="python:3.14-alpine")
+    mission = missions.set_candidate_workspace(mission.id, candidate.id)
+
+    rows = client.get("/ui/missions").json()
+    assert rows == [
+        {
+            "id": mission.id,
+            "title": "Verify UI mission",
+            "source": "manual",
+            "source_id": "",
+            "stage": "inspecting",
+            "created": mission.created,
+            "updated": mission.updated,
+            "candidate_workspace_id": candidate.id,
+            "event_count": 3,
+            "audit_valid": True,
+            "plan_recorded": False,
+            "test_verdict": "unknown",
+            "review_verdict": "unknown",
+            "security_verdict": "unknown",
+        }
+    ]
+    candidates = client.get("/ui/candidates").json()
+    assert candidates == [
+        {
+            "id": candidate.id,
+            "mission_id": mission.id,
+            "base_revision": candidate.base_revision,
+            "image": "python:3.14-alpine",
+            "status": "active",
+            "created": candidate.created,
+            "updated": candidate.updated,
+            "destroyed": None,
+        }
+    ]
+    CandidateWorkspaceService(project).destroy(candidate.id)

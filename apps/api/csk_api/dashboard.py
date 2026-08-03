@@ -10,6 +10,8 @@ surfaces data the rest of ronin actually wrote to disk:
 - memory entries     -> ``ronin_cli.memory_store`` (``~/.ronin/memory.json``)
 - skills             -> ``ronin_cli.muscle_memory`` (``.ronin/commands/*.md``)
 - fleet plans        -> ``ronin_cli.agent_fleet`` (``.ronin/fleet-plans``)
+- missions           -> ``ronin_cli.mission_store`` (``.ronin/missions``)
+- candidate workspaces -> ``ronin_cli.candidate_workspace`` (local metadata only)
 - patch proposals    -> ``ronin_cli.agent_proposals`` (``.ronin/agent-proposals``)
 
 Everything honours ``RONIN_HOME``/the current working directory exactly as the
@@ -305,6 +307,71 @@ def fleet_run_entries(root: str | Path = ".", limit: int = 50) -> list[dict[str,
             ],
         }
         for run in runs
+    ]
+
+
+def mission_entries(root: str | Path = ".", limit: int = 50) -> list[dict[str, Any]]:
+    """Status-only mission records for the local Mission Control panel.
+
+    Issue bodies and artifact content are deliberately excluded: this page is an
+    operational overview, while the typed record remains in the project-local
+    mission store. Audit validation is included so an operator can see whether
+    the durable snapshot still agrees with its append-only evidence.
+    """
+    try:
+        from ronin_cli.mission_store import MissionStore
+    except Exception:  # noqa: BLE001
+        return []
+
+    try:
+        store = MissionStore(root)
+        missions = store.list(limit=limit)
+    except Exception:  # noqa: BLE001
+        return []
+    return [
+        {
+            "id": mission.id,
+            "title": mission.spec.title,
+            "source": mission.spec.source,
+            "source_id": mission.spec.source_id,
+            "stage": mission.stage.value,
+            "created": mission.created,
+            "updated": mission.updated,
+            "candidate_workspace_id": mission.candidate_workspace_id,
+            "event_count": mission.event_count,
+            "audit_valid": store.verify_audit(mission.id).valid,
+            "plan_recorded": mission.artifacts.plan is not None,
+            "test_verdict": mission.artifacts.test_report.verdict if mission.artifacts.test_report else "unknown",
+            "review_verdict": mission.artifacts.review_report.verdict if mission.artifacts.review_report else "unknown",
+            "security_verdict": mission.artifacts.security_scan.verdict if mission.artifacts.security_scan else "unknown",
+        }
+        for mission in missions
+    ]
+
+
+def candidate_workspace_entries(root: str | Path = ".", limit: int = 50) -> list[dict[str, Any]]:
+    """Safe candidate lifecycle metadata; checkout paths and content stay private."""
+    try:
+        from ronin_cli.candidate_workspace import CandidateWorkspaceService
+    except Exception:  # noqa: BLE001
+        return []
+
+    try:
+        candidates = CandidateWorkspaceService(root).list(limit=limit)
+    except Exception:  # noqa: BLE001
+        return []
+    return [
+        {
+            "id": candidate.id,
+            "mission_id": candidate.mission_id,
+            "base_revision": candidate.base_revision,
+            "image": candidate.image,
+            "status": candidate.status,
+            "created": candidate.created,
+            "updated": candidate.updated,
+            "destroyed": candidate.destroyed,
+        }
+        for candidate in candidates
     ]
 
 

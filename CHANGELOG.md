@@ -5,6 +5,15 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Added
+- **Durable issue-to-PR mission foundation.** `ronin util mission` now records
+  strict `MissionSpec`, plan/test/review/security artifacts, hard per-mission
+  budgets, legal workflow transitions, and a hash-chained audit log that is
+  checked against the current snapshot. Candidate workspaces are detached Git
+  checkouts tied to a mission; code verification requires an explicit Docker
+  image and runs with no host fallback, no network, dropped capabilities,
+  `no-new-privileges`, and bounded memory/PIDs. The read-only Operations UI
+  shows mission, audit, evidence, and candidate lifecycle status without
+  exposing issue bodies, artifact content, or workspace paths.
 - **Governed fleet execution.** Saved fleet plans can now become durable local
   fleet runs. `ronin util fleet start`, `runs`, and `run-next` claim exactly one
   dependency-ready wave at a time, persist terminal agent/proposal evidence,

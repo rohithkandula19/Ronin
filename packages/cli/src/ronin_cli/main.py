@@ -2507,6 +2507,299 @@ def agents(
     console.print(table)
 
 
+mission_app = typer.Typer(
+    help="Create and inspect durable issue-to-PR missions and candidate workspaces.",
+    no_args_is_help=True,
+)
+util_app.add_typer(mission_app, name="mission")
+
+mission_workspace_app = typer.Typer(
+    help="Create, inspect, verify, and destroy disposable mission candidate workspaces.",
+    no_args_is_help=True,
+)
+mission_app.add_typer(mission_workspace_app, name="workspace")
+
+
+@mission_app.command("create")
+def mission_create(
+    title: str = typer.Argument(..., help="Short mission title."),
+    issue_text: str = typer.Argument(..., help="Issue body or operator-provided work request."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    source: str = typer.Option("manual", "--source", help="manual, github, or gitlab."),
+    source_id: str = typer.Option("", "--source-id", help="Optional issue identifier from the source."),
+    repository_ref: str = typer.Option("", "--repository-ref", help="Optional issue repository reference."),
+    requirement: List[str] = typer.Option([], "--requirement", help="Repeatable explicit requirement."),
+    acceptance: List[str] = typer.Option([], "--acceptance", help="Repeatable acceptance criterion."),
+    max_tokens: int = typer.Option(100_000, "--max-tokens", min=1, max=10_000_000),
+    max_cost_usd: float = typer.Option(25.0, "--max-cost-usd", min=0.0, max=1_000_000.0),
+    max_wall_time: int = typer.Option(1_800, "--max-wall-time", min=1, max=604_800),
+    max_tool_calls: int = typer.Option(500, "--max-tool-calls", min=1, max=100_000),
+    max_concurrency: int = typer.Option(4, "--max-concurrency", min=1, max=32),
+    max_repairs: int = typer.Option(3, "--max-repairs", min=0, max=10),
+) -> None:
+    """Record structured issue intent and immutable mission audit evidence only."""
+    from .mission_models import MissionBudget, MissionSpec
+    from .mission_store import MissionStore
+
+    try:
+        spec = MissionSpec(
+            source=source.strip().lower(),
+            source_id=source_id.strip(),
+            title=title,
+            issue_text=issue_text,
+            repository_ref=repository_ref.strip(),
+            requirements=requirement,
+            acceptance_criteria=acceptance,
+        )
+        budget = MissionBudget(
+            max_tokens=max_tokens,
+            max_cost_usd=max_cost_usd,
+            max_wall_time_seconds=max_wall_time,
+            max_tool_calls=max_tool_calls,
+            max_concurrency=max_concurrency,
+            max_repair_attempts=max_repairs,
+        )
+        mission = MissionStore(root).create(spec, budget=budget)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(
+        f"[green]created[/green] [cyan]{mission.id}[/cyan] "
+        "[dim](pending inspection; no provider, workspace, command, or write was started)[/dim]"
+    )
+
+
+@mission_app.command("list")
+def mission_list(
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    limit: int = typer.Option(20, "--limit", min=1, max=200, help="Maximum recent missions to show."),
+) -> None:
+    """List locally durable missions and their present review stage."""
+    from .mission_store import MissionStore
+
+    missions = MissionStore(root).list(limit=limit)
+    if not missions:
+        console.print("[dim]no missions saved for this project.[/dim]")
+        return
+    table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+    table.add_column("Mission", no_wrap=True)
+    table.add_column("Stage")
+    table.add_column("Candidate")
+    table.add_column("Events", justify="right")
+    table.add_column("Title", overflow="fold")
+    for mission in missions:
+        table.add_row(
+            mission.id,
+            mission.stage.value,
+            mission.candidate_workspace_id or "-",
+            str(mission.event_count),
+            mission.spec.title,
+        )
+    console.print(table)
+
+
+@mission_app.command("show")
+def mission_show(
+    mission_id: str = typer.Argument(..., help="Saved mission id."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Show structured intent, typed evidence, and the current state-machine stage."""
+    from .mission_store import MissionStore
+
+    try:
+        mission = MissionStore(root).load(mission_id)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    _print_mission(mission)
+
+
+@mission_app.command("advance")
+def mission_advance(
+    mission_id: str = typer.Argument(..., help="Saved mission id."),
+    stage: str = typer.Argument(..., help="Target state-machine stage."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    summary: str = typer.Option("", "--summary", help="Concise operator evidence for this transition."),
+) -> None:
+    """Record one valid state transition; this command never executes an agent."""
+    from .mission_models import MissionStage
+    from .mission_store import MissionStore
+
+    try:
+        target = MissionStage(stage.strip().lower())
+        mission = MissionStore(root).transition(mission_id, target, summary=summary)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(f"[green]advanced[/green] [cyan]{mission.id}[/cyan] to [bold]{mission.stage.value}[/bold]")
+
+
+@mission_app.command("audit")
+def mission_audit(
+    mission_id: str = typer.Argument(..., help="Saved mission id."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Verify the local append-only mission audit chain against its snapshot."""
+    from .mission_store import MissionStore
+
+    try:
+        report = MissionStore(root).verify_audit(mission_id)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    if not report.valid:
+        console.print(f"[red]invalid[/red] mission audit: {report.error or 'unknown error'}")
+        raise typer.Exit(1)
+    console.print(f"[green]valid[/green] mission audit ({report.events} event(s))")
+
+
+@mission_workspace_app.command("create")
+def mission_workspace_create(
+    mission_id: str = typer.Argument(..., help="Mission that owns this candidate checkout."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    image: str = typer.Option("", "--image", help="Required later for Docker-only candidate commands."),
+    base_revision: Optional[str] = typer.Option(None, "--base-revision", help="Committed Git SHA; defaults to HEAD."),
+) -> None:
+    """Create a detached candidate checkout without executing code."""
+    from .candidate_workspace import CandidateWorkspaceService
+    from .mission_store import MissionStore
+    from .worktree import NotAGitRepo
+
+    missions = MissionStore(root)
+    candidates = CandidateWorkspaceService(root)
+    try:
+        mission = missions.load(mission_id)
+        candidate = candidates.create(mission.id, image=image, base_revision=base_revision)
+        try:
+            missions.set_candidate_workspace(mission.id, candidate.id)
+        except Exception:
+            candidates.destroy(candidate.id)
+            raise
+    except (NotAGitRepo, ValueError) as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(
+        f"[green]candidate ready[/green] [cyan]{candidate.id}[/cyan] for [cyan]{mission.id}[/cyan] "
+        f"[dim](base {candidate.base_revision[:12]}; detached checkout; no command ran)[/dim]"
+    )
+
+
+@mission_workspace_app.command("list")
+def mission_workspace_list(
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    limit: int = typer.Option(20, "--limit", min=1, max=200, help="Maximum candidates to show."),
+) -> None:
+    """List candidate workspaces without revealing or modifying their contents."""
+    from .candidate_workspace import CandidateWorkspaceService
+
+    candidates = CandidateWorkspaceService(root).list(limit=limit)
+    if not candidates:
+        console.print("[dim]no candidate workspaces saved for this project.[/dim]")
+        return
+    table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+    table.add_column("Candidate", no_wrap=True)
+    table.add_column("Mission", no_wrap=True)
+    table.add_column("State")
+    table.add_column("Image")
+    table.add_column("Base")
+    for candidate in candidates:
+        table.add_row(
+            candidate.id,
+            candidate.mission_id,
+            candidate.status,
+            candidate.image or "not set",
+            candidate.base_revision[:12],
+        )
+    console.print(table)
+
+
+@mission_workspace_app.command("diff")
+def mission_workspace_diff(
+    candidate_id: str = typer.Argument(..., help="Active candidate workspace id."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Show the active candidate's isolated diff; the parent checkout is untouched."""
+    from .candidate_workspace import CandidateWorkspaceService
+
+    try:
+        diff = CandidateWorkspaceService(root).diff(candidate_id)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(diff or "[dim]candidate checkout has no changes.[/dim]", markup=False)
+
+
+@mission_workspace_app.command("run")
+def mission_workspace_run(
+    candidate_id: str = typer.Argument(..., help="Active candidate workspace id."),
+    command: str = typer.Argument(..., help="Command to run inside the candidate Docker container."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    timeout: int = typer.Option(600, "--timeout", min=1, max=3_600, help="Docker command deadline in seconds."),
+    yes: bool = typer.Option(False, "--yes", help="Confirm the candidate command."),
+) -> None:
+    """Run one command only in the configured, network-disabled Docker candidate."""
+    if not yes:
+        console.print("[yellow]not run[/yellow] (review the candidate and rerun with --yes)")
+        raise typer.Exit(2)
+    from .candidate_workspace import CandidateWorkspaceService
+
+    try:
+        result = CandidateWorkspaceService(root).run_command(candidate_id, command, timeout=timeout)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    if result.stdout:
+        console.print(result.stdout, end="", markup=False)
+    if result.stderr:
+        console.print(result.stderr, end="", markup=False)
+    if result.passed:
+        console.print("[green]candidate command passed[/green]")
+        return
+    console.print(f"[red]candidate command did not pass[/red] {result.error or ''}")
+    raise typer.Exit(1)
+
+
+@mission_workspace_app.command("destroy")
+def mission_workspace_destroy(
+    candidate_id: str = typer.Argument(..., help="Candidate workspace id."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    yes: bool = typer.Option(False, "--yes", help="Confirm permanent removal of this detached candidate checkout."),
+) -> None:
+    """Destroy one disposable candidate checkout while retaining terminal metadata."""
+    if not yes:
+        console.print("[yellow]not destroyed[/yellow] (rerun with --yes after reviewing its diff)")
+        raise typer.Exit(2)
+    from .candidate_workspace import CandidateWorkspaceService
+
+    try:
+        candidate = CandidateWorkspaceService(root).destroy(candidate_id)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(f"[green]destroyed[/green] [cyan]{candidate.id}[/cyan]")
+
+
+def _print_mission(mission) -> None:
+    audit = Table(box=box.SIMPLE, show_header=False)
+    audit.add_column("Field", style="cyan", no_wrap=True)
+    audit.add_column("Value")
+    audit.add_row("mission", mission.id)
+    audit.add_row("stage", mission.stage.value)
+    audit.add_row("source", f"{mission.spec.source}:{mission.spec.source_id}".rstrip(":"))
+    audit.add_row("candidate", mission.candidate_workspace_id or "not created")
+    audit.add_row("events", str(mission.event_count))
+    audit.add_row("plan", "recorded" if mission.artifacts.plan else "not recorded")
+    audit.add_row("tests", mission.artifacts.test_report.verdict if mission.artifacts.test_report else "not recorded")
+    audit.add_row("review", mission.artifacts.review_report.verdict if mission.artifacts.review_report else "not recorded")
+    audit.add_row("security", mission.artifacts.security_scan.verdict if mission.artifacts.security_scan else "not recorded")
+    audit.add_row("title", mission.spec.title)
+    console.print(audit)
+    if mission.spec.acceptance_criteria:
+        console.print("[bold]acceptance criteria[/bold]")
+        for criterion in mission.spec.acceptance_criteria:
+            console.print(f"  - {criterion}")
+
+
 fleet_app = typer.Typer(
     help="Create and inspect bounded multi-wave specialist fleet plans.",
     no_args_is_help=True,
@@ -3442,6 +3735,9 @@ def agent_operations(
     proposals = snapshot["proposals"]
     summary.add_row("proposals", f"{len(proposals)} ({sum(proposal.status == 'ready' for proposal in proposals)} ready)")
     summary.add_row("fleet plans", str(len(snapshot["fleet_plans"])))
+    summary.add_row("missions", str(len(snapshot["missions"])))
+    candidates = snapshot["candidate_workspaces"]
+    summary.add_row("candidate workspaces", f"{len(candidates)} ({sum(item.status == 'active' for item in candidates)} active)")
     console.print(summary)
     if snapshot["providers"]:
         console.print("\n[bold]provider health[/bold]")

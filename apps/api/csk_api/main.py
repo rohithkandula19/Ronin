@@ -180,6 +180,16 @@ def make_app() -> FastAPI:
         from .dashboard import fleet_run_entries
         return fleet_run_entries(".", limit=max(1, min(200, limit)))
 
+    @app.get("/ui/missions")
+    def ui_missions(limit: int = 50) -> list[dict]:
+        from .dashboard import mission_entries
+        return mission_entries(".", limit=max(1, min(200, limit)))
+
+    @app.get("/ui/candidates")
+    def ui_candidates(limit: int = 50) -> list[dict]:
+        from .dashboard import candidate_workspace_entries
+        return candidate_workspace_entries(".", limit=max(1, min(200, limit)))
+
     @app.get("/ui/proposals")
     def ui_proposals(limit: int = 50) -> list[dict]:
         from .dashboard import proposal_entries

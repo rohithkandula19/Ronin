@@ -12,7 +12,9 @@ from .agent_proposals import AgentProposalStore
 from .agent_queue import AgentQueue
 from .agent_recovery import list_recoverable_runs
 from .autonomy_ledger import verify_ledger
+from .candidate_workspace import CandidateWorkspaceService
 from .model_scorecards import ModelScorecardStore
+from .mission_store import MissionStore
 from .provider_health_store import ProviderHealthStore
 
 
@@ -29,5 +31,7 @@ def operations_snapshot(root: Path | str) -> dict[str, Any]:
         "proposals": AgentProposalStore(root).list(),
         "fleet_plans": FleetPlanStore(root).list(),
         "fleet_runs": FleetRunStore(root).list(),
+        "missions": MissionStore(root).list(),
+        "candidate_workspaces": CandidateWorkspaceService(root).list(),
         "ledger": ledger,
     }

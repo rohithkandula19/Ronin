@@ -208,6 +208,8 @@ var API = {
   skills: "/ui/skills",
   fleetPlans: "/ui/fleet-plans",
   fleetRuns: "/ui/fleet-runs",
+  missions: "/ui/missions",
+  candidates: "/ui/candidates",
   proposals: "/ui/proposals"
 };
 var state = { runs: [], activeId: null };
@@ -424,13 +426,44 @@ function fleetRunHtml(run){
   '</li>';
 }
 
+function missionHtml(mission){
+  var stageClass = mission.stage === "completed" ? "green" : (mission.stage === "failed" ? "red" : "amber");
+  var audit = mission.audit_valid ? '<span class="badge green">audit valid</span>' : '<span class="badge red">audit invalid</span>';
+  var candidate = mission.candidate_workspace_id ? '<span>candidate '+esc(mission.candidate_workspace_id)+'</span>' : '<span>no candidate</span>';
+  var evidence = '<span>plan '+(mission.plan_recorded ? 'recorded' : 'pending')+'</span>'+
+    '<span>test '+esc(mission.test_verdict)+'</span><span>review '+esc(mission.review_verdict)+'</span>'+
+    '<span>security '+esc(mission.security_verdict)+'</span>';
+  return '<li class="ops-item">'+
+    '<div class="ops-title">'+esc(mission.title)+'</div>'+
+    '<div class="ops-meta"><span class="badge '+stageClass+'">'+esc(mission.stage)+'</span>'+audit+
+    '<span>'+esc(mission.id)+'</span><span>'+esc(mission.source)+(mission.source_id ? '#'+esc(mission.source_id) : '')+'</span>'+candidate+
+    '<span>'+esc(mission.event_count)+' events</span><span>'+esc(fmtDate(mission.updated))+'</span></div>'+
+    '<div class="wave-list">'+evidence+'</div>'+
+  '</li>';
+}
+
+function candidateHtml(candidate){
+  var stateClass = candidate.status === "active" ? "amber" : "neutral";
+  var image = candidate.image ? esc(candidate.image) : 'image not set';
+  return '<li class="ops-item">'+
+    '<div class="ops-title">'+esc(candidate.id)+'</div>'+
+    '<div class="ops-meta"><span class="badge '+stateClass+'">'+esc(candidate.status)+'</span>'+
+    '<span>mission '+esc(candidate.mission_id)+'</span><span>'+image+'</span>'+
+    '<span>base '+esc((candidate.base_revision || "").slice(0,12))+'</span><span>'+esc(fmtDate(candidate.updated))+'</span></div>'+
+  '</li>';
+}
+
 async function loadOperations(){
   var pane = document.getElementById("pane-operations");
   pane.innerHTML = '<div class="loading">loading...</div>';
   try{
-    var data = await Promise.all([getJSON(API.fleetPlans), getJSON(API.fleetRuns), getJSON(API.proposals)]);
-    var plans = data[0], runs = data[1], proposals = data[2];
-    var html = '<div class="card"><h3>Fleet plans ('+plans.length+')</h3>';
+    var data = await Promise.all([getJSON(API.missions), getJSON(API.candidates), getJSON(API.fleetPlans), getJSON(API.fleetRuns), getJSON(API.proposals)]);
+    var missions = data[0], candidates = data[1], plans = data[2], runs = data[3], proposals = data[4];
+    var html = '<div class="card"><h3>Missions ('+missions.length+')</h3>';
+    html += missions.length ? '<ul class="ops-list">'+missions.map(missionHtml).join("")+'</ul>' : operationsEmpty('No durable issue-to-PR missions saved for this project.');
+    html += '</div><div class="card"><h3>Candidate workspaces ('+candidates.length+')</h3>';
+    html += candidates.length ? '<ul class="ops-list">'+candidates.map(candidateHtml).join("")+'</ul>' : operationsEmpty('No disposable candidate workspaces created for this project.');
+    html += '</div><div class="card"><h3>Fleet plans ('+plans.length+')</h3>';
     html += plans.length ? '<ul class="ops-list">'+plans.map(fleetPlanHtml).join("")+'</ul>' : operationsEmpty('No fleet plans saved for this project.');
     html += '</div><div class="card"><h3>Fleet runs ('+runs.length+')</h3>';
     html += runs.length ? '<ul class="ops-list">'+runs.map(fleetRunHtml).join("")+'</ul>' : operationsEmpty('No fleet executions started for this project.');
