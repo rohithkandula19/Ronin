@@ -150,6 +150,31 @@ mission record and advances to `staging`; it does not create a branch, commit,
 push, or GitHub/GitLab pull request. Remote publication remains an explicit
 integration step, so a verified draft cannot silently ship code.
 
+### Remote Issue Intake
+
+Create the same bounded, auditable mission from one typed remote issue reference:
+
+```bash
+# Requires `gh auth login`; reads one issue through the authenticated gh CLI.
+ronin util mission import github owner/repository#123
+
+# Requires GITLAB_TOKEN or GITLAB_PERSONAL_ACCESS_TOKEN in the environment.
+ronin util mission import gitlab group/project#456
+```
+
+References are strict (`owner/repository#number` for GitHub and
+`group/project#number` for GitLab). Import stores the source, canonical
+reference, repository, title, bounded issue body, labels, and a source-context
+link in the local mission record; it starts no agent, candidate workspace, or
+command. GitHub uses the existing authenticated `gh` CLI. GitLab accepts only
+HTTPS endpoints and reads its token from the process environment without
+persisting or rendering it. For a self-hosted instance, point
+`--gitlab-url` only at an HTTPS GitLab endpoint you trust.
+
+Mission Control displays the imported source reference alongside the existing
+read-only audit and evidence state. It continues to omit issue bodies and
+tokens.
+
 ## Fleet Execution
 
 Turn an approved saved plan into an explicit, durable local run:

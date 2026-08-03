@@ -438,7 +438,7 @@ function missionHtml(mission){
   return '<li class="ops-item">'+
     '<div class="ops-title">'+esc(mission.title)+'</div>'+
     '<div class="ops-meta"><span class="badge '+stageClass+'">'+esc(mission.stage)+'</span>'+audit+
-    '<span>'+esc(mission.id)+'</span><span>'+esc(mission.source)+(mission.source_id ? '#'+esc(mission.source_id) : '')+'</span>'+candidate+
+    '<span>'+esc(mission.id)+'</span><span>'+esc(mission.source)+(mission.source_id ? ' '+esc(mission.source_id) : '')+'</span>'+candidate+
     '<span>'+esc(mission.event_count)+' events</span><span>'+esc(fmtDate(mission.updated))+'</span></div>'+
     '<div class="wave-list">'+evidence+'</div>'+
   '</li>';

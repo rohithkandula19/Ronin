@@ -154,14 +154,20 @@ class MissionStore:
             self._save(updated)
             return updated
 
-    def save_artifacts(self, mission_id: str, artifacts: MissionArtifacts) -> MissionRecord:
+    def save_artifacts(
+        self,
+        mission_id: str,
+        artifacts: MissionArtifacts,
+        *,
+        actor: str = "agent",
+    ) -> MissionRecord:
         """Replace the typed artifact bundle and retain only its digest in the audit log."""
         with self._lock:
             record = self.load(mission_id)
             digest = _digest(artifacts.model_dump(mode="json"))
             updated = record.model_copy(update={"artifacts": artifacts, "updated": _now()})
             event = self._event(
-                record, actor="agent", kind="artifacts_recorded", artifact_kind="mission_artifacts",
+                record, actor=actor, kind="artifacts_recorded", artifact_kind="mission_artifacts",
                 payload_digest=digest,
             )
             updated = updated.model_copy(update={

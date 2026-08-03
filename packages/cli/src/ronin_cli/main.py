@@ -2569,6 +2569,49 @@ def mission_create(
     )
 
 
+@mission_app.command("import")
+def mission_import(
+    source: str = typer.Argument(..., help="Issue source: github or gitlab."),
+    reference: str = typer.Argument(..., help="GitHub owner/repository#number or GitLab group/project#number."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    gitlab_url: str = typer.Option("https://gitlab.com", "--gitlab-url", help="HTTPS GitLab base URL for self-hosted instances."),
+    max_tokens: int = typer.Option(100_000, "--max-tokens", min=1, max=10_000_000),
+    max_cost_usd: float = typer.Option(25.0, "--max-cost-usd", min=0.0, max=1_000_000.0),
+    max_wall_time: int = typer.Option(1_800, "--max-wall-time", min=1, max=604_800),
+    max_tool_calls: int = typer.Option(500, "--max-tool-calls", min=1, max=100_000),
+    max_concurrency: int = typer.Option(4, "--max-concurrency", min=1, max=32),
+    max_repairs: int = typer.Option(3, "--max-repairs", min=0, max=10),
+) -> None:
+    """Import one remote issue as an attributed MissionSpec; no agent starts.
+
+    GitHub uses the authenticated ``gh`` CLI. GitLab requires
+    ``GITLAB_TOKEN`` or ``GITLAB_PERSONAL_ACCESS_TOKEN`` and never prints it.
+    """
+    from .mission_models import MissionBudget
+    from .mission_sources import IssueImportError, MissionIssueImporter
+
+    budget = MissionBudget(
+        max_tokens=max_tokens,
+        max_cost_usd=max_cost_usd,
+        max_wall_time_seconds=max_wall_time,
+        max_tool_calls=max_tool_calls,
+        max_concurrency=max_concurrency,
+        max_repair_attempts=max_repairs,
+    )
+    try:
+        mission = MissionIssueImporter(root, gitlab_url=gitlab_url).import_issue(
+            source, reference, budget=budget,
+        )
+    except (IssueImportError, ValueError) as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(
+        f"[green]imported[/green] [cyan]{mission.id}[/cyan] from "
+        f"[bold]{mission.spec.source}:{mission.spec.source_id}[/bold] "
+        "[dim](source context saved; no agent, command, or write was started)[/dim]"
+    )
+
+
 @mission_app.command("list")
 def mission_list(
     root: Path = typer.Option(Path("."), "--root", help="Project directory."),

@@ -84,3 +84,27 @@ def create_issue(title: str, body: str, root: Path | str = ".",
     if proc.returncode != 0:
         return None
     return (proc.stdout or "").strip() or None
+
+
+def issue_details(repository: str, number: int, root: Path | str = ".") -> dict | None:
+    """Fetch one GitHub issue through the authenticated ``gh`` CLI.
+
+    ``repository`` must use the owner/name form and ``number`` must be positive.
+    Pull requests are returned by GitHub's issues endpoint too, so callers must
+    inspect the returned object and reject them when they only accept issues.
+    Failure stays deliberately non-specific: stderr can contain environment or
+    transport details that should not become mission evidence.
+    """
+    if not repository or repository.startswith("-") or "/" not in repository or number < 1:
+        return None
+    try:
+        proc = _gh("api", "--method", "GET", f"repos/{repository}/issues/{number}", root=root)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        payload = json.loads(proc.stdout or "{}")
+    except (ValueError, TypeError):
+        return None
+    return payload if isinstance(payload, dict) else None

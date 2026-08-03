@@ -20,6 +20,12 @@ All notable changes to this project will be documented here. Format follows [Kee
   budgets, and calculate an auditable release gate. Only a gate-eligible mission
   with an explicit named human approval can produce a local PR title/body/branch
   draft. This intentionally does not create branches, commits, remotes, or PRs.
+- **Remote issue-to-mission intake.** `ronin util mission import` now imports
+  one strictly shaped GitHub or GitLab issue into an attributable `MissionSpec`
+  and local source context before any agent can run. GitHub uses authenticated
+  `gh`; GitLab requires an environment-provided token and an HTTPS endpoint.
+  Tokens, issue bodies, and source URLs remain out of the Operations API, and
+  importing records operator-attributed audit evidence rather than an agent run.
 - **Governed fleet execution.** Saved fleet plans can now become durable local
   fleet runs. `ronin util fleet start`, `runs`, and `run-next` claim exactly one
   dependency-ready wave at a time, persist terminal agent/proposal evidence,
