@@ -20,6 +20,7 @@ from .mission_models import (
     MissionRecord,
     MissionSpec,
     MissionStage,
+    MissionUsage,
     transition_record,
 )
 
@@ -98,6 +99,7 @@ class MissionStore:
         *,
         actor: str = "operator",
         summary: str = "",
+        error: str | None = None,
     ) -> MissionRecord:
         with self._lock:
             record = self.load(mission_id)
@@ -110,6 +112,7 @@ class MissionStore:
                 "event_count": event.sequence,
                 "last_event_hash": event.event_hash,
                 "updated": _now(),
+                "error": error.strip()[:4_000] if error and target is MissionStage.FAILED else None,
             })
             self._append_event(record.id, event)
             self._save(advanced)
@@ -126,6 +129,23 @@ class MissionStore:
             event = self._event(
                 record, actor="workspace-service", kind="candidate_workspace_attached",
                 summary=workspace_id.strip(), artifact_kind="candidate_workspace",
+            )
+            updated = updated.model_copy(update={
+                "event_count": event.sequence, "last_event_hash": event.event_hash,
+            })
+            self._append_event(record.id, event)
+            self._save(updated)
+            return updated
+
+    def set_usage(self, mission_id: str, usage: MissionUsage, *, actor: str = "workflow") -> MissionRecord:
+        """Persist cumulative resource evidence for a mission without raw output."""
+        with self._lock:
+            record = self.load(mission_id)
+            digest = _digest(usage.model_dump(mode="json"))
+            updated = record.model_copy(update={"usage": usage, "updated": _now()})
+            event = self._event(
+                record, actor=actor, kind="mission_usage_recorded", artifact_kind="mission_usage",
+                payload_digest=digest,
             )
             updated = updated.model_copy(update={
                 "event_count": event.sequence, "last_event_hash": event.event_hash,

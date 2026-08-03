@@ -432,7 +432,9 @@ function missionHtml(mission){
   var candidate = mission.candidate_workspace_id ? '<span>candidate '+esc(mission.candidate_workspace_id)+'</span>' : '<span>no candidate</span>';
   var evidence = '<span>plan '+(mission.plan_recorded ? 'recorded' : 'pending')+'</span>'+
     '<span>test '+esc(mission.test_verdict)+'</span><span>review '+esc(mission.review_verdict)+'</span>'+
-    '<span>security '+esc(mission.security_verdict)+'</span>';
+    '<span>security '+esc(mission.security_verdict)+'</span>'+
+    '<span>evaluation '+(mission.evaluation_eligible ? 'eligible' : 'pending')+'</span>'+
+    '<span>PR '+esc(mission.pr_draft_status)+'</span>';
   return '<li class="ops-item">'+
     '<div class="ops-title">'+esc(mission.title)+'</div>'+
     '<div class="ops-meta"><span class="badge '+stageClass+'">'+esc(mission.stage)+'</span>'+audit+

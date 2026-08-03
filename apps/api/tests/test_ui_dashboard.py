@@ -411,6 +411,8 @@ def test_missions_and_candidates_return_real_local_state(client: TestClient) -> 
             "test_verdict": "unknown",
             "review_verdict": "unknown",
             "security_verdict": "unknown",
+            "evaluation_eligible": False,
+            "pr_draft_status": "not_drafted",
         }
     ]
     candidates = client.get("/ui/candidates").json()

@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Callable, Literal
@@ -58,6 +59,7 @@ class CandidateWorkspace(StrictModel):
 class CandidateCommandResult(StrictModel):
     command: str
     exit_code: int | None = None
+    duration_seconds: float = 0.0
     timed_out: bool = False
     blocked: bool = False
     stdout: str = ""
@@ -168,15 +170,27 @@ class CandidateWorkspaceService:
             raise ValueError("candidate execution requires a Docker image; refusing host execution")
         argv = docker_argv(candidate, text, allow_network=allow_network)
         runner = run_fn or subprocess.run
+        started = time.monotonic()
         try:
             proc = runner(argv, capture_output=True, text=True, timeout=timeout, check=False)
         except subprocess.TimeoutExpired:
-            return CandidateCommandResult(command=text, timed_out=True, error=f"timed out after {timeout}s")
+            return CandidateCommandResult(
+                command=text,
+                duration_seconds=time.monotonic() - started,
+                timed_out=True,
+                error=f"timed out after {timeout}s",
+            )
         except OSError as exc:
-            return CandidateCommandResult(command=text, blocked=True, error=f"Docker did not start: {exc}")
+            return CandidateCommandResult(
+                command=text,
+                duration_seconds=time.monotonic() - started,
+                blocked=True,
+                error=f"Docker did not start: {exc}",
+            )
         return CandidateCommandResult(
             command=text,
             exit_code=proc.returncode,
+            duration_seconds=time.monotonic() - started,
             stdout=_trim(proc.stdout or ""),
             stderr=_trim(proc.stderr or ""),
         )

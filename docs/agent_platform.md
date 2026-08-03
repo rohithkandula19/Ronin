@@ -110,6 +110,46 @@ candidate metadata in its read-only Operations tab. It intentionally does not
 publish issue bodies, artifact content, or filesystem paths through the status
 API.
 
+### Evidence-Gated Issue To PR
+
+The single-mission path is now executable as a sequence of typed evidence
+gates. It never treats an agent claim or a green-looking terminal line as proof:
+
+```bash
+ronin util mission plan mission-20260802-120000-abcdef \
+  --step "Implement a bounded retry path" --file src/client.py \
+  --test-addition tests/test_client.py --rollback "Remove the retry branch"
+
+# An implementation agent works only in the detached candidate checkout.
+ronin util mission verify mission-20260802-120000-abcdef "pytest -q" --yes
+ronin util mission review mission-20260802-120000-abcdef
+ronin util mission security mission-20260802-120000-abcdef
+ronin util mission evaluate mission-20260802-120000-abcdef
+ronin util mission draft-pr mission-20260802-120000-abcdef \
+  --approved-by "Rohith" --yes
+```
+
+`plan` turns a `MissionSpec` into a typed `PlanArtifact` and advances only to
+candidate implementation. `verify` executes only in the attached Docker
+candidate and records the real exit status, duration, cumulative tool use, and
+repair count. A failed command can return to implementation only while the
+configured repair budget remains; a blocked Docker command, timeout, or budget
+exhaustion fails the mission rather than pretending it passed.
+
+`review` is a deterministic diff-hygiene gate: it requires a non-empty diff,
+checks Git whitespace, and flags unresolved conflict markers, debug leftovers,
+and high-severity diff guard findings. `security` scans candidate-added lines
+for credentials and private-key material using masked evidence only; a finding
+returns the mission to implementation without retaining the secret value.
+
+`evaluate` records a release gate over the structured plan, active candidate,
+non-empty diff, passed Docker test, approved review, passed security scan,
+budget, and audit chain. `draft-pr` needs that gate plus `--yes` and a named
+human approver. It creates a **local** title/body/branch proposal under the
+mission record and advances to `staging`; it does not create a branch, commit,
+push, or GitHub/GitLab pull request. Remote publication remains an explicit
+integration step, so a verified draft cannot silently ship code.
+
 ## Fleet Execution
 
 Turn an approved saved plan into an explicit, durable local run:

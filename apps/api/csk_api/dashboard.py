@@ -344,6 +344,10 @@ def mission_entries(root: str | Path = ".", limit: int = 50) -> list[dict[str, A
             "test_verdict": mission.artifacts.test_report.verdict if mission.artifacts.test_report else "unknown",
             "review_verdict": mission.artifacts.review_report.verdict if mission.artifacts.review_report else "unknown",
             "security_verdict": mission.artifacts.security_scan.verdict if mission.artifacts.security_scan else "unknown",
+            "evaluation_eligible": bool(
+                mission.artifacts.evaluation_gate and mission.artifacts.evaluation_gate.eligible
+            ),
+            "pr_draft_status": mission.artifacts.pull_request_draft.status if mission.artifacts.pull_request_draft else "not_drafted",
         }
         for mission in missions
     ]

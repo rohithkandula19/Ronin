@@ -206,12 +206,42 @@ class SecurityScan(StrictModel):
     verdict: Literal["passed", "failed", "blocked", "unknown"] = "unknown"
 
 
+class EvaluationCheck(StrictModel):
+    name: str = Field(min_length=1, max_length=100)
+    status: Literal["passed", "failed", "unknown"] = "unknown"
+    detail: str = Field(default="", max_length=2_000)
+
+
+class EvaluationGate(StrictModel):
+    """Deterministic release-readiness evidence, not a model assertion."""
+
+    checks: list[EvaluationCheck] = Field(default_factory=list, max_length=50)
+    eligible: bool = False
+    evaluated_at: str = Field(default_factory=now_utc)
+
+
+class PullRequestDraft(StrictModel):
+    """A local PR proposal that must be reviewed before any remote publish."""
+
+    suggested_branch: str = Field(min_length=1, max_length=200)
+    base_revision: str = Field(min_length=7, max_length=64)
+    candidate_workspace_id: str = Field(min_length=1, max_length=200)
+    title: str = Field(min_length=1, max_length=120)
+    body: str = Field(default="", max_length=20_000)
+    files_changed: list[str] = Field(default_factory=list, max_length=500)
+    diff_digest: str = Field(min_length=64, max_length=128)
+    created_at: str = Field(default_factory=now_utc)
+    status: Literal["ready", "published", "superseded"] = "ready"
+
+
 class MissionArtifacts(StrictModel):
     context_packs: list[ContextPack] = Field(default_factory=list, max_length=20)
     plan: PlanArtifact | None = None
     test_report: TestReport | None = None
     review_report: ReviewReport | None = None
     security_scan: SecurityScan | None = None
+    evaluation_gate: EvaluationGate | None = None
+    pull_request_draft: PullRequestDraft | None = None
 
 
 class MissionEvent(StrictModel):

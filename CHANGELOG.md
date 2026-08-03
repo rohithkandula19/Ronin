@@ -14,6 +14,12 @@ All notable changes to this project will be documented here. Format follows [Kee
   `no-new-privileges`, and bounded memory/PIDs. The read-only Operations UI
   shows mission, audit, evidence, and candidate lifecycle status without
   exposing issue bodies, artifact content, or workspace paths.
+- **Evidence-gated mission execution.** A mission can now record a typed plan,
+  run a Docker-only candidate verification, perform deterministic diff hygiene
+  review and masked added-line secret scanning, enforce its repair/tool/wall
+  budgets, and calculate an auditable release gate. Only a gate-eligible mission
+  with an explicit named human approval can produce a local PR title/body/branch
+  draft. This intentionally does not create branches, commits, remotes, or PRs.
 - **Governed fleet execution.** Saved fleet plans can now become durable local
   fleet runs. `ronin util fleet start`, `runs`, and `run-next` claim exactly one
   dependency-ready wave at a time, persist terminal agent/proposal evidence,

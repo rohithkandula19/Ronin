@@ -2653,6 +2653,154 @@ def mission_audit(
     console.print(f"[green]valid[/green] mission audit ({report.events} event(s))")
 
 
+@mission_app.command("plan")
+def mission_plan(
+    mission_id: str = typer.Argument(..., help="Saved mission id."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    step: List[str] = typer.Option([], "--step", help="Repeatable implementation step."),
+    file: List[str] = typer.Option([], "--file", help="Repeatable repository-relative file expected to change."),
+    test_addition: List[str] = typer.Option([], "--test-addition", help="Repeatable planned regression test."),
+    rollback: str = typer.Option("", "--rollback", help="Rollback strategy for this mission."),
+) -> None:
+    """Record a typed plan and advance the mission to candidate implementation."""
+    if not step:
+        console.print("[red]x[/red] provide at least one --step; plans cannot be empty")
+        raise typer.Exit(2)
+    from .mission_models import PlanArtifact, PlanStep
+    from .mission_workflow import MissionWorkflow
+
+    plan = PlanArtifact(
+        steps=[PlanStep(id=f"step-{index}", description=description, files=file) for index, description in enumerate(step, start=1)],
+        files_to_change=file,
+        test_additions=test_addition,
+        rollback_strategy=rollback,
+    )
+    try:
+        mission = MissionWorkflow(root).record_plan(mission_id, plan)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(f"[green]plan recorded[/green] [cyan]{mission.id}[/cyan] is now [bold]{mission.stage.value}[/bold]")
+
+
+@mission_app.command("verify")
+def mission_verify(
+    mission_id: str = typer.Argument(..., help="Mission with an active candidate checkout."),
+    command: str = typer.Argument(..., help="Verification command to run in the candidate Docker container."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    timeout: int = typer.Option(600, "--timeout", min=1, max=3_600, help="Verification deadline in seconds."),
+    yes: bool = typer.Option(False, "--yes", help="Confirm candidate verification."),
+) -> None:
+    """Run the mission test gate in Docker and route only its actual result."""
+    if not yes:
+        console.print("[yellow]not verified[/yellow] (review the candidate and rerun with --yes)")
+        raise typer.Exit(2)
+    from .mission_models import MissionStage
+    from .mission_workflow import MissionWorkflow
+
+    try:
+        mission = MissionWorkflow(root).verify_candidate(mission_id, command, timeout=timeout)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    report = mission.artifacts.test_report
+    verdict = report.verdict if report else "unknown"
+    console.print(
+        f"[green]verification recorded[/green] [cyan]{mission.id}[/cyan] "
+        f"[dim]verdict={verdict}; next={mission.stage.value}[/dim]"
+    )
+    if mission.stage is MissionStage.FAILED:
+        raise typer.Exit(1)
+
+
+@mission_app.command("review")
+def mission_review(
+    mission_id: str = typer.Argument(..., help="Mission that passed candidate verification."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Run the deterministic candidate diff review gate without executing code."""
+    from .mission_models import MissionStage
+    from .mission_workflow import MissionWorkflow
+
+    try:
+        mission = MissionWorkflow(root).review_candidate(mission_id)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    report = mission.artifacts.review_report
+    console.print(
+        f"[green]review recorded[/green] [cyan]{mission.id}[/cyan] "
+        f"[dim]verdict={report.verdict if report else 'unknown'}; next={mission.stage.value}[/dim]"
+    )
+    if mission.stage is MissionStage.IMPLEMENTING:
+        raise typer.Exit(1)
+
+
+@mission_app.command("security")
+def mission_security(
+    mission_id: str = typer.Argument(..., help="Mission that passed structural review."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Scan candidate-added code for masked secret evidence before approval."""
+    from .mission_models import MissionStage
+    from .mission_workflow import MissionWorkflow
+
+    try:
+        mission = MissionWorkflow(root).scan_candidate_security(mission_id)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    report = mission.artifacts.security_scan
+    console.print(
+        f"[green]security scan recorded[/green] [cyan]{mission.id}[/cyan] "
+        f"[dim]verdict={report.verdict if report else 'unknown'}; next={mission.stage.value}[/dim]"
+    )
+    if mission.stage is MissionStage.IMPLEMENTING:
+        raise typer.Exit(1)
+
+
+@mission_app.command("evaluate")
+def mission_evaluate(
+    mission_id: str = typer.Argument(..., help="Saved mission id."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Run and retain the deterministic release-readiness evaluation gate."""
+    from .mission_workflow import MissionWorkflow
+
+    try:
+        mission = MissionWorkflow(root).evaluate(mission_id)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    _print_mission_evaluation(mission.artifacts.evaluation_gate)
+    if not mission.artifacts.evaluation_gate or not mission.artifacts.evaluation_gate.eligible:
+        raise typer.Exit(1)
+
+
+@mission_app.command("draft-pr")
+def mission_draft_pr(
+    mission_id: str = typer.Argument(..., help="Mission awaiting human approval."),
+    approved_by: str = typer.Option(..., "--approved-by", help="Human approving the verified mission."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    yes: bool = typer.Option(False, "--yes", help="Confirm preparation of a local PR draft."),
+) -> None:
+    """Create a local PR draft after the evaluation gate and explicit approval.
+
+    It never creates a branch, commit, GitHub PR, or remote side effect.
+    """
+    if not yes:
+        console.print("[yellow]not drafted[/yellow] (rerun with --yes after reviewing the evaluation gate)")
+        raise typer.Exit(2)
+    from .mission_workflow import MissionWorkflow
+
+    try:
+        mission = MissionWorkflow(root).prepare_pull_request_draft(mission_id, approved_by=approved_by)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    _print_pr_draft(mission.artifacts.pull_request_draft)
+
+
 @mission_workspace_app.command("create")
 def mission_workspace_create(
     mission_id: str = typer.Argument(..., help="Mission that owns this candidate checkout."),
@@ -2779,6 +2927,33 @@ def mission_workspace_destroy(
     console.print(f"[green]destroyed[/green] [cyan]{candidate.id}[/cyan]")
 
 
+def _print_mission_evaluation(gate) -> None:
+    if gate is None:
+        console.print("[yellow]no mission evaluation has been recorded[/yellow]")
+        return
+    table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+    table.add_column("Gate")
+    table.add_column("Status")
+    table.add_column("Evidence", overflow="fold")
+    for check in gate.checks:
+        table.add_row(check.name, check.status, check.detail)
+    console.print(table)
+    mark = "[green]eligible[/green]" if gate.eligible else "[red]not eligible[/red]"
+    console.print(f"release evaluation: {mark}")
+
+
+def _print_pr_draft(draft) -> None:
+    if draft is None:
+        console.print("[yellow]no pull-request draft was recorded[/yellow]")
+        return
+    console.print(f"[green]local PR draft ready[/green] [bold]{draft.title}[/bold]")
+    console.print(f"[dim]suggested branch: {draft.suggested_branch}; base: {draft.base_revision[:12]}[/dim]")
+    if draft.files_changed:
+        console.print(f"[dim]files: {', '.join(draft.files_changed)}[/dim]")
+    if draft.body:
+        console.print(draft.body, markup=False)
+
+
 def _print_mission(mission) -> None:
     audit = Table(box=box.SIMPLE, show_header=False)
     audit.add_column("Field", style="cyan", no_wrap=True)
@@ -2792,6 +2967,8 @@ def _print_mission(mission) -> None:
     audit.add_row("tests", mission.artifacts.test_report.verdict if mission.artifacts.test_report else "not recorded")
     audit.add_row("review", mission.artifacts.review_report.verdict if mission.artifacts.review_report else "not recorded")
     audit.add_row("security", mission.artifacts.security_scan.verdict if mission.artifacts.security_scan else "not recorded")
+    audit.add_row("evaluation", "eligible" if mission.artifacts.evaluation_gate and mission.artifacts.evaluation_gate.eligible else "not eligible")
+    audit.add_row("PR draft", mission.artifacts.pull_request_draft.status if mission.artifacts.pull_request_draft else "not recorded")
     audit.add_row("title", mission.spec.title)
     console.print(audit)
     if mission.spec.acceptance_criteria:
