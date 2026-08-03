@@ -175,6 +175,11 @@ def make_app() -> FastAPI:
         from .dashboard import fleet_plan_entries
         return fleet_plan_entries(".", limit=max(1, min(200, limit)))
 
+    @app.get("/ui/fleet-runs")
+    def ui_fleet_runs(limit: int = 50) -> list[dict]:
+        from .dashboard import fleet_run_entries
+        return fleet_run_entries(".", limit=max(1, min(200, limit)))
+
     @app.get("/ui/proposals")
     def ui_proposals(limit: int = 50) -> list[dict]:
         from .dashboard import proposal_entries

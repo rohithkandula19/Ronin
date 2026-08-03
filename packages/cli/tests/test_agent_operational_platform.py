@@ -116,6 +116,7 @@ def test_operations_snapshot_joins_queue_recovery_ledger_and_scorecards(tmp_path
     assert snapshot["scorecards"]["local"].quality == .8
     assert snapshot["proposals"] == ()
     assert snapshot["fleet_plans"] == ()
+    assert snapshot["fleet_runs"] == ()
 
 
 def test_json_and_toml_invalid_writes_are_rejected_before_disk_mutation(tmp_path: Path) -> None:

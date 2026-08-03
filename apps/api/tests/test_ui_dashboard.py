@@ -319,3 +319,55 @@ def test_agent_operation_endpoints_return_real_saved_data(client: TestClient) ->
             "failed_subtasks": 0,
         }
     ]
+
+
+def test_fleet_runs_return_real_execution_state(client: TestClient) -> None:
+    from ronin_cli.agent_catalog import AgentProfile, RepositorySignals
+    from ronin_cli.agent_fleet import FleetPlanStore, plan_fleet
+    from ronin_cli.agent_fleet_runs import FleetRunStore, FleetWaveResult
+
+    profiles = (
+        AgentProfile("researcher", "research", "research", ("research",)),
+        AgentProfile("implementer", "implement", "implement", ("implementation",), tier="write"),
+        AgentProfile("reviewer", "review", "review", ("review",)),
+        AgentProfile("tester", "test", "test", ("testing",), tier="test"),
+    )
+    plan = plan_fleet(
+        "execute dashboard reliability work", profiles,
+        core_keys=("researcher", "implementer", "reviewer", "tester"),
+        repository=RepositorySignals(tags=("dashboard",)), write=True,
+        max_profiles=4, max_parallel=2,
+    )
+    FleetPlanStore(Path.cwd()).save(plan)
+    store = FleetRunStore(Path.cwd())
+    run = store.create(plan)
+    _claimed, wave = store.claim_next(run.id)
+    assert wave is not None
+    completed = store.finish_wave(run.id, wave.number, FleetWaveResult(True, agent_run_id="agent-dashboard-1"))
+
+    rows = client.get("/ui/fleet-runs").json()
+    assert rows == [
+        {
+            "id": completed.id,
+            "plan_id": plan.id,
+            "goal": "execute dashboard reliability work",
+            "write": True,
+            "status": "running",
+            "created": completed.created,
+            "updated": completed.updated,
+            "error": None,
+            "waves": [
+                {
+                    "number": item.number,
+                    "phase": item.phase,
+                    "status": item.status,
+                    "attempts": item.attempts,
+                    "parallelism": len(item.profile_keys),
+                    "agent_run_id": item.agent_run_id,
+                    "proposal_run_id": item.proposal_run_id,
+                    "error": item.error,
+                }
+                for item in completed.waves
+            ],
+        }
+    ]

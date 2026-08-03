@@ -2588,6 +2588,220 @@ def fleet_show(
     _print_fleet_plan(plan)
 
 
+@fleet_app.command("start")
+def fleet_start(
+    plan_id: str = typer.Argument(..., help="Saved fleet plan id."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Create a durable fleet run without starting a provider or worker."""
+    from .agent_fleet import FleetPlanStore
+    from .agent_fleet_runs import FleetRunStore
+
+    try:
+        plan = FleetPlanStore(root).load(plan_id)
+        run = FleetRunStore(root).create(plan)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(
+        f"[green]started[/green] [cyan]{run.id}[/cyan] "
+        "[dim](no worker started; run a bounded wave with `ronin util fleet run-next`)[/dim]"
+    )
+
+
+@fleet_app.command("runs")
+def fleet_runs(
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    limit: int = typer.Option(20, "--limit", min=1, max=200, help="Maximum recent fleet runs to show."),
+) -> None:
+    """List durable fleet execution instances and their current phase."""
+    from .agent_fleet_runs import FleetRunStore
+
+    runs = FleetRunStore(root).list(limit=limit)
+    if not runs:
+        console.print("[dim]no fleet runs. Start one from a saved fleet plan.[/dim]")
+        return
+    table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+    table.add_column("Run", no_wrap=True)
+    table.add_column("Status")
+    table.add_column("Progress")
+    table.add_column("Plan", no_wrap=True)
+    table.add_column("Goal", overflow="fold")
+    for run in runs:
+        done = sum(wave.status == "completed" for wave in run.waves)
+        active = next((wave for wave in run.waves if wave.status == "running"), None)
+        progress = f"{done}/{len(run.waves)}"
+        if active is not None:
+            progress += f" (wave {active.number} {active.phase})"
+        table.add_row(run.id, run.status, progress, run.plan_id, run.goal)
+    console.print(table)
+
+
+@fleet_app.command("run-next")
+def fleet_run_next(
+    run_id: str = typer.Argument(..., help="Fleet run id created by `fleet start`."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    roster: str = typer.Option(None, "--roster", "-r", help="Optional role=provider[:model] overrides."),
+    agent_manifest: Optional[Path] = typer.Option(
+        None, "--agent-manifest", help="The project profile manifest used when the plan was created.",
+    ),
+    offline: bool = typer.Option(False, "--offline", help="Run this wave on a local provider only."),
+    max_subtask_iterations: int = typer.Option(12, "--max-subtask-iterations", min=1, max=100),
+    agent_timeout: float = typer.Option(300.0, "--agent-timeout", min=1.0, help="Wall-clock seconds allowed for each sub-agent."),
+) -> None:
+    """Claim and execute one dependency-ready fleet wave.
+
+    This is intentionally one wave at a time. It preserves the saved fleet
+    parallelism cap and leaves each completed write wave as a reviewable
+    isolated-worktree proposal; it never stages, commits, or pushes a change.
+    """
+    from .agent_fleet_runs import FleetRunStore, FleetWaveResult, execute_next_wave
+    from .agent_governance import OrchestrationGovernance
+    from .offline import apply_offline
+    from .orchestrate import agent_catalog, run_orchestrate
+
+    config = load_config()
+    if offline:
+        config = apply_offline(config.model_copy(update={
+            "provider": "local", "model": None, "base_url": None,
+            "failover": [], "offline": True,
+        }))
+    elif not config.has_provider_auth():
+        console.print(f"[red]x[/red] no credentials for {config.provider}; use --offline or configure a provider")
+        raise typer.Exit(2)
+
+    store = FleetRunStore(root)
+    captured: dict[str, object] = {}
+
+    def worker(fleet_run, wave):
+        catalog = {profile.key: profile for profile in agent_catalog(root, manifest=agent_manifest)}
+        missing = [key for key in wave.profile_keys if key not in catalog]
+        if missing:
+            return FleetWaveResult(False, error="fleet profiles are no longer available: " + ", ".join(missing))
+        profiles = tuple(catalog[key] for key in wave.profile_keys)
+        write_wave = fleet_run.write and wave.phase == "implementation"
+        governance = OrchestrationGovernance(
+            max_agents=len(profiles),
+            max_parallel=min(len(profiles), fleet_run.max_parallel),
+            max_iterations_per_agent=max_subtask_iterations,
+            max_total_subtask_iterations=max(len(profiles) * max_subtask_iterations, max_subtask_iterations),
+            max_wall_time_seconds_per_agent=agent_timeout,
+        )
+        completed = [
+            f"wave {item.number} ({item.phase}) run {item.agent_run_id or 'recorded'}"
+            for item in fleet_run.waves if item.status == "completed"
+        ]
+        handoff = "; ".join(completed) if completed else "no earlier fleet waves"
+        wave_goal = (
+            f"{fleet_run.goal}\n\n"
+            f"Fleet execution: wave {wave.number} ({wave.phase}). "
+            f"Assigned specialists: {', '.join(wave.profile_keys)}. "
+            f"Earlier completed work: {handoff}. "
+            "Work only within this wave's role and phase. Re-read repository evidence; "
+            "do not treat prior work as verified."
+        )
+        outcome = run_orchestrate(
+            config, wave_goal, roster_spec=roster, root=root,
+            read_only=not write_wave, profiles=profiles, max_agents=len(profiles),
+            governance=governance,
+        )
+        captured["outcome"] = outcome
+        proposal = outcome.proposal if isinstance(outcome.proposal, dict) else {}
+        return FleetWaveResult(
+            outcome.success,
+            agent_run_id=outcome.run_id,
+            proposal_run_id=proposal.get("run_id") if isinstance(proposal.get("run_id"), str) else None,
+            error=outcome.error,
+        )
+
+    try:
+        run, wave = execute_next_wave(store, run_id, worker)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    if wave is None:
+        console.print(f"[dim]fleet run {run.id} is {run.status}; no ready wave remains.[/dim]")
+        if run.error:
+            console.print(f"[red]{run.error}[/red]")
+        return
+    finished = next(item for item in run.waves if item.number == wave.number)
+    mark = "[green]completed[/green]" if finished.status == "completed" else "[red]failed[/red]"
+    console.print(f"{mark} fleet wave {finished.number} ({finished.phase}) in [cyan]{run.id}[/cyan]")
+    if finished.agent_run_id:
+        console.print(f"[dim]agent run: {finished.agent_run_id}[/dim]")
+    if finished.proposal_run_id:
+        console.print(
+            f"[dim]review proposal: `ronin util proposals show {finished.proposal_run_id} --role <role>`[/dim]"
+        )
+    outcome = captured.get("outcome")
+    if outcome is not None and getattr(outcome, "output", ""):
+        console.print(getattr(outcome, "output"))
+    if finished.status != "completed":
+        console.print(f"[red]{finished.error or run.error or 'wave failed'}[/red]")
+        raise typer.Exit(1)
+
+
+@fleet_app.command("retry")
+def fleet_retry(
+    run_id: str = typer.Argument(..., help="Fleet run id."),
+    wave_number: int = typer.Argument(..., min=1, help="Failed wave number to make eligible again."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    yes: bool = typer.Option(False, "--yes", help="Confirm that the failed wave was reviewed before retrying."),
+) -> None:
+    """Make one failed wave eligible for an explicit rerun; it does not start it."""
+    if not yes:
+        console.print("[yellow]not retried[/yellow] (review the failed wave, then rerun with --yes)")
+        raise typer.Exit(2)
+    from .agent_fleet_runs import FleetRunStore
+
+    try:
+        run = FleetRunStore(root).retry_failed(run_id, wave_number)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(f"[green]wave {wave_number} is ready[/green] in [cyan]{run.id}[/cyan]")
+
+
+@fleet_app.command("recover")
+def fleet_recover(
+    run_id: str = typer.Argument(..., help="Fleet run id with a worker that was interrupted."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    yes: bool = typer.Option(False, "--yes", help="Confirm the previous worker has stopped before releasing its claim."),
+) -> None:
+    """Release an interrupted active wave so an operator may explicitly rerun it."""
+    if not yes:
+        console.print("[yellow]not recovered[/yellow] (confirm the previous worker stopped, then rerun with --yes)")
+        raise typer.Exit(2)
+    from .agent_fleet_runs import FleetRunStore
+
+    try:
+        run = FleetRunStore(root).recover_interrupted(run_id)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(f"[green]released interrupted wave[/green] in [cyan]{run.id}[/cyan]")
+
+
+@fleet_app.command("cancel")
+def fleet_cancel(
+    run_id: str = typer.Argument(..., help="Fleet run id."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    yes: bool = typer.Option(False, "--yes", help="Confirm cancellation of waiting fleet waves."),
+) -> None:
+    """Cancel waiting waves without changing completed evidence or active work."""
+    if not yes:
+        console.print("[yellow]not cancelled[/yellow] (rerun with --yes to cancel waiting waves)")
+        raise typer.Exit(2)
+    from .agent_fleet_runs import FleetRunStore
+
+    try:
+        run = FleetRunStore(root).cancel(run_id)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(f"[green]cancelled[/green] [cyan]{run.id}[/cyan]")
+
+
 def _print_fleet_plan(plan) -> None:
     console.print(
         f"[bold]fleet plan[/bold] {plan.id} [dim]catalog={plan.catalog_size}, "

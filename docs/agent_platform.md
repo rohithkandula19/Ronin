@@ -51,6 +51,46 @@ local routing evidence, but no prompts, providers, agents, shell commands,
 queue workers, edits, or merges are started by these commands. A fleet plan is
 an inspectable scheduling boundary, not autonomous execution.
 
+## Fleet Execution
+
+Turn an approved saved plan into an explicit, durable local run:
+
+```bash
+ronin util fleet start fleet-20260731-120000-abc123
+ronin util fleet runs
+ronin util fleet run-next fleet-run-20260731-120500-def456
+```
+
+`run-next` claims exactly one dependency-ready wave, runs only the specialists
+saved in that wave, and persists the resulting agent run id, proposal id, and
+terminal status under `.ronin/fleet-runs/`. It does not create a daemon or run
+an unbounded backlog. The run's saved parallelism remains the hard maximum for
+that wave.
+
+Only implementation waves in a write plan receive isolated write worktrees;
+their result is still a retained proposal that must be reviewed and explicitly
+staged with `ronin util proposals apply --yes`. Research and acceptance waves
+are read-only. Fleet execution never stages, commits, pushes, resolves a
+conflict, or auto-merges code.
+
+After investigating a failed wave, make it eligible for another explicit worker
+claim:
+
+```bash
+ronin util fleet retry fleet-run-20260731-120500-def456 2 --yes
+```
+
+If a worker process has definitely stopped before recording a terminal result,
+release only its active claim:
+
+```bash
+ronin util fleet recover fleet-run-20260731-120500-def456 --yes
+```
+
+Recovery is intentionally explicit because releasing a still-running worker
+could duplicate provider work. `ronin ui` exposes fleet plans, fleet-run state,
+and proposals as read-only local operational data.
+
 ## Queue and Worker
 
 Use the project-local queue when a person, CI job, or cron task should hand an

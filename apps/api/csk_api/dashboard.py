@@ -265,6 +265,49 @@ def fleet_plan_entries(root: str | Path = ".", limit: int = 50) -> list[dict[str
     ]
 
 
+def fleet_run_entries(root: str | Path = ".", limit: int = 50) -> list[dict[str, Any]]:
+    """Inspectable execution state for locally claimed fleet waves.
+
+    The API intentionally returns status and identifiers only. Executing,
+    retrying, recovering, staging, and merging remain explicit CLI actions.
+    """
+    try:
+        from ronin_cli.agent_fleet_runs import FleetRunStore
+    except Exception:  # noqa: BLE001
+        return []
+
+    try:
+        runs = FleetRunStore(root).list(limit=limit)
+    except Exception:  # noqa: BLE001
+        return []
+    return [
+        {
+            "id": run.id,
+            "plan_id": run.plan_id,
+            "goal": run.goal,
+            "write": run.write,
+            "status": run.status,
+            "created": run.created,
+            "updated": run.updated,
+            "error": run.error,
+            "waves": [
+                {
+                    "number": wave.number,
+                    "phase": wave.phase,
+                    "status": wave.status,
+                    "attempts": wave.attempts,
+                    "parallelism": len(wave.profile_keys),
+                    "agent_run_id": wave.agent_run_id,
+                    "proposal_run_id": wave.proposal_run_id,
+                    "error": wave.error,
+                }
+                for wave in run.waves
+            ],
+        }
+        for run in runs
+    ]
+
+
 def proposal_entries(root: str | Path = ".", limit: int = 50) -> list[dict[str, Any]]:
     """Inspectable summaries of retained isolated-worktree patch proposals."""
     try:

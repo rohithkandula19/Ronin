@@ -7,6 +7,7 @@ from typing import Any
 
 from .agent_observability import dashboard_counts
 from .agent_fleet import FleetPlanStore
+from .agent_fleet_runs import FleetRunStore
 from .agent_proposals import AgentProposalStore
 from .agent_queue import AgentQueue
 from .agent_recovery import list_recoverable_runs
@@ -27,5 +28,6 @@ def operations_snapshot(root: Path | str) -> dict[str, Any]:
         "scorecards": ModelScorecardStore(root).list(),
         "proposals": AgentProposalStore(root).list(),
         "fleet_plans": FleetPlanStore(root).list(),
+        "fleet_runs": FleetRunStore(root).list(),
         "ledger": ledger,
     }

@@ -5,6 +5,12 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Added
+- **Governed fleet execution.** Saved fleet plans can now become durable local
+  fleet runs. `ronin util fleet start`, `runs`, and `run-next` claim exactly one
+  dependency-ready wave at a time, persist terminal agent/proposal evidence,
+  and require explicit retry or interrupted-worker recovery. Implementation
+  waves remain isolated-worktree proposals; no fleet command stages, commits,
+  or pushes code. The Operations dashboard exposes fleet-run state read-only.
 - **Bounded fleet planning.** `ronin util fleet plan` converts up to 512
   relevant specialist profiles into persisted research, implementation, and
   acceptance waves with a hard 32-profile per-wave ceiling. The local `list`

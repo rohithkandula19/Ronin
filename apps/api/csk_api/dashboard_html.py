@@ -163,9 +163,9 @@ h2.dh{font-size:16px;margin:0 0 4px;font-weight:700}
 .ops-item{padding:10px 0;border-bottom:1px solid #1b2129}
 .ops-item:last-child{border-bottom:0}
 .ops-title{font-weight:700;word-break:break-word}
-.ops-meta{display:flex;gap:7px;flex-wrap:wrap;margin-top:5px;color:var(--dim);font-size:11px}
+.ops-meta{display:flex;gap:7px;flex-wrap:wrap;margin-top:5px;color:var(--dim);font-size:11px;word-break:break-word}
 .wave-list{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}
-.wave{font-size:10.5px;padding:2px 6px;border:1px solid var(--border);border-radius:4px;color:var(--muted);background:var(--panel2)}
+.wave{font-size:10.5px;padding:2px 6px;border:1px solid var(--border);border-radius:4px;color:var(--muted);background:var(--panel2);word-break:break-word}
 </style>
 </head>
 <body>
@@ -207,6 +207,7 @@ var API = {
   memory: "/ui/memory",
   skills: "/ui/skills",
   fleetPlans: "/ui/fleet-plans",
+  fleetRuns: "/ui/fleet-runs",
   proposals: "/ui/proposals"
 };
 var state = { runs: [], activeId: null };
@@ -408,14 +409,31 @@ function proposalHtml(proposal){
   '</li>';
 }
 
+function fleetRunHtml(run){
+  var statusClass = run.status === "completed" ? "green" : (run.status === "failed" ? "red" : "amber");
+  var waves = (run.waves || []).map(function(wave){
+    var extra = wave.agent_run_id ? ' &middot; agent '+esc(wave.agent_run_id) : "";
+    var error = wave.error ? ' &middot; '+esc(wave.error) : "";
+    return '<span class="wave">wave '+esc(wave.number)+' '+esc(wave.phase)+' &middot; '+esc(wave.status)+' &middot; '+esc(wave.parallelism)+' agents'+extra+error+'</span>';
+  }).join("");
+  var error = run.error ? '<span>'+esc(run.error)+'</span>' : "";
+  return '<li class="ops-item">'+
+    '<div class="ops-title">'+esc(run.goal)+'</div>'+
+    '<div class="ops-meta"><span class="badge '+statusClass+'">'+esc(run.status)+'</span><span>'+esc(run.id)+'</span><span>plan '+esc(run.plan_id)+'</span><span>'+esc(fmtDate(run.updated))+'</span>'+error+'</div>'+
+    '<div class="wave-list">'+waves+'</div>'+
+  '</li>';
+}
+
 async function loadOperations(){
   var pane = document.getElementById("pane-operations");
   pane.innerHTML = '<div class="loading">loading...</div>';
   try{
-    var data = await Promise.all([getJSON(API.fleetPlans), getJSON(API.proposals)]);
-    var plans = data[0], proposals = data[1];
+    var data = await Promise.all([getJSON(API.fleetPlans), getJSON(API.fleetRuns), getJSON(API.proposals)]);
+    var plans = data[0], runs = data[1], proposals = data[2];
     var html = '<div class="card"><h3>Fleet plans ('+plans.length+')</h3>';
     html += plans.length ? '<ul class="ops-list">'+plans.map(fleetPlanHtml).join("")+'</ul>' : operationsEmpty('No fleet plans saved for this project.');
+    html += '</div><div class="card"><h3>Fleet runs ('+runs.length+')</h3>';
+    html += runs.length ? '<ul class="ops-list">'+runs.map(fleetRunHtml).join("")+'</ul>' : operationsEmpty('No fleet executions started for this project.');
     html += '</div><div class="card"><h3>Retained patch proposals ('+proposals.length+')</h3>';
     html += proposals.length ? '<ul class="ops-list">'+proposals.map(proposalHtml).join("")+'</ul>' : operationsEmpty('No isolated-worktree proposals saved for this project.');
     pane.innerHTML = html;
