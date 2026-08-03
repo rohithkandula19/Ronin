@@ -354,6 +354,31 @@ def mission_entries(root: str | Path = ".", limit: int = 50) -> list[dict[str, A
     ]
 
 
+def mission_event_entries(root: str | Path = ".", limit: int = 100) -> list[dict[str, Any]]:
+    """Recent safe bus envelopes for Mission Control; never exposes payload content."""
+    try:
+        from ronin_cli.mission_events import MissionEventBus
+    except Exception:  # noqa: BLE001
+        return []
+    try:
+        events = MissionEventBus(root).events(limit=limit)
+    except Exception:  # noqa: BLE001
+        return []
+    return [
+        {
+            "id": event.id,
+            "sequence": event.sequence,
+            "topic": event.topic,
+            "mission_id": event.mission_id,
+            "producer": event.producer,
+            "from_stage": event.payload.from_stage,
+            "to_stage": event.payload.to_stage,
+            "occurred_at": event.occurred_at,
+        }
+        for event in events
+    ]
+
+
 def remote_worker_job_entries(root: str | Path = ".", limit: int = 50) -> list[dict[str, Any]]:
     """Safe lifecycle state for remote candidate verification jobs.
 

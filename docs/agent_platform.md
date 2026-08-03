@@ -83,6 +83,28 @@ issue worker is attached, so the eventual worker cannot reinterpret a mission
 as an unbounded autonomous task. Existing installations require no migration:
 all mission records are project-local and removable with `.ronin/` metadata.
 
+### Typed Mission Event Bus
+
+Every committed mission audit record also emits one or more schema-first,
+idempotent event envelopes under `.ronin/mission-events/`. The local durable
+bus is a portable transport boundary for future NATS, Redis Streams, or RabbitMQ
+adapters; the hash-chained mission audit remains the source of truth.
+
+```bash
+ronin util mission events list
+ronin util mission events list --mission mission-20260803-120000-abcdef
+ronin util mission events verify
+ronin util mission events replay mission-20260803-120000-abcdef
+```
+
+Topics include `mission.created`, `mission.transitioned`, `agent.assigned`,
+`handoff.completed`, `test.passed`, `test.failed`, and `policy.violation`.
+Envelopes carry a schema version, correlation/causation identifiers, producer,
+idempotency key, state metadata, and artifact digest only. They deliberately
+exclude issue bodies, artifact content, paths, credentials, and raw worker
+output. `replay` backfills previously recorded audit events safely: the
+idempotency key ensures it cannot duplicate delivery.
+
 ### Candidate Workspaces
 
 Before an implementation is trusted, create a disposable candidate checkout:

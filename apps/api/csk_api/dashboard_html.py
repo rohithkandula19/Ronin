@@ -209,6 +209,7 @@ var API = {
   fleetPlans: "/ui/fleet-plans",
   fleetRuns: "/ui/fleet-runs",
   missions: "/ui/missions",
+  missionEvents: "/ui/mission-events",
   candidates: "/ui/candidates",
   remoteWorkerJobs: "/ui/remote-worker-jobs",
   proposals: "/ui/proposals"
@@ -445,6 +446,15 @@ function missionHtml(mission){
   '</li>';
 }
 
+function missionEventHtml(event){
+  var transition = [event.from_stage, event.to_stage].filter(Boolean).join(" to ") || "recorded";
+  return '<li class="ops-item">'+
+    '<div class="ops-title">'+esc(event.topic)+'</div>'+
+    '<div class="ops-meta"><span>'+esc(event.mission_id)+'</span><span>'+esc(event.producer)+'</span>'+
+    '<span>'+esc(transition)+'</span><span>'+esc(fmtDate(event.occurred_at))+'</span></div>'+
+  '</li>';
+}
+
 function candidateHtml(candidate){
   var stateClass = candidate.status === "active" ? "amber" : "neutral";
   var image = candidate.image ? esc(candidate.image) : 'image not set';
@@ -473,10 +483,12 @@ async function loadOperations(){
   var pane = document.getElementById("pane-operations");
   pane.innerHTML = '<div class="loading">loading...</div>';
   try{
-    var data = await Promise.all([getJSON(API.missions), getJSON(API.candidates), getJSON(API.fleetPlans), getJSON(API.fleetRuns), getJSON(API.remoteWorkerJobs), getJSON(API.proposals)]);
-    var missions = data[0], candidates = data[1], plans = data[2], runs = data[3], workerJobs = data[4], proposals = data[5];
+    var data = await Promise.all([getJSON(API.missions), getJSON(API.missionEvents), getJSON(API.candidates), getJSON(API.fleetPlans), getJSON(API.fleetRuns), getJSON(API.remoteWorkerJobs), getJSON(API.proposals)]);
+    var missions = data[0], missionEvents = data[1], candidates = data[2], plans = data[3], runs = data[4], workerJobs = data[5], proposals = data[6];
     var html = '<div class="card"><h3>Missions ('+missions.length+')</h3>';
     html += missions.length ? '<ul class="ops-list">'+missions.map(missionHtml).join("")+'</ul>' : operationsEmpty('No durable issue-to-PR missions saved for this project.');
+    html += '</div><div class="card"><h3>Mission events ('+missionEvents.length+')</h3>';
+    html += missionEvents.length ? '<ul class="ops-list">'+missionEvents.map(missionEventHtml).join("")+'</ul>' : operationsEmpty('No durable mission bus events saved for this project.');
     html += '</div><div class="card"><h3>Candidate workspaces ('+candidates.length+')</h3>';
     html += candidates.length ? '<ul class="ops-list">'+candidates.map(candidateHtml).join("")+'</ul>' : operationsEmpty('No disposable candidate workspaces created for this project.');
     html += '</div><div class="card"><h3>Fleet plans ('+plans.length+')</h3>';

@@ -5,6 +5,12 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Added
+- **Typed durable mission event bus.** Committed mission audit records now emit
+  versioned, hash-chained, idempotent envelopes for mission creation,
+  transitions, handoffs, candidate assignment, test outcomes, and security
+  policy violations. `ronin util mission events` lists, verifies, and safely
+  replays the compact local bus, while Mission Control exposes the same safe
+  event feed without issue bodies, artifacts, paths, credentials, or raw logs.
 - **Durable issue-to-PR mission foundation.** `ronin util mission` now records
   strict `MissionSpec`, plan/test/review/security artifacts, hard per-mission
   budgets, legal workflow transitions, and a hash-chained audit log that is

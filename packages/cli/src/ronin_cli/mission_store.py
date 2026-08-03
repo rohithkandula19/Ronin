@@ -66,6 +66,7 @@ class MissionStore:
             })
             self._append_event(record.id, event)
             self._save(record)
+            self._publish_audit_event(record.id, event)
             return record
 
     def list(self, *, limit: int = 100) -> tuple[MissionRecord, ...]:
@@ -116,6 +117,7 @@ class MissionStore:
             })
             self._append_event(record.id, event)
             self._save(advanced)
+            self._publish_audit_event(record.id, event)
             return advanced
 
     def set_candidate_workspace(self, mission_id: str, workspace_id: str) -> MissionRecord:
@@ -135,6 +137,7 @@ class MissionStore:
             })
             self._append_event(record.id, event)
             self._save(updated)
+            self._publish_audit_event(record.id, event)
             return updated
 
     def set_usage(self, mission_id: str, usage: MissionUsage, *, actor: str = "workflow") -> MissionRecord:
@@ -152,6 +155,7 @@ class MissionStore:
             })
             self._append_event(record.id, event)
             self._save(updated)
+            self._publish_audit_event(record.id, event)
             return updated
 
     def save_artifacts(
@@ -175,6 +179,7 @@ class MissionStore:
             })
             self._append_event(record.id, event)
             self._save(updated)
+            self._publish_audit_event(record.id, event)
             return updated
 
     def events(self, mission_id: str) -> tuple[MissionEvent, ...]:
@@ -219,6 +224,16 @@ class MissionStore:
             return MissionAuditReport(False, len(lines), "mission snapshot does not match the audit chain")
         return MissionAuditReport(True, len(lines))
 
+    def replay_event_bus(self, mission_id: str) -> int:
+        """Publish all existing audit events through the idempotent local bus."""
+        safe_id = _safe_id(mission_id)
+        events = self.events(safe_id)
+        if not events and not self.verify_audit(safe_id).valid:
+            raise ValueError("mission audit is unavailable or invalid; refusing event replay")
+        for event in events:
+            self._publish_audit_event(safe_id, event)
+        return len(events)
+
     def _event(
         self,
         record: MissionRecord,
@@ -260,6 +275,12 @@ class MissionStore:
 
     def _events_path(self, mission_id: str) -> Path:
         return self.directory / f"{mission_id}.events.jsonl"
+
+    def _publish_audit_event(self, mission_id: str, event: MissionEvent) -> None:
+        """Deliver committed audit metadata after the source snapshot is durable."""
+        from .mission_events import MissionEventBus
+
+        MissionEventBus(self.root).publish_audit(mission_id, event)
 
 
 def _event_hash(event: MissionEvent) -> str:

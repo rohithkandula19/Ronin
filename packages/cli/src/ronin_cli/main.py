@@ -2519,6 +2519,12 @@ mission_workspace_app = typer.Typer(
 )
 mission_app.add_typer(mission_workspace_app, name="workspace")
 
+mission_events_app = typer.Typer(
+    help="Inspect and replay the durable schema-first mission event bus.",
+    no_args_is_help=True,
+)
+mission_app.add_typer(mission_events_app, name="events")
+
 mission_worker_app = typer.Typer(
     help="Dispatch bounded candidate verification jobs to authenticated remote Docker workers.",
     no_args_is_help=True,
@@ -2700,6 +2706,66 @@ def mission_audit(
         console.print(f"[red]invalid[/red] mission audit: {report.error or 'unknown error'}")
         raise typer.Exit(1)
     console.print(f"[green]valid[/green] mission audit ({report.events} event(s))")
+
+
+@mission_events_app.command("list")
+def mission_events_list(
+    mission_id: Optional[str] = typer.Option(None, "--mission", help="Limit events to one mission id."),
+    topic: Optional[str] = typer.Option(None, "--topic", help="Limit events to a typed topic."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    limit: int = typer.Option(50, "--limit", min=1, max=500, help="Maximum recent events."),
+) -> None:
+    """List safe mission event envelopes; issue text and agent output stay private."""
+    from .mission_events import MissionEventBus
+
+    try:
+        events = MissionEventBus(root).events(mission_id=mission_id, topic=topic, limit=limit)
+    except (ValueError, TypeError) as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    if not events:
+        console.print("[dim]no durable mission bus events saved for this project.[/dim]")
+        return
+    table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+    table.add_column("Seq", justify="right")
+    table.add_column("Topic")
+    table.add_column("Mission", no_wrap=True)
+    table.add_column("Producer")
+    table.add_column("Transition")
+    for event in events:
+        transition = " -> ".join(part for part in (event.payload.from_stage, event.payload.to_stage) if part) or "-"
+        table.add_row(str(event.sequence), event.topic, event.mission_id, event.producer, transition)
+    console.print(table)
+
+
+@mission_events_app.command("verify")
+def mission_events_verify(
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Verify the append-only mission event bus chain and idempotency keys."""
+    from .mission_events import MissionEventBus
+
+    report = MissionEventBus(root).verify()
+    if not report.valid:
+        console.print(f"[red]invalid[/red] mission event bus: {report.error or 'unknown error'}")
+        raise typer.Exit(1)
+    console.print(f"[green]valid[/green] mission event bus ({report.events} event(s))")
+
+
+@mission_events_app.command("replay")
+def mission_events_replay(
+    mission_id: str = typer.Argument(..., help="Mission whose immutable audit events should be delivered."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Idempotently backfill the bus from a mission's locally verified audit log."""
+    from .mission_store import MissionStore
+
+    try:
+        count = MissionStore(root).replay_event_bus(mission_id)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(f"[green]replayed[/green] {count} audit event(s) into the mission bus")
 
 
 @mission_app.command("plan")
