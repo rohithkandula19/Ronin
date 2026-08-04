@@ -64,7 +64,7 @@ def test_experience_memory_is_provenanced_compacted_and_refuses_likely_secrets(t
 
     with pytest.raises(ValueError, match="possible secret"):
         store.remember(
-            "reviewer-01", "AWS key AKIAZX7Q2RSTUV3BWXYC",
+            "reviewer-01", "AWS key " + "AKIA" + "ZX7Q2RSTUV3BWXYC",
             source_type="human", source_id="operator", confidence=1.0,
         )
 

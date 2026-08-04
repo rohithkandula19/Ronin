@@ -100,7 +100,8 @@ def test_detects_github_token() -> None:
 
 
 def test_detects_private_key_header() -> None:
-    text = "-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n-----END RSA PRIVATE KEY-----"
+    marker = "-" * 5
+    text = marker + "BEGIN RSA PRIVATE KEY" + marker + "\nMIIE...\n" + marker + "END RSA PRIVATE KEY" + marker
     findings = find_secrets(text, "id_rsa")
     assert any(f["kind"] == "private-key" for f in findings)
 

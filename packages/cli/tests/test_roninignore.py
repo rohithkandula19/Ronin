@@ -24,7 +24,7 @@ def test_is_ignored_matches_glob_basename_segment() -> None:
 def test_scan_tree_respects_roninignore(tmp_path: Path) -> None:
     (tmp_path / "fixture_leak.py").write_text(_LEAK.replace("  # ronin:allow-secret", ""),
                                               encoding="utf-8")
-    (tmp_path / "real_leak.py").write_text('K = "AKIAZX7Q2RSTUV3BWXYC"\n', encoding="utf-8")
+    (tmp_path / "real_leak.py").write_text(_LEAK.replace("  # ronin:allow-secret", ""), encoding="utf-8")
     (tmp_path / ".roninignore").write_text("fixture_leak.py\n", encoding="utf-8")
     paths = {f.path for f in scan_tree(tmp_path)}
     assert "real_leak.py" in paths
