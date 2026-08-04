@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-v1.0.0-blue)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-4162%20passing-brightgreen.svg)](#-whats-under-the-hood)
+[![Tests](https://img.shields.io/badge/tests-4201%20passing-brightgreen.svg)](#-whats-under-the-hood)
 [![Providers](https://img.shields.io/badge/providers-Claude%20·%20Gemini%20·%20Cerebras%20·%20Groq%20·%20OpenRouter%20·%20Ollama%20·%20OpenAI-d4a373)](#-supported-providers)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
@@ -15,6 +15,7 @@
 - **No telemetry, ever** — no analytics, no phoning home. `ronin util privacy` audits exactly what's stored locally.
 - **Any provider, no lock-in** — the same agent runs on Claude, Gemini, Cerebras, Groq, OpenRouter, OpenAI, or Ollama. Free tiers work; no credit card required.
 - **A destructive-command floor** — `rm -rf`, force-pushes, and friends are hard-blocked below the approval layer, with a drift guard so config edits can't silently weaken it.
+- **Evidence-gated engineering missions** — turn a GitHub or GitLab issue into a bounded, auditable issue-to-PR workflow with disposable Docker candidates, independent gates, and explicit human approval before staging.
 
 ```bash
 $ curl -sSL https://raw.githubusercontent.com/rohithkandula19/Ronin/main/install.sh | bash
@@ -85,7 +86,43 @@ Regenerate the walkthrough anytime with [`vhs`](https://github.com/charmbracelet
 
 **One front door:** type **`ronin`** and you get a single agent that reads, writes, and runs code (every edit and shell command gated behind a diff preview and your approval, reads run freely), generates images/video/speech, and queries your connected data, all in one conversation, in plain language. It's **provider-agnostic**: the same agent runs on Claude or on free open models.
 
-It's also a **reference implementation for building agents the right way**. The CLI is a thin wrapper over seven core, independently-usable packages — `agent-patterns`, `eval-suite`, `memory`, `hardening`, `mcp-servers`, `relay`, and `cli` — part of a 23-package workspace (the other 16 are platform packages: identity, vault, billing, observability, and so on), backed by **4,162 tests** that run offline in CI. (`ronin code` is the focused coding agent; `ronin chat` is the talk/media surface, both available when you want a single-purpose mode.)
+It's also a **reference implementation for building agents the right way**. The CLI is a thin wrapper over seven core, independently-usable packages — `agent-patterns`, `eval-suite`, `memory`, `hardening`, `mcp-servers`, `relay`, and `cli` — part of a 23-package workspace (the other 16 are platform packages: identity, vault, billing, observability, and so on), backed by **4,201 passing tests** in the full workspace suite. (`ronin code` is the focused coding agent; `ronin chat` is the talk/media surface, both available when you want a single-purpose mode.)
+
+## Mission Control: verified issue-to-PR work
+
+`ronin util mission` is the durable control plane for engineering work that
+needs more than a chat transcript. A mission records bounded issue intent,
+typed plan/test/review/security evidence, explicit token/cost/time/tool and
+concurrency budgets, a legal lifecycle, and an append-only audit chain.
+
+```bash
+# Create locally or import one attributed remote issue. Neither starts an agent.
+ronin util mission create "Harden retry behavior" "Add bounded retry coverage."
+ronin util mission import github owner/repository#123
+
+# Work happens in a detached candidate checkout, never in the caller's tree.
+ronin util mission workspace create MISSION_ID --image python:3.14-alpine
+ronin util mission workspace run CANDIDATE_ID "pytest -q" --yes
+
+# Inspect the immutable audit trail and the safe, durable event stream.
+ronin util mission audit MISSION_ID
+ronin util mission events verify
+```
+
+The normal lifecycle is `pending -> inspecting -> planning -> implementing ->
+testing -> reviewing -> security -> awaiting_approval -> staging -> completed`.
+Invalid shortcuts are rejected. Candidate commands use a detached Git worktree;
+execution is Docker-only with the candidate mounted in isolation, dropped Linux
+capabilities, resource limits, and no network. A draft PR requires evidence
+gates and named human approval, and stays a local proposal: it does not silently
+commit, push, or publish a remote pull request.
+
+Every committed audit entry emits a versioned, idempotent, hash-chained mission
+event. The event feed contains only safe metadata and artifact digests, never
+issue bodies, agent output, credentials, paths, or raw logs. Ronin can also
+queue bounded candidate verification work to authenticated remote Docker
+workers. See [the agent platform guide](docs/agent_platform.md) for the full
+mission, workspace, event, and remote-worker contract.
 
 ## 🛠 `ronin code` · the coding agent (Claude-Code shaped)
 
@@ -98,7 +135,7 @@ ronin code --continue                                        # resume your last 
 
 A coding agent that reads, edits, and runs your code: every write and shell command gated behind a diff preview and your approval (read operations run freely). It mirrors the Claude Code experience:
 
-- **Rounded input box + live dropdowns**: type inside a bordered prompt with ghost placeholder text. **`/`** opens a command menu (30 commands with descriptions), **`@`** opens a live file picker, **`!`** runs a shell command inline, and **`#`** files a note straight into project memory. ↑/↓ history, vi-mode (`/vim`).
+- **Rounded input box + live dropdowns**: type inside a bordered prompt with ghost placeholder text. **`/`** opens a command menu (34 commands with descriptions), **`@`** opens a live file picker, **`!`** runs a shell command inline, and **`#`** files a note straight into project memory. ↑/↓ history, vi-mode (`/vim`).
 - **Premium status line + mode chips**: a live footer always shows what ronin is and what it's allowed to do — a **FREE / PAID / LOCAL** badge, `provider/model`, the current **mode**, your **git branch** (with `*` when dirty and `↑/↓` ahead/behind), and the context size. Real output, no theming required:
 
   ```text
@@ -243,6 +280,7 @@ ronin is one agent with several focused entry points beyond `code`:
 
 - **`ronin dev explain <path>`** · onboard to any codebase: prose explanation **+ an auto-generated Mermaid architecture diagram** (renders on GitHub) **+ optional voice** (`--speak`). Read-only.
 - **`ronin eval [--model X]`**: score agent quality on a battery of **real** sandboxed jobs (reasoning, file writes, codegen, grounded reads, multi-file). Checks the **outcome**, not an LLM judge, so it's deterministic and works on **any** provider. Swap providers with `/login` and re-run to compare on the same bar.
+- **`ronin util mission`**: inspect an issue, create a disposable candidate workspace, record real verification/review/security evidence, and prepare an approval-gated local PR draft. The audit and event stream are durable under `.ronin/`.
 - **`ronin util briefing`**: a founder ops briefing (revenue, churn, failed payments, urgent issues) aggregated from Stripe / Linear / Slack / Notion / Postgres via read-only MCP servers; auto-saved with week-over-week deltas, `--slack` to post.
 - **`ronin util investigate "<symptom>"`**: root-cause a problem across your **business data AND your code** (e.g. "failed payments spiked the 9th → `stripe_webhook.py` changed in commit `a1b2c3`").
 - **`ronin util image` / `ronin util video` / `ronin util say` / `ronin util see`** · terminal-native media: text-to-image (free via Pollinations, shown inline), frames+ffmpeg video, OS text-to-speech, and vision Q&A on a local image.
@@ -263,7 +301,7 @@ teal highlight); **`ronin play <game>`** jumps straight in. **31 games, all free
 - **⚡ Real-time, arrow-key controls** — full-screen, in-place render via a shared raw-mode engine (`games/_realtime.py`): 🐍 Snake (start-on-keypress, no cheap deaths) · 🔢 2048 · 🟦 Tetris (7-bag, ghost piece, line-clear scoring) · 💣 Minesweeper · ⭕ Tic-Tac-Toe (unbeatable minimax) · 🔴 Connect Four · 🧠 Memory Match.
 - **🃏 Classics with real depth**: Blackjack (betting / double / 3:2) · Pandle (Wordle with a live on-screen keyboard) · Hangman · Rock-Paper-Scissors · Pig · Simon · Word Scramble · Sudoku (unique-solution generator) · Mastermind · Battleship (hunt/target AI) · Reversi · Typing Test · Number Guess.
 - **🐼 ronin-flavoured** — coder games no other arcade ships: 🐛 Bug Hunt (spot the planted bug) · 📈 Big-O Guess · 🧩 Regex Golf.
-- **🔮 AI-powered — and, true to ronin, provider-neutral**: they run on **whatever backend you've configured** (Cerebras / Groq / Gemini / Claude / Ollama), routed through ronin's *own* model layer — not a hardcoded vendor SDK. 🔮 **Mind Reader** (think of anything; the panda guesses it in 20 questions) · 🗺️ **AI Adventure** (a living text dungeon, the panda is your DM) · 🎓 **AI Trivia** (endless generated questions). No model configured? They show a friendly nudge and the other 23 still play fully offline.
+- **🔮 AI-powered — and, true to ronin, provider-neutral**: they run on **whatever backend you've configured** (Cerebras / Groq / Gemini / Claude / Ollama), routed through ronin's *own* model layer — not a hardcoded vendor SDK. 🔮 **Mind Reader** (think of anything; the panda guesses it in 20 questions) · 🗺️ **AI Adventure** (a living text dungeon, the panda is your DM) · 🎓 **AI Trivia** (endless generated questions). No model configured? They show a friendly nudge and the non-AI games still play fully offline.
 
 ```bash
 ronin play                 # the arcade menu
@@ -271,7 +309,7 @@ ronin play tetris          # jump straight into a game
 ronin play mindreader      # the AI reads your mind (runs on your configured model)
 ```
 
-Every game keeps its rules in **pure, unit-tested functions** split from the terminal I/O, and the whole roster is smoke-driven in CI (26/26, zero crashes). The selection menu is a reusable Claude-Code-style picker (`picker.py`) — the same widget is ready to back an `ask_user` clarifying-question tool for the agent.
+Every game keeps its rules in **pure, unit-tested functions** split from the terminal I/O, and the whole roster is smoke-driven in CI. The selection menu is a reusable Claude-Code-style picker (`picker.py`) — the same widget is ready to back an `ask_user` clarifying-question tool for the agent.
 
 ## ronin util ui · the web dashboard
 
@@ -296,6 +334,9 @@ What it shows:
 | Recent runs | Orchestrated runs and chat sessions, most recent first, with success state | `<RONIN_HOME>/runs/*.json`, `.ronin/sessions/*.json` |
 | Run detail | An expandable orchestrator sub-agent tree: the planner node, then each specialist sub-agent by role and provider/model, with the subtasks assigned to it | the stored run record |
 | Faithfulness badges | Grounding score per answer: green grounded, red ungrounded, amber abstain, on the synthesized answer and per subtask | the offline faithfulness harness output stored on the run |
+| Mission Control | Mission stage, audit validity, evidence/budget state, local draft proposals, and fleet plans/runs | `.ronin/missions/`, `.ronin/fleet/` |
+| Mission events | Safe typed event topics, producer, transition, and timestamp; never issue content or raw logs | `.ronin/mission-events/events.jsonl` |
+| Candidates and remote workers | Candidate lifecycle metadata and remote verification lease status; no checkout paths or contents | `.ronin/candidate-workspaces/`, `.ronin/remote-workers/` |
 | Memory | The durable facts ronin remembers about you | `~/.ronin/memory.json` |
 | Skills | Crystallized repo-local skills | `.ronin/commands/*.md` |
 
@@ -309,6 +350,8 @@ Quick check without a browser (the page is served at `/`, the data at `/ui/*`):
 ronin util ui --no-open &                       # serve in the background
 curl -s http://127.0.0.1:8765/ | head      # the self-contained HTML page
 curl -s http://127.0.0.1:8765/ui/runs      # recent runs (JSON)
+curl -s http://127.0.0.1:8765/ui/missions  # safe Mission Control state (JSON)
+curl -s http://127.0.0.1:8765/ui/mission-events # durable safe events (JSON)
 ```
 
 For a screenshot, open `http://127.0.0.1:8765/` in a browser after running
@@ -404,14 +447,15 @@ database_url = "postgres://readonly_user:...@host:5432/db"   # a read-only role
 | Command | What it does |
 |---|---|
 | **`ronin`** | **The unified agent: talk, code, generate media, query data in one conversation.** |
-| **`ronin code [task]`** | **Coding agent: streaming, plan tracker, project memory, 30 slash commands.** |
+| **`ronin code [task]`** | **Coding agent: streaming, plan tracker, project memory, 34 slash commands.** |
 | `ronin chat` | Talk/media REPL with short-term memory. |
-| **`ronin play [game]`** | **The arcade: 26 free terminal games — real-time (Snake / Tetris / 2048 / …), classics, ronin-flavoured (Bug Hunt / Big-O / Regex Golf), and provider-neutral AI games (Mind Reader / AI Adventure / AI Trivia).** |
+| **`ronin play [game]`** | **The arcade: 31 free terminal games — real-time (Snake / Tetris / 2048 / …), classics, ronin-flavoured (Bug Hunt / Big-O / Regex Golf), and provider-neutral AI games (Mind Reader / AI Adventure / AI Trivia).** |
 | `ronin init [--demo]` | Create a config file (interactive or demo). |
 | **`ronin eval [--model X]`** | **Score agent quality on objective tasks, works on any provider (no LLM judge).** |
 | **`ronin dev explain <path>`** | **Explain a codebase: prose + Mermaid diagram + optional voice.** |
 | **`ronin util investigate "<symptom>"`** | **Root-cause a problem across your business data AND your code.** |
 | **`ronin util pipeline "<task>"`** | **Sequential gated role handoff: structured artifacts, a verifier, evidence-based verification (real unified diff incl. untracked files + required/optional multi-suite), structural + `--semantic-contract` checks, and git-safe resume with gated restore of any checkpoint. `--write`, `--dry-run`, `--roles`, `--free`, `--offline`, `--json`, `--commit`, `--pr`, `--verify-cmd` (repeatable), `--verify-suite`, `--auto-verify-all`, `--semantic-contract`, `--diff-context`, `--max-diff-bytes`, `--save-state`, `--resume`, `--restore-checkpoint`, `--force-resume`.** |
+| **`ronin util mission`** | **Durable evidence-gated issue-to-PR control plane: GitHub/GitLab issue intake, state-machine missions, candidate workspaces, Docker verification, deterministic review/security/evaluation gates, local approval-gated PR drafts, safe event replay, and authenticated remote verification workers.** |
 | **`ronin dev review [--base main]`** | **AI code review of your diff: severity-tagged findings, read-only.** |
 | **`ronin dev fix "<command>"`** | **Autonomous fix-until-green: runs the command, edits + re-runs until it passes.** |
 | **`ronin util book "<request>"`** | **Prepare-and-confirm a booking (flight, hotel, restaurant, ticket): researches options into a summary (option, price, link, details), optionally pre-fills a form in the browser up to the payment step, then STOPS. It never pays. You confirm and pay yourself. The browser is an optional extra (`pip install 'ronin-cli[browser]'`); without it you get search + a prepared summary + manual steps.** |
@@ -424,7 +468,7 @@ database_url = "postgres://readonly_user:...@host:5432/db"   # a read-only role
 | `ronin util briefing --slack <#chan>` / `--history` / `--out file.md` | Post to Slack / trend table / write to Markdown. |
 | `ronin ask "<question>"` | One-shot: print answer + typed trace. |
 | `ronin util tui` | Full-screen Textual UI: chat + live trace, F1 help. |
-| **`ronin util ui [--port 8765]`** | **Web dashboard: a single self-contained page (offline, no external resources) showing recent runs, an expandable orchestrator sub-agent tree, faithfulness badges, memory, and skills. Read-only.** |
+| **`ronin util ui [--port 8765]`** | **Read-only local dashboard: runs, sub-agent tree, faithfulness, memory, skills, and Mission Control with safe mission, event, candidate, fleet, proposal, and remote-worker status.** |
 | `ronin mcp add <name> <command>` | Register an MCP tool server (then `/mcp` lists them in-session). |
 | `ronin util serve --port 8000` | Expose the agent as an HTTP API (`POST /ask`). |
 | `ronin util schedule add <name> "<prompt>" --cron "<expr>"` | Store an agent task on a cron schedule. `schedule list` shows each task + its next run, `schedule run-due` runs the tasks due now through the agent, `schedule remove <name>` deletes one. Tasks persist to `~/.ronin/schedule.json`; `run-due` falls back to the offline demo brain when no key is set. |
@@ -450,6 +494,8 @@ database_url = "postgres://readonly_user:...@host:5432/db"   # a read-only role
 ronin can write files and run commands, so safety is built into the core, not bolted on:
 
 - **Gated mutations.** Every file write and shell command in the coding agent is held behind a **diff preview + your approval**: read operations run freely. **Plan mode** (`--plan`) is fully read-only.
+- **Candidate isolation.** Mission verification executes only in a detached candidate Git worktree through Docker, with dropped capabilities, `no-new-privileges`, resource limits, a candidate-only bind mount, and no network. There is no host-execution fallback.
+- **Mission evidence and budgets.** Mission lifecycle changes are constrained by typed evidence and hard token, cost, wall-clock, tool-call, concurrency, and repair-attempt ceilings. Audit records are hash-chained; the companion event bus is versioned, idempotent, and contains only compact safe metadata.
 - **Prompt-injection scanning.** User input passes through an injection scanner (`packages/hardening`) before it reaches a tool-calling planner.
 - **Faithfulness / grounding harness.** The injection scanner guards the input; the faithfulness harness guards the output. It checks whether the output is supported by the sources the agent actually read, flags references to functions / files / attributes that appear in nothing it opened, scores grounding 0..1, and **abstains** when the evidence is too thin to judge. It runs in two places: (1) on the autonomous agent's **final answer** (`ronin util agent --faithfulness warn|gate`), and (2) as an **edit guard in the coding agent** - when the agent proposes a `write_file` / `edit_file` / `multi_edit`, the new code is scored against everything it read so far. In `warn` mode the score is surfaced (non-blocking) and the normal approval gate proceeds; in `gate` mode an ungrounded edit (one that references a symbol absent from every file the agent opened) is **held** with feedback so the agent must read the right file or revise - and that hold stands even under `--full-access`/yolo, where the normal approval gate would auto-approve. Opt in with `--faithfulness warn|gate` (on `ronin util agent` or the `ronin code` session) or `config set faithfulness=...`; off by default, lexical and offline, so it runs with no provider. This is a faithfulness/grounding check in the standard sense (claim decomposition plus per-claim grounding), with a code specialization for hallucinated symbols; it does not claim novelty over that literature. See [docs/FAITHFULNESS.md](docs/FAITHFULNESS.md).
 - **Read-only data integrations.** The Stripe / Linear / Slack / Notion / Postgres MCP templates are read-only by default; the recommended Postgres setup uses a read-only DB role.
@@ -472,17 +518,17 @@ ronin is MIT-licensed and meant to be picked up by other people. A few notes if 
 
 `ronin` is the user-facing wrapper. The substance lives in **seven core packages you can also use independently** (part of a 23-package workspace), this is the engineering core:
 
-| Package | What it does | Tests |
-|---|---|---|
-| `agent-patterns` | ReAct, Planner-Executor, Multi-Agent Supervisor, Reflexion + a provider abstraction (streaming, 429 retry, MCP-style metadata) | 81 |
-| `eval-suite` | LLM-as-a-judge + **SWE-bench execution harness** (resolved-rate, regression gate), golden datasets, drift detection, HTML reports | 38 |
-| `memory` | Short-term (rolling summary), long-term (pluggable vector store), user preferences | 11 |
-| `hardening` | Prompt-injection scanner, faithfulness/grounding harness, tool allowlist, approval gates, output validator, token budgets, tracing | 60 |
-| `mcp-servers` | Read-only Postgres, Stripe, Linear, Slack, Notion, Tavily, GitHub templates | 67 |
-| `cli` | The `ronin` binary: agent loop, MCP client, web tools, subagents, eval, media, the **31-game arcade** (`ronin play`) | 1882 |
-| `deployment-templates` | Docker Compose, Modal, Vercel, Railway | - |
+| Package | What it does |
+|---|---|
+| `agent-patterns` | ReAct, Planner-Executor, Multi-Agent Supervisor, Reflexion, and a provider abstraction with streaming, 429 retry, and MCP-style metadata |
+| `eval-suite` | LLM-as-a-judge plus a **SWE-bench execution harness**, golden datasets, drift detection, regression gates, and HTML reports |
+| `memory` | Short-term summaries, long-term pluggable vector memory, and user preferences |
+| `hardening` | Prompt-injection scanning, faithfulness/grounding, tool allowlists, approval gates, output validation, token budgets, and tracing |
+| `mcp-servers` | Read-only Postgres, Stripe, Linear, Slack, Notion, Tavily, and GitHub templates |
+| `cli` | The `ronin` binary: coding agent, mission control, MCP client, web tools, subagents, evaluation, media, and the **31-game arcade** (`ronin play`) |
+| `deployment-templates` | Docker Compose, Modal, Vercel, and Railway |
 
-**4,162 tests** across all packages (incl. the demo/API apps), green on every push (see CI). A `FakeProvider` makes them deterministic, offline, and free: no API calls in CI.
+**4,201 tests** across all packages (including the demo/API apps) passed in the current full workspace suite. A `FakeProvider` makes them deterministic, offline, and free: no API calls in CI.
 
 ## Use the modules without the CLI
 
@@ -591,6 +637,7 @@ Ronin/
 ## Documentation
 
 - [Documentation site](apps/docs/): concepts, production checklist, ADRs (run `mintlify dev` from `apps/docs/` to preview)
+- [Agent platform guide](docs/agent_platform.md): mission lifecycle, evidence gates, candidate workspaces, event bus, and remote verification workers
 - [CHANGELOG.md](CHANGELOG.md): what's new
 - [CONTRIBUTING.md](CONTRIBUTING.md): how to add MCP servers, providers, etc.
 
