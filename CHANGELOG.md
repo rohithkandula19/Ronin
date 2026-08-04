@@ -5,9 +5,9 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Security
-- Updated the affected `brace-expansion` lockfile resolution to `5.0.8` for
-  the high-severity unbounded-expansion denial-of-service advisory. The
-  repository secret scan is now an enforced clean-tree contract: credential
+- Updated transitive dependencies for the remediable Dependabot alerts:
+  `brace-expansion` 1.1.18 and 5.0.9, PostCSS 8.5.23, and cryptography 50.0.0.
+  The repository secret scan is now an enforced clean-tree contract: credential
   detector fixtures construct their values at runtime, so test coverage remains
   real without embedding credential-shaped literals in source files.
 
