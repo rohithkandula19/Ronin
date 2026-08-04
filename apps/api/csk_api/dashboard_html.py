@@ -210,6 +210,7 @@ var API = {
   fleetRuns: "/ui/fleet-runs",
   missions: "/ui/missions",
   missionEvents: "/ui/mission-events",
+  persistentAgents: "/ui/persistent-agents",
   candidates: "/ui/candidates",
   remoteWorkerJobs: "/ui/remote-worker-jobs",
   proposals: "/ui/proposals"
@@ -455,6 +456,17 @@ function missionEventHtml(event){
   '</li>';
 }
 
+function persistentAgentHtml(agent){
+  var stateClass = agent.status === "running" ? "amber" : agent.status === "crashed" ? "red" : "neutral";
+  var mission = agent.mission_id ? 'mission '+esc(agent.mission_id) : 'unassigned';
+  return '<li class="ops-item">'+
+    '<div class="ops-title">'+esc(agent.agent_id)+'</div>'+
+    '<div class="ops-meta"><span class="badge '+stateClass+'">'+esc(agent.status)+'</span>'+
+    '<span>'+esc(agent.role)+'</span><span>'+mission+'</span><span>'+esc(agent.restart_count)+' restarts</span>'+
+    '<span>'+esc(fmtDate(agent.health_check_at))+'</span></div>'+
+  '</li>';
+}
+
 function candidateHtml(candidate){
   var stateClass = candidate.status === "active" ? "amber" : "neutral";
   var image = candidate.image ? esc(candidate.image) : 'image not set';
@@ -483,12 +495,14 @@ async function loadOperations(){
   var pane = document.getElementById("pane-operations");
   pane.innerHTML = '<div class="loading">loading...</div>';
   try{
-    var data = await Promise.all([getJSON(API.missions), getJSON(API.missionEvents), getJSON(API.candidates), getJSON(API.fleetPlans), getJSON(API.fleetRuns), getJSON(API.remoteWorkerJobs), getJSON(API.proposals)]);
-    var missions = data[0], missionEvents = data[1], candidates = data[2], plans = data[3], runs = data[4], workerJobs = data[5], proposals = data[6];
+    var data = await Promise.all([getJSON(API.missions), getJSON(API.missionEvents), getJSON(API.persistentAgents), getJSON(API.candidates), getJSON(API.fleetPlans), getJSON(API.fleetRuns), getJSON(API.remoteWorkerJobs), getJSON(API.proposals)]);
+    var missions = data[0], missionEvents = data[1], persistentAgents = data[2], candidates = data[3], plans = data[4], runs = data[5], workerJobs = data[6], proposals = data[7];
     var html = '<div class="card"><h3>Missions ('+missions.length+')</h3>';
     html += missions.length ? '<ul class="ops-list">'+missions.map(missionHtml).join("")+'</ul>' : operationsEmpty('No durable issue-to-PR missions saved for this project.');
     html += '</div><div class="card"><h3>Mission events ('+missionEvents.length+')</h3>';
     html += missionEvents.length ? '<ul class="ops-list">'+missionEvents.map(missionEventHtml).join("")+'</ul>' : operationsEmpty('No durable mission bus events saved for this project.');
+    html += '</div><div class="card"><h3>Persistent team ('+persistentAgents.length+')</h3>';
+    html += persistentAgents.length ? '<ul class="ops-list">'+persistentAgents.map(persistentAgentHtml).join("")+'</ul>' : operationsEmpty('No persistent specialist team initialized for this project.');
     html += '</div><div class="card"><h3>Candidate workspaces ('+candidates.length+')</h3>';
     html += candidates.length ? '<ul class="ops-list">'+candidates.map(candidateHtml).join("")+'</ul>' : operationsEmpty('No disposable candidate workspaces created for this project.');
     html += '</div><div class="card"><h3>Fleet plans ('+plans.length+')</h3>';

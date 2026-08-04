@@ -51,6 +51,60 @@ local routing evidence, but no prompts, providers, agents, shell commands,
 queue workers, edits, or merges are started by these commands. A fleet plan is
 an inspectable scheduling boundary, not autonomous execution.
 
+## Persistent Role Teams
+
+`ronin util team` gives the core architect, implementer, reviewer, tester,
+security, and release roles stable project-local identities. The SQLite
+supervisor persists lifecycle state, in-flight mission assignment, health,
+restart count, role experience, and a compact hash-chained audit under
+`.ronin/persistent-agents.sqlite`.
+
+```bash
+ronin util team init
+ronin util team status
+ronin util team assign architect-01 mission-20260804-120000-abcdef "Design the retry boundary"
+ronin util team start architect-01
+ronin util team heartbeat architect-01
+ronin util team complete architect-01 --summary "Recorded a bounded design proposal."
+ronin util team release architect-01
+ronin util team audit
+```
+
+The lifecycle is explicit: `idle -> assigned -> running -> completed -> idle`.
+An assigned or running role with a stale heartbeat is recorded as crashed. The
+supervisor can return it to `assigned` with the same mission and task plus a
+restart count, so a governed worker can recover from durable state rather than
+inventing progress. `team supervise` manages that recovery boundary; it does
+not launch a hidden daemon, provider, shell command, or code-editing worker.
+
+Each role keeps an attributed experience ledger with source type/id, confidence,
+expiry, access count, and last-accessed timestamp. Likely secrets are refused.
+Workarounds default to a 30-day lifetime, high-confidence ADRs to one year, and
+other entries to 90 days. `team memory compact` archives expired
+low-confidence entries while retaining a bounded historical summary:
+
+```bash
+ronin util team memory remember reviewer-01 \
+  "FastAPI route changes require matching OpenAPI coverage." \
+  --source-type pull_request --source-id '#123' --confidence 0.9
+ronin util team memory recall reviewer-01 "FastAPI route coverage"
+ronin util team memory compact reviewer-01
+```
+
+Before a role starts, `team context` assembles a local, token-bounded context
+pack from compatible project instructions, BM25-ranked repository files and
+tests, and the active role's recalled experience. The pack uses references and
+symbol outlines, not raw chat history. It truncates visibly when its token
+budget is exhausted and never calls a provider.
+
+```bash
+ronin util team context tester-01 "add retry coverage" --mission mission-20260804-120000-abcdef
+```
+
+Mission Control exposes only safe team metadata: role identity, lifecycle,
+mission id, restart count, and health timestamp. It deliberately excludes task
+text, operator summaries, scratchpads, and experience contents.
+
 ## Mission Foundation
 
 Ronin's issue-to-PR foundation uses structured artifacts rather than an

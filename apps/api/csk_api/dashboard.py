@@ -379,6 +379,34 @@ def mission_event_entries(root: str | Path = ".", limit: int = 100) -> list[dict
     ]
 
 
+def persistent_agent_entries(root: str | Path = ".", limit: int = 50) -> list[dict[str, Any]]:
+    """Safe persistent-team lifecycle metadata for Mission Control.
+
+    Working task text, summaries, scratchpads, and experience content stay in
+    the project-local supervisor database and are intentionally excluded.
+    """
+    try:
+        from ronin_cli.persistent_agents import PersistentAgentStore
+    except Exception:  # noqa: BLE001
+        return []
+    try:
+        agents = PersistentAgentStore(root).list(limit=limit)
+    except Exception:  # noqa: BLE001
+        return []
+    return [
+        {
+            "agent_id": agent.agent_id,
+            "role": agent.role,
+            "status": agent.status,
+            "mission_id": agent.current_mission_id or "",
+            "restart_count": agent.restart_count,
+            "health_check_at": agent.health_check_at,
+            "updated_at": agent.updated_at,
+        }
+        for agent in agents
+    ]
+
+
 def remote_worker_job_entries(root: str | Path = ".", limit: int = 50) -> list[dict[str, Any]]:
     """Safe lifecycle state for remote candidate verification jobs.
 

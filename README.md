@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-v1.0.0-blue)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-4201%20passing-brightgreen.svg)](#-whats-under-the-hood)
+[![Tests](https://img.shields.io/badge/tests-4205%20passing-brightgreen.svg)](#-whats-under-the-hood)
 [![Providers](https://img.shields.io/badge/providers-Claude%20·%20Gemini%20·%20Cerebras%20·%20Groq%20·%20OpenRouter%20·%20Ollama%20·%20OpenAI-d4a373)](#-supported-providers)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
@@ -86,7 +86,7 @@ Regenerate the walkthrough anytime with [`vhs`](https://github.com/charmbracelet
 
 **One front door:** type **`ronin`** and you get a single agent that reads, writes, and runs code (every edit and shell command gated behind a diff preview and your approval, reads run freely), generates images/video/speech, and queries your connected data, all in one conversation, in plain language. It's **provider-agnostic**: the same agent runs on Claude or on free open models.
 
-It's also a **reference implementation for building agents the right way**. The CLI is a thin wrapper over seven core, independently-usable packages — `agent-patterns`, `eval-suite`, `memory`, `hardening`, `mcp-servers`, `relay`, and `cli` — part of a 23-package workspace (the other 16 are platform packages: identity, vault, billing, observability, and so on), backed by **4,201 passing tests** in the full workspace suite. (`ronin code` is the focused coding agent; `ronin chat` is the talk/media surface, both available when you want a single-purpose mode.)
+It's also a **reference implementation for building agents the right way**. The CLI is a thin wrapper over seven core, independently-usable packages — `agent-patterns`, `eval-suite`, `memory`, `hardening`, `mcp-servers`, `relay`, and `cli` — part of a 23-package workspace (the other 16 are platform packages: identity, vault, billing, observability, and so on), backed by **4,205 passing tests** in the full workspace suite. (`ronin code` is the focused coding agent; `ronin chat` is the talk/media surface, both available when you want a single-purpose mode.)
 
 ## Mission Control: verified issue-to-PR work
 
@@ -123,6 +123,15 @@ issue bodies, agent output, credentials, paths, or raw logs. Ronin can also
 queue bounded candidate verification work to authenticated remote Docker
 workers. See [the agent platform guide](docs/agent_platform.md) for the full
 mission, workspace, event, and remote-worker contract.
+
+Persistent specialist identities add durable project-local role experience on
+top of mission execution. `ronin util team init` creates the architect,
+implementer, reviewer, tester, security, and release roles; `team supervise`
+detects stale heartbeats and preserves assignments for a governed recovery.
+Role memories have source provenance, confidence, expiry, compaction, and
+secret rejection. `team context` assembles a token-bounded local context pack
+from project instructions, ranked repository files/tests, and relevant role
+experience. Mission Control exposes only safe lifecycle metadata.
 
 ## 🛠 `ronin code` · the coding agent (Claude-Code shaped)
 
@@ -528,7 +537,7 @@ ronin is MIT-licensed and meant to be picked up by other people. A few notes if 
 | `cli` | The `ronin` binary: coding agent, mission control, MCP client, web tools, subagents, evaluation, media, and the **31-game arcade** (`ronin play`) |
 | `deployment-templates` | Docker Compose, Modal, Vercel, and Railway |
 
-**4,201 tests** across all packages (including the demo/API apps) passed in the current full workspace suite. A `FakeProvider` makes them deterministic, offline, and free: no API calls in CI.
+**4,205 tests** across all packages (including the demo/API apps) passed in the current full workspace suite. A `FakeProvider` makes them deterministic, offline, and free: no API calls in CI.
 
 ## Use the modules without the CLI
 

@@ -5,6 +5,14 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Added
+- **Persistent specialist-team supervisor.** `ronin util team` now creates
+  durable local architect, implementer, reviewer, tester, security, and release
+  identities with an explicit lifecycle, heartbeats, stale-worker recovery, and
+  hash-chained audit in SQLite. Per-role experience entries carry source
+  provenance, confidence, expiry, access history, secret rejection, and safe
+  compaction. Token-bounded local context packs combine project conventions,
+  BM25 repository/test pointers, and recalled role experience; Mission Control
+  exposes status-only team metadata without task, scratchpad, or memory content.
 - **Typed durable mission event bus.** Committed mission audit records now emit
   versioned, hash-chained, idempotent envelopes for mission creation,
   transitions, handoffs, candidate assignment, test outcomes, and security

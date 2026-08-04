@@ -190,6 +190,11 @@ def make_app() -> FastAPI:
         from .dashboard import mission_event_entries
         return mission_event_entries(".", limit=max(1, min(500, limit)))
 
+    @app.get("/ui/persistent-agents")
+    def ui_persistent_agents(limit: int = 50) -> list[dict]:
+        from .dashboard import persistent_agent_entries
+        return persistent_agent_entries(".", limit=max(1, min(200, limit)))
+
     @app.get("/ui/candidates")
     def ui_candidates(limit: int = 50) -> list[dict]:
         from .dashboard import candidate_workspace_entries

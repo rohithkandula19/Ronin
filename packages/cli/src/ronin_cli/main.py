@@ -3536,6 +3536,272 @@ def _print_fleet_plan(plan) -> None:
         console.print(f"[dim]routing evidence: {', '.join(plan.repository.tags)}[/dim]")
 
 
+persistent_team_app = typer.Typer(
+    help="Operate durable local specialist identities, experience ledgers, and recoverable assignments.",
+    no_args_is_help=True,
+)
+util_app.add_typer(persistent_team_app, name="team")
+
+
+@persistent_team_app.command("init")
+def persistent_team_init(
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Create the default persistent architect, implementer, reviewer, tester, security, and release roles."""
+    from .persistent_agents import PersistentAgentStore
+
+    agents = PersistentAgentStore(root).bootstrap()
+    console.print(f"[green]ready[/green] persistent team with {len(agents)} local role identities")
+    _print_persistent_agents(agents)
+
+
+@persistent_team_app.command("status")
+def persistent_team_status(
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Show safe role lifecycle and health metadata; task text and experience stay local."""
+    from .persistent_agents import PersistentAgentStore
+
+    agents = PersistentAgentStore(root).list()
+    if not agents:
+        console.print("[dim]no persistent team yet; run `ronin util team init`.[/dim]")
+        return
+    _print_persistent_agents(agents)
+
+
+@persistent_team_app.command("assign")
+def persistent_team_assign(
+    agent_id: str = typer.Argument(..., help="Idle persistent role id, for example architect-01."),
+    mission_id: str = typer.Argument(..., help="Mission id this role will serve."),
+    task: str = typer.Argument(..., help="Bounded role-specific task description."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Reserve one idle role for a mission without starting a provider or worker."""
+    from .persistent_agents import PersistentAgentStore
+
+    try:
+        agent = PersistentAgentStore(root).assign(agent_id, mission_id, task)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(f"[green]assigned[/green] [cyan]{agent.agent_id}[/cyan] to {agent.current_mission_id}")
+
+
+@persistent_team_app.command("start")
+def persistent_team_start(
+    agent_id: str = typer.Argument(..., help="Assigned persistent role id."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Mark an assigned role as running after the governed worker claims it."""
+    from .persistent_agents import PersistentAgentStore
+
+    try:
+        agent = PersistentAgentStore(root).start(agent_id)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(f"[green]running[/green] [cyan]{agent.agent_id}[/cyan]")
+
+
+@persistent_team_app.command("complete")
+def persistent_team_complete(
+    agent_id: str = typer.Argument(..., help="Running persistent role id."),
+    summary: str = typer.Option("", "--summary", help="Bounded operator-facing outcome summary."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Record completion evidence; release remains an explicit separate action."""
+    from .persistent_agents import PersistentAgentStore
+
+    try:
+        agent = PersistentAgentStore(root).complete(agent_id, summary)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(f"[green]completed[/green] [cyan]{agent.agent_id}[/cyan]")
+
+
+@persistent_team_app.command("release")
+def persistent_team_release(
+    agent_id: str = typer.Argument(..., help="Completed or crashed persistent role id."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Return a reviewed terminal role to the idle pool; no work is discarded."""
+    from .persistent_agents import PersistentAgentStore
+
+    try:
+        agent = PersistentAgentStore(root).release(agent_id)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(f"[green]idle[/green] [cyan]{agent.agent_id}[/cyan]")
+
+
+@persistent_team_app.command("heartbeat")
+def persistent_team_heartbeat(
+    agent_id: str = typer.Argument(..., help="Persistent role id whose worker is alive."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Record a worker heartbeat without changing its lifecycle state."""
+    from .persistent_agents import PersistentAgentStore
+
+    try:
+        agent = PersistentAgentStore(root).heartbeat(agent_id)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(f"[green]healthy[/green] [cyan]{agent.agent_id}[/cyan] ({agent.status})")
+
+
+@persistent_team_app.command("supervise")
+def persistent_team_supervise(
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    heartbeat_age: int = typer.Option(30, "--heartbeat-age", min=1, max=86_400, help="Seconds before an in-flight role is stale."),
+    auto_restart: bool = typer.Option(True, "--auto-restart/--no-auto-restart", help="Return stale assigned/running roles to recoverable assigned state."),
+) -> None:
+    """Detect stale role heartbeats and preserve their mission assignment for recovery."""
+    from .persistent_agents import PersistentAgentStore
+
+    try:
+        changed = PersistentAgentStore(root).supervise(
+            max_age_seconds=heartbeat_age, auto_restart=auto_restart,
+        )
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    if not changed:
+        console.print("[green]healthy[/green] no stale persistent role assignments")
+        return
+    _print_persistent_agents(changed)
+
+
+persistent_team_memory_app = typer.Typer(
+    help="Manage source-attributed local experience ledgers for persistent roles.",
+    no_args_is_help=True,
+)
+persistent_team_app.add_typer(persistent_team_memory_app, name="memory")
+
+
+@persistent_team_memory_app.command("remember")
+def persistent_team_memory_remember(
+    agent_id: str = typer.Argument(..., help="Persistent role id."),
+    content: str = typer.Argument(..., help="Durable repo-specific learning; likely secrets are refused."),
+    source_type: str = typer.Option(..., "--source-type", help="mission, issue, pull_request, commit, human, skill, adr, or workaround."),
+    source_id: str = typer.Option(..., "--source-id", help="Immutable source identifier for the learning."),
+    confidence: float = typer.Option(0.7, "--confidence", min=0.0, max=1.0),
+    expires_at: Optional[str] = typer.Option(None, "--expires-at", help="ISO timestamp; defaults depend on provenance."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Store one local role experience with provenance, confidence, and expiry."""
+    from .persistent_agents import PersistentAgentStore
+
+    try:
+        entry = PersistentAgentStore(root).remember(
+            agent_id, content, source_type=source_type.strip().lower(), source_id=source_id,
+            confidence=confidence, expires_at=expires_at,
+        )
+    except (ValueError, TypeError) as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(f"[green]remembered[/green] [cyan]{entry.memory_id}[/cyan] until {entry.expires_at}")
+
+
+@persistent_team_memory_app.command("recall")
+def persistent_team_memory_recall(
+    agent_id: str = typer.Argument(..., help="Persistent role id."),
+    query: str = typer.Argument(..., help="Experience query."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    limit: int = typer.Option(10, "--limit", min=1, max=50),
+) -> None:
+    """Recall active role experience by local lexical relevance."""
+    from .persistent_agents import PersistentAgentStore
+
+    try:
+        entries = PersistentAgentStore(root).recall(agent_id, query, limit=limit)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    if not entries:
+        console.print("[dim]no matching active role experience.[/dim]")
+        return
+    table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+    table.add_column("Source")
+    table.add_column("Confidence", justify="right")
+    table.add_column("Experience", overflow="fold")
+    for entry in entries:
+        table.add_row(f"{entry.source_type}:{entry.source_id}", f"{entry.confidence:.2f}", entry.content)
+    console.print(table)
+
+
+@persistent_team_memory_app.command("compact")
+def persistent_team_memory_compact(
+    agent_id: str = typer.Argument(..., help="Persistent role id."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Archive expired low-confidence experience and retain a compact historical summary."""
+    from .persistent_agents import PersistentAgentStore
+
+    try:
+        result = PersistentAgentStore(root).compact_memories(agent_id)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    if not result.archived:
+        console.print("[dim]no expired low-confidence experience to compact.[/dim]")
+        return
+    console.print(f"[green]compacted[/green] {result.archived} memories into {result.summary_memory_id}")
+
+
+@persistent_team_app.command("context")
+def persistent_team_context(
+    agent_id: str = typer.Argument(..., help="Persistent role id."),
+    task: str = typer.Argument(..., help="Task used to retrieve bounded context."),
+    mission_id: str = typer.Option("", "--mission", help="Optional mission correlation id."),
+    max_tokens: int = typer.Option(2_000, "--max-tokens", min=64, max=32_000),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Print a local token-bounded context pack; no provider is called."""
+    from .persistent_agents import PersistentAgentStore
+
+    try:
+        pack = PersistentAgentStore(root).context_pack(
+            agent_id, task, mission_id=mission_id, max_tokens=max_tokens,
+        )
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print_json(pack.model_dump_json(indent=2))
+
+
+@persistent_team_app.command("audit")
+def persistent_team_audit(
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Verify the persistent-team supervisor's compact append-only audit chain."""
+    from .persistent_agents import PersistentAgentStore
+
+    report = PersistentAgentStore(root).verify_audit()
+    if not report.valid:
+        console.print(f"[red]invalid[/red] persistent team audit: {report.error or 'unknown error'}")
+        raise typer.Exit(1)
+    console.print(f"[green]valid[/green] persistent team audit ({report.events} event(s))")
+
+
+def _print_persistent_agents(agents) -> None:
+    table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+    table.add_column("Agent", no_wrap=True)
+    table.add_column("Role")
+    table.add_column("Status")
+    table.add_column("Mission", no_wrap=True)
+    table.add_column("Restarts", justify="right")
+    table.add_column("Last health")
+    for agent in agents:
+        table.add_row(
+            agent.agent_id, agent.role, agent.status, agent.current_mission_id or "-",
+            str(agent.restart_count), agent.health_check_at,
+        )
+    console.print(table)
+
+
 agent_queue_app = typer.Typer(
     help="Project-local queue for governed orchestration jobs. Jobs run only when a worker claims them.",
     no_args_is_help=True,
