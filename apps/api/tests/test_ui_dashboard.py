@@ -321,6 +321,38 @@ def test_agent_operation_endpoints_return_real_saved_data(client: TestClient) ->
     ]
 
 
+def test_persistent_handoffs_return_safe_real_metadata(client: TestClient) -> None:
+    from ronin_cli.persistent_agents import HandoffEvidenceInput, PersistentAgentStore
+
+    store = PersistentAgentStore(Path.cwd())
+    store.bootstrap(("architect", "implementer"))
+    store.assign("architect-01", "mission-ui", "Design the UI handoff")
+    store.assign("implementer-01", "mission-ui", "Implement the UI handoff")
+    store.start("architect-01")
+    store.complete("architect-01", "Design evidence recorded.")
+    handoff = store.create_handoff(
+        "architect-01", "implementer-01", "mission-ui", "Use the approved accessibility plan.",
+        (HandoffEvidenceInput(kind="plan", reference="mission-ui:accessibility-plan"),),
+    )
+    accepted = store.acknowledge_handoff(handoff.handoff_id, "implementer-01")
+
+    assert client.get("/ui/persistent-handoffs").json() == [
+        {
+            "handoff_id": handoff.handoff_id,
+            "mission_id": "mission-ui",
+            "from_agent_id": "architect-01",
+            "to_agent_id": "implementer-01",
+            "status": "accepted",
+            "evidence_count": 1,
+            "created_at": handoff.created_at,
+            "accepted_at": accepted.accepted_at,
+            "updated_at": accepted.updated_at,
+        }
+    ]
+    body = str(client.get("/ui/persistent-handoffs").json())
+    assert "approved accessibility" not in body and "accessibility-plan" not in body
+
+
 def test_fleet_runs_return_real_execution_state(client: TestClient) -> None:
     from ronin_cli.agent_catalog import AgentProfile, RepositorySignals
     from ronin_cli.agent_fleet import FleetPlanStore, plan_fleet

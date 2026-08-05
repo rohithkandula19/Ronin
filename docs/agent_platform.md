@@ -66,6 +66,11 @@ ronin util team assign architect-01 mission-20260804-120000-abcdef "Design the r
 ronin util team start architect-01
 ronin util team heartbeat architect-01
 ronin util team complete architect-01 --summary "Recorded a bounded design proposal."
+ronin util team assign implementer-01 mission-20260804-120000-abcdef "Implement the approved retry boundary"
+ronin util team handoff architect-01 implementer-01 mission-20260804-120000-abcdef \
+  --summary "The retry plan is ready for implementation." \
+  --evidence plan:mission-20260804-120000-abcdef:retry-plan-v1
+ronin util team accept-handoff handoff-... implementer-01
 ronin util team release architect-01
 ronin util team audit
 ```
@@ -101,9 +106,19 @@ budget is exhausted and never calls a provider.
 ronin util team context tester-01 "add retry coverage" --mission mission-20260804-120000-abcdef
 ```
 
+Completed roles can transfer a compact conclusion plus one to twelve typed
+evidence references to a peer that is already assigned to the same mission.
+The recipient explicitly acknowledges the transfer before starting work; a
+handoff never starts a provider, worker, shell command, or lifecycle transition.
+Likely secrets are rejected from the summary and references. `team handoffs`
+lists only ids, roles, state, timestamps, and evidence counts, while the SQLite
+record retains the bounded summary and references. Existing supervisor databases
+upgrade additively to schema version 2 on first use.
+
 Mission Control exposes only safe team metadata: role identity, lifecycle,
-mission id, restart count, and health timestamp. It deliberately excludes task
-text, operator summaries, scratchpads, and experience contents.
+mission id, restart count, health timestamp, and handoff ownership/state/evidence
+count. It deliberately excludes task text, operator summaries, handoff summaries
+and references, scratchpads, and experience contents.
 
 ## Mission Foundation
 

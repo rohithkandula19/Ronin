@@ -3620,6 +3620,64 @@ def persistent_team_complete(
     console.print(f"[green]completed[/green] [cyan]{agent.agent_id}[/cyan]")
 
 
+@persistent_team_app.command("handoff")
+def persistent_team_handoff(
+    source_agent_id: str = typer.Argument(..., help="Completed persistent role id that produced the evidence."),
+    recipient_agent_id: str = typer.Argument(..., help="Assigned persistent role id that will receive the evidence."),
+    mission_id: str = typer.Argument(..., help="Mission shared by both persistent roles."),
+    summary: str = typer.Option(..., "--summary", help="Bounded handoff conclusion; raw chat transcripts are not accepted."),
+    evidence: list[str] = typer.Option([], "--evidence", help="Repeatable typed reference: plan:ID, test:ID, review:ID, security:ID, or candidate:ID."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Create a compact evidence handoff from a completed role to an assigned peer."""
+    from .persistent_agents import PersistentAgentStore
+
+    try:
+        evidence_entries = tuple(_parse_persistent_handoff_evidence(value) for value in evidence)
+        handoff = PersistentAgentStore(root).create_handoff(
+            source_agent_id, recipient_agent_id, mission_id, summary, evidence_entries,
+        )
+    except (TypeError, ValueError) as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(
+        f"[green]handed off[/green] [cyan]{handoff.handoff_id}[/cyan] "
+        f"from {handoff.from_agent_id} to {handoff.to_agent_id} ({len(handoff.evidence)} evidence reference(s))",
+    )
+
+
+@persistent_team_app.command("accept-handoff")
+def persistent_team_accept_handoff(
+    handoff_id: str = typer.Argument(..., help="Pending persistent handoff id."),
+    recipient_agent_id: str = typer.Argument(..., help="Assigned recipient role id that acknowledges the evidence."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Explicitly acknowledge a handoff without starting the recipient's worker."""
+    from .persistent_agents import PersistentAgentStore
+
+    try:
+        handoff = PersistentAgentStore(root).acknowledge_handoff(handoff_id, recipient_agent_id)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(f"[green]acknowledged[/green] [cyan]{handoff.handoff_id}[/cyan] by {handoff.to_agent_id}")
+
+
+@persistent_team_app.command("handoffs")
+def persistent_team_handoffs(
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    limit: int = typer.Option(50, "--limit", min=1, max=500),
+) -> None:
+    """List persistent evidence handoffs without printing their summaries or references."""
+    from .persistent_agents import PersistentAgentStore
+
+    handoffs = PersistentAgentStore(root).list_handoffs(limit=limit)
+    if not handoffs:
+        console.print("[dim]no persistent team handoffs yet.[/dim]")
+        return
+    _print_persistent_handoffs(handoffs)
+
+
 @persistent_team_app.command("release")
 def persistent_team_release(
     agent_id: str = typer.Argument(..., help="Completed or crashed persistent role id."),
@@ -3798,6 +3856,32 @@ def _print_persistent_agents(agents) -> None:
         table.add_row(
             agent.agent_id, agent.role, agent.status, agent.current_mission_id or "-",
             str(agent.restart_count), agent.health_check_at,
+        )
+    console.print(table)
+
+
+def _parse_persistent_handoff_evidence(value: str):
+    from .persistent_agents import HandoffEvidenceInput
+
+    kind, separator, reference = value.partition(":")
+    if not separator or not kind.strip() or not reference.strip():
+        raise ValueError("handoff evidence must use kind:reference")
+    return HandoffEvidenceInput(kind=kind.strip().lower(), reference=reference.strip())
+
+
+def _print_persistent_handoffs(handoffs) -> None:
+    table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+    table.add_column("Handoff", no_wrap=True)
+    table.add_column("Mission", no_wrap=True)
+    table.add_column("From")
+    table.add_column("To")
+    table.add_column("Status")
+    table.add_column("Evidence", justify="right")
+    table.add_column("Updated")
+    for handoff in handoffs:
+        table.add_row(
+            handoff.handoff_id, handoff.mission_id, handoff.from_agent_id, handoff.to_agent_id,
+            handoff.status, str(len(handoff.evidence)), handoff.updated_at,
         )
     console.print(table)
 

@@ -8,7 +8,7 @@ import pytest
 from typer.testing import CliRunner
 
 from ronin_cli.main import app
-from ronin_cli.persistent_agents import PersistentAgentStore
+from ronin_cli.persistent_agents import HandoffEvidenceInput, PersistentAgentStore, TEAM_SCHEMA_VERSION
 
 
 def test_persistent_agent_lifecycle_recovers_a_stale_assignment_and_keeps_audit(tmp_path: Path) -> None:
@@ -39,6 +39,22 @@ def test_persistent_agent_lifecycle_recovers_a_stale_assignment_and_keeps_audit(
     with sqlite3.connect(reopened.path) as con:
         con.execute("UPDATE agent_events SET kind = 'corrupted' WHERE sequence = 1")
     assert not reopened.verify_audit().valid
+
+
+def test_persistent_team_schema_v1_upgrades_additively_for_handoffs(tmp_path: Path) -> None:
+    store = PersistentAgentStore(tmp_path)
+    store.bootstrap(("architect",))
+    with sqlite3.connect(store.path) as con:
+        con.execute("DROP TABLE agent_handoffs")
+        con.execute("PRAGMA user_version = 1")
+
+    upgraded = PersistentAgentStore(tmp_path)
+    assert upgraded.list_handoffs() == ()
+    with sqlite3.connect(upgraded.path) as con:
+        assert con.execute("PRAGMA user_version").fetchone()[0] == TEAM_SCHEMA_VERSION
+        assert con.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_handoffs'",
+        ).fetchone()
 
 
 def test_experience_memory_is_provenanced_compacted_and_refuses_likely_secrets(tmp_path: Path) -> None:
@@ -93,6 +109,37 @@ def test_context_pack_combines_repo_conventions_tests_and_role_experience_with_b
     assert any(item.reference == "tests/test_retry.py" for item in pack.items)
 
 
+def test_persistent_handoff_requires_completed_source_acknowledgement_and_safe_metadata(tmp_path: Path) -> None:
+    store = PersistentAgentStore(tmp_path)
+    store.bootstrap(("architect", "implementer"))
+    store.assign("architect-01", "mission-42", "Design the retry boundary")
+    store.assign("implementer-01", "mission-42", "Implement the bounded retry policy")
+    store.start("architect-01")
+    store.complete("architect-01", "Recorded a bounded implementation plan.")
+
+    handoff = store.create_handoff(
+        "architect-01", "implementer-01", "mission-42", "Plan is ready for implementation.",
+        (HandoffEvidenceInput(kind="plan", reference="mission-42:retry-plan-v1"),),
+    )
+    assert handoff.status == "pending" and handoff.evidence[0].digest
+    assert store.get("implementer-01").status == "assigned"
+    assert PersistentAgentStore(tmp_path).get_handoff(handoff.handoff_id).summary == handoff.summary
+
+    acknowledged = store.acknowledge_handoff(handoff.handoff_id, "implementer-01")
+    assert acknowledged.status == "accepted" and acknowledged.accepted_at
+    assert store.get("implementer-01").status == "assigned"
+    assert [event.kind for event in store.audit_events(limit=20)][0] == "handoff_acknowledged"
+    assert store.verify_audit().valid
+
+    with pytest.raises(ValueError, match="already been acknowledged"):
+        store.acknowledge_handoff(handoff.handoff_id, "implementer-01")
+    with pytest.raises(ValueError, match="possible secret"):
+        store.create_handoff(
+            "architect-01", "implementer-01", "mission-42", "AKIA" + "ZX7Q2RSTUV3BWXYC",
+            (HandoffEvidenceInput(kind="plan", reference="mission-42:retry-plan-v2"),),
+        )
+
+
 def test_team_cli_and_dashboard_surface_status_only_metadata(tmp_path: Path) -> None:
     runner = CliRunner()
     initialized = runner.invoke(app, ["util", "team", "init", "--root", str(tmp_path)])
@@ -101,11 +148,37 @@ def test_team_cli_and_dashboard_surface_status_only_metadata(tmp_path: Path) -> 
         ["util", "team", "assign", "architect-01", "mission-42", "Design the retry boundary", "--root", str(tmp_path)],
     )
     status = runner.invoke(app, ["util", "team", "status", "--root", str(tmp_path)])
+    started = runner.invoke(app, ["util", "team", "start", "architect-01", "--root", str(tmp_path)])
+    completed = runner.invoke(app, ["util", "team", "complete", "architect-01", "--root", str(tmp_path)])
+    assigned_implementer = runner.invoke(
+        app,
+        ["util", "team", "assign", "implementer-01", "mission-42", "Implement the retry boundary", "--root", str(tmp_path)],
+    )
+    handoff = runner.invoke(
+        app,
+        [
+            "util", "team", "handoff", "architect-01", "implementer-01", "mission-42",
+            "--summary", "Design is ready for implementation.", "--evidence", "plan:mission-42:retry-plan-v1",
+            "--root", str(tmp_path),
+        ],
+    )
+    handoff_id = next(token for token in handoff.stdout.split() if token.startswith("handoff-"))
+    accepted = runner.invoke(
+        app, ["util", "team", "accept-handoff", handoff_id, "implementer-01", "--root", str(tmp_path)],
+    )
+    handoffs = runner.invoke(app, ["util", "team", "handoffs", "--root", str(tmp_path)])
     audit = runner.invoke(app, ["util", "team", "audit", "--root", str(tmp_path)])
-    from csk_api.dashboard import persistent_agent_entries
+    from csk_api.dashboard import persistent_agent_entries, persistent_handoff_entries
 
     assert initialized.exit_code == 0, initialized.stdout
     assert assigned.exit_code == 0, assigned.stdout
+    assert started.exit_code == 0, started.stdout
+    assert completed.exit_code == 0, completed.stdout
+    assert assigned_implementer.exit_code == 0, assigned_implementer.stdout
+    assert handoff.exit_code == 0, handoff.stdout
+    assert accepted.exit_code == 0, accepted.stdout
+    assert handoffs.exit_code == 0 and handoff_id in handoffs.stdout
+    assert PersistentAgentStore(tmp_path).get_handoff(handoff_id).status == "accepted"
     assert status.exit_code == 0 and "architect-01" in status.stdout and "assigned" in status.stdout
     assert audit.exit_code == 0 and "valid" in audit.stdout
     entry = next(item for item in persistent_agent_entries(tmp_path) if item["agent_id"] == "architect-01")
@@ -114,3 +187,10 @@ def test_team_cli_and_dashboard_surface_status_only_metadata(tmp_path: Path) -> 
         "agent_id", "role", "status", "mission_id", "restart_count", "health_check_at", "updated_at",
     }
     assert "Design the retry boundary" not in str(entry)
+    handoff_entry = persistent_handoff_entries(tmp_path)[0]
+    assert handoff_entry["status"] == "accepted" and handoff_entry["evidence_count"] == 1
+    assert set(handoff_entry) == {
+        "handoff_id", "mission_id", "from_agent_id", "to_agent_id", "status", "evidence_count",
+        "created_at", "accepted_at", "updated_at",
+    }
+    assert "Design is ready for implementation" not in str(handoff_entry)

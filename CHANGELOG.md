@@ -20,6 +20,10 @@ All notable changes to this project will be documented here. Format follows [Kee
   compaction. Token-bounded local context packs combine project conventions,
   BM25 repository/test pointers, and recalled role experience; Mission Control
   exposes status-only team metadata without task, scratchpad, or memory content.
+  Completed roles can also make typed, secret-screened evidence handoffs to an
+  assigned peer on the same mission; recipients explicitly acknowledge them,
+  and the hash-chained audit records both steps without exposing summaries or
+  evidence references to Mission Control.
 - **Typed durable mission event bus.** Committed mission audit records now emit
   versioned, hash-chained, idempotent envelopes for mission creation,
   transitions, handoffs, candidate assignment, test outcomes, and security

@@ -407,6 +407,37 @@ def persistent_agent_entries(root: str | Path = ".", limit: int = 50) -> list[di
     ]
 
 
+def persistent_handoff_entries(root: str | Path = ".", limit: int = 50) -> list[dict[str, Any]]:
+    """Safe persistent-team handoff metadata for Mission Control.
+
+    Handoff summaries, evidence references, and their digests remain in the
+    project-local supervisor database. The read-only UI needs only ownership,
+    mission correlation, state, and evidence count to track work progression.
+    """
+    try:
+        from ronin_cli.persistent_agents import PersistentAgentStore
+    except Exception:  # noqa: BLE001
+        return []
+    try:
+        handoffs = PersistentAgentStore(root).list_handoffs(limit=limit)
+    except Exception:  # noqa: BLE001
+        return []
+    return [
+        {
+            "handoff_id": handoff.handoff_id,
+            "mission_id": handoff.mission_id,
+            "from_agent_id": handoff.from_agent_id,
+            "to_agent_id": handoff.to_agent_id,
+            "status": handoff.status,
+            "evidence_count": len(handoff.evidence),
+            "created_at": handoff.created_at,
+            "accepted_at": handoff.accepted_at,
+            "updated_at": handoff.updated_at,
+        }
+        for handoff in handoffs
+    ]
+
+
 def remote_worker_job_entries(root: str | Path = ".", limit: int = 50) -> list[dict[str, Any]]:
     """Safe lifecycle state for remote candidate verification jobs.
 

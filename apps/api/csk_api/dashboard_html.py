@@ -211,6 +211,7 @@ var API = {
   missions: "/ui/missions",
   missionEvents: "/ui/mission-events",
   persistentAgents: "/ui/persistent-agents",
+  persistentHandoffs: "/ui/persistent-handoffs",
   candidates: "/ui/candidates",
   remoteWorkerJobs: "/ui/remote-worker-jobs",
   proposals: "/ui/proposals"
@@ -467,6 +468,16 @@ function persistentAgentHtml(agent){
   '</li>';
 }
 
+function persistentHandoffHtml(handoff){
+  var stateClass = handoff.status === "accepted" ? "green" : "amber";
+  return '<li class="ops-item">'+
+    '<div class="ops-title">'+esc(handoff.from_agent_id)+' to '+esc(handoff.to_agent_id)+'</div>'+
+    '<div class="ops-meta"><span class="badge '+stateClass+'">'+esc(handoff.status)+'</span>'+
+    '<span>mission '+esc(handoff.mission_id)+'</span><span>'+esc(handoff.evidence_count)+' evidence reference(s)</span>'+
+    '<span>'+esc(fmtDate(handoff.updated_at))+'</span></div>'+
+  '</li>';
+}
+
 function candidateHtml(candidate){
   var stateClass = candidate.status === "active" ? "amber" : "neutral";
   var image = candidate.image ? esc(candidate.image) : 'image not set';
@@ -495,14 +506,16 @@ async function loadOperations(){
   var pane = document.getElementById("pane-operations");
   pane.innerHTML = '<div class="loading">loading...</div>';
   try{
-    var data = await Promise.all([getJSON(API.missions), getJSON(API.missionEvents), getJSON(API.persistentAgents), getJSON(API.candidates), getJSON(API.fleetPlans), getJSON(API.fleetRuns), getJSON(API.remoteWorkerJobs), getJSON(API.proposals)]);
-    var missions = data[0], missionEvents = data[1], persistentAgents = data[2], candidates = data[3], plans = data[4], runs = data[5], workerJobs = data[6], proposals = data[7];
+    var data = await Promise.all([getJSON(API.missions), getJSON(API.missionEvents), getJSON(API.persistentAgents), getJSON(API.persistentHandoffs), getJSON(API.candidates), getJSON(API.fleetPlans), getJSON(API.fleetRuns), getJSON(API.remoteWorkerJobs), getJSON(API.proposals)]);
+    var missions = data[0], missionEvents = data[1], persistentAgents = data[2], handoffs = data[3], candidates = data[4], plans = data[5], runs = data[6], workerJobs = data[7], proposals = data[8];
     var html = '<div class="card"><h3>Missions ('+missions.length+')</h3>';
     html += missions.length ? '<ul class="ops-list">'+missions.map(missionHtml).join("")+'</ul>' : operationsEmpty('No durable issue-to-PR missions saved for this project.');
     html += '</div><div class="card"><h3>Mission events ('+missionEvents.length+')</h3>';
     html += missionEvents.length ? '<ul class="ops-list">'+missionEvents.map(missionEventHtml).join("")+'</ul>' : operationsEmpty('No durable mission bus events saved for this project.');
     html += '</div><div class="card"><h3>Persistent team ('+persistentAgents.length+')</h3>';
     html += persistentAgents.length ? '<ul class="ops-list">'+persistentAgents.map(persistentAgentHtml).join("")+'</ul>' : operationsEmpty('No persistent specialist team initialized for this project.');
+    html += '</div><div class="card"><h3>Evidence handoffs ('+handoffs.length+')</h3>';
+    html += handoffs.length ? '<ul class="ops-list">'+handoffs.map(persistentHandoffHtml).join("")+'</ul>' : operationsEmpty('No acknowledged persistent-team evidence handoffs yet.');
     html += '</div><div class="card"><h3>Candidate workspaces ('+candidates.length+')</h3>';
     html += candidates.length ? '<ul class="ops-list">'+candidates.map(candidateHtml).join("")+'</ul>' : operationsEmpty('No disposable candidate workspaces created for this project.');
     html += '</div><div class="card"><h3>Fleet plans ('+plans.length+')</h3>';

@@ -23,7 +23,7 @@ from pydantic import Field
 from .mission_models import StrictModel, now_utc
 
 
-TEAM_SCHEMA_VERSION = 1
+TEAM_SCHEMA_VERSION = 2
 DEFAULT_HEARTBEAT_SECONDS = 30
 DEFAULT_TEAM_ROLES = ("architect", "implementer", "reviewer", "tester", "security", "release")
 AgentRole = Literal["architect", "implementer", "reviewer", "tester", "security", "release", "meta"]
@@ -32,6 +32,8 @@ MemorySourceType = Literal[
     "mission", "issue", "pull_request", "commit", "human", "skill", "adr", "workaround", "compaction",
 ]
 ContextItemKind = Literal["file", "test", "convention", "experience"]
+HandoffEvidenceKind = Literal["plan", "implementation", "test", "review", "security", "candidate", "context", "other"]
+HandoffStatus = Literal["pending", "accepted"]
 
 _AGENT_ID = re.compile(r"^[a-z][a-z0-9-]{1,79}$")
 _TOKENS = re.compile(r"[a-z0-9_]+")
@@ -127,6 +129,34 @@ class TeamContextPack(StrictModel):
     max_tokens: int = Field(ge=64, le=32_000)
     truncated: bool = False
     generated_at: str = Field(default_factory=now_utc)
+
+
+class HandoffEvidenceInput(StrictModel):
+    """One bounded pointer to verifiable work; never a chat transcript."""
+
+    kind: HandoffEvidenceKind
+    reference: str = Field(min_length=1, max_length=500)
+
+
+class HandoffEvidence(HandoffEvidenceInput):
+    """Evidence pointer persisted with a deterministic local digest."""
+
+    digest: str = Field(min_length=64, max_length=64)
+
+
+class TeamHandoff(StrictModel):
+    """A durable, acknowledged evidence transfer between two role identities."""
+
+    handoff_id: str = Field(min_length=1, max_length=80)
+    mission_id: str = Field(min_length=1, max_length=200)
+    from_agent_id: str = Field(min_length=2, max_length=80)
+    to_agent_id: str = Field(min_length=2, max_length=80)
+    summary: str = Field(min_length=1, max_length=2_000)
+    evidence: list[HandoffEvidence] = Field(min_length=1, max_length=12)
+    status: HandoffStatus = "pending"
+    created_at: str = Field(default_factory=now_utc)
+    updated_at: str = Field(default_factory=now_utc)
+    accepted_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -427,6 +457,121 @@ class PersistentAgentStore:
             ))
         return _fit_context_pack(agent, clean_task, mission_id.strip(), items, max_tokens)
 
+    def create_handoff(
+        self,
+        from_agent_id: str,
+        to_agent_id: str,
+        mission_id: str,
+        summary: str,
+        evidence: Iterable[HandoffEvidenceInput],
+    ) -> TeamHandoff:
+        """Transfer compact, attributable evidence without exposing raw agent chat.
+
+        The completed source and assigned recipient must retain the same mission
+        correlation. Acknowledging the handoff remains a separate explicit step;
+        this method never starts a worker or changes either role's lifecycle.
+        """
+        safe_source = _safe_agent_id(from_agent_id)
+        safe_target = _safe_agent_id(to_agent_id)
+        clean_mission = mission_id.strip()
+        clean_summary = " ".join(summary.split()).strip()
+        if safe_source == safe_target:
+            raise ValueError("persistent handoff needs distinct source and recipient roles")
+        if not clean_mission or len(clean_mission) > 200 or not clean_summary or len(clean_summary) > 2_000:
+            raise ValueError("persistent handoff requires a bounded mission id and summary")
+        from .memory_store import secret_labels
+
+        if secret_labels(clean_summary):
+            raise ValueError("refusing to store a possible secret in persistent handoff evidence")
+        prepared: list[HandoffEvidence] = []
+        for item in evidence:
+            clean_reference = " ".join(item.reference.split()).strip()
+            if not clean_reference:
+                raise ValueError("persistent handoff evidence needs a reference")
+            if secret_labels(clean_reference):
+                raise ValueError("refusing to store a possible secret in persistent handoff evidence")
+            prepared.append(HandoffEvidence(
+                kind=item.kind,
+                reference=clean_reference,
+                digest=_digest({"kind": item.kind, "reference": clean_reference}),
+            ))
+        if not 1 <= len(prepared) <= 12:
+            raise ValueError("persistent handoff needs between 1 and 12 evidence references")
+
+        handoff = TeamHandoff(
+            handoff_id=f"handoff-{uuid.uuid4().hex}", mission_id=clean_mission,
+            from_agent_id=safe_source, to_agent_id=safe_target, summary=clean_summary,
+            evidence=prepared,
+        )
+        with self._connect() as con:
+            source = self._require_agent(con, safe_source)
+            target = self._require_agent(con, safe_target)
+            if source.status != "completed" or source.current_mission_id != clean_mission:
+                raise ValueError("persistent handoff source must be completed on the stated mission")
+            if target.status != "assigned" or target.current_mission_id != clean_mission:
+                raise ValueError("persistent handoff recipient must be assigned to the stated mission")
+            con.execute(
+                """
+                INSERT INTO agent_handoffs(
+                    handoff_id, mission_id, from_agent_id, to_agent_id, summary,
+                    evidence_json, status, created_at, updated_at, accepted_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                """,
+                (
+                    handoff.handoff_id, handoff.mission_id, handoff.from_agent_id, handoff.to_agent_id,
+                    handoff.summary, json.dumps([item.model_dump(mode="json") for item in handoff.evidence], sort_keys=True),
+                    handoff.status, handoff.created_at, handoff.updated_at,
+                ),
+            )
+            self._append_event(
+                con, safe_source, "handoff_created", source.status, source.status, clean_mission,
+                {"handoff_id": handoff.handoff_id, "to_agent_id": safe_target, "evidence_count": len(prepared)},
+            )
+        return handoff
+
+    def get_handoff(self, handoff_id: str) -> TeamHandoff:
+        clean_id = _safe_handoff_id(handoff_id)
+        with self._connect() as con:
+            row = con.execute("SELECT * FROM agent_handoffs WHERE handoff_id = ?", (clean_id,)).fetchone()
+        if row is None:
+            raise ValueError(f"persistent handoff {clean_id!r} was not found")
+        return _handoff_from_row(row)
+
+    def list_handoffs(self, *, limit: int = 100) -> tuple[TeamHandoff, ...]:
+        with self._connect() as con:
+            rows = con.execute(
+                "SELECT * FROM agent_handoffs ORDER BY created_at DESC, handoff_id DESC LIMIT ?",
+                (max(1, min(limit, 500)),),
+            ).fetchall()
+        return tuple(_handoff_from_row(row) for row in rows)
+
+    def acknowledge_handoff(self, handoff_id: str, recipient_agent_id: str) -> TeamHandoff:
+        """Record the intended recipient's explicit acknowledgement of a handoff."""
+        clean_id = _safe_handoff_id(handoff_id)
+        safe_recipient = _safe_agent_id(recipient_agent_id)
+        with self._connect() as con:
+            row = con.execute("SELECT * FROM agent_handoffs WHERE handoff_id = ?", (clean_id,)).fetchone()
+            if row is None:
+                raise ValueError(f"persistent handoff {clean_id!r} was not found")
+            handoff = _handoff_from_row(row)
+            if handoff.to_agent_id != safe_recipient:
+                raise ValueError("persistent handoff can only be acknowledged by its assigned recipient")
+            if handoff.status != "pending":
+                raise ValueError("persistent handoff has already been acknowledged")
+            recipient = self._require_agent(con, safe_recipient)
+            if recipient.status != "assigned" or recipient.current_mission_id != handoff.mission_id:
+                raise ValueError("persistent handoff recipient is no longer assigned to this mission")
+            stamp = now_utc()
+            con.execute(
+                "UPDATE agent_handoffs SET status = 'accepted', accepted_at = ?, updated_at = ? WHERE handoff_id = ?",
+                (stamp, stamp, clean_id),
+            )
+            self._append_event(
+                con, safe_recipient, "handoff_acknowledged", recipient.status, recipient.status, handoff.mission_id,
+                {"handoff_id": handoff.handoff_id, "from_agent_id": handoff.from_agent_id},
+            )
+        return self.get_handoff(clean_id)
+
     def audit_events(self, *, agent_id: str | None = None, limit: int = 100) -> tuple[TeamAuditEvent, ...]:
         safe_id = _safe_agent_id(agent_id) if agent_id else None
         query = "SELECT * FROM agent_events"
@@ -545,7 +690,7 @@ class PersistentAgentStore:
     def _init_db(self) -> None:
         with self._connect() as con:
             version = int(con.execute("PRAGMA user_version").fetchone()[0])
-            if version not in {0, TEAM_SCHEMA_VERSION}:
+            if version not in {0, 1, TEAM_SCHEMA_VERSION}:
                 raise ValueError(f"unsupported persistent-agent schema version {version}")
             con.executescript(
                 """
@@ -601,6 +746,20 @@ class PersistentAgentStore:
                     previous_hash TEXT NOT NULL,
                     event_hash TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS agent_handoffs (
+                    handoff_id TEXT PRIMARY KEY,
+                    mission_id TEXT NOT NULL,
+                    from_agent_id TEXT NOT NULL REFERENCES persistent_agents(agent_id),
+                    to_agent_id TEXT NOT NULL REFERENCES persistent_agents(agent_id),
+                    summary TEXT NOT NULL,
+                    evidence_json TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    accepted_at TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_agent_handoffs_mission_updated
+                    ON agent_handoffs(mission_id, updated_at DESC);
                 """
             )
             con.execute(f"PRAGMA user_version = {TEAM_SCHEMA_VERSION}")
@@ -610,6 +769,13 @@ def _safe_agent_id(agent_id: str) -> str:
     safe = agent_id.strip()
     if not _AGENT_ID.fullmatch(safe):
         raise ValueError("invalid persistent agent id")
+    return safe
+
+
+def _safe_handoff_id(handoff_id: str) -> str:
+    safe = handoff_id.strip()
+    if not safe.startswith("handoff-") or not _AGENT_ID.fullmatch(safe):
+        raise ValueError("invalid persistent handoff id")
     return safe
 
 
@@ -644,6 +810,15 @@ def _event_from_row(row: sqlite3.Row) -> TeamAuditEvent:
         from_status=row["from_status"], to_status=row["to_status"], mission_id=row["mission_id"],
         occurred_at=row["occurred_at"], payload_digest=row["payload_digest"],
         previous_hash=row["previous_hash"], event_hash=row["event_hash"],
+    )
+
+
+def _handoff_from_row(row: sqlite3.Row) -> TeamHandoff:
+    return TeamHandoff(
+        handoff_id=row["handoff_id"], mission_id=row["mission_id"], from_agent_id=row["from_agent_id"],
+        to_agent_id=row["to_agent_id"], summary=row["summary"],
+        evidence=json.loads(row["evidence_json"]), status=row["status"], created_at=row["created_at"],
+        updated_at=row["updated_at"], accepted_at=row["accepted_at"],
     )
 
 

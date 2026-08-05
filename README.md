@@ -131,7 +131,9 @@ detects stale heartbeats and preserves assignments for a governed recovery.
 Role memories have source provenance, confidence, expiry, compaction, and
 secret rejection. `team context` assembles a token-bounded local context pack
 from project instructions, ranked repository files/tests, and relevant role
-experience. Mission Control exposes only safe lifecycle metadata.
+experience. Completed roles can make an evidence-backed handoff to an assigned
+peer on the same mission, and that peer explicitly acknowledges it before work
+starts. Mission Control exposes only safe lifecycle and handoff metadata.
 
 ## 🛠 `ronin code` · the coding agent (Claude-Code shaped)
 

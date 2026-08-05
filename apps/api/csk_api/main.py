@@ -195,6 +195,11 @@ def make_app() -> FastAPI:
         from .dashboard import persistent_agent_entries
         return persistent_agent_entries(".", limit=max(1, min(200, limit)))
 
+    @app.get("/ui/persistent-handoffs")
+    def ui_persistent_handoffs(limit: int = 50) -> list[dict]:
+        from .dashboard import persistent_handoff_entries
+        return persistent_handoff_entries(".", limit=max(1, min(200, limit)))
+
     @app.get("/ui/candidates")
     def ui_candidates(limit: int = 50) -> list[dict]:
         from .dashboard import candidate_workspace_entries
