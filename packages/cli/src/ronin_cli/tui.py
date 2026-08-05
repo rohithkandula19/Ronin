@@ -593,8 +593,11 @@ class RoninApp(App):
             cached = usage.get("cache_read_input_tokens", 0)
             self.tokens_up += up
             self.tokens_down += down
-            # rough context fill: a 128k window, capped at 100
-            self.context_pct = min(100, int((up + down) * 100 / 128000))
+            from .context_policy import resolve_context_policy
+
+            self.context_pct = resolve_context_policy(self.config).used_percent(
+                up + down,
+            )
             meta = (f"_↑{up} ↓{down}"
                     + (f" · ⚡{cached} cached" if cached else "") + "_")
             self._append_chat(meta)

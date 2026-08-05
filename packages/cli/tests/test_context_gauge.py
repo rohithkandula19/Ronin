@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from ronin_agent_patterns import Message, ToolCall
 from ronin_cli.code_mode import _history_token_estimate
+from ronin_cli.config import RoninConfig
+from ronin_cli.context_policy import resolve_context_policy
 
 
 def test_empty_history_is_zero():
@@ -25,7 +27,7 @@ def test_counts_message_objects_not_just_dicts():
     est = _history_token_estimate(history)
     assert est >= 1800, est
     # And it must move the gauge off 100%.
-    left = max(0, 100 - int(est * 100 / 128000))
+    left = resolve_context_policy(RoninConfig(provider="anthropic")).remaining_percent(est)
     assert left < 100
 
 

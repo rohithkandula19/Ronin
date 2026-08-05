@@ -12,6 +12,13 @@ All notable changes to this project will be documented here. Format follows [Kee
   real without embedding credential-shaped literals in source files.
 
 ### Added
+- **Provider-aware context policy.** Ronin now resolves a guarded context window
+  from its model/provider catalog or a bounded project override, reserves output
+  capacity, and uses the same policy for agent compaction, indexed retrieval,
+  terminal/TUI gauges, explain, and investigate modes. `/context` shows the
+  active budget and supports `/context 64k` or `/context auto`; `ronin code
+  --context-window` applies a one-run override. Unknown models safely fall back
+  to a 32k window instead of inheriting another provider's limit.
 - **Persistent specialist-team supervisor.** `ronin util team` now creates
   durable local architect, implementer, reviewer, tester, security, and release
   identities with an explicit lifecycle, heartbeats, stale-worker recovery, and

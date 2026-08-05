@@ -715,6 +715,10 @@ def run_code_agent(
     if _blocked is not None:
         return _blocked
 
+    from .context_policy import resolve_context_policy
+
+    context_policy = resolve_context_policy(config)
+
     # A read-only role (researcher / reviewer / architect) restricts the agent to
     # read-only tools — guidance that's also enforced, never a safety bypass.
     from .roles import role_is_read_only
@@ -864,7 +868,7 @@ def run_code_agent(
             from .repo_index import index_db_path, query_index
             _db = index_db_path(root)
             if _db.exists():
-                _paths = query_index(task, _db, token_budget=8000)
+                _paths = query_index(task, _db, token_budget=context_policy.retrieval_budget_tokens)
                 if _paths:
                     _ctx = ("## Relevant code (ronin repo index)\n"
                             + "\n".join(f"- {p}" for p in _paths))
@@ -882,19 +886,13 @@ def run_code_agent(
     if console is not None:
         from .runner import attach_retry_notifier
         attach_retry_notifier(provider, console)
-    # Compact old tool output before the context window fills. Claude has a 200k
-    # window; most free/open models are far smaller (some 8–32k), so they'd error
-    # long before a Claude-sized threshold — compact much earlier off-Anthropic.
     _fast = getattr(config, "fast", False)
-    _compact_at = 120_000 if config.provider == "anthropic" else 28_000
-    if _fast:
-        _compact_at = min(_compact_at, 16_000)   # compact sooner → leaner context
     agent = ReActAgent(
         system=system,
         tools=tools,
         provider=provider,
         max_iterations=max_iterations,
-        compact_after_tokens=_compact_at,
+        compact_after_tokens=context_policy.compaction_threshold_tokens,
         compact_keep_recent=4 if _fast else 6,
         # Fast mode caps each tool result tighter, so file dumps / command output
         # don't balloon the per-call payload.
@@ -1730,7 +1728,7 @@ def run_code_session(
                     # Count the structured history (Message objects, not dicts) —
                     # content + tool-call arguments — so the gauge actually ticks.
                     _used = _history_token_estimate(message_history)
-                    _left = max(0, 100 - int(_used * 100 / 128000))
+                    _left = resolve_context_policy(config).remaining_percent(_used)
                     # Always-visible chip strip: [FREE] [provider:model] [mode]
                     # [branch*] [write-gated] [role:x], width-aware.
                     from .prompt_box import current_mode
@@ -2092,7 +2090,7 @@ def run_unified_session(
                     # Count the structured history (Message objects, not dicts) —
                     # content + tool-call arguments — so the gauge actually ticks.
                     _used = _history_token_estimate(message_history)
-                    _left = max(0, 100 - int(_used * 100 / 128000))
+                    _left = resolve_context_policy(config).remaining_percent(_used)
                     # Always-visible chip strip: [FREE] [provider:model] [mode]
                     # [branch*] [write-gated] [role:x], width-aware.
                     from .prompt_box import current_mode

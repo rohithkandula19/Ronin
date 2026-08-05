@@ -152,6 +152,9 @@ class RoninConfig(BaseModel):
     # the most relevant files (from the repo map) so the model starts aimed at
     # the right code. Non-blocking; set False to disable.
     auto_context: bool = True
+    # Optional project-local context-window override. None uses Ronin's conservative
+    # provider/model catalog; /context <tokens> persists an explicit override.
+    context_window: int | None = Field(default=None, ge=4_096, le=2_000_000)
     # Full-access mode (opt-in, `--full-access`): lifts the guards — filesystem
     # access beyond the project root, auto-approve (no y/n gate), longer command
     # timeouts + bigger output caps. Powerful and unsandboxed; off by default.

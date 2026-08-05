@@ -473,7 +473,24 @@ def _slash_fix(ctx: SlashCtx) -> str:
 
 def _slash_context(ctx: SlashCtx) -> str:
     from . import code_mode
+    from .config import save_config
+    from .context_policy import parse_context_window, resolve_context_policy
+
     console, config, transcript = ctx.console, ctx.config, ctx.transcript
+    if len(ctx.parts) > 1:
+        requested = ctx.parts[1].lower()
+        if requested in {"auto", "default", "off"}:
+            config.context_window = None
+            save_config(config)
+            console.print("  [green]✓[/green] context window [bold]auto[/bold] — using the provider/model policy.")
+        else:
+            try:
+                config.context_window = parse_context_window(requested)
+            except ValueError as exc:
+                console.print(f"  [yellow]{exc}[/yellow]")
+                return "handled"
+            save_config(config)
+            console.print(f"  [green]✓[/green] context window [bold]{config.context_window:,}[/bold] tokens.")
     turns = sum(1 for e in transcript if e.startswith("USER: "))
     # Estimate from the STRUCTURED history the model actually receives — it
     # carries tool calls + tool results (file dumps, command output) that the
@@ -486,14 +503,24 @@ def _slash_context(ctx: SlashCtx) -> str:
         convo = "\n".join(transcript)
         entries = f"{len(transcript)} entries"
     toks = code_mode._estimate_tokens(convo)
-    window = 120_000 if config.provider == "anthropic" else 28_000
-    pct = min(100, round(toks / window * 100)) if window else 0
+    policy = resolve_context_policy(config)
+    pct = policy.used_percent(toks)
     console.print("[bold]context[/bold]")
-    console.print(f"  {code_mode.render_bar(toks, window)} [dim]~{toks:,} / {window:,} tokens "
-                  f"({pct}%)[/dim]", highlight=False)
+    console.print(
+        f"  {code_mode.render_bar(toks, policy.input_budget_tokens)} [dim]~{toks:,} / "
+        f"{policy.input_budget_tokens:,} input tokens ({pct}%)[/dim]",
+        highlight=False,
+    )
     console.print(f"  [#6b7089]{turns} turns · {entries} · "
                   f"~{len(convo):,} chars[/#6b7089]", highlight=False)
-    console.print("  [dim]shrink with [bold]/compact[/bold] · wipe with [bold]/clear[/bold][/dim]")
+    console.print(
+        f"  [#6b7089]window {policy.window_tokens:,} · reserve {policy.output_reserve_tokens:,} output · "
+        f"compact at {policy.compaction_threshold_tokens:,} · retrieval {policy.retrieval_budget_tokens:,} "
+        f"({policy.source})[/#6b7089]",
+        highlight=False,
+    )
+    console.print("  [dim]set with [bold]/context 64k[/bold] · reset with [bold]/context auto[/bold] · "
+                  "shrink with [bold]/compact[/bold][/dim]")
     return "handled"
 
 

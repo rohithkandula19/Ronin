@@ -7385,6 +7385,7 @@ def code(
     continue_session: bool = typer.Option(False, "--continue", "-c", help="Resume this repo's last session."),
     plan: bool = typer.Option(False, "--plan", help="Propose a plan first (read-only), confirm, then execute."),
     scout: bool = typer.Option(False, "--scout", help="Scout→Strike: a free model does recon, the strong one edits (needs routing)."),
+    context_window: Optional[int] = typer.Option(None, "--context-window", min=4_096, max=2_000_000, help="Temporary context-window override in tokens; does not change config."),
 ) -> None:
     """Coding agent (Claude Code / Cline shaped): reads files, edits code, runs commands.
 
@@ -7404,6 +7405,8 @@ def code(
         return
 
     config = load_config()
+    if context_window is not None:
+        config.context_window = context_window
     from .agent_mode import has_real_key
     from .code_mode import run_code_agent, run_code_session
 
