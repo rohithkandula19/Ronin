@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 from time import monotonic
-from typing import Callable, ClassVar
+from typing import Any, Callable, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from .base import execute_tool_call
-from .providers import AnthropicProvider, LLMProvider, Message
+from .durable import BudgetExceeded, RunBudget, RunJournal
+from .providers import AnthropicProvider, LLMProvider, Message, ToolCall
 from .types import AgentResult, Step, Tool
 
 # Live-narration hook: called for every step as it's appended to the trace.
@@ -110,6 +111,10 @@ class ReActAgent(BaseModel):
         on_reset: OnReset | None = None,
         after_tool: "AfterTool | None" = None,
         parallel_safe: "Callable[[str], bool] | None" = None,
+        journal: RunJournal | None = None,
+        journal_run_id: str | None = None,
+        budget: RunBudget | None = None,
+        resume_state: dict[str, Any] | None = None,
     ) -> AgentResult:
         """Run the agent.
 
@@ -127,6 +132,13 @@ class ReActAgent(BaseModel):
         ``on_text``: optional hook fired with each text delta as the model
         generates it. When supplied, the provider is driven in streaming mode so
         the answer appears token-by-token (the Claude-Code feel).
+        ``journal``: optional local SQLite run journal. It checkpoints before
+        provider and tool actions, records safe lifecycle events, and leaves an
+        interrupted run resumable after a process exit.
+        ``budget``: optional hard cross-action budget. It is checked before each
+        provider request and tool invocation, with reservations for concurrency.
+        ``resume_state``: state returned by ``journal.resume(run_id)``. Use
+        :meth:`resume` rather than constructing it manually.
         """
         assert self.provider is not None  # set by model_post_init
         tools_by_name = {t.name: t for t in self.tools}
@@ -142,21 +154,113 @@ class ReActAgent(BaseModel):
                     pass
 
         # Seed with any prior conversation, then append this turn's user message.
-        messages: list[Message] = list(history) if history else []
-        messages.append(Message(role="user", content=user_message))
-        trace: list[Step] = []
-        usage: dict[str, int | float] = {"input_tokens": 0, "output_tokens": 0}
+        # A resume starts exactly from a prior checkpoint instead.
+        if resume_state is None:
+            messages: list[Message] = list(history) if history else []
+            messages.append(Message(role="user", content=user_message))
+            trace: list[Step] = []
+            usage: dict[str, int | float] = {"input_tokens": 0, "output_tokens": 0}
+            start_iteration = 0
+            pending_calls: list[ToolCall] = []
+        else:
+            messages = [Message.model_validate(item) for item in resume_state.get("messages", [])]
+            trace = [Step.model_validate(item) for item in resume_state.get("trace", [])]
+            restored_usage = resume_state.get("usage", {})
+            if not messages or not isinstance(restored_usage, dict):
+                raise ValueError("durable resume state is missing conversation history or usage")
+            usage = {str(key): value for key, value in restored_usage.items() if isinstance(value, (int, float))}
+            start_iteration = max(0, int(resume_state.get("next_iteration", 0)))
+            pending_calls = [
+                ToolCall.model_validate(item)
+                for item in resume_state.get("pending_tool_calls", [])
+            ]
+            if budget is not None:
+                restored_budget = resume_state.get("budget", {})
+                if isinstance(restored_budget, dict):
+                    budget.restore(restored_budget)
         started_at = monotonic()
+        active_run_id = ""
 
+        def state(next_iteration: int, pending: list[ToolCall] | None = None) -> dict[str, Any]:
+            return {
+                "schema_version": 1,
+                "messages": [message.model_dump(mode="json") for message in messages],
+                "trace": [step.model_dump(mode="json") for step in trace],
+                "usage": usage,
+                "next_iteration": next_iteration,
+                "pending_tool_calls": [call.model_dump(mode="json") for call in pending or []],
+                "budget": budget.snapshot() if budget is not None else {},
+            }
+
+        if journal is not None:
+            if resume_state is None:
+                active_run_id = journal.start(state(start_iteration), run_id=journal_run_id)
+            else:
+                if not journal_run_id:
+                    raise ValueError("journal_run_id is required when resuming a durable run")
+                active_run_id = journal_run_id
+
+        def checkpoint(next_iteration: int, pending: list[ToolCall] | None = None) -> None:
+            if journal is not None:
+                journal.checkpoint(active_run_id, state(next_iteration, pending))
+
+        def record_budget(action: str, decision) -> None:
+            if journal is not None:
+                journal.append_event(
+                    active_run_id,
+                    "budget_checked",
+                    {
+                        "action": action,
+                        "allowed": decision.allowed,
+                        "warnings": list(decision.warnings),
+                        "reason": decision.reason,
+                        "usage": budget.snapshot() if budget is not None else {},
+                    },
+                )
+
+        def complete(result: AgentResult, status: str) -> AgentResult:
+            if journal is not None:
+                journal.finish(active_run_id, status=status, error=result.error or "")
+            return result
+
+        current_iteration = start_iteration
         try:
-            for i in range(self.max_iterations):
+            if pending_calls:
+                # A checkpoint taken after the provider requested tools contains
+                # those calls. Re-run them before another provider request so the
+                # transcript remains API-valid and no work is silently skipped.
+                for index, tc in enumerate(pending_calls):
+                    remaining = pending_calls[index:]
+                    later = pending_calls[index + 1:]
+                    self._run_one(
+                        tc, tools_by_name, before_tool, after_tool, emit, messages,
+                        budget=budget, journal=journal, run_id=active_run_id,
+                        checkpoint=lambda remaining=remaining: checkpoint(start_iteration, remaining),
+                        checkpoint_after=lambda later=later: checkpoint(
+                            start_iteration + (1 if not later else 0), later,
+                        ),
+                        record_budget=record_budget,
+                    )
+                start_iteration += 1
+            for i in range(start_iteration, self.max_iterations):
+                current_iteration = i
                 budget_error = self._budget_error(usage, started_at)
                 if budget_error is not None:
-                    return self._budget_result(
+                    return complete(self._budget_result(
                         budget_error, "", i, trace, usage, messages, emit,
-                    )
+                    ), "blocked")
+                if budget is not None:
+                    decision = budget.before_provider()
+                    record_budget("provider", decision)
+                    if not decision.allowed:
+                        return complete(self._budget_result(
+                            decision.reason, "", i, trace, usage, messages, emit,
+                        ), "blocked")
                 if self.compact_after_tokens is not None:
                     self._maybe_compact(messages, emit)
+                checkpoint(i)
+                if journal is not None:
+                    journal.append_event(active_run_id, "provider_requested", {"iteration": i + 1})
                 if on_text is not None:
                     # Streaming mode: forward text deltas live, then take the final
                     # assembled response from the terminal ``done`` event.
@@ -189,15 +293,22 @@ class ReActAgent(BaseModel):
                 # guesses a price from a model name or token count.
                 for key, value in response.usage.items():
                     usage[key] = usage.get(key, 0) + value
+                if budget is not None:
+                    decision = budget.record_provider_usage(response.usage)
+                    record_budget("provider_result", decision)
 
                 if response.text:
                     emit(Step(kind="thought", content=response.text))
 
                 budget_error = self._budget_error(usage, started_at)
                 if budget_error is not None:
-                    return self._budget_result(
+                    return complete(self._budget_result(
                         budget_error, response.text, i + 1, trace, usage, messages, emit,
-                    )
+                    ), "blocked")
+                if budget is not None and not decision.allowed:
+                    return complete(self._budget_result(
+                        decision.reason, response.text, i + 1, trace, usage, messages, emit,
+                    ), "blocked")
 
                 if not response.tool_calls:
                     final = response.text or "(no output)"
@@ -205,14 +316,14 @@ class ReActAgent(BaseModel):
                     # Keep the final answer in the history so the next turn (when the
                     # caller feeds ``messages`` back as ``history``) sees what we said.
                     messages.append(Message(role="assistant", content=final))
-                    return AgentResult(
+                    return complete(AgentResult(
                         success=True,
                         output=final,
                         iterations=i + 1,
                         trace=trace,
                         usage=usage,
                         messages=messages,
-                    )
+                    ), "completed")
 
                 messages.append(Message(
                     role="assistant",
@@ -226,17 +337,36 @@ class ReActAgent(BaseModel):
                 # gated. Order of results is preserved to match the tool_call ids.
                 if (len(calls) > 1 and parallel_safe is not None
                         and all(parallel_safe(tc.name) for tc in calls)):
-                    self._run_parallel(calls, tools_by_name, before_tool, after_tool, emit, messages)
+                    checkpoint(i, calls)
+                    self._run_parallel(
+                        calls, tools_by_name, before_tool, after_tool, emit, messages,
+                        budget=budget, journal=journal, run_id=active_run_id,
+                        checkpoint=None, record_budget=record_budget,
+                    )
+                    checkpoint(i + 1)
                 else:
-                    for tc in calls:
-                        self._run_one(tc, tools_by_name, before_tool, after_tool, emit, messages)
+                    for index, tc in enumerate(calls):
+                        remaining = calls[index:]
+                        later = calls[index + 1:]
+                        self._run_one(
+                            tc, tools_by_name, before_tool, after_tool, emit, messages,
+                            budget=budget, journal=journal, run_id=active_run_id,
+                            checkpoint=lambda remaining=remaining: checkpoint(i, remaining),
+                            checkpoint_after=lambda later=later: checkpoint(i + (1 if not later else 0), later),
+                            record_budget=record_budget,
+                        )
+
+        except BudgetExceeded as exc:
+            return complete(self._budget_result(
+                str(exc), "", current_iteration + 1, trace, usage, messages, emit,
+            ), "blocked")
 
         except KeyboardInterrupt:
             # Ctrl-C ends the turn but must not throw away what the agent already
             # did. Preserve the structured history (trimmed to complete pairs) so
             # the next turn keeps every file read; mark it interrupted for context.
             messages.append(Message(role="user", content="(previous turn interrupted by user before completion)"))
-            return AgentResult(
+            return complete(AgentResult(
                 success=False,
                 output="(interrupted by user)",
                 iterations=i + 1,
@@ -244,8 +374,8 @@ class ReActAgent(BaseModel):
                 error="interrupted by user",
                 usage=usage,
                 messages=trim_to_complete_pairs(messages),
-            )
-        return AgentResult(
+            ), "interrupted")
+        return complete(AgentResult(
             success=False,
             output="(iteration cap reached)",
             iterations=self.max_iterations,
@@ -256,6 +386,34 @@ class ReActAgent(BaseModel):
             # next turn keeps every file read across these iterations instead of
             # starting cold. Trim any dangling final tool-call round first.
             messages=trim_to_complete_pairs(messages),
+        ), "failed")
+
+    def resume(
+        self,
+        run_id: str,
+        journal: RunJournal,
+        *,
+        on_step: OnStep | None = None,
+        before_tool: BeforeTool | None = None,
+        on_text: OnText | None = None,
+        on_reset: OnReset | None = None,
+        after_tool: AfterTool | None = None,
+        parallel_safe: "Callable[[str], bool] | None" = None,
+        budget: RunBudget | None = None,
+    ) -> AgentResult:
+        """Resume an interrupted durable run from its latest verified checkpoint."""
+        return self.run(
+            "",
+            on_step=on_step,
+            before_tool=before_tool,
+            on_text=on_text,
+            on_reset=on_reset,
+            after_tool=after_tool,
+            parallel_safe=parallel_safe,
+            journal=journal,
+            journal_run_id=run_id,
+            budget=budget,
+            resume_state=journal.resume(run_id),
         )
 
     def _budget_error(self, usage: dict[str, int | float], started_at: float) -> str | None:
@@ -304,7 +462,10 @@ class ReActAgent(BaseModel):
             messages=trim_to_complete_pairs(messages),
         )
 
-    def _resolve_and_gate(self, tc, tools_by_name, before_tool, emit):
+    def _resolve_and_gate(
+        self, tc, tools_by_name, before_tool, emit, *, budget=None, journal=None,
+        run_id="", checkpoint=None, record_budget=None,
+    ):
         """Announce the call, resolve the tool, run the gate. Returns
         (tool, denied_or_missing_message|None). A non-None message means don't
         execute — append it as the tool result."""
@@ -333,9 +494,22 @@ class ReActAgent(BaseModel):
                 emit(Step(kind="error", content=f"tool '{tc.name}' denied by user"))
                 return None, ("DENIED: the user declined this action. Do not retry it; "
                               "find another way or stop.")
+        if budget is not None:
+            decision = budget.begin_tool()
+            if record_budget is not None:
+                record_budget("tool", decision)
+            if not decision.allowed:
+                raise BudgetExceeded(decision.reason)
+        if checkpoint is not None:
+            checkpoint()
+        if journal is not None:
+            journal.append_event(run_id, "tool_started", {"tool": tc.name})
         return tool, None
 
-    def _record(self, tc, result, is_err, after_tool, emit, messages):
+    def _record(
+        self, tc, result, is_err, after_tool, emit, messages, *, budget=None,
+        journal=None, run_id="", checkpoint=None,
+    ):
         result = self._cap_result(result)
         if after_tool is not None:
             try:
@@ -345,25 +519,54 @@ class ReActAgent(BaseModel):
         emit(Step(kind="tool_result", content={"name": tc.name, "result": result, "is_error": is_err}))
         messages.append(Message(role="tool", tool_call_id=tc.id, name=tc.name,
                                 content=result, is_error=is_err))
+        if budget is not None:
+            budget.finish_tool()
+        if journal is not None:
+            journal.append_event(
+                run_id, "tool_finished", {"tool": tc.name, "is_error": bool(is_err), "result_chars": len(result)},
+            )
+        if checkpoint is not None:
+            checkpoint()
 
-    def _run_one(self, tc, tools_by_name, before_tool, after_tool, emit, messages):
+    def _run_one(
+        self, tc, tools_by_name, before_tool, after_tool, emit, messages, *, budget=None,
+        journal=None, run_id="", checkpoint=None, checkpoint_after=None, record_budget=None,
+    ):
         """Execute a single tool call (announce → gate → run → record)."""
-        tool, blocked = self._resolve_and_gate(tc, tools_by_name, before_tool, emit)
+        tool, blocked = self._resolve_and_gate(
+            tc, tools_by_name, before_tool, emit, budget=budget, journal=journal, run_id=run_id,
+            checkpoint=checkpoint, record_budget=record_budget,
+        )
         if blocked is not None:
             messages.append(Message(role="tool", tool_call_id=tc.id, name=tc.name,
                                     content=blocked, is_error=True))
             return
         result, is_err = execute_tool_call(tool, tc.arguments)
-        self._record(tc, result, is_err, after_tool, emit, messages)
+        self._record(
+            tc, result, is_err, after_tool, emit, messages, budget=budget, journal=journal,
+            run_id=run_id, checkpoint=checkpoint_after if checkpoint_after is not None else checkpoint,
+        )
 
-    def _run_parallel(self, calls, tools_by_name, before_tool, after_tool, emit, messages):
+    def _run_parallel(
+        self, calls, tools_by_name, before_tool, after_tool, emit, messages, *, budget=None,
+        journal=None, run_id="", checkpoint=None, record_budget=None,
+    ):
         """Run a batch of read-only/idempotent tool calls concurrently. Tool calls
         are announced and gated up front (gates are non-blocking for these), the
         handlers run on a thread pool, and results are appended in original order
         so the assistant↔tool_call_id pairing the API needs is preserved."""
         from concurrent.futures import ThreadPoolExecutor
 
-        plan = [(tc, *self._resolve_and_gate(tc, tools_by_name, before_tool, emit)) for tc in calls]
+        plan = [
+            (
+                tc,
+                *self._resolve_and_gate(
+                    tc, tools_by_name, before_tool, emit, budget=budget, journal=journal,
+                    run_id=run_id, checkpoint=checkpoint, record_budget=record_budget,
+                ),
+            )
+            for tc in calls
+        ]
         runnable = [(i, tc, tool) for i, (tc, tool, blocked) in enumerate(plan) if blocked is None]
         outcomes: dict[int, tuple] = {}
         if runnable:
@@ -382,7 +585,10 @@ class ReActAgent(BaseModel):
                                         content=blocked, is_error=True))
             else:
                 result, is_err = outcomes[i]
-                self._record(tc, result, is_err, after_tool, emit, messages)
+                self._record(
+                    tc, result, is_err, after_tool, emit, messages, budget=budget, journal=journal,
+                    run_id=run_id, checkpoint=checkpoint,
+                )
 
     def _cap_result(self, result: str) -> str:
         """Truncate a single tool result that's too large to enter context whole.

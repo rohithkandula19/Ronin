@@ -17,6 +17,7 @@ from .effort import (
     effort_to_params,
     normalize_effort,
 )
+from .durable import BudgetDecision, BudgetExceeded, BudgetLimits, DurableRunError, JournalEvent, RunBudget, RunJournal
 from .orchestrator import (
     OrchestrationPlan,
     OrchestrationResult,
@@ -46,8 +47,12 @@ from .types import AgentResult, Step, Tool
 
 __all__ = [
     "AgentResult",
+    "BudgetDecision",
+    "BudgetExceeded",
+    "BudgetLimits",
     "AnthropicProvider",
     "Critique",
+    "DurableRunError",
     "EFFORT_LEVELS",
     "describe_effort",
     "effort_to_params",
@@ -55,6 +60,7 @@ __all__ = [
     "FailoverProvider",
     "FakeProvider",
     "LLMProvider",
+    "JournalEvent",
     "LLMResponse",
     "Message",
     "OllamaProvider",
@@ -67,6 +73,8 @@ __all__ = [
     "PlanCache",
     "PlannerExecutorAgent",
     "ReActAgent",
+    "RunBudget",
+    "RunJournal",
     "ReflexionAgent",
     "repository_fingerprint",
     "Step",

@@ -5,6 +5,26 @@ select expertise; it does not start thousands of processes. Every active team is
 limited by the orchestration governance settings, approval policy, and provider
 budgets.
 
+## Durable ReAct Runtime
+
+`ronin_agent_patterns.RunJournal` is the local, versioned execution substrate
+for a single ReAct run. It records an append-only SQLite event stream and writes
+full JSON checkpoints atomically before provider and tool operations. Each
+checkpoint is SHA-256 verified before resumption. A run left `running` by a
+process failure, or marked `interrupted` after a handled interruption, is listed
+by `interrupted_runs()` and can resume from its latest verified checkpoint.
+
+`RunBudget` provides one shared, opt-in limit check for provider requests and
+tool calls. It tracks reported input/output tokens, explicit provider cost,
+wall time, tool-call count, active action count, and nested-agent depth. It
+warns at the configured fraction (80% by default) and prevents an action that
+would exceed a hard ceiling. No model price is inferred from a model name.
+
+The runtime stays opt-in: existing `ReActAgent.run()` callers retain their
+current behavior until they pass a `RunJournal`, `RunBudget`, or both. Journal
+events retain only lifecycle metadata; complete serialized state remains in the
+local checkpoint file required for crash recovery.
+
 ## Isolated Write Work
 
 `ronin util orchestrate --write` creates a detached Git worktree for every
