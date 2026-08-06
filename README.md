@@ -203,6 +203,17 @@ persistent `ronin index` is used when available; otherwise the existing
 in-memory retrieval path remains best-effort. This keeps interactive, streaming,
 and resumable runs on one attributable context contract.
 
+### Editor Interoperability
+
+`ronin acp --root .` exposes the same coding runtime to a local
+[Agent Client Protocol](https://agentclientprotocol.com/) editor client over
+stdio. It provides ACP initialization, bounded sessions, text prompts, and
+streamed agent messages while preserving the normal typed context, project
+memory, provider routing, and agent history. The bridge is deliberately
+**read-only**: a client cannot select a workspace outside `--root`, inject MCP
+servers, or elevate tool permissions. Configure trusted Ronin tools separately,
+then use the terminal's approval-gated code flow for edits.
+
 ## 🛠 `ronin code` · the coding agent (Claude-Code shaped)
 
 ```bash
@@ -528,6 +539,7 @@ database_url = "postgres://readonly_user:...@host:5432/db"   # a read-only role
 |---|---|
 | **`ronin`** | **The unified agent: talk, code, generate media, query data in one conversation.** |
 | **`ronin code [task]`** | **Coding agent: streaming, plan tracker, project memory, 40 slash commands.** |
+| **`ronin acp --root .`** | **Local, read-only ACP bridge for editor-agent sessions over stdio.** |
 | `ronin chat` | Talk/media REPL with short-term memory. |
 | **`ronin play [game]`** | **The arcade: 31 free terminal games — real-time (Snake / Tetris / 2048 / …), classics, ronin-flavoured (Bug Hunt / Big-O / Regex Golf), and provider-neutral AI games (Mind Reader / AI Adventure / AI Trivia).** |
 | `ronin init [--demo]` | Create a config file (interactive or demo). |

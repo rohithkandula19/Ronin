@@ -12,6 +12,11 @@ All notable changes to this project will be documented here. Format follows [Kee
   real without embedding credential-shaped literals in source files.
 
 ### Added
+- **Local ACP editor bridge.** `ronin acp --root <directory>` now exposes a
+  read-only, stdio-only Agent Client Protocol v1 session surface. It reuses the
+  coding agent's typed context, project memory, provider routing, and structured
+  conversation history without letting editor clients escape the trusted root,
+  attach arbitrary MCP servers, or gain write/command authority.
 - **Evidence-backed learned project instincts.** `ronin util instincts` now
   stores candidate practices locally with supporting evidence, confidence,
   observation counts, and expiry. Only explicitly reinforced active instincts

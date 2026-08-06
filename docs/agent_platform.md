@@ -39,6 +39,21 @@ approvals, or runtime behavior. The complete resolved system prompt is saved in
 the run checkpoint. A resumed run therefore uses the same context that informed
 the original decision, even when a memory or retrieval provider has changed.
 
+## Editor Agent Bridge
+
+`ronin acp --root <trusted-directory>` offers the code runtime to local editor
+clients through [ACP v1](https://agentclientprotocol.com/protocol/v1/).
+The adapter speaks JSON-RPC only on stdio and delegates each turn to the normal
+typed-context code runner, rather than maintaining a separate editor-specific
+agent. It supports initialization, session creation, text prompt turns, and
+agent-message updates.
+
+The bridge is an intentionally conservative boundary: every session workspace
+must be inside the configured root, all turns are read-only, and editor-supplied
+MCP server definitions are rejected. Therefore an editor can neither expand the
+trusted tool surface nor obtain write or command authority through ACP. Write
+work remains a terminal approval-gated or isolated-worktree workflow.
+
 ## Isolated Write Work
 
 `ronin util orchestrate --write` creates a detached Git worktree for every

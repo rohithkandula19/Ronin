@@ -7583,6 +7583,19 @@ def agent(
 
 # ---------- code ----------
 
+@app.command("acp")
+def acp(
+    root: Path = typer.Option(Path("."), "--root", help="Trusted workspace root for editor sessions."),
+    max_steps: int = typer.Option(25, "--max-steps", min=1, help="Iteration cap for each editor turn."),
+) -> None:
+    """Serve Ronin to a local ACP editor client over stdio (read-only)."""
+    from .acp import serve_stdio
+
+    # stdout is reserved for JSON-RPC.  Do not use Rich here: editor clients
+    # treat every stdout line as protocol data.
+    serve_stdio(root=root, max_iterations=max_steps)
+
+
 @app.command()
 def code(
     task: list[str] = typer.Argument(None, help="The coding task. Omit to start an interactive session."),
