@@ -7,6 +7,7 @@ from typing import Any, Callable, ClassVar
 from pydantic import BaseModel, ConfigDict, Field
 
 from .base import execute_tool_call
+from .contracts import AgentRequest, ContextProvider, assemble_context
 from .durable import BudgetExceeded, RunBudget, RunJournal
 from .providers import AnthropicProvider, LLMProvider, Message, ToolCall
 from .types import AgentResult, Step, Tool
@@ -88,6 +89,10 @@ class ReActAgent(BaseModel):
     # when it enters the context (a runaway `list_files`/`search` can't blow the
     # window in one shot). 0 disables.
     max_tool_result_chars: int = 16000
+    # Typed, local context providers are resolved once per fresh run. Their
+    # rendered prompt is checkpointed so recovery never changes task context.
+    context_providers: list[Any] = Field(default_factory=list)
+    max_runtime_context_chars: int = 16_000
 
     # Backward-compat shortcuts (used only if provider is not supplied):
     model: str | None = None
@@ -115,6 +120,7 @@ class ReActAgent(BaseModel):
         journal_run_id: str | None = None,
         budget: RunBudget | None = None,
         resume_state: dict[str, Any] | None = None,
+        runtime_context: dict[str, Any] | None = None,
     ) -> AgentResult:
         """Run the agent.
 
@@ -139,6 +145,8 @@ class ReActAgent(BaseModel):
         provider request and tool invocation, with reservations for concurrency.
         ``resume_state``: state returned by ``journal.resume(run_id)``. Use
         :meth:`resume` rather than constructing it manually.
+        ``runtime_context``: typed metadata supplied to this run's context
+        providers. Providers resolve once before the first model request.
         """
         assert self.provider is not None  # set by model_post_init
         tools_by_name = {t.name: t for t in self.tools}
@@ -162,6 +170,13 @@ class ReActAgent(BaseModel):
             usage: dict[str, int | float] = {"input_tokens": 0, "output_tokens": 0}
             start_iteration = 0
             pending_calls: list[ToolCall] = []
+            assembly = assemble_context(
+                self.system,
+                AgentRequest(task=user_message, metadata=runtime_context or {}),
+                self.context_providers,
+                max_context_chars=self.max_runtime_context_chars,
+            )
+            effective_system = assembly.system_prompt
         else:
             messages = [Message.model_validate(item) for item in resume_state.get("messages", [])]
             trace = [Step.model_validate(item) for item in resume_state.get("trace", [])]
@@ -174,6 +189,7 @@ class ReActAgent(BaseModel):
                 ToolCall.model_validate(item)
                 for item in resume_state.get("pending_tool_calls", [])
             ]
+            effective_system = str(resume_state.get("system_prompt", self.system))
             if budget is not None:
                 restored_budget = resume_state.get("budget", {})
                 if isinstance(restored_budget, dict):
@@ -189,12 +205,22 @@ class ReActAgent(BaseModel):
                 "usage": usage,
                 "next_iteration": next_iteration,
                 "pending_tool_calls": [call.model_dump(mode="json") for call in pending or []],
+                "system_prompt": effective_system,
                 "budget": budget.snapshot() if budget is not None else {},
             }
 
         if journal is not None:
             if resume_state is None:
                 active_run_id = journal.start(state(start_iteration), run_id=journal_run_id)
+                journal.append_event(
+                    active_run_id,
+                    "context_resolved",
+                    {
+                        "sources": assembly.sources,
+                        "truncated_sources": assembly.truncated_sources,
+                        "failed_sources": assembly.failed_sources,
+                    },
+                )
             else:
                 if not journal_run_id:
                     raise ValueError("journal_run_id is required when resuming a durable run")
@@ -283,7 +309,7 @@ class ReActAgent(BaseModel):
                     assert response is not None, "stream ended without a 'done' event"
                 else:
                     response = self.provider.complete(
-                        system=self.system,
+                        system=effective_system,
                         messages=messages,
                         tools=self.tools,
                         max_tokens=self.max_tokens,
@@ -400,6 +426,7 @@ class ReActAgent(BaseModel):
         after_tool: AfterTool | None = None,
         parallel_safe: "Callable[[str], bool] | None" = None,
         budget: RunBudget | None = None,
+        runtime_context: dict[str, Any] | None = None,
     ) -> AgentResult:
         """Resume an interrupted durable run from its latest verified checkpoint."""
         return self.run(
@@ -414,6 +441,7 @@ class ReActAgent(BaseModel):
             journal_run_id=run_id,
             budget=budget,
             resume_state=journal.resume(run_id),
+            runtime_context=runtime_context,
         )
 
     def _budget_error(self, usage: dict[str, int | float], started_at: float) -> str | None:

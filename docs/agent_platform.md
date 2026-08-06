@@ -25,6 +25,20 @@ current behavior until they pass a `RunJournal`, `RunBudget`, or both. Journal
 events retain only lifecycle metadata; complete serialized state remains in the
 local checkpoint file required for crash recovery.
 
+## Typed Agent Contracts
+
+The core agent architecture uses `AgentRequest` and `ContextFragment` models,
+with `ContextProvider.resolve(request)` as the integration contract for project
+memory, repository retrieval, skills, and specialist-role evidence. The runtime
+orders fragments deterministically by priority and source, applies a fixed
+context budget before a provider call, and records source names, truncation, and
+provider failures as safe journal metadata.
+
+Untrusted context is visibly delimited and instructed not to alter tool policy,
+approvals, or runtime behavior. The complete resolved system prompt is saved in
+the run checkpoint. A resumed run therefore uses the same context that informed
+the original decision, even when a memory or retrieval provider has changed.
+
 ## Isolated Write Work
 
 `ronin util orchestrate --write` creates a detached Git worktree for every
