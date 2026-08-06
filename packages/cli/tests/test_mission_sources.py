@@ -43,6 +43,7 @@ def test_github_import_persists_typed_spec_source_context_and_budget(tmp_path) -
             body="Show health evidence before routing.",
             labels=("providers", "reliability"),
             url="https://github.com/openai/ronin/issues/42",
+            comments=("A maintainer confirmed the health check must run before routing.",),
         )
 
     mission = MissionIssueImporter(tmp_path, github_fetcher=github).import_issue(
@@ -53,7 +54,10 @@ def test_github_import_persists_typed_spec_source_context_and_budget(tmp_path) -
     assert mission.spec.source == "github"
     assert mission.spec.source_id == "openai/ronin#42"
     assert mission.spec.repository_ref == "openai/ronin"
+    assert mission.spec.workflow == "verified"
     assert mission.spec.risk_tags == ["providers", "reliability"]
+    assert "untrusted" in mission.spec.issue_text
+    assert "maintainer confirmed" in mission.spec.issue_text
     assert mission.budget.max_tokens == 123
     assert mission.artifacts.context_packs[0].sources[0].reference.endswith("/42")
     assert mission.event_count == 2
@@ -74,19 +78,68 @@ def test_github_fetch_uses_authenticated_helper_and_rejects_pull_requests(
         "labels": [{"name": "agents"}],
         "html_url": "https://github.com/openai/ronin/issues/42",
     })
+    monkeypatch.setattr(gh, "issue_comments", lambda *args, **kwargs: [{"body": "Read this discussion."}])
     issue = fetch_github_issue("openai/ronin#42")
     assert issue.repository_ref == "openai/ronin"
     assert issue.labels == ("agents",)
+    assert issue.comments == ("Read this discussion.",)
 
     monkeypatch.setattr(gh, "issue_details", lambda *args, **kwargs: {"pull_request": {}})
     with pytest.raises(IssueImportError, match="pull request"):
         fetch_github_issue("openai/ronin#42")
 
 
-def test_gitlab_fetch_uses_https_token_header_and_empty_body_fallback() -> None:
-    captured: dict[str, object] = {}
+def test_github_import_refuses_incomplete_comment_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    import ronin_cli.gh_helper as gh
+
+    monkeypatch.setattr(gh, "gh_available", lambda: True)
+    monkeypatch.setattr(gh, "issue_details", lambda *args, **kwargs: {
+        "number": 42,
+        "title": "Import a durable issue",
+        "body": "Keep remote provenance.",
+        "labels": [],
+        "html_url": "https://github.com/openai/ronin/issues/42",
+    })
+    monkeypatch.setattr(gh, "issue_comments", lambda *args, **kwargs: None)
+
+    with pytest.raises(IssueImportError, match="comments could not be read"):
+        fetch_github_issue("openai/ronin#42")
+
+
+@pytest.mark.parametrize(
+    ("comments", "message"),
+    [
+        ([{"body": f"Comment {index}"} for index in range(101)], "more comments"),
+        ([{"body": "x" * 8_001}], "comment exceeds"),
+    ],
+)
+def test_github_import_refuses_comment_context_beyond_safety_limits(
+    monkeypatch: pytest.MonkeyPatch, comments: list[dict[str, str]], message: str,
+) -> None:
+    import ronin_cli.gh_helper as gh
+
+    monkeypatch.setattr(gh, "gh_available", lambda: True)
+    monkeypatch.setattr(gh, "issue_details", lambda *args, **kwargs: {
+        "number": 42,
+        "title": "Import a durable issue",
+        "body": "Keep remote provenance.",
+        "labels": [],
+        "html_url": "https://github.com/openai/ronin/issues/42",
+    })
+    monkeypatch.setattr(gh, "issue_comments", lambda *args, **kwargs: comments)
+
+    with pytest.raises(IssueImportError, match=message):
+        fetch_github_issue("openai/ronin#42")
+
+
+def test_gitlab_fetch_uses_https_token_header_and_imports_notes() -> None:
+    captured: dict[str, object] = {"urls": []}
 
     class Response:
+        def __init__(self, payload: object) -> None:
+            self._payload = payload
+            self.headers = {}
+
         def __enter__(self):
             return self
 
@@ -94,19 +147,21 @@ def test_gitlab_fetch_uses_https_token_header_and_empty_body_fallback() -> None:
             return False
 
         def read(self):
-            return json.dumps({
-                "iid": 9,
-                "title": "Improve worker lease recovery",
-                "description": "",
-                "labels": ["workers", "reliability"],
-                "web_url": "https://gitlab.com/platform/ronin/-/issues/9",
-            }).encode("utf-8")
+            return json.dumps(self._payload).encode("utf-8")
 
     def opener(request, *, timeout: int):
-        captured["url"] = request.full_url
+        captured["urls"].append(request.full_url)
         captured["token"] = request.get_header("Private-token")
         captured["timeout"] = timeout
-        return Response()
+        if request.full_url.endswith("/notes?per_page=100"):
+            return Response([{"body": "A worker must release an expired lease."}])
+        return Response({
+            "iid": 9,
+            "title": "Improve worker lease recovery",
+            "description": "",
+            "labels": ["workers", "reliability"],
+            "web_url": "https://gitlab.com/platform/ronin/-/issues/9",
+        })
 
     issue = fetch_gitlab_issue(
         "platform/ronin#9", token="do-not-print", opener=opener,
@@ -116,8 +171,12 @@ def test_gitlab_fetch_uses_https_token_header_and_empty_body_fallback() -> None:
     assert issue.reference == "platform/ronin#9"
     assert issue.body == "No issue body was provided by the source."
     assert issue.labels == ("workers", "reliability")
+    assert issue.comments == ("A worker must release an expired lease.",)
     assert captured == {
-        "url": "https://gitlab.com/api/v4/projects/platform%2Fronin/issues/9",
+        "urls": [
+            "https://gitlab.com/api/v4/projects/platform%2Fronin/issues/9",
+            "https://gitlab.com/api/v4/projects/platform%2Fronin/issues/9/notes?per_page=100",
+        ],
         "token": "do-not-print",
         "timeout": 20,
     }

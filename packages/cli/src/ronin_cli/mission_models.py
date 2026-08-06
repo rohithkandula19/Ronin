@@ -129,6 +129,7 @@ class MissionSpec(StrictModel):
     acceptance_criteria: list[str] = Field(default_factory=list, max_length=100)
     ambiguities: list[str] = Field(default_factory=list, max_length=50)
     risk_tags: list[str] = Field(default_factory=list, max_length=50)
+    workflow: Literal["standard", "verified"] = "standard"
 
 
 class ContextSource(StrictModel):
@@ -154,11 +155,50 @@ class PlanStep(StrictModel):
 
 
 class PlanArtifact(StrictModel):
+    approach: str = Field(default="", max_length=4_000)
     steps: list[PlanStep] = Field(default_factory=list, max_length=100)
     files_to_change: list[str] = Field(default_factory=list, max_length=500)
     test_additions: list[str] = Field(default_factory=list, max_length=100)
     dependency_impacts: list[str] = Field(default_factory=list, max_length=100)
+    risks: list[str] = Field(default_factory=list, max_length=100)
     rollback_strategy: str = Field(default="", max_length=4_000)
+    approved_by: str = Field(default="", max_length=200)
+    approved_at: str = Field(default="", max_length=100)
+
+
+class IssueAnalysis(StrictModel):
+    """Attributed issue understanding before repository work begins."""
+
+    summary: str = Field(min_length=1, max_length=8_000)
+    symptoms: list[str] = Field(default_factory=list, max_length=100)
+    expected_behavior: list[str] = Field(default_factory=list, max_length=100)
+    reproduction_steps: list[str] = Field(default_factory=list, max_length=100)
+    acceptance_criteria: list[str] = Field(default_factory=list, max_length=100)
+    related_references: list[str] = Field(default_factory=list, max_length=100)
+    involved_files: list[str] = Field(default_factory=list, max_length=500)
+    ambiguities: list[str] = Field(default_factory=list, max_length=50)
+
+
+class RepositoryMap(StrictModel):
+    """Evidence-backed map of the repository surface relevant to a mission."""
+
+    source_directories: list[str] = Field(default_factory=list, max_length=100)
+    test_directories: list[str] = Field(default_factory=list, max_length=100)
+    configuration_files: list[str] = Field(default_factory=list, max_length=100)
+    documentation_files: list[str] = Field(default_factory=list, max_length=100)
+    test_commands: list[str] = Field(default_factory=list, max_length=100)
+    architectural_patterns: list[str] = Field(default_factory=list, max_length=100)
+
+
+class RootCauseAnalysis(StrictModel):
+    """Concrete explanation of observed behavior and the evidence behind it."""
+
+    broken_behavior: str = Field(min_length=1, max_length=8_000)
+    cause: str = Field(min_length=1, max_length=8_000)
+    responsible_logic: str = Field(min_length=1, max_length=8_000)
+    behavior_gap: str = Field(min_length=1, max_length=8_000)
+    evidence_references: list[str] = Field(default_factory=list, max_length=100)
+    affected_files: list[str] = Field(default_factory=list, max_length=500)
 
 
 class TestSuiteResult(StrictModel):
@@ -220,6 +260,25 @@ class EvaluationGate(StrictModel):
     evaluated_at: str = Field(default_factory=now_utc)
 
 
+class VerificationReport(StrictModel):
+    """Actual test, review, and security evidence collected for a mission."""
+
+    checks: list[TestSuiteResult] = Field(default_factory=list, max_length=100)
+    security_summary: str = Field(default="", max_length=4_000)
+    reproduction_summary: str = Field(default="", max_length=4_000)
+    verdict: Literal["passed", "failed", "blocked", "unknown"] = "unknown"
+
+
+class SelfReviewNotes(StrictModel):
+    """Named operator or agent self-review retained before PR preparation."""
+
+    reviewer: str = Field(min_length=1, max_length=200)
+    checked: list[str] = Field(min_length=1, max_length=100)
+    notes: str = Field(default="", max_length=8_000)
+    fixes_applied: list[str] = Field(default_factory=list, max_length=100)
+    reviewed_at: str = Field(default_factory=now_utc)
+
+
 class PullRequestDraft(StrictModel):
     """A local PR proposal that must be reviewed before any remote publish."""
 
@@ -236,10 +295,15 @@ class PullRequestDraft(StrictModel):
 
 class MissionArtifacts(StrictModel):
     context_packs: list[ContextPack] = Field(default_factory=list, max_length=20)
+    issue_analysis: IssueAnalysis | None = None
+    repository_map: RepositoryMap | None = None
+    root_cause: RootCauseAnalysis | None = None
     plan: PlanArtifact | None = None
     test_report: TestReport | None = None
     review_report: ReviewReport | None = None
     security_scan: SecurityScan | None = None
+    verification_report: VerificationReport | None = None
+    self_review: SelfReviewNotes | None = None
     evaluation_gate: EvaluationGate | None = None
     pull_request_draft: PullRequestDraft | None = None
 

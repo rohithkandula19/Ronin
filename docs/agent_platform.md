@@ -152,6 +152,17 @@ issue worker is attached, so the eventual worker cannot reinterpret a mission
 as an unbounded autonomous task. Existing installations require no migration:
 all mission records are project-local and removable with `.ronin/` metadata.
 
+### Verified Issue Protocol
+
+GitHub and GitLab imports opt into the verified protocol. Before `plan` may
+advance, Ronin requires typed issue analysis, repository-map, and root-cause
+artifacts. A verified plan remains in `planning` until a named operator runs
+`mission approve-plan --yes`. Candidate test, review, and security evidence are
+compiled into a verification report. A named self-review is then required before
+the evaluation gate can approve a local PR draft. The PR body is rendered from
+those stored artifacts, including summary, root cause, changes, test evidence,
+security considerations, self-review, checklist, and source issue reference.
+
 ### Typed Mission Event Bus
 
 Every committed mission audit record also emits one or more schema-first,
@@ -255,11 +266,13 @@ ronin util mission import gitlab group/project#456
 
 References are strict (`owner/repository#number` for GitHub and
 `group/project#number` for GitLab). Import stores the source, canonical
-reference, repository, title, bounded issue body, labels, and a source-context
-link in the local mission record; it starts no agent, candidate workspace, or
-command. GitHub uses the existing authenticated `gh` CLI. GitLab accepts only
-HTTPS endpoints and reads its token from the process environment without
-persisting or rendering it. For a self-hosted instance, point
+reference, repository, title, bounded issue body and discussion, labels, and a
+source-context link in the local mission record; it starts no agent, candidate
+workspace, or command. Comment intake fails closed when the source discussion
+cannot be read in full within Ronin's count and item-size safety limits. GitHub uses the existing
+authenticated `gh` CLI. GitLab accepts only HTTPS endpoints and reads its token
+from the process environment without persisting or rendering it. For a
+self-hosted instance, point
 `--gitlab-url` only at an HTTPS GitLab endpoint you trust.
 
 Mission Control displays the imported source reference alongside the existing

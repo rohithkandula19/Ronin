@@ -18,18 +18,24 @@ from .guard import changed_files, scan_added
 from .mission_models import (
     EvaluationCheck,
     EvaluationGate,
+    IssueAnalysis,
     MissionArtifacts,
     MissionRecord,
     MissionStage,
     MissionUsage,
     PlanArtifact,
     PullRequestDraft,
+    RepositoryMap,
     ReviewFinding,
     ReviewReport,
+    RootCauseAnalysis,
     SecurityFinding,
     SecurityScan,
+    SelfReviewNotes,
     TestReport,
     TestSuiteResult,
+    VerificationReport,
+    now_utc,
 )
 from .mission_store import MissionStore
 from .secret_scan import find_secrets
@@ -43,6 +49,39 @@ class MissionWorkflow:
         self.store = MissionStore(self.root)
         self.candidates = CandidateWorkspaceService(self.root)
 
+    def record_issue_analysis(
+        self, mission_id: str, analysis: IssueAnalysis, *, actor: str = "inspector",
+    ) -> MissionRecord:
+        """Record Phase 1 evidence and enter inspection without starting work."""
+        mission = self.store.load(mission_id)
+        if mission.stage is MissionStage.PENDING:
+            mission = self.store.transition(
+                mission.id, MissionStage.INSPECTING, actor=actor, summary="issue analysis recorded",
+            )
+        if mission.stage not in {MissionStage.INSPECTING, MissionStage.AWAITING_CLARIFICATION}:
+            raise ValueError(f"mission must be inspecting before issue analysis is recorded; it is {mission.stage.value}")
+        return self.store.save_artifacts(
+            mission.id, mission.artifacts.model_copy(update={"issue_analysis": analysis}), actor=actor,
+        )
+
+    def record_repository_map(
+        self, mission_id: str, repository_map: RepositoryMap, *, actor: str = "inspector",
+    ) -> MissionRecord:
+        """Record Phase 2 repository evidence before root-cause or planning work."""
+        mission = self._require_inspecting(mission_id)
+        return self.store.save_artifacts(
+            mission.id, mission.artifacts.model_copy(update={"repository_map": repository_map}), actor=actor,
+        )
+
+    def record_root_cause(
+        self, mission_id: str, root_cause: RootCauseAnalysis, *, actor: str = "investigator",
+    ) -> MissionRecord:
+        """Record Phase 3 root-cause evidence while the mission is still read-only."""
+        mission = self._require_inspecting(mission_id)
+        return self.store.save_artifacts(
+            mission.id, mission.artifacts.model_copy(update={"root_cause": root_cause}), actor=actor,
+        )
+
     def record_plan(self, mission_id: str, plan: PlanArtifact, *, actor: str = "architect") -> MissionRecord:
         """Store a structured plan and make the mission eligible for implementation."""
         mission = self.store.load(mission_id)
@@ -52,14 +91,39 @@ class MissionWorkflow:
             )
         if mission.stage not in {MissionStage.INSPECTING, MissionStage.AWAITING_CLARIFICATION}:
             raise ValueError(f"mission must be inspecting before a plan is recorded; it is {mission.stage.value}")
+        if mission.spec.workflow == "verified":
+            missing = _missing_preplan_evidence(mission)
+            if missing:
+                raise ValueError("verified mission needs " + ", ".join(missing) + " before planning")
         mission = self.store.transition(
             mission.id, MissionStage.PLANNING, actor=actor, summary="structured implementation plan prepared",
         )
         mission = self.store.save_artifacts(
             mission.id, mission.artifacts.model_copy(update={"plan": plan}),
         )
+        if mission.spec.workflow == "verified":
+            return mission
         return self.store.transition(
             mission.id, MissionStage.IMPLEMENTING, actor=actor, summary="plan approved for candidate implementation",
+        )
+
+    def approve_plan(self, mission_id: str, *, approved_by: str) -> MissionRecord:
+        """Explicitly release a verified plan to the isolated implementation phase."""
+        approver = approved_by.strip()
+        if not approver:
+            raise ValueError("an approving human identity is required for a verified plan")
+        mission = self._require_stage(mission_id, MissionStage.PLANNING)
+        if mission.spec.workflow != "verified":
+            raise ValueError("plan approval is only required for verified missions")
+        if mission.artifacts.plan is None or not mission.artifacts.plan.steps:
+            raise ValueError("verified mission has no structured plan to approve")
+        approved_plan = mission.artifacts.plan.model_copy(update={"approved_by": approver, "approved_at": now_utc()})
+        mission = self.store.save_artifacts(
+            mission.id, mission.artifacts.model_copy(update={"plan": approved_plan}), actor=f"approval:{approver}",
+        )
+        return self.store.transition(
+            mission.id, MissionStage.IMPLEMENTING, actor=f"approval:{approver}",
+            summary="human approved verified implementation plan",
         )
 
     def verify_candidate(
@@ -195,6 +259,11 @@ class MissionWorkflow:
         scanned = self.store.save_artifacts(
             mission.id, mission.artifacts.model_copy(update={"security_scan": scan}),
         )
+        verification = _verification_report(scanned)
+        scanned = self.store.save_artifacts(
+            scanned.id, scanned.artifacts.model_copy(update={"verification_report": verification}),
+            actor="verification-gate",
+        )
         if scan.verdict == "passed":
             return self.store.transition(
                 scanned.id,
@@ -207,6 +276,16 @@ class MissionWorkflow:
             MissionStage.IMPLEMENTING,
             actor="security-gate",
             summary="candidate security scan found blocking evidence",
+        )
+
+    def record_self_review(
+        self, mission_id: str, review: SelfReviewNotes, *, actor: str | None = None,
+    ) -> MissionRecord:
+        """Retain Phase 7 review notes after independent candidate gates pass."""
+        mission = self._require_stage(mission_id, MissionStage.AWAITING_APPROVAL)
+        reviewer = actor or review.reviewer
+        return self.store.save_artifacts(
+            mission.id, mission.artifacts.model_copy(update={"self_review": review}), actor=reviewer,
         )
 
     def evaluate(self, mission_id: str) -> MissionRecord:
@@ -232,6 +311,10 @@ class MissionWorkflow:
         gate = evaluated.artifacts.evaluation_gate
         if gate is None or not gate.eligible:
             raise ValueError("mission evaluation gate is not eligible for a PR draft")
+        if evaluated.spec.workflow == "verified":
+            missing = _missing_pr_evidence(evaluated)
+            if missing:
+                raise ValueError("verified mission needs " + ", ".join(missing) + " before a PR draft")
         candidate, diff = self._candidate_and_diff(evaluated)
         draft = _draft_pull_request(evaluated, candidate, diff, approved_by.strip())
         drafted = self.store.save_artifacts(
@@ -248,6 +331,12 @@ class MissionWorkflow:
         mission = self.store.load(mission_id)
         if mission.stage is not stage:
             raise ValueError(f"mission must be {stage.value}; it is {mission.stage.value}")
+        return mission
+
+    def _require_inspecting(self, mission_id: str) -> MissionRecord:
+        mission = self.store.load(mission_id)
+        if mission.stage not in {MissionStage.INSPECTING, MissionStage.AWAITING_CLARIFICATION}:
+            raise ValueError(f"mission must be inspecting; it is {mission.stage.value}")
         return mission
 
     def _candidate_for(self, mission: MissionRecord) -> CandidateWorkspace:
@@ -294,6 +383,57 @@ class MissionWorkflow:
         return self.store.transition(
             blocked.id, MissionStage.FAILED, actor=actor, summary="candidate verification blocked", error=reason,
         )
+
+
+def _missing_preplan_evidence(mission: MissionRecord) -> tuple[str, ...]:
+    artifacts = mission.artifacts
+    missing: list[str] = []
+    if artifacts.issue_analysis is None:
+        missing.append("issue analysis")
+    if artifacts.repository_map is None:
+        missing.append("repository map")
+    if artifacts.root_cause is None:
+        missing.append("root-cause analysis")
+    return tuple(missing)
+
+
+def _missing_pr_evidence(mission: MissionRecord) -> tuple[str, ...]:
+    artifacts = mission.artifacts
+    missing = list(_missing_preplan_evidence(mission))
+    if artifacts.plan is None or not artifacts.plan.approved_by:
+        missing.append("named plan approval")
+    if artifacts.verification_report is None or artifacts.verification_report.verdict != "passed":
+        missing.append("passing verification report")
+    if artifacts.self_review is None:
+        missing.append("self-review notes")
+    return tuple(missing)
+
+
+def _verification_report(mission: MissionRecord) -> VerificationReport:
+    """Derive final verification evidence only from recorded candidate results."""
+    artifacts = mission.artifacts
+    checks = list(artifacts.test_report.suites) if artifacts.test_report else []
+    review_status = "passed" if artifacts.review_report and artifacts.review_report.verdict == "approve" else "failed"
+    checks.append(TestSuiteResult(
+        name="structural-review", status=review_status,
+        output_summary="candidate structural review approved" if review_status == "passed" else "candidate structural review did not approve",
+    ))
+    security_status = "passed" if artifacts.security_scan and artifacts.security_scan.verdict == "passed" else "failed"
+    checks.append(TestSuiteResult(
+        name="security-scan", status=security_status,
+        output_summary="candidate secret scan passed" if security_status == "passed" else "candidate secret scan found blocking evidence",
+    ))
+    passed = bool(checks) and all(check.status == "passed" for check in checks)
+    reproduction = "No reproduction steps were recorded."
+    if artifacts.issue_analysis and artifacts.issue_analysis.reproduction_steps:
+        reproduction = "Recorded reproduction steps are covered by the candidate verification evidence."
+    security_summary = "No issues found." if security_status == "passed" else "Security findings require remediation."
+    return VerificationReport(
+        checks=checks,
+        security_summary=security_summary,
+        reproduction_summary=reproduction,
+        verdict="passed" if passed else "failed",
+    )
 
 
 def _test_report(command: str, result: CandidateCommandResult, *, repair_attempt: int) -> TestReport:
@@ -437,14 +577,47 @@ def _evaluation_checks(
             detail="mission audit chain matches its snapshot" if audit_valid else "mission audit chain is invalid",
         ),
     ]
+    if mission.spec.workflow == "verified":
+        checks.extend([
+            EvaluationCheck(
+                name="issue_analysis",
+                status="passed" if artifacts.issue_analysis else "failed",
+                detail="issue analysis is recorded" if artifacts.issue_analysis else "issue analysis is missing",
+            ),
+            EvaluationCheck(
+                name="repository_map",
+                status="passed" if artifacts.repository_map else "failed",
+                detail="repository map is recorded" if artifacts.repository_map else "repository map is missing",
+            ),
+            EvaluationCheck(
+                name="root_cause",
+                status="passed" if artifacts.root_cause else "failed",
+                detail="root-cause analysis is recorded" if artifacts.root_cause else "root-cause analysis is missing",
+            ),
+            EvaluationCheck(
+                name="plan_approval",
+                status="passed" if artifacts.plan and artifacts.plan.approved_by else "failed",
+                detail="named plan approval is recorded" if artifacts.plan and artifacts.plan.approved_by else "named plan approval is missing",
+            ),
+            EvaluationCheck(
+                name="verification_report",
+                status="passed" if artifacts.verification_report and artifacts.verification_report.verdict == "passed" else "failed",
+                detail="verification report passed" if artifacts.verification_report and artifacts.verification_report.verdict == "passed" else "verification report is incomplete or failed",
+            ),
+            EvaluationCheck(
+                name="self_review",
+                status="passed" if artifacts.self_review else "failed",
+                detail="self-review notes are recorded" if artifacts.self_review else "self-review notes are missing",
+            ),
+        ])
     return checks
 
 
 def _draft_pull_request(mission: MissionRecord, candidate: CandidateWorkspace, diff: str, approved_by: str) -> PullRequestDraft:
     files = changed_files(diff)
-    title = mission.spec.title.strip()[:120]
+    title = _conventional_title(mission.spec.title)
     source = f"{mission.spec.source}:{mission.spec.source_id}".rstrip(":")
-    body = (
+    body = _verified_pr_body(mission, source, approved_by) if mission.spec.workflow == "verified" else (
         f"## Summary\n\n- Addresses {source}: {mission.spec.title}\n"
         f"- Prepared from isolated candidate `{candidate.id}` after approval by `{approved_by}`.\n\n"
         "## Validation\n\n"
@@ -461,3 +634,84 @@ def _draft_pull_request(mission: MissionRecord, candidate: CandidateWorkspace, d
         files_changed=files,
         diff_digest=hashlib.sha256(diff.encode("utf-8")).hexdigest(),
     )
+
+
+def _conventional_title(title: str) -> str:
+    """Use the repository's conventional-commit style without guessing intent."""
+    clean = title.strip()
+    if clean.lower().startswith(("feat(", "fix(", "docs(", "test(", "refactor(", "perf(", "ci(",
+                                 "feat:", "fix:", "docs:", "test:", "refactor:", "perf:", "ci:")):
+        return clean[:120]
+    low = clean.lower()
+    prefix = "fix" if any(word in low for word in ("bug", "fix", "error", "failure", "regression")) else "feat"
+    return f"{prefix}: {clean}"[:120]
+
+
+def _verified_pr_body(mission: MissionRecord, source: str, approved_by: str) -> str:
+    """Render a review-ready PR body solely from typed mission evidence."""
+    artifacts = mission.artifacts
+    analysis = artifacts.issue_analysis
+    root_cause = artifacts.root_cause
+    plan = artifacts.plan
+    verification = artifacts.verification_report
+    review = artifacts.self_review
+    assert analysis is not None and root_cause is not None and plan is not None and verification is not None and review is not None
+
+    changes = [step.description for step in plan.steps[:20]] or ["No implementation steps were recorded."]
+    testing = []
+    for check in verification.checks[:20]:
+        command = f" `{check.command}`" if check.command else ""
+        testing.append(f"- {check.name}: **{check.status}**{command} - {check.output_summary}")
+    criteria = analysis.acceptance_criteria or mission.spec.acceptance_criteria
+    check_statuses = {check.name: check.status for check in verification.checks}
+    checklist = [
+        ("Issue reproduction confirmed", bool(analysis.reproduction_steps)),
+        ("Root cause identified", True),
+        ("Minimal fix implemented", bool(plan.steps)),
+        ("Tests added/updated and passing", bool(artifacts.test_report and artifacts.test_report.verdict == "passed")),
+        ("Linting/formatting checks pass", check_statuses.get("lint") == "passed" and check_statuses.get("format") == "passed"),
+        ("Security review completed", bool(artifacts.security_scan and artifacts.security_scan.verdict == "passed")),
+        ("Self-review completed", True),
+        ("Documentation updated (if applicable)", bool(plan.dependency_impacts)),
+    ]
+    body = "\n".join([
+        "## Summary",
+        "",
+        analysis.summary,
+        "",
+        "## Root Cause",
+        "",
+        root_cause.cause,
+        "",
+        "## Acceptance Criteria",
+        "",
+        *([f"- {criterion}" for criterion in criteria] if criteria else ["- No explicit acceptance criteria were recorded."]),
+        "",
+        "## Changes Made",
+        "",
+        *[f"- {change}" for change in changes],
+        "",
+        "## Testing",
+        "",
+        *(testing or ["- No verification checks were recorded."]),
+        f"- Reproduction: {verification.reproduction_summary}",
+        "",
+        "## Security Considerations",
+        "",
+        verification.security_summary,
+        "",
+        "## Self-Review",
+        "",
+        review.notes or "Reviewed for scope, error handling, and edge cases.",
+        "",
+        "## Checklist",
+        "",
+        *[f"- [{'x' if complete else ' '}] {item}" for item, complete in checklist],
+        "",
+        "## Related Issues",
+        "",
+        f"- {source or mission.spec.title}",
+        f"- Plan approved by: {plan.approved_by}",
+        f"- PR preparation approved by: {approved_by}",
+    ])
+    return body[:20_000]

@@ -4,11 +4,22 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from ronin_cli.candidate_workspace import CandidateCommandResult, CandidateWorkspaceService
 from ronin_cli.main import app
-from ronin_cli.mission_models import MissionBudget, MissionSpec, MissionStage, PlanArtifact, PlanStep
+from ronin_cli.mission_models import (
+    IssueAnalysis,
+    MissionBudget,
+    MissionSpec,
+    MissionStage,
+    PlanArtifact,
+    PlanStep,
+    RepositoryMap,
+    RootCauseAnalysis,
+    SelfReviewNotes,
+)
 from ronin_cli.mission_store import MissionStore
 from ronin_cli.mission_workflow import MissionWorkflow
 
@@ -57,6 +68,37 @@ def _plan() -> PlanArtifact:
     )
 
 
+def _verified_mission(root: Path):
+    return MissionStore(root).create(
+        MissionSpec(
+            title="Fix retry failure", issue_text="Retries stop too early.", workflow="verified",
+            acceptance_criteria=["Retry transient failures within the configured limit."],
+        ),
+    )
+
+
+def _record_verified_discovery(workflow: MissionWorkflow, mission_id: str) -> None:
+    workflow.record_issue_analysis(mission_id, IssueAnalysis(
+        summary="Retry handling stops after the first transient failure.",
+        symptoms=["Requests fail before the configured retry limit."],
+        expected_behavior=["Transient failures are retried within the configured limit."],
+        reproduction_steps=["Run the retry regression test with a transient failure."],
+        acceptance_criteria=["Transient failures are retried within the configured limit."],
+        involved_files=["retry.py", "tests/test_retry.py"],
+    ))
+    workflow.record_repository_map(mission_id, RepositoryMap(
+        source_directories=["."], test_directories=["tests"], configuration_files=["pyproject.toml"],
+        test_commands=["pytest -q"], architectural_patterns=["bounded retry helper"],
+    ))
+    workflow.record_root_cause(mission_id, RootCauseAnalysis(
+        broken_behavior="The retry helper exits after one transient failure.",
+        cause="The retry branch does not loop through remaining attempts.",
+        responsible_logic="retry.py retry branch returns before the next attempt.",
+        behavior_gap="Configured retry limits are never reached.",
+        evidence_references=["retry.py", "tests/test_retry.py"], affected_files=["retry.py"],
+    ))
+
+
 def test_issue_to_pr_workflow_requires_real_evidence_at_every_gate(tmp_path: Path) -> None:
     _repo(tmp_path)
     mission = _mission(tmp_path)
@@ -92,6 +134,88 @@ def test_issue_to_pr_workflow_requires_real_evidence_at_every_gate(tmp_path: Pat
     assert staged.artifacts.pull_request_draft.suggested_branch == f"ronin/{mission.id}"
     assert MissionStore(tmp_path).verify_audit(mission.id).valid
     CandidateWorkspaceService(tmp_path).destroy(candidate.id)
+
+
+def test_verified_issue_to_pr_workflow_requires_discovery_plan_approval_and_self_review(tmp_path: Path) -> None:
+    _repo(tmp_path)
+    mission = _verified_mission(tmp_path)
+    workflow = MissionWorkflow(tmp_path)
+
+    with pytest.raises(ValueError, match="issue analysis"):
+        workflow.record_plan(mission.id, _plan())
+    _record_verified_discovery(workflow, mission.id)
+
+    planned = workflow.record_plan(mission.id, _plan())
+    assert planned.stage is MissionStage.PLANNING
+    assert planned.artifacts.plan is not None and not planned.artifacts.plan.approved_by
+    implementing = workflow.approve_plan(mission.id, approved_by="Rohith")
+    assert implementing.stage is MissionStage.IMPLEMENTING
+    assert implementing.artifacts.plan is not None and implementing.artifacts.plan.approved_by == "Rohith"
+
+    candidate = _prepare_candidate(tmp_path, mission.id)
+    assert workflow.verify_candidate(mission.id, "pytest -q", run_fn=_passed_runner).stage is MissionStage.REVIEWING
+    assert workflow.review_candidate(mission.id).stage is MissionStage.SECURITY
+    awaiting = workflow.scan_candidate_security(mission.id)
+    assert awaiting.stage is MissionStage.AWAITING_APPROVAL
+    assert awaiting.artifacts.verification_report is not None
+    assert awaiting.artifacts.verification_report.verdict == "passed"
+
+    workflow.record_self_review(mission.id, SelfReviewNotes(
+        reviewer="Rohith", checked=["scope", "error handling", "edge cases"],
+        notes="No additional issues found.",
+    ))
+    evaluated = workflow.evaluate(mission.id)
+    assert evaluated.artifacts.evaluation_gate is not None and evaluated.artifacts.evaluation_gate.eligible
+    staged = workflow.prepare_pull_request_draft(mission.id, approved_by="Rohith")
+    draft = staged.artifacts.pull_request_draft
+    assert staged.stage is MissionStage.STAGING and draft is not None
+    assert "## Root Cause" in draft.body
+    assert "## Self-Review" in draft.body
+    assert "Plan approved by: Rohith" in draft.body
+    CandidateWorkspaceService(tmp_path).destroy(candidate.id)
+
+
+def test_verified_mission_cli_records_discovery_before_named_plan_approval(tmp_path: Path) -> None:
+    runner = CliRunner()
+    created = runner.invoke(
+        app,
+        ["util", "mission", "create", "Fix retry failure", "Retries stop too early.", "--verified", "--root", str(tmp_path)],
+    )
+    assert created.exit_code == 0, created.stdout
+    mission = MissionStore(tmp_path).list()[0]
+
+    inspected = runner.invoke(
+        app,
+        ["util", "mission", "inspect", mission.id, "--summary", "Retries stop after one failure.",
+         "--reproduce", "Run the retry regression test.", "--root", str(tmp_path)],
+    )
+    assert inspected.exit_code == 0, inspected.stdout
+    mapped = runner.invoke(
+        app,
+        ["util", "mission", "map", mission.id, "--source-dir", "src", "--test-dir", "tests",
+         "--test-command", "pytest -q", "--root", str(tmp_path)],
+    )
+    assert mapped.exit_code == 0, mapped.stdout
+    rca = runner.invoke(
+        app,
+        ["util", "mission", "rca", mission.id, "--broken", "Retry exits early.",
+         "--cause", "The loop returns too soon.", "--logic", "The retry branch returns before retrying.",
+         "--gap", "The configured limit is not reached.", "--root", str(tmp_path)],
+    )
+    assert rca.exit_code == 0, rca.stdout
+    planned = runner.invoke(
+        app,
+        ["util", "mission", "plan", mission.id, "--step", "Repair the retry loop", "--file", "retry.py",
+         "--root", str(tmp_path)],
+    )
+    assert planned.exit_code == 0, planned.stdout
+    assert MissionStore(tmp_path).load(mission.id).stage is MissionStage.PLANNING
+    approved = runner.invoke(
+        app,
+        ["util", "mission", "approve-plan", mission.id, "--approved-by", "Rohith", "--yes", "--root", str(tmp_path)],
+    )
+    assert approved.exit_code == 0, approved.stdout
+    assert MissionStore(tmp_path).load(mission.id).stage is MissionStage.IMPLEMENTING
 
 
 def test_failed_candidate_tests_use_only_the_configured_repair_budget(tmp_path: Path) -> None:

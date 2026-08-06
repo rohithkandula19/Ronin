@@ -2542,6 +2542,7 @@ def mission_create(
     repository_ref: str = typer.Option("", "--repository-ref", help="Optional issue repository reference."),
     requirement: List[str] = typer.Option([], "--requirement", help="Repeatable explicit requirement."),
     acceptance: List[str] = typer.Option([], "--acceptance", help="Repeatable acceptance criterion."),
+    verified: bool = typer.Option(False, "--verified", help="Require strict issue analysis, plan approval, verification, and self-review evidence."),
     max_tokens: int = typer.Option(100_000, "--max-tokens", min=1, max=10_000_000),
     max_cost_usd: float = typer.Option(25.0, "--max-cost-usd", min=0.0, max=1_000_000.0),
     max_wall_time: int = typer.Option(1_800, "--max-wall-time", min=1, max=604_800),
@@ -2562,6 +2563,7 @@ def mission_create(
             repository_ref=repository_ref.strip(),
             requirements=requirement,
             acceptance_criteria=acceptance,
+            workflow="verified" if verified else "standard",
         )
         budget = MissionBudget(
             max_tokens=max_tokens,
@@ -2577,7 +2579,7 @@ def mission_create(
         raise typer.Exit(2)
     console.print(
         f"[green]created[/green] [cyan]{mission.id}[/cyan] "
-        "[dim](pending inspection; no provider, workspace, command, or write was started)[/dim]"
+        f"[dim]({mission.spec.workflow} workflow; pending inspection; no provider, workspace, command, or write was started)[/dim]"
     )
 
 
@@ -2775,6 +2777,8 @@ def mission_plan(
     step: List[str] = typer.Option([], "--step", help="Repeatable implementation step."),
     file: List[str] = typer.Option([], "--file", help="Repeatable repository-relative file expected to change."),
     test_addition: List[str] = typer.Option([], "--test-addition", help="Repeatable planned regression test."),
+    approach: str = typer.Option("", "--approach", help="High-level implementation strategy."),
+    risk: List[str] = typer.Option([], "--risk", help="Repeatable compatibility, security, or delivery risk."),
     rollback: str = typer.Option("", "--rollback", help="Rollback strategy for this mission."),
 ) -> None:
     """Record a typed plan and advance the mission to candidate implementation."""
@@ -2785,9 +2789,11 @@ def mission_plan(
     from .mission_workflow import MissionWorkflow
 
     plan = PlanArtifact(
+        approach=approach,
         steps=[PlanStep(id=f"step-{index}", description=description, files=file) for index, description in enumerate(step, start=1)],
         files_to_change=file,
         test_additions=test_addition,
+        risks=risk,
         rollback_strategy=rollback,
     )
     try:
@@ -2796,6 +2802,110 @@ def mission_plan(
         console.print(f"[red]x[/red] {exc}")
         raise typer.Exit(2)
     console.print(f"[green]plan recorded[/green] [cyan]{mission.id}[/cyan] is now [bold]{mission.stage.value}[/bold]")
+
+
+@mission_app.command("inspect")
+def mission_inspect(
+    mission_id: str = typer.Argument(..., help="Saved mission id."),
+    summary: str = typer.Option(..., "--summary", help="Evidence-backed issue summary."),
+    symptom: List[str] = typer.Option([], "--symptom", help="Repeatable observed symptom."),
+    expected: List[str] = typer.Option([], "--expected", help="Repeatable expected behavior."),
+    reproduce: List[str] = typer.Option([], "--reproduce", help="Repeatable reproduction step."),
+    acceptance: List[str] = typer.Option([], "--acceptance", help="Repeatable acceptance criterion."),
+    related: List[str] = typer.Option([], "--related", help="Repeatable related issue, PR, commit, or document."),
+    file: List[str] = typer.Option([], "--file", help="Repeatable repository-relative involved file."),
+    ambiguity: List[str] = typer.Option([], "--ambiguity", help="Repeatable unresolved question."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Record Phase 1 issue analysis without starting an agent or workspace."""
+    from .mission_models import IssueAnalysis
+    from .mission_workflow import MissionWorkflow
+
+    analysis = IssueAnalysis(
+        summary=summary, symptoms=symptom, expected_behavior=expected, reproduction_steps=reproduce,
+        acceptance_criteria=acceptance, related_references=related, involved_files=file, ambiguities=ambiguity,
+    )
+    try:
+        mission = MissionWorkflow(root).record_issue_analysis(mission_id, analysis)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(f"[green]issue analysis recorded[/green] [cyan]{mission.id}[/cyan] [dim]stage={mission.stage.value}[/dim]")
+
+
+@mission_app.command("map")
+def mission_map(
+    mission_id: str = typer.Argument(..., help="Mission whose repository map is being recorded."),
+    source_dir: List[str] = typer.Option([], "--source-dir", help="Repeatable relevant source directory."),
+    test_dir: List[str] = typer.Option([], "--test-dir", help="Repeatable relevant test directory."),
+    config: List[str] = typer.Option([], "--config", help="Repeatable relevant configuration file."),
+    docs: List[str] = typer.Option([], "--docs", help="Repeatable relevant documentation file."),
+    test_command: List[str] = typer.Option([], "--test-command", help="Repeatable discovered test command."),
+    pattern: List[str] = typer.Option([], "--pattern", help="Repeatable observed architectural pattern."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Record Phase 2 repository inspection evidence without executing code."""
+    from .mission_models import RepositoryMap
+    from .mission_workflow import MissionWorkflow
+
+    repository_map = RepositoryMap(
+        source_directories=source_dir, test_directories=test_dir, configuration_files=config,
+        documentation_files=docs, test_commands=test_command, architectural_patterns=pattern,
+    )
+    try:
+        mission = MissionWorkflow(root).record_repository_map(mission_id, repository_map)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(f"[green]repository map recorded[/green] [cyan]{mission.id}[/cyan]")
+
+
+@mission_app.command("rca")
+def mission_rca(
+    mission_id: str = typer.Argument(..., help="Mission whose root cause is being recorded."),
+    broken: str = typer.Option(..., "--broken", help="Observed broken behavior."),
+    cause: str = typer.Option(..., "--cause", help="Evidence-backed root cause."),
+    logic: str = typer.Option(..., "--logic", help="Exact responsible logic or line-level explanation."),
+    gap: str = typer.Option(..., "--gap", help="Why current behavior differs from expected behavior."),
+    evidence: List[str] = typer.Option([], "--evidence", help="Repeatable file, test, commit, or log reference."),
+    file: List[str] = typer.Option([], "--file", help="Repeatable affected file."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Record Phase 3 root-cause evidence without mutating the candidate."""
+    from .mission_models import RootCauseAnalysis
+    from .mission_workflow import MissionWorkflow
+
+    report = RootCauseAnalysis(
+        broken_behavior=broken, cause=cause, responsible_logic=logic, behavior_gap=gap,
+        evidence_references=evidence, affected_files=file,
+    )
+    try:
+        mission = MissionWorkflow(root).record_root_cause(mission_id, report)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(f"[green]root-cause analysis recorded[/green] [cyan]{mission.id}[/cyan]")
+
+
+@mission_app.command("approve-plan")
+def mission_approve_plan(
+    mission_id: str = typer.Argument(..., help="Verified mission with a structured plan."),
+    approved_by: str = typer.Option(..., "--approved-by", help="Human approving the implementation plan."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    yes: bool = typer.Option(False, "--yes", help="Confirm release of the plan to implementation."),
+) -> None:
+    """Release a verified plan to candidate implementation after explicit approval."""
+    if not yes:
+        console.print("[yellow]plan not approved[/yellow] (review the plan and rerun with --yes)")
+        raise typer.Exit(2)
+    from .mission_workflow import MissionWorkflow
+
+    try:
+        mission = MissionWorkflow(root).approve_plan(mission_id, approved_by=approved_by)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(f"[green]plan approved[/green] [cyan]{mission.id}[/cyan] is now [bold]{mission.stage.value}[/bold]")
 
 
 @mission_app.command("verify")
@@ -2872,6 +2982,28 @@ def mission_security(
     )
     if mission.stage is MissionStage.IMPLEMENTING:
         raise typer.Exit(1)
+
+
+@mission_app.command("self-review")
+def mission_self_review(
+    mission_id: str = typer.Argument(..., help="Verified mission that passed the security gate."),
+    reviewer: str = typer.Option(..., "--reviewer", help="Person or role that performed the self-review."),
+    checked: List[str] = typer.Option(..., "--checked", help="Repeatable item checked during review."),
+    note: str = typer.Option("", "--note", help="Concise review notes."),
+    fix: List[str] = typer.Option([], "--fix", help="Repeatable correction applied during review."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+) -> None:
+    """Record Phase 7 self-review evidence before preparing a verified PR."""
+    from .mission_models import SelfReviewNotes
+    from .mission_workflow import MissionWorkflow
+
+    review = SelfReviewNotes(reviewer=reviewer, checked=checked, notes=note, fixes_applied=fix)
+    try:
+        mission = MissionWorkflow(root).record_self_review(mission_id, review)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(f"[green]self-review recorded[/green] [cyan]{mission.id}[/cyan]")
 
 
 @mission_app.command("evaluate")
@@ -3202,13 +3334,20 @@ def _print_mission(mission) -> None:
     audit.add_column("Value")
     audit.add_row("mission", mission.id)
     audit.add_row("stage", mission.stage.value)
+    audit.add_row("workflow", mission.spec.workflow)
     audit.add_row("source", f"{mission.spec.source}:{mission.spec.source_id}".rstrip(":"))
     audit.add_row("candidate", mission.candidate_workspace_id or "not created")
     audit.add_row("events", str(mission.event_count))
+    audit.add_row("issue analysis", "recorded" if mission.artifacts.issue_analysis else "not recorded")
+    audit.add_row("repository map", "recorded" if mission.artifacts.repository_map else "not recorded")
+    audit.add_row("root cause", "recorded" if mission.artifacts.root_cause else "not recorded")
     audit.add_row("plan", "recorded" if mission.artifacts.plan else "not recorded")
+    audit.add_row("plan approval", mission.artifacts.plan.approved_by if mission.artifacts.plan and mission.artifacts.plan.approved_by else "not recorded")
     audit.add_row("tests", mission.artifacts.test_report.verdict if mission.artifacts.test_report else "not recorded")
     audit.add_row("review", mission.artifacts.review_report.verdict if mission.artifacts.review_report else "not recorded")
     audit.add_row("security", mission.artifacts.security_scan.verdict if mission.artifacts.security_scan else "not recorded")
+    audit.add_row("verification", mission.artifacts.verification_report.verdict if mission.artifacts.verification_report else "not recorded")
+    audit.add_row("self-review", "recorded" if mission.artifacts.self_review else "not recorded")
     audit.add_row("evaluation", "eligible" if mission.artifacts.evaluation_gate and mission.artifacts.evaluation_gate.eligible else "not eligible")
     audit.add_row("PR draft", mission.artifacts.pull_request_draft.status if mission.artifacts.pull_request_draft else "not recorded")
     audit.add_row("title", mission.spec.title)

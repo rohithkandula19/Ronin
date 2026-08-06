@@ -108,3 +108,35 @@ def issue_details(repository: str, number: int, root: Path | str = ".") -> dict 
     except (ValueError, TypeError):
         return None
     return payload if isinstance(payload, dict) else None
+
+
+def issue_comments(repository: str, number: int, root: Path | str = ".") -> list[dict] | None:
+    """Fetch every GitHub issue-comment page through the authenticated CLI.
+
+    ``None`` means the discussion could not be read; callers must not silently
+    claim that issue context is complete in that case.
+    """
+    if not repository or repository.startswith("-") or "/" not in repository or number < 1:
+        return None
+    try:
+        proc = _gh(
+            "api", "--paginate", "--slurp",
+            f"repos/{repository}/issues/{number}/comments?per_page=100", root=root,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        pages = json.loads(proc.stdout or "[]")
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(pages, list):
+        return None
+    comments: list[dict] = []
+    for page in pages:
+        items = page if isinstance(page, list) else [page]
+        for item in items:
+            if isinstance(item, dict):
+                comments.append(item)
+    return comments
