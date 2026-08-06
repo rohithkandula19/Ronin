@@ -4260,6 +4260,73 @@ def ledger_show(
 project_memory_app = typer.Typer(help="Durable local project facts for human-approved agent recall.", no_args_is_help=True)
 util_app.add_typer(project_memory_app, name="project-memory")
 
+project_instincts_app = typer.Typer(help="Evidence-backed project practices with explicit promotion.", no_args_is_help=True)
+util_app.add_typer(project_instincts_app, name="instincts")
+
+
+@project_instincts_app.command("add")
+def project_instinct_add(
+    text: str = typer.Argument(..., help="Candidate project practice to learn."),
+    evidence: str = typer.Option(..., "--evidence", help="Observed evidence supporting this practice."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    confidence: float = typer.Option(0.35, "--confidence", min=0.0, max=1.0),
+    expires_in_days: int = typer.Option(30, "--expires-in-days", min=1, max=365),
+) -> None:
+    """Add a candidate instinct; it enters context only once active."""
+    from .project_instincts import ProjectInstinctStore
+
+    try:
+        instinct_id = ProjectInstinctStore(root).propose(
+            text, evidence=evidence, confidence=confidence, expires_in_days=expires_in_days
+        )
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(f"[green]instinct saved[/green] {instinct_id}")
+
+
+@project_instincts_app.command("reinforce")
+def project_instinct_reinforce(
+    instinct_id: str = typer.Argument(..., help="Instinct identifier."),
+    evidence: str = typer.Option(..., "--evidence", help="New observed evidence."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    weight: float = typer.Option(0.15, "--weight", min=0.01, max=0.5),
+) -> None:
+    """Add evidence and promote a candidate at the active confidence threshold."""
+    from .project_instincts import ProjectInstinctStore
+
+    try:
+        row = ProjectInstinctStore(root).reinforce(instinct_id, evidence=evidence, weight=weight)
+    except (KeyError, ValueError) as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(f"[green]{row['state']}[/green] confidence={row['confidence']:.2f} observations={row['observations']}")
+
+
+@project_instincts_app.command("list")
+def project_instinct_list(
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    state: str | None = typer.Option(None, "--state", help="Filter: candidate or active."),
+) -> None:
+    """Show current, unexpired project instincts and their supporting evidence."""
+    from .project_instincts import ProjectInstinctStore
+
+    if state is not None and state not in {"candidate", "active"}:
+        console.print("[red]x[/red] state must be candidate or active")
+        raise typer.Exit(2)
+    rows = ProjectInstinctStore(root).list(state=state)
+    if not rows:
+        console.print("[dim]no project instincts.[/dim]")
+        return
+    table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+    table.add_column("ID")
+    table.add_column("State")
+    table.add_column("Confidence")
+    table.add_column("Practice", overflow="fold")
+    for row in rows:
+        table.add_row(row["id"][:8], row["state"], f"{row['confidence']:.2f}", row["text"])
+    console.print(table)
+
 
 @project_memory_app.command("add")
 def project_memory_add(

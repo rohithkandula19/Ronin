@@ -478,16 +478,33 @@ Coding agents can recall this memory; writing a new fact is approval-gated and
 likely API keys or private keys are refused. This store has no cloud dependency
 and can be removed independently of source code and instruction files.
 
+### Learned Project Instincts
+
+`ronin util instincts` keeps a separate, evidence-backed practice layer in the
+same local SQLite file. A new practice starts as a candidate and cannot enter
+agent context. Explicit reinforcement adds independently observed evidence and
+promotes it only after it reaches the active confidence threshold. Active
+instincts expire, are recalled only when relevant, and remain delimited as
+untrusted evidence rather than maintainer policy.
+
+```bash
+ronin util instincts add "Run focused tests before the full suite" \
+  --evidence "A regression was isolated by a focused test" --root .
+ronin util instincts reinforce <instinct-id> \
+  --evidence "A second change confirmed the workflow" --root .
+ronin util instincts list --root .
+```
+
 ### Context Assembly
 
 The coding agent does not concatenate these sources through a separate prompt
-path. `ProjectInstructionsContext`, `ProjectFactsContext`, and
-`RepositoryContext` adapt the existing stores to the shared
+path. `ProjectInstructionsContext`, `ProjectFactsContext`,
+`ProjectInstinctsContext`, and `RepositoryContext` adapt the existing stores to the shared
 `ContextProvider` contract. Instruction files are trusted maintainer policy;
-recalled facts are delimited as untrusted evidence; repository retrieval is
-trusted local metadata. The kernel orders and bounds all fragments, records the
-selected sources in the durable journal, and sends the exact resolved prompt to
-both normal and streaming provider calls.
+recalled facts and active instincts are delimited as untrusted evidence;
+repository retrieval is trusted local metadata. The kernel orders and bounds all
+fragments, records the selected sources in the durable journal, and sends the
+exact resolved prompt to both normal and streaming provider calls.
 
 Repository retrieval prefers `.ronin/index.db` when present. On a cold index,
 the in-memory retrieval engine retains its non-blocking behavior, so the first

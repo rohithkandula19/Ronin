@@ -6,6 +6,7 @@ from pathlib import Path
 from ronin_agent_patterns import AgentRequest, ContextFragment, ContextProvider
 
 from .project_memory import ProjectMemory, load_project_memory
+from .project_instincts import ProjectInstinctStore
 from .repo_index import index_db_path, query_index
 
 
@@ -46,6 +47,26 @@ class ProjectFactsContext(ContextProvider):
         return ContextFragment(source="project-memory", content=facts, priority=80, trust="untrusted")
 
 
+class ProjectInstinctsContext(ContextProvider):
+    """Only reinforced practices can shape an agent's relevant context."""
+
+    name = "project-instincts"
+
+    def __init__(self, root: Path | str, *, limit: int = 4) -> None:
+        self.root = Path(root).resolve()
+        self.limit = max(1, min(limit, 12))
+
+    def resolve(self, request: AgentRequest) -> ContextFragment | None:
+        rows = ProjectInstinctStore(self.root).recall(request.task, k=self.limit)
+        if not rows:
+            return None
+        practices = "\n".join(
+            f"- {row['text']} (confidence {row['confidence']:.2f}; observations {row['observations']})"
+            for row in rows
+        )
+        return ContextFragment(source="project-instincts", content=practices, priority=75, trust="untrusted")
+
+
 class RepositoryContext(ContextProvider):
     """Use the persistent index when available, with the established fallback."""
 
@@ -78,7 +99,11 @@ def build_code_context_providers(
     retrieval_token_budget: int,
 ) -> list[ContextProvider]:
     """One context pipeline for coding turns, without duplicate retrieval paths."""
-    providers: list[ContextProvider] = [ProjectInstructionsContext(root), ProjectFactsContext(root)]
+    providers: list[ContextProvider] = [
+        ProjectInstructionsContext(root),
+        ProjectFactsContext(root),
+        ProjectInstinctsContext(root),
+    ]
     if include_retrieval:
         providers.append(RepositoryContext(root, token_budget=retrieval_token_budget))
     return providers

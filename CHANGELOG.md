@@ -12,6 +12,11 @@ All notable changes to this project will be documented here. Format follows [Kee
   real without embedding credential-shaped literals in source files.
 
 ### Added
+- **Evidence-backed learned project instincts.** `ronin util instincts` now
+  stores candidate practices locally with supporting evidence, confidence,
+  observation counts, and expiry. Only explicitly reinforced active instincts
+  are retrieved into the typed agent context, where they remain untrusted
+  evidence and can never override project policy or trigger actions.
 - **Provider-aware context policy.** Ronin now resolves a guarded context window
   from its model/provider catalog or a bounded project override, reserves output
   capacity, and uses the same policy for agent compaction, indexed retrieval,
