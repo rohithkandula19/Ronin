@@ -292,7 +292,7 @@ class ReActAgent(BaseModel):
                     # assembled response from the terminal ``done`` event.
                     response = None
                     for ev in self.provider.stream(
-                        system=self.system,
+                        system=effective_system,
                         messages=messages,
                         tools=self.tools,
                         max_tokens=self.max_tokens,

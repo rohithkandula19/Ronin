@@ -27,7 +27,7 @@ from .code_tools import (
 )
 from .config import RoninConfig
 from .media import build_image_tool
-from .project_memory import load_project_memory, memory_system_block, write_memory_template
+from .project_memory import load_project_memory, write_memory_template
 from .self_command import detect_self_command
 from .sentinel import confidence_badge, is_low
 from .prompt_box import read_prompt
@@ -850,45 +850,23 @@ def run_code_agent(
     if getattr(config, "sentinel", False):
         from .sentinel import SENTINEL_SYSTEM
         system += SENTINEL_SYSTEM
-    mem = memory_system_block(root)
-    if mem is not None:
-        block, mem_name = mem
-        system += block
-        if console is not None and not history_prefix:
-            console.print(f"[dim]📄 loaded project memory from [bold]{mem_name}[/bold][/dim]")
-
-    # Context engineering: front-load the files most relevant to THIS request so
-    # the model starts aimed at the right code (non-blocking; interactive turns
-    # only — sub-agents/evals pass console=None and stay deterministic).
-    # Auto-context front-loads relevant files — skipped in fast mode (leaner
-    # context = faster turns; the agent can still read what it needs on demand).
-    # Only on the FIRST turn (no structured history yet): injecting query-specific
-    # files into `system` every turn would change the system block each time and
-    # invalidate the prompt-cache prefix — defeating the point of persistent
-    # history. Once history exists, the agent already carries what it read forward.
-    if (console is not None and getattr(config, "auto_context", False)
-            and not getattr(config, "fast", False) and not message_history):
-        _ctx = ""
-        # Scalable path: if the user built a repo index (`ronin index`), pull a
-        # BUDGETED, ranked set of files from the persistent index — context stays
-        # bounded even on a huge monorepo. Falls back to the in-memory map when
-        # there's no index, so default behaviour is unchanged.
-        try:
-            from .repo_index import index_db_path, query_index
-            _db = index_db_path(root)
-            if _db.exists():
-                _paths = query_index(task, _db, token_budget=context_policy.retrieval_budget_tokens)
-                if _paths:
-                    _ctx = ("## Relevant code (ronin repo index)\n"
-                            + "\n".join(f"- {p}" for p in _paths))
-        except Exception:  # noqa: BLE001 - index is best-effort; never break a run
-            _ctx = ""
-        if not _ctx:
-            from .context_engine import relevant_context
-            _ctx = relevant_context(task, root)
-        if _ctx:
-            system += "\n\n" + _ctx
-            console.print("[dim]📎 added relevant files to context[/dim]")
+    # Existing project memory and repository retrieval now enter through the
+    # shared typed contract used by every durable ReAct run. Retrieval remains a
+    # first-turn interactive optimization, preserving the prompt-cache behavior.
+    from .agent_context import build_code_context_providers
+    _include_retrieval = bool(
+        console is not None and getattr(config, "auto_context", False)
+        and not getattr(config, "fast", False) and not message_history
+    )
+    _context_providers = build_code_context_providers(
+        root,
+        include_retrieval=_include_retrieval,
+        retrieval_token_budget=context_policy.retrieval_budget_tokens,
+    )
+    if console is not None and not history_prefix:
+        _instructions = load_project_memory(root)
+        if _instructions is not None:
+            console.print(f"[dim]📄 loaded project memory from [bold]{_instructions[0]}[/bold][/dim]")
 
     provider = build_provider(config)
     # Surface rate-limit backoff so a (up to ~60s) retry wait doesn't look frozen.
@@ -906,6 +884,7 @@ def run_code_agent(
         # Fast mode caps each tool result tighter, so file dumps / command output
         # don't balloon the per-call payload.
         max_tool_result_chars=6000 if _fast else 16000,
+        context_providers=_context_providers,
     )
 
     # The set of tools that must pass the approval gate: the built-in mutators
@@ -1015,7 +994,8 @@ def run_code_agent(
         result = agent.run(prompt, history=message_history or None,
                            on_step=on_step, before_tool=before_tool,
                            on_text=on_text, on_reset=on_reset, after_tool=after_tool,
-                           parallel_safe=lambda n: n in _PARALLEL_TOOLS)
+                           parallel_safe=lambda n: n in _PARALLEL_TOOLS,
+                           runtime_context={"root": str(_Path(root).resolve()), "mode": "code"})
     except KeyboardInterrupt:
         # Ctrl-C during a turn → stop THIS turn, keep the session alive.
         if renderer is not None:

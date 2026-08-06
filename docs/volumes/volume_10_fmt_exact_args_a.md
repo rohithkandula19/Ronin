@@ -19,7 +19,7 @@ whitespace included.
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately."},
    {"role": "user", "content": "In settings.py, change ENABLE_BETA = False to ENABLE_BETA = True."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"settings.py\", \"old_string\": \"ENABLE_BETA = False\", \"new_string\": \"ENABLE_BETA = True\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "settings.py", "old_string": "ENABLE_BETA = False", "new_string": "ENABLE_BETA = True"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "edit_file", "description": "Surgically replace an exact, unique string in an existing file. Gated by approval.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old_string": {"type": "string", "description": "Exact text to find — must be unique in the file."}, "new_string": {"type": "string", "description": "Replacement text."}}, "required": ["path", "old_string", "new_string"]}}}]}
@@ -31,7 +31,7 @@ whitespace included.
    {"role": "system", "content": "You are Ronin. Tool arguments use the schema's exact keys; copy strings from the request verbatim, whitespace included."},
    {"role": "user", "content": "In deploy/values.yaml the line '  replicas: 2' (two leading spaces) should become '  replicas: 4'. Keep the indentation intact."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"deploy/values.yaml\", \"old_string\": \"  replicas: 2\", \"new_string\": \"  replicas: 4\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "deploy/values.yaml", "old_string": "  replicas: 2", "new_string": "  replicas: 4"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "edit_file", "description": "Surgically replace an exact, unique string in an existing file. Gated by approval.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old_string": {"type": "string", "description": "Exact text to find — must be unique in the file."}, "new_string": {"type": "string", "description": "Replacement text."}}, "required": ["path", "old_string", "new_string"]}}}]}
@@ -43,7 +43,7 @@ whitespace included.
    {"role": "system", "content": "You are Ronin, a coding agent. Emit the tool call directly; the path goes into the call exactly as the user wrote it."},
    {"role": "user", "content": "Fix the typo in srv/api/v2/handlers.go: the function name HandleUsrProfile should be HandleUserProfile."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"srv/api/v2/handlers.go\", \"old_string\": \"HandleUsrProfile\", \"new_string\": \"HandleUserProfile\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "srv/api/v2/handlers.go", "old_string": "HandleUsrProfile", "new_string": "HandleUserProfile"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "edit_file", "description": "Surgically replace an exact, unique string in an existing file. Gated by approval.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old_string": {"type": "string", "description": "Exact text to find — must be unique in the file."}, "new_string": {"type": "string", "description": "Replacement text."}}, "required": ["path", "old_string", "new_string"]}}}]}
@@ -59,7 +59,7 @@ correction is a structured call.
    {"role": "system", "content": "You are Ronin. When a call is rejected for bad argument keys, resend it with the schema's exact keys. No narration."},
    {"role": "user", "content": "This call was rejected by the runtime: {\"name\": \"edit_file\", \"arguments\": {\"file\": \"Cargo.toml\", \"find\": \"edition = \\\"2018\\\"\", \"replace\": \"edition = \\\"2021\\\"\"}}. Emit it correctly."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"Cargo.toml\", \"old_string\": \"edition = \\\"2018\\\"\", \"new_string\": \"edition = \\\"2021\\\"\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "Cargo.toml", "old_string": "edition = \"2018\"", "new_string": "edition = \"2021\""}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "edit_file", "description": "Surgically replace an exact, unique string in an existing file. Gated by approval.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old_string": {"type": "string", "description": "Exact text to find — must be unique in the file."}, "new_string": {"type": "string", "description": "Replacement text."}}, "required": ["path", "old_string", "new_string"]}}}]}
@@ -71,7 +71,7 @@ correction is a structured call.
    {"role": "system", "content": "You are Ronin, a coding agent. A call missing a required key is fixed by resending the complete call."},
    {"role": "user", "content": "Ronin rejected this because new_string was missing: {\"name\": \"edit_file\", \"arguments\": {\"path\": \"Makefile\", \"old_string\": \"PYTHON ?= python3.10\"}}. The replacement should be PYTHON ?= python3.12. Send the fixed call."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"Makefile\", \"old_string\": \"PYTHON ?= python3.10\", \"new_string\": \"PYTHON ?= python3.12\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "Makefile", "old_string": "PYTHON ?= python3.10", "new_string": "PYTHON ?= python3.12"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "edit_file", "description": "Surgically replace an exact, unique string in an existing file. Gated by approval.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old_string": {"type": "string", "description": "Exact text to find — must be unique in the file."}, "new_string": {"type": "string", "description": "Replacement text."}}, "required": ["path", "old_string", "new_string"]}}}]}
@@ -86,11 +86,11 @@ When the runtime reports that `old_string` is not unique, the fix is a longer
    {"role": "system", "content": "You are Ronin. If a tool rejects a call, correct the arguments and call again without narration."},
    {"role": "user", "content": "In app/models/user.rb, extend the User class validation `validates :email, presence: true` to `validates :email, presence: true, uniqueness: true`."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"app/models/user.rb\", \"old_string\": \"validates :email, presence: true\", \"new_string\": \"validates :email, presence: true, uniqueness: true\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "app/models/user.rb", "old_string": "validates :email, presence: true", "new_string": "validates :email, presence: true, uniqueness: true"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "Error: old_string matches 2 locations in app/models/user.rb; it must be unique. A distinct anchor for the User class occurrence is:\nclass User < ApplicationRecord\n  validates :email, presence: true"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"app/models/user.rb\", \"old_string\": \"class User < ApplicationRecord\\n  validates :email, presence: true\", \"new_string\": \"class User < ApplicationRecord\\n  validates :email, presence: true, uniqueness: true\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "app/models/user.rb", "old_string": "class User < ApplicationRecord\n  validates :email, presence: true", "new_string": "class User < ApplicationRecord\n  validates :email, presence: true, uniqueness: true"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "edit_file", "description": "Surgically replace an exact, unique string in an existing file. Gated by approval.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old_string": {"type": "string", "description": "Exact text to find — must be unique in the file."}, "new_string": {"type": "string", "description": "Replacement text."}}, "required": ["path", "old_string", "new_string"]}}}]}
@@ -108,7 +108,7 @@ bare object, and never joined by invented options.
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately."},
    {"role": "user", "content": "In src/cache.ts rename getTTL to getTtl in both places: the definition `function getTTL(key: string)` and the export line `export { getTTL };`. One approval for both."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "multi_edit", "arguments": "{\"path\": \"src/cache.ts\", \"edits\": [{\"old_string\": \"function getTTL(key: string)\", \"new_string\": \"function getTtl(key: string)\"}, {\"old_string\": \"export { getTTL };\", \"new_string\": \"export { getTtl };\"}]}"}}
+     {"id": "c1", "type": "function", "function": {"name": "multi_edit", "arguments": {"path": "src/cache.ts", "edits": [{"old_string": "function getTTL(key: string)", "new_string": "function getTtl(key: string)"}, {"old_string": "export { getTTL };", "new_string": "export { getTtl };"}]}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "multi_edit", "description": "Apply several surgical string replacements to one file in a single approved step (all-or-nothing). Gated by approval.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "edits": {"type": "array", "items": {"type": "object", "properties": {"old_string": {"type": "string"}, "new_string": {"type": "string"}}, "required": ["old_string", "new_string"]}}}, "required": ["path", "edits"]}}}]}
@@ -120,7 +120,7 @@ bare object, and never joined by invented options.
    {"role": "system", "content": "You are Ronin. Several replacements to one file go into a single multi_edit call with one edits array."},
    {"role": "user", "content": "Three changes to config/nginx.conf in one atomic step: 'worker_processes 2;' becomes 'worker_processes 4;', 'keepalive_timeout 65;' becomes 'keepalive_timeout 30;', and 'gzip off;' becomes 'gzip on;'."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "multi_edit", "arguments": "{\"path\": \"config/nginx.conf\", \"edits\": [{\"old_string\": \"worker_processes 2;\", \"new_string\": \"worker_processes 4;\"}, {\"old_string\": \"keepalive_timeout 65;\", \"new_string\": \"keepalive_timeout 30;\"}, {\"old_string\": \"gzip off;\", \"new_string\": \"gzip on;\"}]}"}}
+     {"id": "c1", "type": "function", "function": {"name": "multi_edit", "arguments": {"path": "config/nginx.conf", "edits": [{"old_string": "worker_processes 2;", "new_string": "worker_processes 4;"}, {"old_string": "keepalive_timeout 65;", "new_string": "keepalive_timeout 30;"}, {"old_string": "gzip off;", "new_string": "gzip on;"}]}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "multi_edit", "description": "Apply several surgical string replacements to one file in a single approved step (all-or-nothing). Gated by approval.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "edits": {"type": "array", "items": {"type": "object", "properties": {"old_string": {"type": "string"}, "new_string": {"type": "string"}}, "required": ["old_string", "new_string"]}}}, "required": ["path", "edits"]}}}]}
@@ -132,7 +132,7 @@ bare object, and never joined by invented options.
    {"role": "system", "content": "You are Ronin, a coding agent. A rejected multi_edit is corrected by nesting the replacements in the edits array."},
    {"role": "user", "content": "The runtime threw this out: {\"name\": \"multi_edit\", \"arguments\": {\"path\": \"schema.sql\", \"old_string\": \"VARCHAR(64)\", \"new_string\": \"VARCHAR(128)\", \"old_string_2\": \"INT(4)\", \"new_string_2\": \"BIGINT\"}}. It needs the nested edits array. Re-emit."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "multi_edit", "arguments": "{\"path\": \"schema.sql\", \"edits\": [{\"old_string\": \"VARCHAR(64)\", \"new_string\": \"VARCHAR(128)\"}, {\"old_string\": \"INT(4)\", \"new_string\": \"BIGINT\"}]}"}}
+     {"id": "c1", "type": "function", "function": {"name": "multi_edit", "arguments": {"path": "schema.sql", "edits": [{"old_string": "VARCHAR(64)", "new_string": "VARCHAR(128)"}, {"old_string": "INT(4)", "new_string": "BIGINT"}]}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "multi_edit", "description": "Apply several surgical string replacements to one file in a single approved step (all-or-nothing). Gated by approval.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "edits": {"type": "array", "items": {"type": "object", "properties": {"old_string": {"type": "string"}, "new_string": {"type": "string"}}, "required": ["old_string", "new_string"]}}}, "required": ["path", "edits"]}}}]}
@@ -144,7 +144,7 @@ bare object, and never joined by invented options.
    {"role": "system", "content": "You are Ronin. multi_edit takes path and edits only; never invent extra options like dry_run or backup."},
    {"role": "user", "content": "Atomically in Dockerfile: change 'FROM node:18-alpine' to 'FROM node:20-alpine' and 'EXPOSE 3000' to 'EXPOSE 8080'."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "multi_edit", "arguments": "{\"path\": \"Dockerfile\", \"edits\": [{\"old_string\": \"FROM node:18-alpine\", \"new_string\": \"FROM node:20-alpine\"}, {\"old_string\": \"EXPOSE 3000\", \"new_string\": \"EXPOSE 8080\"}]}"}}
+     {"id": "c1", "type": "function", "function": {"name": "multi_edit", "arguments": {"path": "Dockerfile", "edits": [{"old_string": "FROM node:18-alpine", "new_string": "FROM node:20-alpine"}, {"old_string": "EXPOSE 3000", "new_string": "EXPOSE 8080"}]}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "multi_edit", "description": "Apply several surgical string replacements to one file in a single approved step (all-or-nothing). Gated by approval.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "edits": {"type": "array", "items": {"type": "object", "properties": {"old_string": {"type": "string"}, "new_string": {"type": "string"}}, "required": ["old_string", "new_string"]}}}, "required": ["path", "edits"]}}}]}
@@ -156,7 +156,7 @@ bare object, and never joined by invented options.
    {"role": "system", "content": "You are Ronin, a coding agent. Quoted JSON fragments in the request are copied into old_string and new_string exactly, quotes included."},
    {"role": "user", "content": "In package.json bump \"version\": \"2.4.1\" to \"version\": \"2.5.0\" and \"lastRelease\": \"2.4.1\" to \"lastRelease\": \"2.5.0\" in one shot."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "multi_edit", "arguments": "{\"path\": \"package.json\", \"edits\": [{\"old_string\": \"\\\"version\\\": \\\"2.4.1\\\"\", \"new_string\": \"\\\"version\\\": \\\"2.5.0\\\"\"}, {\"old_string\": \"\\\"lastRelease\\\": \\\"2.4.1\\\"\", \"new_string\": \"\\\"lastRelease\\\": \\\"2.5.0\\\"\"}]}"}}
+     {"id": "c1", "type": "function", "function": {"name": "multi_edit", "arguments": {"path": "package.json", "edits": [{"old_string": "\"version\": \"2.4.1\"", "new_string": "\"version\": \"2.5.0\""}, {"old_string": "\"lastRelease\": \"2.4.1\"", "new_string": "\"lastRelease\": \"2.5.0\""}]}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "multi_edit", "description": "Apply several surgical string replacements to one file in a single approved step (all-or-nothing). Gated by approval.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "edits": {"type": "array", "items": {"type": "object", "properties": {"old_string": {"type": "string"}, "new_string": {"type": "string"}}, "required": ["old_string", "new_string"]}}}, "required": ["path", "edits"]}}}]}
@@ -168,7 +168,7 @@ bare object, and never joined by invented options.
    {"role": "system", "content": "You are Ronin. The edits argument is an array of objects, even for a single replacement; correct rejected calls silently."},
    {"role": "user", "content": "This failed schema validation because edits was an object instead of an array: {\"name\": \"multi_edit\", \"arguments\": {\"path\": \"styles/theme.css\", \"edits\": {\"old_string\": \"--accent: #ff6b35\", \"new_string\": \"--accent: #0f766e\"}}}. Also add a second replacement: --radius: 2px becomes --radius: 6px. Corrected call, please."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "multi_edit", "arguments": "{\"path\": \"styles/theme.css\", \"edits\": [{\"old_string\": \"--accent: #ff6b35\", \"new_string\": \"--accent: #0f766e\"}, {\"old_string\": \"--radius: 2px\", \"new_string\": \"--radius: 6px\"}]}"}}
+     {"id": "c1", "type": "function", "function": {"name": "multi_edit", "arguments": {"path": "styles/theme.css", "edits": [{"old_string": "--accent: #ff6b35", "new_string": "--accent: #0f766e"}, {"old_string": "--radius: 2px", "new_string": "--radius: 6px"}]}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "multi_edit", "description": "Apply several surgical string replacements to one file in a single approved step (all-or-nothing). Gated by approval.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "edits": {"type": "array", "items": {"type": "object", "properties": {"old_string": {"type": "string"}, "new_string": {"type": "string"}}, "required": ["old_string", "new_string"]}}}, "required": ["path", "edits"]}}}]}
@@ -180,7 +180,7 @@ bare object, and never joined by invented options.
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately."},
    {"role": "user", "content": "In .env.staging change API_HOST=api.staging.internal to API_HOST=api.stage2.internal and API_PORT=8443 to API_PORT=9443, as a single atomic step."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "multi_edit", "arguments": "{\"path\": \".env.staging\", \"edits\": [{\"old_string\": \"API_HOST=api.staging.internal\", \"new_string\": \"API_HOST=api.stage2.internal\"}, {\"old_string\": \"API_PORT=8443\", \"new_string\": \"API_PORT=9443\"}]}"}}
+     {"id": "c1", "type": "function", "function": {"name": "multi_edit", "arguments": {"path": ".env.staging", "edits": [{"old_string": "API_HOST=api.staging.internal", "new_string": "API_HOST=api.stage2.internal"}, {"old_string": "API_PORT=8443", "new_string": "API_PORT=9443"}]}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "multi_edit", "description": "Apply several surgical string replacements to one file in a single approved step (all-or-nothing). Gated by approval.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "edits": {"type": "array", "items": {"type": "object", "properties": {"old_string": {"type": "string"}, "new_string": {"type": "string"}}, "required": ["old_string", "new_string"]}}}, "required": ["path", "edits"]}}}]}
@@ -197,7 +197,7 @@ an integer too. A quoted number is a schema violation, not a stylistic choice.
    {"role": "system", "content": "You are Ronin. Process ids are JSON integers, never quoted strings."},
    {"role": "user", "content": "What has background process 7 printed lately?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "background_logs", "arguments": "{\"id\": 7}"}}
+     {"id": "c1", "type": "function", "function": {"name": "background_logs", "arguments": {"id": 7}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "background_logs", "description": "Read the most recent output (stdout+stderr) of a background process.", "parameters": {"type": "object", "properties": {"id": {"type": "integer"}, "lines": {"type": "integer"}}, "required": ["id"]}}}]}
@@ -209,7 +209,7 @@ an integer too. A quoted number is a schema violation, not a stylistic choice.
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately."},
    {"role": "user", "content": "Give me the last 120 lines of output from process 3."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "background_logs", "arguments": "{\"id\": 3, \"lines\": 120}"}}
+     {"id": "c1", "type": "function", "function": {"name": "background_logs", "arguments": {"id": 3, "lines": 120}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "background_logs", "description": "Read the most recent output (stdout+stderr) of a background process.", "parameters": {"type": "object", "properties": {"id": {"type": "integer"}, "lines": {"type": "integer"}}, "required": ["id"]}}}]}
@@ -221,7 +221,7 @@ an integer too. A quoted number is a schema violation, not a stylistic choice.
    {"role": "system", "content": "You are Ronin. stop_background takes a single integer id; no other keys exist."},
    {"role": "user", "content": "Background job 12 is stuck. Kill it."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "stop_background", "arguments": "{\"id\": 12}"}}
+     {"id": "c1", "type": "function", "function": {"name": "stop_background", "arguments": {"id": 12}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "stop_background", "description": "Stop (kill) a background process and its child tree by id.", "parameters": {"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]}}}]}
@@ -233,7 +233,7 @@ an integer too. A quoted number is a schema violation, not a stylistic choice.
    {"role": "system", "content": "You are Ronin, a coding agent. A call rejected for a type error is resent with the correct JSON types."},
    {"role": "user", "content": "Rejected: {\"name\": \"background_logs\", \"arguments\": {\"id\": \"4\", \"lines\": \"60\"}}. The schema wants integers, not strings. Fix and resend."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "background_logs", "arguments": "{\"id\": 4, \"lines\": 60}"}}
+     {"id": "c1", "type": "function", "function": {"name": "background_logs", "arguments": {"id": 4, "lines": 60}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "background_logs", "description": "Read the most recent output (stdout+stderr) of a background process.", "parameters": {"type": "object", "properties": {"id": {"type": "integer"}, "lines": {"type": "integer"}}, "required": ["id"]}}}]}
@@ -251,7 +251,7 @@ no arguments get an empty object, not invented filters.
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately."},
    {"role": "user", "content": "Open docs/adr/0007-event-sourcing.md."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"docs/adr/0007-event-sourcing.md\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "docs/adr/0007-event-sourcing.md"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 text file (relative to the project root).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}]}
@@ -263,7 +263,7 @@ no arguments get an empty object, not invented filters.
    {"role": "system", "content": "You are Ronin. Search queries are literal strings copied exactly, capitalization and punctuation included."},
    {"role": "user", "content": "Grep the services directory for the exact string X-Request-Id, with that capitalization."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"X-Request-Id\", \"directory\": \"services\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "X-Request-Id", "directory": "services"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "search_files", "description": "Grep for a literal string across files; returns file/line/text hits.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "directory": {"type": "string"}}, "required": ["query"]}}}]}
@@ -275,7 +275,7 @@ no arguments get an empty object, not invented filters.
    {"role": "system", "content": "You are Ronin, a coding agent. Glob patterns go into the pattern argument exactly as requested."},
    {"role": "user", "content": "Find every *.spec.tsx file anywhere under packages/web."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "glob", "arguments": "{\"pattern\": \"**/*.spec.tsx\", \"directory\": \"packages/web\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "glob", "arguments": {"pattern": "**/*.spec.tsx", "directory": "packages/web"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "glob", "description": "Find files by glob pattern (e.g. '**/*.py', 'src/*.ts') relative to a directory.", "parameters": {"type": "object", "properties": {"pattern": {"type": "string"}, "directory": {"type": "string"}}, "required": ["pattern"]}}}]}
@@ -287,7 +287,7 @@ no arguments get an empty object, not invented filters.
    {"role": "system", "content": "You are Ronin. repo_map takes a query string and an integer k; a requested result count becomes k."},
    {"role": "user", "content": "Where is rate limiting implemented? Give me the top 5 ranked files."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "repo_map", "arguments": "{\"query\": \"where is rate limiting implemented\", \"k\": 5}"}}
+     {"id": "c1", "type": "function", "function": {"name": "repo_map", "arguments": {"query": "where is rate limiting implemented", "k": 5}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "repo_map", "description": "Relevance-ranked code search: give a concept or question and get the most relevant files plus their symbol outlines.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "k": {"type": "integer"}}, "required": ["query"]}}}]}
@@ -299,7 +299,7 @@ no arguments get an empty object, not invented filters.
    {"role": "system", "content": "You are Ronin. background_status takes no arguments; send an empty object, never invented filters."},
    {"role": "user", "content": "Which of my background jobs are still alive?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "background_status", "arguments": "{}"}}
+     {"id": "c1", "type": "function", "function": {"name": "background_status", "arguments": {}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "background_status", "description": "List the background processes and whether each is running or has exited.", "parameters": {"type": "object", "properties": {}}}}]}
@@ -317,7 +317,7 @@ commands keep the same `command` key under `run_background`.
    {"role": "system", "content": "You are Ronin, a coding agent. A dictated command goes into the command argument exactly as typed."},
    {"role": "user", "content": "Run exactly: pytest tests/unit -k \"parser and not slow\" -q"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"pytest tests/unit -k \\\"parser and not slow\\\" -q\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "pytest tests/unit -k \"parser and not slow\" -q"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "run_command", "description": "Run a shell command in the project root. Gated by approval.", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}}]}
@@ -329,7 +329,7 @@ commands keep the same `command` key under `run_background`.
    {"role": "system", "content": "You are Ronin. run_background's only argument key is command; correct rejected calls by resending with the schema's key."},
    {"role": "user", "content": "The runtime bounced this: {\"name\": \"run_background\", \"arguments\": {\"cmd\": \"npm run dev -- --port 5173\"}}. The key is wrong. Emit the valid call."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_background", "arguments": "{\"command\": \"npm run dev -- --port 5173\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_background", "arguments": {"command": "npm run dev -- --port 5173"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "run_background", "description": "Start a long-running command in the background and return immediately with a process id. Gated by approval.", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}}]}
@@ -341,7 +341,7 @@ commands keep the same `command` key under `run_background`.
    {"role": "system", "content": "You are Ronin, a coding agent. Dictated file content is written exactly as given."},
    {"role": "user", "content": "Create .nvmrc containing exactly one line: 20.11.1"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "write_file", "arguments": "{\"path\": \".nvmrc\", \"content\": \"20.11.1\\n\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "write_file", "arguments": {"path": ".nvmrc", "content": "20.11.1\n"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "write_file", "description": "Create a file or fully overwrite it. Gated by approval. Prefer edit_file for changes to existing files.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}}}]}

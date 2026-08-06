@@ -17,7 +17,7 @@ depends on — all of it is text one read away. The turn is the call, nothing el
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately."},
    {"role": "user", "content": "Before I fix these warnings — what does `npm run lint` actually invoke here?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"package.json\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "package.json"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 text file (relative to the project root).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}]}
@@ -29,7 +29,7 @@ depends on — all of it is text one read away. The turn is the call, nothing el
    {"role": "system", "content": "You are Ronin, a coding agent. Config questions are answered by reading the file — call the tool at once, no narration."},
    {"role": "user", "content": "What test runner does the api workspace use? Its manifest is at packages/api/package.json."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"packages/api/package.json\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "packages/api/package.json"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 text file (relative to the project root).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}]}
@@ -41,7 +41,7 @@ depends on — all of it is text one read away. The turn is the call, nothing el
    {"role": "system", "content": "You are Ronin, a coding agent. Never recite a repo's config from memory; emit the read call first."},
    {"role": "user", "content": "Which package globs are included in our pnpm workspace?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"pnpm-workspace.yaml\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "pnpm-workspace.yaml"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 text file (relative to the project root).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}]}
@@ -53,7 +53,7 @@ depends on — all of it is text one read away. The turn is the call, nothing el
    {"role": "system", "content": "You are Ronin, a coding agent. If a tool can answer it, the structured call is your entire turn."},
    {"role": "user", "content": "Does the turbo build task depend on its upstream packages' builds?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"turbo.json\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "turbo.json"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 text file (relative to the project root).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}]}
@@ -70,7 +70,7 @@ config file is the authority, and the first token of the turn is the call that o
    {"role": "system", "content": "You are Ronin, a coding agent. Read first, answer after — emit the tool call immediately."},
    {"role": "user", "content": "Quick check: is noImplicitAny turned on in the root tsconfig?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"tsconfig.json\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "tsconfig.json"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 text file (relative to the project root).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}]}
@@ -82,7 +82,7 @@ config file is the authority, and the first token of the turn is the call that o
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately."},
    {"role": "user", "content": "What jsx setting does packages/web/tsconfig.json compile with?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"packages/web/tsconfig.json\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "packages/web/tsconfig.json"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 text file (relative to the project root).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}]}
@@ -94,7 +94,7 @@ config file is the authority, and the first token of the turn is the call that o
    {"role": "system", "content": "You are Ronin, a coding agent. Config questions are answered by reading the file — call the tool at once, no narration."},
    {"role": "user", "content": "A teammate claims no-console is only a warning for us. What does .eslintrc.cjs actually set it to?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \".eslintrc.cjs\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": ".eslintrc.cjs"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 text file (relative to the project root).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}]}
@@ -106,7 +106,7 @@ config file is the authority, and the first token of the turn is the call that o
    {"role": "system", "content": "You are Ronin, a coding agent. Never recite a repo's config from memory; emit the read call first."},
    {"role": "user", "content": "Do our unit tests run under jsdom or node? Check the vitest config."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"vitest.config.ts\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "vitest.config.ts"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 text file (relative to the project root).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}]}
@@ -118,7 +118,7 @@ config file is the authority, and the first token of the turn is the call that o
    {"role": "system", "content": "You are Ronin, a coding agent. If a tool can answer it, the structured call is your entire turn."},
    {"role": "user", "content": "Which browsers are listed in the projects section of playwright.config.ts?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"playwright.config.ts\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "playwright.config.ts"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 text file (relative to the project root).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}]}
@@ -150,7 +150,7 @@ answer is a read or a glob emitted on the spot.
    {"role": "system", "content": "You are Ronin, a coding agent. Read first, answer after — emit the tool call immediately."},
    {"role": "user", "content": "What port does docker/api.Dockerfile expose?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"docker/api.Dockerfile\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "docker/api.Dockerfile"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 text file (relative to the project root).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}]}
@@ -162,7 +162,7 @@ answer is a read or a glob emitted on the spot.
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately."},
    {"role": "user", "content": "Name every service docker-compose.yml brings up."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"docker-compose.yml\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "docker-compose.yml"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 text file (relative to the project root).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}]}
@@ -174,7 +174,7 @@ answer is a read or a glob emitted on the spot.
    {"role": "system", "content": "You are Ronin, a coding agent. Config questions are answered by reading the file — call the tool at once, no narration."},
    {"role": "user", "content": "How many Dockerfiles are scattered around this repo? Find them all."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "glob", "arguments": "{\"pattern\": \"**/*Dockerfile*\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "glob", "arguments": {"pattern": "**/*Dockerfile*"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "glob", "description": "Find files by glob pattern (e.g. '**/*.py', 'src/*.ts') relative to a directory.", "parameters": {"type": "object", "properties": {"pattern": {"type": "string"}, "directory": {"type": "string"}}, "required": ["pattern"]}}}]}
@@ -207,7 +207,7 @@ read, searched, or listed — never paraphrased from what CI files usually conta
    {"role": "system", "content": "You are Ronin, a coding agent. Never recite a repo's config from memory; emit the read call first."},
    {"role": "user", "content": "Which branches can trigger .github/workflows/deploy.yml?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \".github/workflows/deploy.yml\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": ".github/workflows/deploy.yml"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 text file (relative to the project root).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}]}
@@ -219,7 +219,7 @@ read, searched, or listed — never paraphrased from what CI files usually conta
    {"role": "system", "content": "You are Ronin, a coding agent. If a tool can answer it, the structured call is your entire turn."},
    {"role": "user", "content": "What Node versions does the CI matrix in .github/workflows/test.yml cover?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \".github/workflows/test.yml\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": ".github/workflows/test.yml"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 text file (relative to the project root).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}]}
@@ -231,7 +231,7 @@ read, searched, or listed — never paraphrased from what CI files usually conta
    {"role": "system", "content": "You are Ronin, a coding agent. Read first, answer after — emit the tool call immediately."},
    {"role": "user", "content": "Do any of our workflows use actions/cache? Search the workflows directory."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"actions/cache\", \"directory\": \".github/workflows\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "actions/cache", "directory": ".github/workflows"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "search_files", "description": "Grep for a literal string across files; returns file/line/text hits.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "directory": {"type": "string"}}, "required": ["query"]}}}]}
@@ -243,7 +243,7 @@ read, searched, or listed — never paraphrased from what CI files usually conta
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately."},
    {"role": "user", "content": "What's checked in under the .github directory?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "list_files", "arguments": "{\"directory\": \".github\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "list_files", "arguments": {"directory": ".github"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "list_files", "description": "List files under a directory, optionally glob-filtered. Skips .git/node_modules/.venv.", "parameters": {"type": "object", "properties": {"directory": {"type": "string"}, "pattern": {"type": "string"}}}}}]}
@@ -268,7 +268,7 @@ variable is consumed is a grep. Each is one immediate call.
    {"role": "system", "content": "You are Ronin, a coding agent. Config questions are answered by reading the file — call the tool at once, no narration."},
    {"role": "user", "content": "What environment variables does the app expect? The example env file should say."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \".env.example\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": ".env.example"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 text file (relative to the project root).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}]}
@@ -280,7 +280,7 @@ variable is consumed is a grep. Each is one immediate call.
    {"role": "system", "content": "You are Ronin, a coding agent. Never recite a repo's config from memory; emit the read call first."},
    {"role": "user", "content": "Which Node version does .nvmrc pin?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \".nvmrc\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": ".nvmrc"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 text file (relative to the project root).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}]}
@@ -292,7 +292,7 @@ variable is consumed is a grep. Each is one immediate call.
    {"role": "system", "content": "You are Ronin, a coding agent. If a tool can answer it, the structured call is your entire turn."},
    {"role": "user", "content": "Where in the codebase do we read DATABASE_URL?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"DATABASE_URL\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "DATABASE_URL"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "search_files", "description": "Grep for a literal string across files; returns file/line/text hits.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "directory": {"type": "string"}}, "required": ["query"]}}}]}
@@ -317,7 +317,7 @@ targets — deployment questions resolve to a file path and an immediate read.
    {"role": "system", "content": "You are Ronin, a coding agent. Read first, answer after — emit the tool call immediately."},
    {"role": "user", "content": "What publish directory does netlify.toml deploy from?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"netlify.toml\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "netlify.toml"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 text file (relative to the project root).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}]}
@@ -329,7 +329,7 @@ targets — deployment questions resolve to a file path and an immediate read.
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately."},
    {"role": "user", "content": "Which region is the app pinned to in fly.toml?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"fly.toml\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "fly.toml"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 text file (relative to the project root).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}]}
@@ -341,7 +341,7 @@ targets — deployment questions resolve to a file path and an immediate read.
    {"role": "system", "content": "You are Ronin, a coding agent. Config questions are answered by reading the file — call the tool at once, no narration."},
    {"role": "user", "content": "What upstream does deploy/nginx.conf proxy traffic to?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"deploy/nginx.conf\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "deploy/nginx.conf"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 text file (relative to the project root).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}]}
@@ -353,7 +353,7 @@ targets — deployment questions resolve to a file path and an immediate read.
    {"role": "system", "content": "You are Ronin, a coding agent. Never recite a repo's config from memory; emit the read call first."},
    {"role": "user", "content": "How many replicas does k8s/web-deployment.yaml ask for?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"k8s/web-deployment.yaml\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "k8s/web-deployment.yaml"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 text file (relative to the project root).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}]}
@@ -365,7 +365,7 @@ targets — deployment questions resolve to a file path and an immediate read.
    {"role": "system", "content": "You are Ronin, a coding agent. If a tool can answer it, the structured call is your entire turn."},
    {"role": "user", "content": "Which AWS region does infra/main.tf configure the provider for?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"infra/main.tf\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "infra/main.tf"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 text file (relative to the project root).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}]}
@@ -377,7 +377,7 @@ targets — deployment questions resolve to a file path and an immediate read.
    {"role": "system", "content": "You are Ronin, a coding agent. Read first, answer after — emit the tool call immediately."},
    {"role": "user", "content": "What steps does `make deploy` run? The Makefile is at the repo root."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"Makefile\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "Makefile"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 text file (relative to the project root).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}]}

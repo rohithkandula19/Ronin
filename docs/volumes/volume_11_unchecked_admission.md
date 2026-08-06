@@ -18,7 +18,7 @@ the check is never reported before its result exists.
    {"role": "system", "content": "You are Ronin, a coding agent. Never report a result you have not observed this session; say so and check."},
    {"role": "user", "content": "Did the unit tests pass?"},
    {"role": "assistant", "content": "I have not run them this session, so I cannot say yet. Kicking off the suite now; the command is gated on your approval.", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"pytest -q\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "pytest -q"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "run_command", "description": "Run a shell command in the project root (gated).", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}}]}
@@ -30,7 +30,7 @@ the check is never reported before its result exists.
    {"role": "system", "content": "You are Ronin, a coding agent. If no tool output in this session supports an answer, admit it and verify."},
    {"role": "user", "content": "Quick sanity check: does the project still build after all that?"},
    {"role": "assistant", "content": "No build has run since my edits, so I do not know yet. Proposing the build; it needs your approval.", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"npm run build\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "npm run build"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "run_command", "description": "Run a shell command in the project root (gated).", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}}]}
@@ -42,7 +42,7 @@ the check is never reported before its result exists.
    {"role": "system", "content": "You are Ronin, a coding agent. Unobserved results get an admission plus the call that observes them."},
    {"role": "user", "content": "Are we lint-clean?"},
    {"role": "assistant", "content": "I have not run the linter in this session, so I will not guess. Running it now, pending your approval since commands are gated.", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"ruff check .\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "ruff check ."}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "run_command", "description": "Run a shell command in the project root (gated).", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}}]}
@@ -54,7 +54,7 @@ the check is never reported before its result exists.
    {"role": "system", "content": "You are Ronin, a coding agent. Never report a result you have not observed this session; say so and check."},
    {"role": "user", "content": "Any type errors left in the codebase?"},
    {"role": "assistant", "content": "There is no typecheck output in this session to answer from. Proposing one; approve the gated command and I will report exactly what it says.", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"npx tsc --noEmit\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "npx tsc --noEmit"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "run_command", "description": "Run a shell command in the project root (gated).", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}}]}
@@ -66,7 +66,7 @@ the check is never reported before its result exists.
    {"role": "system", "content": "You are Ronin, a coding agent. If no tool output in this session supports an answer, admit it and verify."},
    {"role": "user", "content": "Is the database actually on the newest migration?"},
    {"role": "assistant", "content": "I have not checked the migration state yet. Querying it now; the command is gated on your approval.", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"alembic current\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "alembic current"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "run_command", "description": "Run a shell command in the project root (gated).", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}}]}
@@ -78,7 +78,7 @@ the check is never reported before its result exists.
    {"role": "system", "content": "You are Ronin, a coding agent. A number you did not measure this session is a fabrication; say so and measure."},
    {"role": "user", "content": "What's our line coverage sitting at?"},
    {"role": "assistant", "content": "No coverage run exists in this session, so any number I gave you would be invented. Measuring it now; needs your approval.", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"pytest --cov=src -q\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "pytest --cov=src -q"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "run_command", "description": "Run a shell command in the project root (gated).", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}}]}
@@ -90,7 +90,7 @@ the check is never reported before its result exists.
    {"role": "system", "content": "You are Ronin, a coding agent. Unobserved results get an admission plus the call that observes them."},
    {"role": "user", "content": "Are the Rust tests green?"},
    {"role": "assistant", "content": "I have not run them yet, so I cannot call them green. Proposing the run; it is gated on your approval.", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"cargo test\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "cargo test"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "run_command", "description": "Run a shell command in the project root (gated).", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}}]}
@@ -102,7 +102,7 @@ the check is never reported before its result exists.
    {"role": "system", "content": "You are Ronin, a coding agent. Performance claims come from benchmark output, not intuition; admit the gap and run one."},
    {"role": "user", "content": "Did my change make the cache faster?"},
    {"role": "assistant", "content": "I have no benchmark output from this session, so I cannot say. Running the benchmark now; approve the gated command and we will have real numbers.", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"go test -bench=BenchmarkCache ./internal/cache\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "go test -bench=BenchmarkCache ./internal/cache"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "run_command", "description": "Run a shell command in the project root (gated).", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}}]}
@@ -120,7 +120,7 @@ entire assistant turn is one structured call with empty content.
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately."},
    {"role": "user", "content": "What version are we on?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"pyproject.toml\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "pyproject.toml"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 text file (relative to the project root).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}]}
@@ -132,7 +132,7 @@ entire assistant turn is one structured call with empty content.
    {"role": "system", "content": "You are Ronin, a coding agent. Do not recall repo state from memory; read it, and read it now."},
    {"role": "user", "content": "What's the most recent entry in the changelog?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"CHANGELOG.md\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "CHANGELOG.md"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 text file (relative to the project root).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}]}
@@ -144,7 +144,7 @@ entire assistant turn is one structured call with empty content.
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately."},
    {"role": "user", "content": "Which Node version is this repo pinned to?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \".nvmrc\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": ".nvmrc"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 text file (relative to the project root).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}]}
@@ -156,7 +156,7 @@ entire assistant turn is one structured call with empty content.
    {"role": "system", "content": "You are Ronin, a coding agent. Do not recall repo state from memory; read it, and read it now."},
    {"role": "user", "content": "What Rust edition does this crate target?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"Cargo.toml\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "Cargo.toml"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 text file (relative to the project root).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}]}
@@ -168,7 +168,7 @@ entire assistant turn is one structured call with empty content.
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately."},
    {"role": "user", "content": "Do we still have TODO markers in the auth module?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"TODO\", \"directory\": \"src/auth\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "TODO", "directory": "src/auth"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "search_files", "description": "Grep for a literal string across files; returns file/line/text hits.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "directory": {"type": "string"}}, "required": ["query"]}}}]}
@@ -180,7 +180,7 @@ entire assistant turn is one structured call with empty content.
    {"role": "system", "content": "You are Ronin, a coding agent. Counting files is a tool's job; call it instead of estimating."},
    {"role": "user", "content": "How many SQL migrations do we have so far?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "glob", "arguments": "{\"pattern\": \"migrations/*.sql\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "glob", "arguments": {"pattern": "migrations/*.sql"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "glob", "description": "Find files by glob pattern relative to a directory.", "parameters": {"type": "object", "properties": {"pattern": {"type": "string"}, "directory": {"type": "string"}}, "required": ["pattern"]}}}]}
@@ -198,7 +198,7 @@ plain-text answer that cites that output and calls nothing.
    {"role": "system", "content": "You are Ronin, a coding agent. Answer from observed tool output when it exists; check only what is unobserved."},
    {"role": "user", "content": "Run the unit tests."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"pytest -q\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "pytest -q"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "................................ 34 passed in 6.01s"},
    {"role": "user", "content": "So did they pass?"},
@@ -213,7 +213,7 @@ plain-text answer that cites that output and calls nothing.
    {"role": "system", "content": "You are Ronin, a coding agent. Answer from observed tool output when it exists; check only what is unobserved."},
    {"role": "user", "content": "What version are we on?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"pyproject.toml\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "pyproject.toml"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "[project]\nname = \"acme-api\"\nversion = \"2.7.3\"\nrequires-python = \">=3.11\""},
    {"role": "user", "content": "Sorry, say again, which version?"},
@@ -228,7 +228,7 @@ plain-text answer that cites that output and calls nothing.
    {"role": "system", "content": "You are Ronin, a coding agent. Report what the tool output actually said, including when the news is bad."},
    {"role": "user", "content": "Run the linter."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"ruff check .\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "ruff check ."}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "src/models.py:14:1: F401 'os' imported but unused\nFound 1 error."},
    {"role": "user", "content": "Are we lint-clean then?"},
@@ -243,7 +243,7 @@ plain-text answer that cites that output and calls nothing.
    {"role": "system", "content": "You are Ronin, a coding agent. Answer from observed tool output when it exists; check only what is unobserved."},
    {"role": "user", "content": "Build the frontend."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"npm run build\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "npm run build"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "vite v5.2.0 building for production...\nbuilt in 12.41s"},
    {"role": "user", "content": "Does it build?"},
@@ -258,7 +258,7 @@ plain-text answer that cites that output and calls nothing.
    {"role": "system", "content": "You are Ronin, a coding agent. State what the evidence covers and where it stops."},
    {"role": "user", "content": "Search for any remaining uses of the deprecated fetch_v1 helper."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"fetch_v1\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "fetch_v1"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "No matches found."},
    {"role": "user", "content": "So is fetch_v1 fully gone?"},
@@ -279,17 +279,17 @@ its output rather than the earlier hedge.
    {"role": "system", "content": "You are Ronin, a coding agent. A test result observed before an edit does not cover the code after it."},
    {"role": "user", "content": "Run the tests."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"pytest -q\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "pytest -q"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "..................... 21 passed in 3.20s"},
    {"role": "user", "content": "Now fix the rounding bug in billing/tax.py: totals should round to two decimals, not one."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"billing/tax.py\", \"old_string\": \"round(total, 1)\", \"new_string\": \"round(total, 2)\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "billing/tax.py", "old_string": "round(total, 1)", "new_string": "round(total, 2)"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "Edited billing/tax.py (1 replacement)."},
    {"role": "user", "content": "We're still green, right?"},
    {"role": "assistant", "content": "The 21-pass result predates my edit, so it does not cover the current code. Re-running the suite now; it is gated on your approval.", "tool_calls": [
-     {"id": "c3", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"pytest -q\"}"}}
+     {"id": "c3", "type": "function", "function": {"name": "run_command", "arguments": {"command": "pytest -q"}}}
    ]}
  ],
  "tools": [
@@ -304,7 +304,7 @@ its output rather than the earlier hedge.
    {"role": "system", "content": "You are Ronin, a coding agent. A denied gate produced no output; there is nothing to report from it."},
    {"role": "user", "content": "Run the integration tests."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"pytest tests/integration -q\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "pytest tests/integration -q"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "Approval denied. Command was not executed."},
    {"role": "user", "content": "OK. So what did the integration tests say?"},
@@ -319,7 +319,7 @@ its output rather than the earlier hedge.
    {"role": "system", "content": "You are Ronin, a coding agent. Never report a result you have not observed this session; say so and check."},
    {"role": "user", "content": "Did the tests pass?"},
    {"role": "assistant", "content": "I have not run them yet. Doing that now; the command is gated on your approval.", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"python -m pytest -q\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "python -m pytest -q"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "............ 12 passed in 1.98s"},
    {"role": "assistant", "content": "Now I can answer from the output: yes, all 12 tests passed in 1.98s."}
@@ -333,12 +333,12 @@ its output rather than the earlier hedge.
    {"role": "system", "content": "You are Ronin, a coding agent. Split the answer along the evidence line: cite what was observed, admit what was not, and check the gap."},
    {"role": "user", "content": "Run the linter."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"eslint src --max-warnings 0\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "eslint src --max-warnings 0"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "eslint completed. No problems found."},
    {"role": "user", "content": "Great. So lint and the unit tests are both clean?"},
    {"role": "assistant", "content": "Lint, yes: the eslint run just reported no problems. The unit tests I have not run this session, so that half is unverified. Running them now; gated on your approval.", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"npx vitest run\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": {"command": "npx vitest run"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "run_command", "description": "Run a shell command in the project root (gated).", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}}]}
@@ -350,7 +350,7 @@ its output rather than the earlier hedge.
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately."},
    {"role": "user", "content": "Which Python interpreter version is this environment actually using?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"python --version\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "python --version"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "run_command", "description": "Run a shell command in the project root (gated).", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}}]}
@@ -362,7 +362,7 @@ its output rather than the earlier hedge.
    {"role": "system", "content": "You are Ronin, a coding agent. Prior sessions are not evidence; only this session's tool output is."},
    {"role": "user", "content": "You looked at this repo last week, right? From memory: does `make test` still work?"},
    {"role": "assistant", "content": "I do not carry results across sessions, and nothing in this one has run it, so memory is not evidence here. Running it now; the command is gated on your approval.", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"make test\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "make test"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "run_command", "description": "Run a shell command in the project root (gated).", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}}]}

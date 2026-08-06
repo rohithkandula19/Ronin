@@ -58,3 +58,11 @@ what training renders. The fixes that can actually move the metric are:
 
 None of this requires abandoning the kill criteria: 4/4 + >60/91 stands; the next
 training cycle simply attacks the real gaps instead of a phantom format bug.
+
+## Completion note
+
+The source volumes were subsequently migrated to the canonical representation:
+all 1,015 tool-call `arguments` values in the affected `ronin-sft` records are
+now JSON objects rather than JSON-encoded strings. The migration is deliberately
+limited to machine-readable SFT blocks; prose examples remain unchanged. The
+strict dataset build and the training regression suite validate this invariant.

@@ -19,11 +19,11 @@ immediately as the next structured call.
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately."},
    {"role": "user", "content": "Find where loglevel is set for the collector service."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"loglevel\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "loglevel"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "no matches found for \"loglevel\""},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"LogLevel\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "search_files", "arguments": {"query": "LogLevel"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "search_files", "description": "Grep for a literal string across files; returns file/line/text hits.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "directory": {"type": "string"}}, "required": ["query"]}}}]}
@@ -35,11 +35,11 @@ immediately as the next structured call.
    {"role": "system", "content": "You are Ronin, a coding agent. An empty search result means the next output is a better search call, not a guess."},
    {"role": "user", "content": "What is max_retries set to for the job queue?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"max_retries\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "max_retries"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "no matches found for \"max_retries\""},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"maxRetries\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "search_files", "arguments": {"query": "maxRetries"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "src/queue/worker.ts:9:   maxRetries: 5,\nsrc/queue/worker.ts:24:   if (job.attempts >= opts.maxRetries) {"},
    {"role": "assistant", "content": "5. This is a TypeScript codebase, so the option is camelCased: `maxRetries: 5` at `src/queue/worker.ts` line 9, enforced at line 24 where a job is dropped once `job.attempts` reaches it. The snake_case spelling never appears, which is why the first grep was empty."}
@@ -53,11 +53,11 @@ immediately as the next structured call.
    {"role": "system", "content": "You are Ronin, a coding agent. Retry an empty search with a smarter query at once; never invent a hit."},
    {"role": "user", "content": "Where is jwt_secret configured?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"jwt_secret\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "jwt_secret"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "no matches found for \"jwt_secret\""},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"JWT_SECRET\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "search_files", "arguments": {"query": "JWT_SECRET"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "config/settings.py:19: JWT_SECRET = os.environ[\"JWT_SECRET\"]\n.env.example:4: JWT_SECRET=change-me"},
    {"role": "assistant", "content": "It is the uppercase constant `JWT_SECRET`: read from the environment with no fallback at `config/settings.py` line 19 (a missing variable raises `KeyError` at import), with a `change-me` placeholder documented in `.env.example` line 4. The lowercase spelling exists nowhere, hence the empty first grep."}
@@ -71,11 +71,11 @@ immediately as the next structured call.
    {"role": "system", "content": "You are Ronin, a coding agent. Empty results escalate the search; conclusions quote only what tools returned."},
    {"role": "user", "content": "Which migration creates the orders table? Grep for CREATE TABLE orders."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"CREATE TABLE orders\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "CREATE TABLE orders"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "no matches found for \"CREATE TABLE orders\""},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"create table\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "search_files", "arguments": {"query": "create table"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "db/migrations/0001_init.sql:1: create table if not exists users (\ndb/migrations/0003_orders.sql:1: create table if not exists orders ("},
    {"role": "assistant", "content": "`db/migrations/0003_orders.sql` — line 1 reads `create table if not exists orders (`. The migrations write their DDL in lowercase with `if not exists`, so the uppercase exact phrase you gave me matches nothing; only `0001_init.sql` (users) and `0003_orders.sql` (orders) create tables at all."}
@@ -111,11 +111,11 @@ name). The retry carries the loosened literal and nothing else.
    {"role": "system", "content": "You are Ronin, a coding agent. If the first probe is empty, the very next output is the second probe."},
    {"role": "user", "content": "Where is handle_payment_webhook defined?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"def handle_payment_webhook\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "def handle_payment_webhook"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "no matches found for \"def handle_payment_webhook\""},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"payment_webhook\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "search_files", "arguments": {"query": "payment_webhook"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "search_files", "description": "Grep for a literal string across files; returns file/line/text hits.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "directory": {"type": "string"}}, "required": ["query"]}}}]}
@@ -127,11 +127,11 @@ name). The retry carries the loosened literal and nothing else.
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately."},
    {"role": "user", "content": "Do we mention pre_commit anywhere in this repo?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"pre_commit\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "pre_commit"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "no matches found for \"pre_commit\""},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"pre-commit\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "search_files", "arguments": {"query": "pre-commit"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "search_files", "description": "Grep for a literal string across files; returns file/line/text hits.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "directory": {"type": "string"}}, "required": ["query"]}}}]}
@@ -143,11 +143,11 @@ name). The retry carries the loosened literal and nothing else.
    {"role": "system", "content": "You are Ronin, a coding agent. An empty search result means the next output is a better search call, not a guess."},
    {"role": "user", "content": "Where is sanitize_filename! defined?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"def sanitize_filename!\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "def sanitize_filename!"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "no matches found for \"def sanitize_filename!\""},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"sanitize_filename\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "search_files", "arguments": {"query": "sanitize_filename"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "lib/uploads/naming.rb:12: def sanitize_filename(raw)\napp/models/attachment.rb:31:     name = Uploads::Naming.sanitize_filename(file.original_name)"},
    {"role": "assistant", "content": "There is no bang variant. The method is the plain `sanitize_filename(raw)` at `lib/uploads/naming.rb` line 12, called from `app/models/attachment.rb` line 31 on `file.original_name`. If you were expecting a mutating `!` version, it does not exist in this repo — the non-bang one is the only definition the grep found."}
@@ -161,11 +161,11 @@ name). The retry carries the loosened literal and nothing else.
    {"role": "system", "content": "You are Ronin, a coding agent. Retry an empty search with a smarter query at once; never invent a hit."},
    {"role": "user", "content": "Where do we read SMTP_HOST? The mailer needs pointing at the new relay."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"SMTP_HOST\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "SMTP_HOST"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "no matches found for \"SMTP_HOST\""},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"SMTP\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "search_files", "arguments": {"query": "SMTP"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "config/runtime.exs:24:   host: System.get_env(\"SMTP_RELAY_HOST\", \"localhost\"),\nconfig/runtime.exs:25:   port: String.to_integer(System.get_env(\"SMTP_RELAY_PORT\", \"587\")),"},
    {"role": "assistant", "content": "The variable is named `SMTP_RELAY_HOST`, not `SMTP_HOST` — read at `config/runtime.exs` line 24 with a `localhost` default, alongside `SMTP_RELAY_PORT` (default 587) on line 25. To point the mailer at the new relay, set `SMTP_RELAY_HOST` in the runtime environment; nothing in the repo reads the shorter name."}
@@ -179,11 +179,11 @@ name). The retry carries the loosened literal and nothing else.
    {"role": "system", "content": "You are Ronin, a coding agent. Empty results escalate the search; conclusions quote only what tools returned."},
    {"role": "user", "content": "Where do we call load_dotenv? I want to see which env file it loads."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"load_dotenv\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "load_dotenv"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "no matches found for \"load_dotenv\""},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"dotenv\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "search_files", "arguments": {"query": "dotenv"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "pyproject.toml:12:     \"python-dotenv>=1.0\","},
    {"role": "assistant", "content": "We never call it. `python-dotenv` is declared as a dependency at `pyproject.toml` line 12, but that dependency line is the only place the word `dotenv` appears — no module imports it and `load_dotenv` is called nowhere. So no env file is being loaded through it; the package looks vestigial, or the loading you remember happens outside this repo (a container entrypoint, for example)."}
@@ -222,11 +222,11 @@ vocabulary: the verb the team actually used, or the vendor they actually integra
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately."},
    {"role": "user", "content": "Show me download_artifact — the CI helper that pulls build outputs."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"download_artifact\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "download_artifact"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "no matches found for \"download_artifact\""},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"fetch_artifact\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "search_files", "arguments": {"query": "fetch_artifact"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "search_files", "description": "Grep for a literal string across files; returns file/line/text hits.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "directory": {"type": "string"}}, "required": ["query"]}}}]}
@@ -238,11 +238,11 @@ vocabulary: the verb the team actually used, or the vendor they actually integra
    {"role": "system", "content": "You are Ronin, a coding agent. If the first probe is empty, the very next output is the second probe."},
    {"role": "user", "content": "Find the shutdown_hook for the worker process."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"shutdown_hook\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "shutdown_hook"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "no matches found for \"shutdown_hook\""},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"teardown\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "search_files", "arguments": {"query": "teardown"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "worker/lifecycle.py:18: def teardown(signum, frame):\nworker/main.py:7: signal.signal(signal.SIGTERM, lifecycle.teardown)"},
    {"role": "assistant", "content": "This codebase calls it `teardown`, not `shutdown_hook`: defined as a signal handler `teardown(signum, frame)` at `worker/lifecycle.py` line 18 and registered for SIGTERM at `worker/main.py` line 7. No identifier named `shutdown_hook` exists, which is why the first grep was empty."}
@@ -256,11 +256,11 @@ vocabulary: the verb the team actually used, or the vendor they actually integra
    {"role": "system", "content": "You are Ronin, a coding agent. An empty search result means the next output is a better search call, not a guess."},
    {"role": "user", "content": "Where do we initialize Sentry?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"sentry\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "sentry"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "no matches found for \"sentry\""},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "repo_map", "arguments": "{\"query\": \"error reporting client initialization\", \"k\": 4}"}}
+     {"id": "c2", "type": "function", "function": {"name": "repo_map", "arguments": {"query": "error reporting client initialization", "k": 4}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "1. src/telemetry/rollbar.ts  (initErrorReporting, captureError)\n2. src/main.ts  (bootstrap)\n3. src/config.ts  (config)"},
    {"role": "assistant", "content": "We don't use Sentry — error reporting here is Rollbar. The concept search ranks `src/telemetry/rollbar.ts` first, with `initErrorReporting` and `captureError` in its outline, and nothing Sentry-flavored surfaced anywhere, so there is no Sentry integration under any casing. I haven't read the Rollbar file yet; want me to open it to see how `initErrorReporting` is wired into `bootstrap`?"}
@@ -298,11 +298,11 @@ jumps tiers: from the literal to a glob over the names such a file would carry.
    {"role": "system", "content": "You are Ronin, a coding agent. Retry an empty search with a smarter query at once; never invent a hit."},
    {"role": "user", "content": "Where's the SessionMiddleware class?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"SessionMiddleware\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "SessionMiddleware"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "no matches found for \"SessionMiddleware\""},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "glob", "arguments": "{\"pattern\": \"**/*middleware*\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "glob", "arguments": {"pattern": "**/*middleware*"}}}
    ]}
  ],
  "tools": [
@@ -317,11 +317,11 @@ jumps tiers: from the literal to a glob over the names such a file would carry.
    {"role": "system", "content": "You are Ronin, a coding agent. Empty results escalate the search; conclusions quote only what tools returned."},
    {"role": "user", "content": "Where's the CircuitBreaker type in this Go repo?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"CircuitBreaker\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "CircuitBreaker"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "no matches found for \"CircuitBreaker\""},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "glob", "arguments": "{\"pattern\": \"**/*breaker*\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "glob", "arguments": {"pattern": "**/*breaker*"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "pkg/resilience/breaker.go"},
    {"role": "assistant", "content": "There is no type literally named `CircuitBreaker` anywhere — that grep had zero hits. The one breaker-flavored file is `pkg/resilience/breaker.go`, so the implementation almost certainly lives there under a different name (Go style would suggest `resilience.Breaker`), but I haven't read it yet and won't name the type until I have. Want me to open it?"}
@@ -339,11 +339,11 @@ jumps tiers: from the literal to a glob over the names such a file would carry.
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately."},
    {"role": "user", "content": "List the JSX component files under src."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "glob", "arguments": "{\"pattern\": \"**/*.jsx\", \"directory\": \"src\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "glob", "arguments": {"pattern": "**/*.jsx", "directory": "src"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "no files match pattern \"**/*.jsx\" under src/"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "glob", "arguments": "{\"pattern\": \"**/*.tsx\", \"directory\": \"src\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "glob", "arguments": {"pattern": "**/*.tsx", "directory": "src"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "glob", "description": "Find files by glob pattern (e.g. '**/*.py', 'src/*.ts') relative to a directory.", "parameters": {"type": "object", "properties": {"pattern": {"type": "string"}, "directory": {"type": "string"}}, "required": ["pattern"]}}}]}
@@ -355,11 +355,11 @@ jumps tiers: from the literal to a glob over the names such a file would carry.
    {"role": "system", "content": "You are Ronin, a coding agent. An empty search result means the next output is a better search call, not a guess."},
    {"role": "user", "content": "What GitHub Actions workflows do we have? They're the .yaml files in .github/workflows."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "glob", "arguments": "{\"pattern\": \".github/workflows/*.yaml\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "glob", "arguments": {"pattern": ".github/workflows/*.yaml"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "no files match pattern \".github/workflows/*.yaml\""},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "glob", "arguments": "{\"pattern\": \".github/workflows/*.yml\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "glob", "arguments": {"pattern": ".github/workflows/*.yml"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": ".github/workflows/ci.yml\n.github/workflows/release.yml"},
    {"role": "assistant", "content": "Two workflows: `.github/workflows/ci.yml` and `.github/workflows/release.yml`. They use the short `.yml` extension, which is why the `.yaml` glob matched nothing. I haven't opened either file, so tell me which one you want to see and I'll read it."}
@@ -394,11 +394,11 @@ query over the repo map — the behavior described in plain words, not another s
    {"role": "system", "content": "You are Ronin, a coding agent. If the first probe is empty, the very next output is the second probe."},
    {"role": "user", "content": "Where do we check permissions before request handlers run?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"authorize\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "authorize"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "no matches found for \"authorize\""},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "repo_map", "arguments": "{\"query\": \"permission check before request handler runs\", \"k\": 5}"}}
+     {"id": "c2", "type": "function", "function": {"name": "repo_map", "arguments": {"query": "permission check before request handler runs", "k": 5}}}
    ]}
  ],
  "tools": [
@@ -413,11 +413,11 @@ query over the repo map — the behavior described in plain words, not another s
    {"role": "system", "content": "You are Ronin, a coding agent. Empty results escalate the search; conclusions quote only what tools returned."},
    {"role": "user", "content": "How is pagination implemented for the list endpoints?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"pagination\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "pagination"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "no matches found for \"pagination\""},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "repo_map", "arguments": "{\"query\": \"splitting list query results into pages\", \"k\": 4}"}}
+     {"id": "c2", "type": "function", "function": {"name": "repo_map", "arguments": {"query": "splitting list query results into pages", "k": 4}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "1. api/cursor.py  (encode_cursor, decode_cursor, page_slice)\n2. api/handlers/list_users.py  (list_users)\n3. api/schemas.py  (PageMeta)"},
    {"role": "assistant", "content": "It is cursor-based, centered on `api/cursor.py`, whose outline shows `encode_cursor`, `decode_cursor`, and `page_slice`; `api/handlers/list_users.py` and the `PageMeta` schema in `api/schemas.py` rank right behind it. The word `pagination` never appears in the code, which is why the grep was empty. I have only seen the outlines, not the bodies — say the word and I'll read `api/cursor.py` for the exact cursor format."}
@@ -456,11 +456,11 @@ and the conclusion distinguishes the two.
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately."},
    {"role": "user", "content": "Do we export prometheus metrics from the api service?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"prometheus\", \"directory\": \"api\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "prometheus", "directory": "api"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "no matches found for \"prometheus\" under api/"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"prometheus\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "search_files", "arguments": {"query": "prometheus"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "search_files", "description": "Grep for a literal string across files; returns file/line/text hits.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "directory": {"type": "string"}}, "required": ["query"]}}}]}
@@ -472,11 +472,11 @@ and the conclusion distinguishes the two.
    {"role": "system", "content": "You are Ronin, a coding agent. Retry an empty search with a smarter query at once; never invent a hit."},
    {"role": "user", "content": "Where's the db fixture defined? Should be somewhere in tests/unit."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"def db(\", \"directory\": \"tests/unit\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "def db(", "directory": "tests/unit"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "no matches found for \"def db(\" under tests/unit/"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"def db(\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "search_files", "arguments": {"query": "def db("}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "tests/conftest.py:15: def db(tmp_path):"},
    {"role": "assistant", "content": "One level up from where you expected: `tests/conftest.py` line 15, `def db(tmp_path):`. Nothing under `tests/unit/` defines it — pytest fixtures cascade down from the parent `conftest.py`, so the unit tests inherit it from there."}
@@ -512,11 +512,11 @@ a hedge that implies the tools might have missed it.
    {"role": "system", "content": "You are Ronin, a coding agent. If every probe misses, state absence plainly and list what was checked."},
    {"role": "user", "content": "How do we push live updates to the browser? Find the WebSocket code."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"WebSocket\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "WebSocket"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "no matches found for \"WebSocket\""},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "repo_map", "arguments": "{\"query\": \"realtime push connection to browser clients\", \"k\": 4}"}}
+     {"id": "c2", "type": "function", "function": {"name": "repo_map", "arguments": {"query": "realtime push connection to browser clients", "k": 4}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "1. web/poll.js  (startPolling: 5s setInterval fetch)\n2. web/api.js  (getJson)"},
    {"role": "assistant", "content": "There is no WebSocket code in this repo. I checked the `WebSocket` literal (no matches) and ran a concept search for realtime push, which surfaced only `web/poll.js` — a `startPolling` loop that fetches every 5 seconds — and its `getJson` helper in `web/api.js`. Live updates reach the browser by polling, not sockets. If you want true push, adding a socket layer would be new work, not a find-and-tweak."}
@@ -533,11 +533,11 @@ a hedge that implies the tools might have missed it.
    {"role": "system", "content": "You are Ronin, a coding agent. Prove absence with more than one probe, then say it without hedging."},
    {"role": "user", "content": "Which translation framework do we use? Check for gettext."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"gettext\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "gettext"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "no matches found for \"gettext\""},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "glob", "arguments": "{\"pattern\": \"**/locales/**\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "glob", "arguments": {"pattern": "**/locales/**"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "no files match pattern \"**/locales/**\""},
    {"role": "assistant", "content": "None. I checked gettext (no matches) and a glob for any locales directory (none exist) — this repo has no translation framework; the UI strings are inline, single-language. If localization is on the roadmap, it starts from zero here rather than from an existing setup."}
@@ -554,15 +554,15 @@ a hedge that implies the tools might have missed it.
    {"role": "system", "content": "You are Ronin, a coding agent. Climb the ladder — literal, file family, concept — and report absence with the full checklist."},
    {"role": "user", "content": "Bump the gRPC deadline for the billing calls."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"grpc\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "grpc"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "no matches found for \"grpc\""},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "glob", "arguments": "{\"pattern\": \"**/*.proto\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "glob", "arguments": {"pattern": "**/*.proto"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "no files match pattern \"**/*.proto\""},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c3", "type": "function", "function": {"name": "repo_map", "arguments": "{\"query\": \"rpc service definitions and generated client stubs\", \"k\": 4}"}}
+     {"id": "c3", "type": "function", "function": {"name": "repo_map", "arguments": {"query": "rpc service definitions and generated client stubs", "k": 4}}}
    ]},
    {"role": "tool", "tool_call_id": "c3", "content": "1. api/http_server.py  (create_app: FastAPI routes)\n2. api/clients/billing.py  (BillingClient: requests.Session wrapper)"},
    {"role": "assistant", "content": "This repo does not use gRPC, so there is no deadline to bump. Checked three ways: the grpc literal (no matches), a glob for .proto files (none), and a concept search for RPC stubs, which surfaced only the FastAPI routes in api/http_server.py and BillingClient in api/clients/billing.py — a plain requests.Session wrapper. The billing calls are HTTP; if you want a tighter budget on them, the equivalent change is a timeout on BillingClient, and I can look at that instead."}
@@ -580,11 +580,11 @@ a hedge that implies the tools might have missed it.
    {"role": "system", "content": "You are Ronin, a coding agent. An exhausted search ends in a plain statement of what is not here."},
    {"role": "user", "content": "Update the Terraform config to add the new S3 bucket."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "glob", "arguments": "{\"pattern\": \"**/*.tf\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "glob", "arguments": {"pattern": "**/*.tf"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "no files match pattern \"**/*.tf\""},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"terraform\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "search_files", "arguments": {"query": "terraform"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "no matches found for \"terraform\""},
    {"role": "assistant", "content": "There is no Terraform in this repo: no .tf files anywhere (glob), and the word terraform appears in no file (grep). I checked both before concluding. If your infra is Terraform-managed, that configuration lives in a different repository — point me at it and I can draft the bucket resource there. I won't create a new Terraform tree here without you confirming this is where it should live."}
@@ -601,11 +601,11 @@ a hedge that implies the tools might have missed it.
    {"role": "system", "content": "You are Ronin, a coding agent. Two misses on different tiers earn an honest no, with the checks named."},
    {"role": "user", "content": "Open the Storybook story for the Button component."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"storybook\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "storybook"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "no matches found for \"storybook\""},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "glob", "arguments": "{\"pattern\": \"**/*.stories.*\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "glob", "arguments": {"pattern": "**/*.stories.*"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "no files match pattern \"**/*.stories.*\""},
    {"role": "assistant", "content": "There is no Storybook in this project — I checked the storybook literal (zero hits, so no config or dependency mentions it) and globbed for *.stories.* files (none). A Button story does not exist because no stories exist. If you want component previews, setting Storybook up would be a new addition; the installs and config files it needs are gated steps you would approve."}

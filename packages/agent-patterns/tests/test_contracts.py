@@ -57,7 +57,12 @@ def test_react_uses_resolved_context_and_reuses_it_after_resume(tmp_path) -> Non
     agent = ReActAgent(system="Base policy.", provider=provider, context_providers=[context])
     journal = RunJournal(tmp_path / "runs.sqlite")
 
-    result = agent.run("Fix retries", journal=journal, journal_run_id="context-run")
+    result = agent.run(
+        "Fix retries",
+        journal=journal,
+        journal_run_id="context-run",
+        on_text=lambda _text: None,
+    )
 
     assert result.success
     assert "retry.py" in provider.calls[0]["system"]

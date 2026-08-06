@@ -17,7 +17,7 @@ The correction is the same call with strict-JSON arguments, emitted directly.
    {"role": "system", "content": "You are Ronin, a coding agent. When a tool call is rejected as malformed, re-emit the corrected structured call immediately."},
    {"role": "user", "content": "My codegen script produced this and Ronin's runtime rejected it: {name: read_file, arguments: {path: src/payments/refund.py}}. Emit the call correctly."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"src/payments/refund.py\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "src/payments/refund.py"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 text file (relative to the project root).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}]}
@@ -29,7 +29,7 @@ The correction is the same call with strict-JSON arguments, emitted directly.
    {"role": "system", "content": "You are Ronin, a coding agent. Fix a rejected call by emitting the well-formed call, never by quoting JSON in prose."},
    {"role": "user", "content": "The runtime log says unquoted keys are not valid JSON and shows {pattern: **/*.tsx}. That was meant to be a glob call over the whole repo. Re-send it."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "glob", "arguments": "{\"pattern\": \"**/*.tsx\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "glob", "arguments": {"pattern": "**/*.tsx"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "glob", "description": "Find files by glob pattern (e.g. '**/*.py', 'src/*.ts') relative to a directory.", "parameters": {"type": "object", "properties": {"pattern": {"type": "string"}, "directory": {"type": "string"}}, "required": ["pattern"]}}}]}
@@ -41,7 +41,7 @@ The correction is the same call with strict-JSON arguments, emitted directly.
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately."},
    {"role": "user", "content": "This search_files call failed with 'arguments are not valid JSON': {'query': 'ECONNREFUSED', 'directory': 'server'}. Single quotes, apparently. Fix it and run it."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"ECONNREFUSED\", \"directory\": \"server\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "ECONNREFUSED", "directory": "server"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "search_files", "description": "Grep for a literal string across files; returns file/line/text hits.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "directory": {"type": "string"}}, "required": ["query"]}}}]}
@@ -53,7 +53,7 @@ The correction is the same call with strict-JSON arguments, emitted directly.
    {"role": "system", "content": "You are Ronin, a coding agent. Rejected calls get corrected and re-emitted as structured calls, nothing else."},
    {"role": "user", "content": "My orchestrator emitted {'query': 'where user sessions are persisted'} for repo_map and Ronin refused it because of the single quotes. Send the corrected call."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "repo_map", "arguments": "{\"query\": \"where user sessions are persisted\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "repo_map", "arguments": {"query": "where user sessions are persisted"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "repo_map", "description": "Relevance-ranked code search: give a concept or question and get the most relevant files plus symbol outlines.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "k": {"type": "integer"}}, "required": ["query"]}}}]}
@@ -65,7 +65,7 @@ The correction is the same call with strict-JSON arguments, emitted directly.
    {"role": "system", "content": "You are Ronin, a coding agent. Strict JSON arguments, registry tool names, structured calls only."},
    {"role": "user", "content": "Rejected before execution: {command: npx prettier --check .} needs proper JSON quoting on both the key and the value. It was a run_command call; re-emit it."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"npx prettier --check .\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "npx prettier --check ."}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "run_command", "description": "Run a shell command in the project root. SENSITIVE, gated by approval.", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}}]}
@@ -83,7 +83,7 @@ define, and sends integers as integers.
    {"role": "system", "content": "You are Ronin, a coding agent. When a tool call is rejected as malformed, re-emit the corrected structured call immediately."},
    {"role": "user", "content": "The runtime refused this background_logs call because None is Python, not JSON: {\"id\": 7, \"lines\": None}. Just give me the recent output of process 7 with the default line count."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "background_logs", "arguments": "{\"id\": 7}"}}
+     {"id": "c1", "type": "function", "function": {"name": "background_logs", "arguments": {"id": 7}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "background_logs", "description": "Read the most recent output (stdout+stderr) of a background process. Args: id (process id), lines (default 40).", "parameters": {"type": "object", "properties": {"id": {"type": "integer"}, "lines": {"type": "integer"}}, "required": ["id"]}}}]}
@@ -95,7 +95,7 @@ define, and sends integers as integers.
    {"role": "system", "content": "You are Ronin, a coding agent. Fix a rejected call by emitting the well-formed call, never by quoting JSON in prose."},
    {"role": "user", "content": "My script generated {\"directory\": \"app\", \"recursive\": True} for list_files and Ronin rejected it. True is not JSON, and recursive is not an argument the tool takes. Re-send a valid listing call for the app directory."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "list_files", "arguments": "{\"directory\": \"app\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "list_files", "arguments": {"directory": "app"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "list_files", "description": "List files under a directory, optionally glob-filtered. Skips .git/node_modules/.venv.", "parameters": {"type": "object", "properties": {"directory": {"type": "string"}, "pattern": {"type": "string"}}}}}]}
@@ -107,7 +107,7 @@ define, and sends integers as integers.
    {"role": "system", "content": "You are Ronin, a coding agent. Argument types must match the tool schema exactly."},
    {"role": "user", "content": "stop_background bounced my call {\"id\": \"2\"} because it wants an integer id, not a string. Kill process 2 properly."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "stop_background", "arguments": "{\"id\": 2}"}}
+     {"id": "c1", "type": "function", "function": {"name": "stop_background", "arguments": {"id": 2}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "stop_background", "description": "Stop (kill) a background process and its child tree by id. Args: id.", "parameters": {"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]}}}]}
@@ -119,7 +119,7 @@ define, and sends integers as integers.
    {"role": "system", "content": "You are Ronin, a coding agent. Strict JSON arguments, registry tool names, structured calls only."},
    {"role": "user", "content": "Another rejected call from my batch runner: {\"pattern\": \"*.gradle\", \"directory\": None}. Drop the Python null and emit the glob correctly."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "glob", "arguments": "{\"pattern\": \"*.gradle\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "glob", "arguments": {"pattern": "*.gradle"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "glob", "description": "Find files by glob pattern (e.g. '**/*.py', 'src/*.ts') relative to a directory.", "parameters": {"type": "object", "properties": {"pattern": {"type": "string"}, "directory": {"type": "string"}}, "required": ["pattern"]}}}]}
@@ -136,7 +136,7 @@ identical payload minus the comma, re-emitted without commentary.
    {"role": "system", "content": "You are Ronin, a coding agent. When a tool call is rejected as malformed, re-emit the corrected structured call immediately."},
    {"role": "user", "content": "This edit_file call was rejected as invalid JSON, trailing comma after new_string: {\"path\": \"config/nginx.conf\", \"old_string\": \"keepalive_timeout 65;\", \"new_string\": \"keepalive_timeout 30;\",}. Re-emit it without the comma."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"config/nginx.conf\", \"old_string\": \"keepalive_timeout 65;\", \"new_string\": \"keepalive_timeout 30;\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "config/nginx.conf", "old_string": "keepalive_timeout 65;", "new_string": "keepalive_timeout 30;"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "edit_file", "description": "Surgically replace an exact, unique string in an existing file. SENSITIVE, gated by approval.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old_string": {"type": "string", "description": "Exact text to find — must be unique in the file."}, "new_string": {"type": "string", "description": "Replacement text."}}, "required": ["path", "old_string", "new_string"]}}}]}
@@ -148,7 +148,7 @@ identical payload minus the comma, re-emitted without commentary.
    {"role": "system", "content": "You are Ronin, a coding agent. Rejected calls get corrected and re-emitted as structured calls, nothing else."},
    {"role": "user", "content": "Runtime says invalid JSON: {\"query\": \"LaunchDarkly\",} because my template left a trailing comma. It was a search_files call over the whole repo. Fix and send."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"LaunchDarkly\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "LaunchDarkly"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "search_files", "description": "Grep for a literal string across files; returns file/line/text hits.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "directory": {"type": "string"}}, "required": ["query"]}}}]}
@@ -160,7 +160,7 @@ identical payload minus the comma, re-emitted without commentary.
    {"role": "system", "content": "You are Ronin, a coding agent. Fix a rejected call by emitting the well-formed call, never by quoting JSON in prose."},
    {"role": "user", "content": "My theme migration script emitted a multi_edit for src/theme.css that got rejected, trailing comma inside the edits array: {\"path\": \"src/theme.css\", \"edits\": [{\"old_string\": \"#1a73e8\", \"new_string\": \"#0f5bd7\"}, {\"old_string\": \"#fbbc04\", \"new_string\": \"#e8a800\"},]}. Emit the corrected call."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "multi_edit", "arguments": "{\"path\": \"src/theme.css\", \"edits\": [{\"old_string\": \"#1a73e8\", \"new_string\": \"#0f5bd7\"}, {\"old_string\": \"#fbbc04\", \"new_string\": \"#e8a800\"}]}"}}
+     {"id": "c1", "type": "function", "function": {"name": "multi_edit", "arguments": {"path": "src/theme.css", "edits": [{"old_string": "#1a73e8", "new_string": "#0f5bd7"}, {"old_string": "#fbbc04", "new_string": "#e8a800"}]}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "multi_edit", "description": "Apply SEVERAL surgical string replacements to ONE file in a single approved step. SENSITIVE, gated by approval.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "edits": {"type": "array", "items": {"type": "object", "properties": {"old_string": {"type": "string"}, "new_string": {"type": "string"}}, "required": ["old_string", "new_string"]}}}, "required": ["path", "edits"]}}}]}
@@ -177,7 +177,7 @@ maps to the real name and preserves the original arguments.
    {"role": "system", "content": "You are Ronin, a coding agent. Only registry tool names exist; correct near-misses to the real name."},
    {"role": "user", "content": "Rejected with unknown tool 'readfile': {\"name\": \"readfile\", \"arguments\": \"{\\\"path\\\": \\\"lib/telemetry.ex\\\"}\"}. The registry name has an underscore. Re-emit it."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"lib/telemetry.ex\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "lib/telemetry.ex"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 text file (relative to the project root).", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}}]}
@@ -189,7 +189,7 @@ maps to the real name and preserves the original arguments.
    {"role": "system", "content": "You are Ronin, a coding agent. When a tool call is rejected as malformed, re-emit the corrected structured call immediately."},
    {"role": "user", "content": "My agent framework hyphenates tool names, so Ronin refused this: {\"name\": \"search-files\", \"arguments\": \"{\\\"query\\\": \\\"unwrap()\\\", \\\"directory\\\": \\\"src\\\"}\"}. Send it under the real name."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"unwrap()\", \"directory\": \"src\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "unwrap()", "directory": "src"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "search_files", "description": "Grep for a literal string across files; returns file/line/text hits.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "directory": {"type": "string"}}, "required": ["query"]}}}]}
@@ -201,7 +201,7 @@ maps to the real name and preserves the original arguments.
    {"role": "system", "content": "You are Ronin, a coding agent. Strict JSON arguments, registry tool names, structured calls only."},
    {"role": "user", "content": "The queue rejected unknown tool 'runcommand'. The call was {\"name\": \"runcommand\", \"arguments\": \"{\\\"command\\\": \\\"go vet ./...\\\"}\"}. Correct the name and emit it."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"go vet ./...\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "go vet ./..."}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "run_command", "description": "Run a shell command in the project root. SENSITIVE, gated by approval.", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}}]}
@@ -213,7 +213,7 @@ maps to the real name and preserves the original arguments.
    {"role": "system", "content": "You are Ronin, a coding agent. Only registry tool names exist; correct near-misses to the real name."},
    {"role": "user", "content": "My watchdog emitted {\"name\": \"background-status\", \"arguments\": \"{}\"} and got unknown tool back. It just wants the process list. Re-emit it under the registry name."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "background_status", "arguments": "{}"}}
+     {"id": "c1", "type": "function", "function": {"name": "background_status", "arguments": {}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "background_status", "description": "List the background processes and whether each is running or has exited.", "parameters": {"type": "object", "properties": {}}}}]}
@@ -230,7 +230,7 @@ never executes. Both failures are corrected the same way: one structured call.
    {"role": "system", "content": "You are Ronin, a coding agent. Tool arguments travel as a JSON-encoded string, never as a raw object."},
    {"role": "user", "content": "The runtime rejected my write_file call: function.arguments must be a JSON-encoded string, got object. My generator had set arguments to a raw object with path \".editorconfig\" and content \"root = true\" plus a trailing newline. Emit it with properly encoded arguments."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "write_file", "arguments": "{\"path\": \".editorconfig\", \"content\": \"root = true\\n\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "write_file", "arguments": {"path": ".editorconfig", "content": "root = true\n"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "write_file", "description": "Create a file or fully overwrite it. SENSITIVE, gated by approval.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}}}]}
@@ -242,7 +242,7 @@ never executes. Both failures are corrected the same way: one structured call.
    {"role": "system", "content": "You are Ronin, a coding agent. When a tool call is rejected as malformed, re-emit the corrected structured call immediately."},
    {"role": "user", "content": "Rejected: arguments came through as a raw JSON object instead of an encoded string. The intent was repo_map with query \"rate limiter middleware\" and k set to 5. Re-emit it correctly."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "repo_map", "arguments": "{\"query\": \"rate limiter middleware\", \"k\": 5}"}}
+     {"id": "c1", "type": "function", "function": {"name": "repo_map", "arguments": {"query": "rate limiter middleware", "k": 5}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "repo_map", "description": "Relevance-ranked code search: give a concept or question and get the most relevant files plus symbol outlines.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "k": {"type": "integer"}}, "required": ["query"]}}}]}
@@ -254,7 +254,7 @@ never executes. Both failures are corrected the same way: one structured call.
    {"role": "system", "content": "You are Ronin, a coding agent. A call written into reply text never executes; make it a structured call."},
    {"role": "user", "content": "A previous session printed this in its reply instead of calling anything: ```json {\"tool\": \"edit_file\", \"path\": \"Gemfile\", \"old_string\": \"gem 'rails', '7.1.0'\", \"new_string\": \"gem 'rails', '7.1.3'\"} ``` and nothing executed. Do it as a real call."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"Gemfile\", \"old_string\": \"gem 'rails', '7.1.0'\", \"new_string\": \"gem 'rails', '7.1.3'\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "Gemfile", "old_string": "gem 'rails', '7.1.0'", "new_string": "gem 'rails', '7.1.3'"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "edit_file", "description": "Surgically replace an exact, unique string in an existing file. SENSITIVE, gated by approval.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old_string": {"type": "string", "description": "Exact text to find — must be unique in the file."}, "new_string": {"type": "string", "description": "Replacement text."}}, "required": ["path", "old_string", "new_string"]}}}]}
@@ -266,7 +266,7 @@ never executes. Both failures are corrected the same way: one structured call.
    {"role": "system", "content": "You are Ronin, a coding agent. Fix a rejected call by emitting the well-formed call, never by quoting JSON in prose."},
    {"role": "user", "content": "The transcript shows the model typed a fenced block ```{\"name\": \"run_command\", \"arguments\": {\"command\": \"cargo test -p auth\"}}``` as plain text, so the runtime never saw a call. Emit it for real."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"cargo test -p auth\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "cargo test -p auth"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "run_command", "description": "Run a shell command in the project root. SENSITIVE, gated by approval.", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}}]}
@@ -283,7 +283,7 @@ the missing value, the correction is the complete call with that key filled in.
    {"role": "system", "content": "You are Ronin, a coding agent. When a tool call is rejected as malformed, re-emit the corrected structured call immediately."},
    {"role": "user", "content": "edit_file rejected my call: missing required key 'new_string'. I sent {\"path\": \"Makefile\", \"old_string\": \"-j4\"}. The replacement should be -j8. Emit the complete call."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"Makefile\", \"old_string\": \"-j4\", \"new_string\": \"-j8\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "Makefile", "old_string": "-j4", "new_string": "-j8"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "edit_file", "description": "Surgically replace an exact, unique string in an existing file. SENSITIVE, gated by approval.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old_string": {"type": "string", "description": "Exact text to find — must be unique in the file."}, "new_string": {"type": "string", "description": "Replacement text."}}, "required": ["path", "old_string", "new_string"]}}}]}
@@ -295,7 +295,7 @@ the missing value, the correction is the complete call with that key filled in.
    {"role": "system", "content": "You are Ronin, a coding agent. Rejected calls get corrected and re-emitted as structured calls, nothing else."},
    {"role": "user", "content": "My script built a search_files call with only {\"directory\": \"packages\"} and the runtime refused it because query is required. I wanted it to look for getServerSideProps. Send the fixed call."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"getServerSideProps\", \"directory\": \"packages\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "getServerSideProps", "directory": "packages"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "search_files", "description": "Grep for a literal string across files; returns file/line/text hits.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "directory": {"type": "string"}}, "required": ["query"]}}}]}
@@ -307,7 +307,7 @@ the missing value, the correction is the complete call with that key filled in.
    {"role": "system", "content": "You are Ronin, a coding agent. Strict JSON arguments, registry tool names, structured calls only."},
    {"role": "user", "content": "write_file bounced {\"path\": \".python-version\"} because content is required. The file should contain exactly 3.12 followed by a newline. Emit the corrected call."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "write_file", "arguments": "{\"path\": \".python-version\", \"content\": \"3.12\\n\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "write_file", "arguments": {"path": ".python-version", "content": "3.12\n"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "write_file", "description": "Create a file or fully overwrite it. SENSITIVE, gated by approval.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}}}]}
@@ -325,11 +325,11 @@ echoing the broken text back.
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately."},
    {"role": "user", "content": "My release helper writes its next Ronin call to .ronin/pending_call.json, but the runtime keeps rejecting it. Read the file and execute what it was trying to do, properly."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \".ronin/pending_call.json\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": ".ronin/pending_call.json"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "{name: run_command, arguments: {command: \"npm run build\"}}"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"npm run build\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": {"command": "npm run build"}}}
    ]}
  ],
  "tools": [
@@ -344,11 +344,11 @@ echoing the broken text back.
    {"role": "system", "content": "You are Ronin, a coding agent. When a tool call is rejected as malformed, re-emit the corrected structured call immediately."},
    {"role": "user", "content": "Ronin's runtime just logged a rejection in logs/runtime_errors.log. Read it and re-emit whatever call it refused."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"logs/runtime_errors.log\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "logs/runtime_errors.log"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "2026-07-14T10:02:11Z ERROR tool call arguments are not valid JSON: {'path': 'services/billing/invoice.py', 'old_string': 'retries = 1', 'new_string': 'retries = 3'}. Single-quoted strings. The call was not executed."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"services/billing/invoice.py\", \"old_string\": \"retries = 1\", \"new_string\": \"retries = 3\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "services/billing/invoice.py", "old_string": "retries = 1", "new_string": "retries = 3"}}}
    ]}
  ],
  "tools": [

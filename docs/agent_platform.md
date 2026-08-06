@@ -478,6 +478,21 @@ Coding agents can recall this memory; writing a new fact is approval-gated and
 likely API keys or private keys are refused. This store has no cloud dependency
 and can be removed independently of source code and instruction files.
 
+### Context Assembly
+
+The coding agent does not concatenate these sources through a separate prompt
+path. `ProjectInstructionsContext`, `ProjectFactsContext`, and
+`RepositoryContext` adapt the existing stores to the shared
+`ContextProvider` contract. Instruction files are trusted maintainer policy;
+recalled facts are delimited as untrusted evidence; repository retrieval is
+trusted local metadata. The kernel orders and bounds all fragments, records the
+selected sources in the durable journal, and sends the exact resolved prompt to
+both normal and streaming provider calls.
+
+Repository retrieval prefers `.ronin/index.db` when present. On a cold index,
+the in-memory retrieval engine retains its non-blocking behavior, so the first
+interactive turn is not delayed by an indexing pass.
+
 ## Provider Intelligence and Evaluation Evidence
 
 Every completed orchestration contributes its actual subtask outcome to

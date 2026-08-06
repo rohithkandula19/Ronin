@@ -30,7 +30,7 @@ An argument the user did not ask for does not appear in the call, and an argumen
      "type": "function",
      "function": {
       "name": "background_logs",
-      "arguments": "{\"id\": 3}"
+      "arguments": {"id": 3}
      }
     }
    ]
@@ -86,7 +86,7 @@ An argument the user did not ask for does not appear in the call, and an argumen
      "type": "function",
      "function": {
       "name": "background_logs",
-      "arguments": "{\"id\": 8, \"lines\": 120}"
+      "arguments": {"id": 8, "lines": 120}
      }
     }
    ]
@@ -142,7 +142,7 @@ An argument the user did not ask for does not appear in the call, and an argumen
      "type": "function",
      "function": {
       "name": "glob",
-      "arguments": "{\"pattern\": \"**/*.tf\"}"
+      "arguments": {"pattern": "**/*.tf"}
      }
     }
    ]
@@ -198,7 +198,7 @@ An argument the user did not ask for does not appear in the call, and an argumen
      "type": "function",
      "function": {
       "name": "glob",
-      "arguments": "{\"pattern\": \"**/*.proto\", \"directory\": \"services/payments\"}"
+      "arguments": {"pattern": "**/*.proto", "directory": "services/payments"}
      }
     }
    ]
@@ -254,7 +254,7 @@ An argument the user did not ask for does not appear in the call, and an argumen
      "type": "function",
      "function": {
       "name": "search_files",
-      "arguments": "{\"query\": \"REDIS_SENTINEL_HOST\"}"
+      "arguments": {"query": "REDIS_SENTINEL_HOST"}
      }
     }
    ]
@@ -310,7 +310,7 @@ An argument the user did not ask for does not appear in the call, and an argumen
      "type": "function",
      "function": {
       "name": "search_files",
-      "arguments": "{\"query\": \"deprecated_hash\", \"directory\": \"packages/api/src\"}"
+      "arguments": {"query": "deprecated_hash", "directory": "packages/api/src"}
      }
     }
    ]
@@ -366,7 +366,7 @@ An argument the user did not ask for does not appear in the call, and an argumen
      "type": "function",
      "function": {
       "name": "repo_map",
-      "arguments": "{\"query\": \"rate limiting implementation\"}"
+      "arguments": {"query": "rate limiting implementation"}
      }
     }
    ]
@@ -422,7 +422,7 @@ An argument the user did not ask for does not appear in the call, and an argumen
      "type": "function",
      "function": {
       "name": "repo_map",
-      "arguments": "{\"query\": \"session expiry handling\", \"k\": 3}"
+      "arguments": {"query": "session expiry handling", "k": 3}
      }
     }
    ]
@@ -478,7 +478,7 @@ An argument the user did not ask for does not appear in the call, and an argumen
      "type": "function",
      "function": {
       "name": "list_files",
-      "arguments": "{\"directory\": \"deploy/helm\", \"pattern\": \"*.yaml\"}"
+      "arguments": {"directory": "deploy/helm", "pattern": "*.yaml"}
      }
     }
    ]
@@ -585,7 +585,7 @@ A value that contains double quotes, backslashes, shell quoting, or multi-line a
      "type": "function",
      "function": {
       "name": "edit_file",
-      "arguments": "{\"path\": \"app/logging_setup.py\", \"old_string\": \"logger.setLevel(\\\"DEBUG\\\")\", \"new_string\": \"logger.setLevel(\\\"INFO\\\")\"}"
+      "arguments": {"path": "app/logging_setup.py", "old_string": "logger.setLevel(\"DEBUG\")", "new_string": "logger.setLevel(\"INFO\")"}
      }
     }
    ]
@@ -648,7 +648,7 @@ A value that contains double quotes, backslashes, shell quoting, or multi-line a
      "type": "function",
      "function": {
       "name": "search_files",
-      "arguments": "{\"query\": \"re.compile(r\\\"^\\\\d{4}-\\\\d{2}-\\\\d{2}\\\")\"}"
+      "arguments": {"query": "re.compile(r\"^\\d{4}-\\d{2}-\\d{2}\")"}
      }
     }
    ]
@@ -704,7 +704,7 @@ A value that contains double quotes, backslashes, shell quoting, or multi-line a
      "type": "function",
      "function": {
       "name": "run_command",
-      "arguments": "{\"command\": \"pytest -k \\\"not slow and not integration\\\"\"}"
+      "arguments": {"command": "pytest -k \"not slow and not integration\""}
      }
     }
    ]
@@ -757,7 +757,7 @@ A value that contains double quotes, backslashes, shell quoting, or multi-line a
      "type": "function",
      "function": {
       "name": "write_file",
-      "arguments": "{\"path\": \"config/feature_flags.json\", \"content\": \"{\\n  \\\"beta_search\\\": false,\\n  \\\"new_onboarding\\\": true\\n}\\n\"}"
+      "arguments": {"path": "config/feature_flags.json", "content": "{\n  \"beta_search\": false,\n  \"new_onboarding\": true\n}\n"}
      }
     }
    ]
@@ -814,7 +814,7 @@ A value that contains double quotes, backslashes, shell quoting, or multi-line a
      "type": "function",
      "function": {
       "name": "edit_file",
-      "arguments": "{\"path\": \"scripts/release.sh\", \"old_string\": \"echo \\\"building\\\"\\nmake build\", \"new_string\": \"echo \\\"building\\\"\\nmake -j4 build\"}"
+      "arguments": {"path": "scripts/release.sh", "old_string": "echo \"building\"\nmake build", "new_string": "echo \"building\"\nmake -j4 build"}
      }
     }
    ]
@@ -877,7 +877,7 @@ A value that contains double quotes, backslashes, shell quoting, or multi-line a
      "type": "function",
      "function": {
       "name": "search_files",
-      "arguments": "{\"query\": \"TODO: remove after Q3 migration\"}"
+      "arguments": {"query": "TODO: remove after Q3 migration"}
      }
     }
    ]
@@ -933,7 +933,7 @@ A value that contains double quotes, backslashes, shell quoting, or multi-line a
      "type": "function",
      "function": {
       "name": "glob",
-      "arguments": "{\"pattern\": \"src/**/test_*.py\"}"
+      "arguments": {"pattern": "src/**/test_*.py"}
      }
     }
    ]
@@ -989,7 +989,7 @@ A value that contains double quotes, backslashes, shell quoting, or multi-line a
      "type": "function",
      "function": {
       "name": "run_command",
-      "arguments": "{\"command\": \"python \\\"scripts/data tools/export.py\\\" --dry-run\"}"
+      "arguments": {"command": "python \"scripts/data tools/export.py\" --dry-run"}
      }
     }
    ]
@@ -1042,7 +1042,7 @@ A value that contains double quotes, backslashes, shell quoting, or multi-line a
      "type": "function",
      "function": {
       "name": "multi_edit",
-      "arguments": "{\"path\": \"worker/client.py\", \"edits\": [{\"old_string\": \"os.getenv(\\\"API_TOKEN\\\")\", \"new_string\": \"os.getenv(\\\"SERVICE_API_TOKEN\\\")\"}, {\"old_string\": \"\\\"X-Api-Token\\\"\", \"new_string\": \"\\\"X-Service-Token\\\"\"}]}"
+      "arguments": {"path": "worker/client.py", "edits": [{"old_string": "os.getenv(\"API_TOKEN\")", "new_string": "os.getenv(\"SERVICE_API_TOKEN\")"}, {"old_string": "\"X-Api-Token\"", "new_string": "\"X-Service-Token\""}]}
      }
     }
    ]
@@ -1114,7 +1114,7 @@ A value that contains double quotes, backslashes, shell quoting, or multi-line a
      "type": "function",
      "function": {
       "name": "edit_file",
-      "arguments": "{\"path\": \"docs/build_setup.md\", \"old_string\": \"C:\\\\builds\\\\out\", \"new_string\": \"C:\\\\artifacts\\\\out\"}"
+      "arguments": {"path": "docs/build_setup.md", "old_string": "C:\\builds\\out", "new_string": "C:\\artifacts\\out"}
      }
     }
    ]
@@ -1177,7 +1177,7 @@ A value that contains double quotes, backslashes, shell quoting, or multi-line a
      "type": "function",
      "function": {
       "name": "read_file",
-      "arguments": "{\"path\": \"services/auth/internal/token/refresh.go\"}"
+      "arguments": {"path": "services/auth/internal/token/refresh.go"}
      }
     }
    ]
@@ -1230,7 +1230,7 @@ A value that contains double quotes, backslashes, shell quoting, or multi-line a
      "type": "function",
      "function": {
       "name": "run_command",
-      "arguments": "{\"command\": \"node -e \\\"console.log(require('./package.json').version)\\\"\"}"
+      "arguments": {"command": "node -e \"console.log(require('./package.json').version)\""}
      }
     }
    ]
@@ -1332,7 +1332,7 @@ Rejected arguments come back fixed, as a new structured call: string digits beco
      "type": "function",
      "function": {
       "name": "stop_background",
-      "arguments": "{\"id\": 5}"
+      "arguments": {"id": 5}
      }
     }
    ]
@@ -1385,7 +1385,7 @@ Rejected arguments come back fixed, as a new structured call: string digits beco
      "type": "function",
      "function": {
       "name": "background_logs",
-      "arguments": "{\"id\": 12, \"lines\": 60}"
+      "arguments": {"id": 12, "lines": 60}
      }
     }
    ]
@@ -1441,7 +1441,7 @@ Rejected arguments come back fixed, as a new structured call: string digits beco
      "type": "function",
      "function": {
       "name": "edit_file",
-      "arguments": "{\"path\": \"server/config.py\", \"old_string\": \"port = 8080\", \"new_string\": \"port = 9090\"}"
+      "arguments": {"path": "server/config.py", "old_string": "port = 8080", "new_string": "port = 9090"}
      }
     }
    ]
@@ -1460,7 +1460,7 @@ Rejected arguments come back fixed, as a new structured call: string digits beco
      "type": "function",
      "function": {
       "name": "edit_file",
-      "arguments": "{\"path\": \"server/config.py\", \"old_string\": \"# fallback when PORT is unset\\nport = 8080\", \"new_string\": \"# fallback when PORT is unset\\nport = 9090\"}"
+      "arguments": {"path": "server/config.py", "old_string": "# fallback when PORT is unset\nport = 8080", "new_string": "# fallback when PORT is unset\nport = 9090"}
      }
     }
    ]
@@ -1523,7 +1523,7 @@ Rejected arguments come back fixed, as a new structured call: string digits beco
      "type": "function",
      "function": {
       "name": "glob",
-      "arguments": "{\"pattern\": \"*.sql\", \"directory\": \"db/migrations\"}"
+      "arguments": {"pattern": "*.sql", "directory": "db/migrations"}
      }
     }
    ]

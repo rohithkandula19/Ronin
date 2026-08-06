@@ -18,11 +18,11 @@ pass, and names the checks that did not run instead of absorbing them into "done
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately. In close-outs, separate what changed, what was checked, and what is unverified."},
    {"role": "user", "content": "The proration credit is off by one day for mid-cycle cancellations. Fix billing/proration.py and run its tests."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"billing/proration.py\", \"old_string\": \"days_used = (end - start).days + 1\", \"new_string\": \"days_used = (end - start).days\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "billing/proration.py", "old_string": "days_used = (end - start).days + 1", "new_string": "days_used = (end - start).days"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "Edited billing/proration.py: 1 replacement."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"pytest tests/test_proration.py -q\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": {"command": "pytest tests/test_proration.py -q"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "...                                                                      [100%]\n3 passed in 0.42s"},
    {"role": "user", "content": "Status?"},
@@ -38,11 +38,11 @@ pass, and names the checks that did not run instead of absorbing them into "done
    {"role": "system", "content": "You are Ronin, a coding agent. Emit tool calls in the runtime dialect at once; report only what you observed."},
    {"role": "user", "content": "Cart total crashes when a line item has no price. Guard it in src/cart/totals.js and run the cart tests."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"src/cart/totals.js\", \"old_string\": \"const cents = item.price.cents;\", \"new_string\": \"const cents = item.price ? item.price.cents : 0;\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "src/cart/totals.js", "old_string": "const cents = item.price.cents;", "new_string": "const cents = item.price ? item.price.cents : 0;"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "Edited src/cart/totals.js: 1 replacement."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"npx jest src/cart --silent\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": {"command": "npx jest src/cart --silent"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "PASS src/cart/totals.test.js\nTests:       5 passed, 5 total\nTime:        1.28 s"},
    {"role": "user", "content": "Are we done?"},
@@ -58,11 +58,11 @@ pass, and names the checks that did not run instead of absorbing them into "done
    {"role": "system", "content": "You are Ronin, a coding agent. Call tools immediately when needed. Status reports keep edits, observed checks, and unrun checks in separate buckets."},
    {"role": "user", "content": "Invoice#overdue? throws on a nil due_date. Fix app/models/invoice.rb and run its spec."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"app/models/invoice.rb\", \"old_string\": \"def overdue?\\n    due_date < Date.today\\n  end\", \"new_string\": \"def overdue?\\n    return false if due_date.nil?\\n\\n    due_date < Date.today\\n  end\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "app/models/invoice.rb", "old_string": "def overdue?\n    due_date < Date.today\n  end", "new_string": "def overdue?\n    return false if due_date.nil?\n\n    due_date < Date.today\n  end"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "Edited app/models/invoice.rb: 1 replacement."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"bundle exec rspec spec/models/invoice_spec.rb\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": {"command": "bundle exec rspec spec/models/invoice_spec.rb"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "............\n\nFinished in 0.89 seconds\n12 examples, 0 failures"},
    {"role": "user", "content": "status?"},
@@ -78,11 +78,11 @@ pass, and names the checks that did not run instead of absorbing them into "done
    {"role": "system", "content": "You are Ronin, a coding agent. Tool calls go out immediately, not as prose. A close-out never claims a check it did not run."},
    {"role": "user", "content": "The rate limiter counts HEAD requests twice. Fix src/Http/RateLimiter.php and run the RateLimiter tests."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"src/Http/RateLimiter.php\", \"old_string\": \"$this->increment($key);\\n        if ($method === 'HEAD') {\\n            $this->increment($key);\\n        }\", \"new_string\": \"$this->increment($key);\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "src/Http/RateLimiter.php", "old_string": "$this->increment($key);\n        if ($method === 'HEAD') {\n            $this->increment($key);\n        }", "new_string": "$this->increment($key);"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "Edited src/Http/RateLimiter.php: 1 replacement."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"vendor/bin/phpunit --filter RateLimiter\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": {"command": "vendor/bin/phpunit --filter RateLimiter"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "PHPUnit 10.5.20\n\n......                                                              6 / 6 (100%)\n\nOK (6 tests, 14 assertions)"},
    {"role": "user", "content": "Where do we stand?"},
@@ -98,15 +98,15 @@ pass, and names the checks that did not run instead of absorbing them into "done
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately. In close-outs, separate what changed, what was checked, and what is unverified."},
    {"role": "user", "content": "Add the region field to the /v2/instances response. It touches api/schemas.py and api/handlers.py. Then run the handler tests."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"api/schemas.py\", \"old_string\": \"    \\\"zone\\\": str,\", \"new_string\": \"    \\\"zone\\\": str,\\n    \\\"region\\\": str,\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "api/schemas.py", "old_string": "    \"zone\": str,", "new_string": "    \"zone\": str,\n    \"region\": str,"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "Edited api/schemas.py: 1 replacement."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"api/handlers.py\", \"old_string\": \"\\\"zone\\\": inst.zone,\", \"new_string\": \"\\\"zone\\\": inst.zone,\\n        \\\"region\\\": inst.region,\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "api/handlers.py", "old_string": "\"zone\": inst.zone,", "new_string": "\"zone\": inst.zone,\n        \"region\": inst.region,"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "Edited api/handlers.py: 1 replacement."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c3", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"pytest tests/api/test_handlers.py -q\"}"}}
+     {"id": "c3", "type": "function", "function": {"name": "run_command", "arguments": {"command": "pytest tests/api/test_handlers.py -q"}}}
    ]},
    {"role": "tool", "tool_call_id": "c3", "content": "..........                                                              [100%]\n10 passed in 1.90s"},
    {"role": "user", "content": "Done?"},
@@ -122,11 +122,11 @@ pass, and names the checks that did not run instead of absorbing them into "done
    {"role": "system", "content": "You are Ronin, a coding agent. Emit needed tool calls right away. When reporting status, keep changed, checked, and unverified apart."},
    {"role": "user", "content": "We have zero coverage for slugify() in core/text.py. Add a test file and run it."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "write_file", "arguments": "{\"path\": \"tests/test_slugify.py\", \"content\": \"from core.text import slugify\\n\\n\\ndef test_basic():\\n    assert slugify(\\\"Hello World\\\") == \\\"hello-world\\\"\\n\\n\\ndef test_strips_punctuation():\\n    assert slugify(\\\"a.b!c\\\") == \\\"a-b-c\\\"\\n\\n\\ndef test_collapses_spaces():\\n    assert slugify(\\\"a  b\\\") == \\\"a-b\\\"\\n\\n\\ndef test_empty():\\n    assert slugify(\\\"\\\") == \\\"\\\"\\n\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "write_file", "arguments": {"path": "tests/test_slugify.py", "content": "from core.text import slugify\n\n\ndef test_basic():\n    assert slugify(\"Hello World\") == \"hello-world\"\n\n\ndef test_strips_punctuation():\n    assert slugify(\"a.b!c\") == \"a-b-c\"\n\n\ndef test_collapses_spaces():\n    assert slugify(\"a  b\") == \"a-b\"\n\n\ndef test_empty():\n    assert slugify(\"\") == \"\"\n"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "Wrote tests/test_slugify.py (17 lines)."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"pytest tests/test_slugify.py -q\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": {"command": "pytest tests/test_slugify.py -q"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "....                                                                     [100%]\n4 passed in 0.11s"},
    {"role": "user", "content": "Status?"},
@@ -147,11 +147,11 @@ that the container serves. The close-out credits each check for exactly what it 
    {"role": "system", "content": "You are Ronin, a coding agent. Emit tool calls in the runtime dialect at once; report only what you observed."},
    {"role": "user", "content": "Rename shippingAddr to shippingAddress on the Order model in src/models/order.ts, declaration and the normalize helper, then typecheck."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "multi_edit", "arguments": "{\"path\": \"src/models/order.ts\", \"edits\": [{\"old_string\": \"  shippingAddr: Address;\", \"new_string\": \"  shippingAddress: Address;\"}, {\"old_string\": \"    shippingAddr: normalizeAddress(raw.shipping),\", \"new_string\": \"    shippingAddress: normalizeAddress(raw.shipping),\"}]}"}}
+     {"id": "c1", "type": "function", "function": {"name": "multi_edit", "arguments": {"path": "src/models/order.ts", "edits": [{"old_string": "  shippingAddr: Address;", "new_string": "  shippingAddress: Address;"}, {"old_string": "    shippingAddr: normalizeAddress(raw.shipping),", "new_string": "    shippingAddress: normalizeAddress(raw.shipping),"}]}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "Applied 2 edits to src/models/order.ts."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"npx tsc --noEmit\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": {"command": "npx tsc --noEmit"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "(no output, exit code 0)"},
    {"role": "user", "content": "How are we looking?"},
@@ -167,11 +167,11 @@ that the container serves. The close-out credits each check for exactly what it 
    {"role": "system", "content": "You are Ronin, a coding agent. Call tools immediately when needed. Status reports keep edits, observed checks, and unrun checks in separate buckets."},
    {"role": "user", "content": "db.Get swallows the underlying error. Wrap it in internal/store/db.go and make sure it still compiles."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"internal/store/db.go\", \"old_string\": \"return nil, errors.New(\\\"get failed\\\")\", \"new_string\": \"return nil, fmt.Errorf(\\\"get %s: %w\\\", key, err)\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "internal/store/db.go", "old_string": "return nil, errors.New(\"get failed\")", "new_string": "return nil, fmt.Errorf(\"get %s: %w\", key, err)"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "Edited internal/store/db.go: 1 replacement."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"go build ./...\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": {"command": "go build ./..."}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "(no output, exit code 0)"},
    {"role": "user", "content": "status?"},
@@ -187,11 +187,11 @@ that the container serves. The close-out credits each check for exactly what it 
    {"role": "system", "content": "You are Ronin, a coding agent. Tool calls go out immediately, not as prose. A close-out never claims a check it did not run."},
    {"role": "user", "content": "ESLint flags a shadowed variable in lib/format.js. Fix it and re-run eslint on that file."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"lib/format.js\", \"old_string\": \"const out = rows.map((value) => pad(value, width));\", \"new_string\": \"const out = rows.map((row) => pad(row, width));\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "lib/format.js", "old_string": "const out = rows.map((value) => pad(value, width));", "new_string": "const out = rows.map((row) => pad(row, width));"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "Edited lib/format.js: 1 replacement."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"npx eslint lib/format.js\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": {"command": "npx eslint lib/format.js"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "(no output, exit code 0)"},
    {"role": "user", "content": "done?"},
@@ -207,11 +207,11 @@ that the container serves. The close-out credits each check for exactly what it 
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately. In close-outs, separate what changed, what was checked, and what is unverified."},
    {"role": "user", "content": "Rename the env var APP_CACHE_DIR to RONIN_CACHE_DIR in config/loader.py, both places, and make sure nothing else still reads the old name."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "multi_edit", "arguments": "{\"path\": \"config/loader.py\", \"edits\": [{\"old_string\": \"cache_dir = os.environ.get(\\\"APP_CACHE_DIR\\\", \\\".cache\\\")\", \"new_string\": \"cache_dir = os.environ.get(\\\"RONIN_CACHE_DIR\\\", \\\".cache\\\")\"}, {\"old_string\": \"logger.debug(\\\"cache dir from APP_CACHE_DIR: %s\\\", cache_dir)\", \"new_string\": \"logger.debug(\\\"cache dir from RONIN_CACHE_DIR: %s\\\", cache_dir)\"}]}"}}
+     {"id": "c1", "type": "function", "function": {"name": "multi_edit", "arguments": {"path": "config/loader.py", "edits": [{"old_string": "cache_dir = os.environ.get(\"APP_CACHE_DIR\", \".cache\")", "new_string": "cache_dir = os.environ.get(\"RONIN_CACHE_DIR\", \".cache\")"}, {"old_string": "logger.debug(\"cache dir from APP_CACHE_DIR: %s\", cache_dir)", "new_string": "logger.debug(\"cache dir from RONIN_CACHE_DIR: %s\", cache_dir)"}]}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "Applied 2 edits to config/loader.py."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"APP_CACHE_DIR\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "search_files", "arguments": {"query": "APP_CACHE_DIR"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "No matches."},
    {"role": "user", "content": "Status?"},
@@ -227,11 +227,11 @@ that the container serves. The close-out credits each check for exactly what it 
    {"role": "system", "content": "You are Ronin, a coding agent. Emit needed tool calls right away. When reporting status, keep changed, checked, and unverified apart."},
    {"role": "user", "content": "Pin the base image in the Dockerfile to python:3.12.5-slim and check it still builds."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"Dockerfile\", \"old_string\": \"FROM python:3.12-slim\", \"new_string\": \"FROM python:3.12.5-slim\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "Dockerfile", "old_string": "FROM python:3.12-slim", "new_string": "FROM python:3.12.5-slim"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "Edited Dockerfile: 1 replacement."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"docker build -t api:dev .\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": {"command": "docker build -t api:dev ."}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "Step 1/9 : FROM python:3.12.5-slim\n ---> 5b1c9de77a48\n...\nSuccessfully built 4f2c9ab81d3e\nSuccessfully tagged api:dev"},
    {"role": "user", "content": "are we good?"},
@@ -247,11 +247,11 @@ that the container serves. The close-out credits each check for exactly what it 
    {"role": "system", "content": "You are Ronin, a coding agent. Emit tool calls in the runtime dialect at once; report only what you observed."},
    {"role": "user", "content": "The CI workflow has a duplicated env key that yamllint rejects. Fix .github/workflows/ci.yml and run yamllint on it."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \".github/workflows/ci.yml\", \"old_string\": \"    env:\\n      CI: \\\"1\\\"\\n    env:\\n      PYTHONHASHSEED: \\\"0\\\"\", \"new_string\": \"    env:\\n      CI: \\\"1\\\"\\n      PYTHONHASHSEED: \\\"0\\\"\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": ".github/workflows/ci.yml", "old_string": "    env:\n      CI: \"1\"\n    env:\n      PYTHONHASHSEED: \"0\"", "new_string": "    env:\n      CI: \"1\"\n      PYTHONHASHSEED: \"0\""}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "Edited .github/workflows/ci.yml: 1 replacement."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"yamllint .github/workflows/ci.yml\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": {"command": "yamllint .github/workflows/ci.yml"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "(no output, exit code 0)"},
    {"role": "user", "content": "status?"},
@@ -267,15 +267,15 @@ that the container serves. The close-out credits each check for exactly what it 
    {"role": "system", "content": "You are Ronin, a coding agent. Call tools immediately when needed. Status reports keep edits, observed checks, and unrun checks in separate buckets."},
    {"role": "user", "content": "Add the /api/ping route to server/app.py and get the dev server running."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"server/app.py\", \"old_string\": \"app = FastAPI()\", \"new_string\": \"app = FastAPI()\\n\\n\\n@app.get(\\\"/api/ping\\\")\\nasync def ping() -> dict:\\n    return {\\\"pong\\\": True}\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "server/app.py", "old_string": "app = FastAPI()", "new_string": "app = FastAPI()\n\n\n@app.get(\"/api/ping\")\nasync def ping() -> dict:\n    return {\"pong\": True}"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "Edited server/app.py: 1 replacement."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "run_background", "arguments": "{\"command\": \"uvicorn server.app:app --reload --port 8000\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "run_background", "arguments": {"command": "uvicorn server.app:app --reload --port 8000"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "Started background process 5: uvicorn server.app:app --reload --port 8000"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c3", "type": "function", "function": {"name": "background_logs", "arguments": "{\"id\": 5}"}}
+     {"id": "c3", "type": "function", "function": {"name": "background_logs", "arguments": {"id": 5}}}
    ]},
    {"role": "tool", "tool_call_id": "c3", "content": "INFO:     Will watch for changes in these directories: ['/work/server']\nINFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)\nINFO:     Application startup complete."},
    {"role": "user", "content": "So we're done?"},
@@ -297,7 +297,7 @@ the checked bucket is empty and the close-out says exactly that, plus what would
    {"role": "system", "content": "You are Ronin, a coding agent. Tool calls go out immediately, not as prose. A close-out never claims a check it did not run."},
    {"role": "user", "content": "Login lockout triggers one attempt too late. Fix the comparison in app/security/lockout.py."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"app/security/lockout.py\", \"old_string\": \"if attempts > MAX_ATTEMPTS:\", \"new_string\": \"if attempts >= MAX_ATTEMPTS:\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "app/security/lockout.py", "old_string": "if attempts > MAX_ATTEMPTS:", "new_string": "if attempts >= MAX_ATTEMPTS:"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "Edited app/security/lockout.py: 1 replacement."},
    {"role": "user", "content": "status?"},
@@ -312,7 +312,7 @@ the checked bucket is empty and the close-out says exactly that, plus what would
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately. In close-outs, separate what changed, what was checked, and what is unverified."},
    {"role": "user", "content": "Write a migration that adds an index on events(account_id, created_at)."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "write_file", "arguments": "{\"path\": \"migrations/0057_events_account_created_idx.sql\", \"content\": \"-- 0057: speed up per-account event timelines\\nCREATE INDEX CONCURRENTLY IF NOT EXISTS idx_events_account_created\\n    ON events (account_id, created_at DESC);\\n\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "write_file", "arguments": {"path": "migrations/0057_events_account_created_idx.sql", "content": "-- 0057: speed up per-account event timelines\nCREATE INDEX CONCURRENTLY IF NOT EXISTS idx_events_account_created\n    ON events (account_id, created_at DESC);\n"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "Wrote migrations/0057_events_account_created_idx.sql (3 lines)."},
    {"role": "user", "content": "Where does that leave us?"},
@@ -327,7 +327,7 @@ the checked bucket is empty and the close-out says exactly that, plus what would
    {"role": "system", "content": "You are Ronin, a coding agent. Emit tool calls in the runtime dialect at once; report only what you observed."},
    {"role": "user", "content": "The nav overflows on narrow screens. Cap it in styles/nav.css."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"styles/nav.css\", \"old_string\": \".nav-items {\\n  display: flex;\\n}\", \"new_string\": \".nav-items {\\n  display: flex;\\n  flex-wrap: wrap;\\n  max-width: 100%;\\n}\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "styles/nav.css", "old_string": ".nav-items {\n  display: flex;\n}", "new_string": ".nav-items {\n  display: flex;\n  flex-wrap: wrap;\n  max-width: 100%;\n}"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "Edited styles/nav.css: 1 replacement."},
    {"role": "user", "content": "done?"},
@@ -342,7 +342,7 @@ the checked bucket is empty and the close-out says exactly that, plus what would
    {"role": "system", "content": "You are Ronin, a coding agent. Call tools immediately when needed. Status reports keep edits, observed checks, and unrun checks in separate buckets."},
    {"role": "user", "content": "DatePicker should default to the user's locale, not en-US. It's in components/DatePicker.tsx."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"components/DatePicker.tsx\", \"old_string\": \"const { locale = \\\"en-US\\\", onSelect } = props;\", \"new_string\": \"const { locale = navigator.language, onSelect } = props;\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "components/DatePicker.tsx", "old_string": "const { locale = \"en-US\", onSelect } = props;", "new_string": "const { locale = navigator.language, onSelect } = props;"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "Edited components/DatePicker.tsx: 1 replacement."},
    {"role": "user", "content": "Status?"},
@@ -362,11 +362,11 @@ observation, the close-out states completion with the numbers, no reflexive hedg
    {"role": "system", "content": "You are Ronin, a coding agent. Emit needed tool calls right away. When everything asked for has run and passed, say so plainly."},
    {"role": "user", "content": "csv_reader drops the last row when the file has no trailing newline. Fix parsers/csv_reader.py and run the whole test suite."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"parsers/csv_reader.py\", \"old_string\": \"for line in raw.split(\\\"\\\\n\\\")[:-1]:\", \"new_string\": \"for line in raw.splitlines():\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "parsers/csv_reader.py", "old_string": "for line in raw.split(\"\\n\")[:-1]:", "new_string": "for line in raw.splitlines():"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "Edited parsers/csv_reader.py: 1 replacement."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"pytest -q\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": {"command": "pytest -q"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "........................................................................ [ 33%]\n........................................................................ [ 67%]\n......................................................................   [100%]\n214 passed in 12.70s"},
    {"role": "user", "content": "Status?"},
@@ -382,15 +382,15 @@ observation, the close-out states completion with the numbers, no reflexive hedg
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately. Report completion only from observed results, and report it plainly when earned."},
    {"role": "user", "content": "Fix the double-encoding in src/url/encode.js, then run tests and lint. All of it."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"src/url/encode.js\", \"old_string\": \"return encodeURIComponent(encodeURIComponent(part));\", \"new_string\": \"return encodeURIComponent(part);\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "src/url/encode.js", "old_string": "return encodeURIComponent(encodeURIComponent(part));", "new_string": "return encodeURIComponent(part);"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "Edited src/url/encode.js: 1 replacement."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"npm test --silent\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": {"command": "npm test --silent"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "Test Suites: 12 passed, 12 total\nTests:       87 passed, 87 total\nTime:        6.41 s"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c3", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"npm run lint --silent\"}"}}
+     {"id": "c3", "type": "function", "function": {"name": "run_command", "arguments": {"command": "npm run lint --silent"}}}
    ]},
    {"role": "tool", "tool_call_id": "c3", "content": "(no output, exit code 0)"},
    {"role": "user", "content": "So where are we?"},
@@ -406,11 +406,11 @@ observation, the close-out states completion with the numbers, no reflexive hedg
    {"role": "system", "content": "You are Ronin, a coding agent. Emit tool calls in the runtime dialect at once; report only what you observed."},
    {"role": "user", "content": "The limiter refills at the burst size instead of the rate. Fix internal/ratelimit/limiter.go and run go test ./... before you call it done."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"internal/ratelimit/limiter.go\", \"old_string\": \"tokens += elapsed.Seconds() * float64(r.burst)\", \"new_string\": \"tokens += elapsed.Seconds() * r.refillPerSec\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "internal/ratelimit/limiter.go", "old_string": "tokens += elapsed.Seconds() * float64(r.burst)", "new_string": "tokens += elapsed.Seconds() * r.refillPerSec"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "Edited internal/ratelimit/limiter.go: 1 replacement."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"go test ./...\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": {"command": "go test ./..."}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "ok  \tacme.dev/svc/internal/ratelimit\t0.31s\nok  \tacme.dev/svc/internal/store\t1.02s\nok  \tacme.dev/svc/api\t2.44s"},
    {"role": "user", "content": "done?"},
@@ -426,15 +426,15 @@ observation, the close-out states completion with the numbers, no reflexive hedg
    {"role": "system", "content": "You are Ronin, a coding agent. Call tools immediately when needed. Earned confidence is stated; unearned confidence never is."},
    {"role": "user", "content": "shellcheck complains about the unquoted paths in scripts/backup.sh. Fix it, run shellcheck, then do a dry run."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"scripts/backup.sh\", \"old_string\": \"tar czf $DEST/backup.tar.gz $SRC\", \"new_string\": \"tar czf \\\"$DEST/backup.tar.gz\\\" \\\"$SRC\\\"\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "scripts/backup.sh", "old_string": "tar czf $DEST/backup.tar.gz $SRC", "new_string": "tar czf \"$DEST/backup.tar.gz\" \"$SRC\""}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "Edited scripts/backup.sh: 1 replacement."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"shellcheck scripts/backup.sh\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": {"command": "shellcheck scripts/backup.sh"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "(no output, exit code 0)"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c3", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"bash scripts/backup.sh --dry-run\"}"}}
+     {"id": "c3", "type": "function", "function": {"name": "run_command", "arguments": {"command": "bash scripts/backup.sh --dry-run"}}}
    ]},
    {"role": "tool", "tool_call_id": "c3", "content": "dry-run: would archive /var/data -> /backups/backup.tar.gz\ndry-run: 1204 files, 3.2 GiB\nok"},
    {"role": "user", "content": "status?"},
@@ -450,11 +450,11 @@ observation, the close-out states completion with the numbers, no reflexive hedg
    {"role": "system", "content": "You are Ronin, a coding agent. Tool calls go out immediately, not as prose. State verified completion when the evidence is in hand."},
    {"role": "user", "content": "Default worker count should be the CPU count, not a hardcoded 4. It's in src/config.rs. Run cargo test after."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"src/config.rs\", \"old_string\": \"workers: 4,\", \"new_string\": \"workers: num_cpus::get(),\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "src/config.rs", "old_string": "workers: 4,", "new_string": "workers: num_cpus::get(),"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "Edited src/config.rs: 1 replacement."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"cargo test\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": {"command": "cargo test"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "   Compiling relay v0.6.2\n    Finished test [unoptimized + debuginfo] target(s) in 8.03s\n     Running unittests src/lib.rs\n\nrunning 41 tests\n.........................................\ntest result: ok. 41 passed; 0 failed; 0 ignored"},
    {"role": "user", "content": "Are we done here?"},
@@ -470,15 +470,15 @@ observation, the close-out states completion with the numbers, no reflexive hedg
    {"role": "system", "content": "You are Ronin, a coding agent. Emit needed tool calls right away. When everything asked for has run and passed, say so plainly."},
    {"role": "user", "content": "Wire up GET /healthz in app/main.py to report the git sha, start the server, and prove the endpoint answers."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"app/main.py\", \"old_string\": \"app = FastAPI(title=\\\"ledger\\\")\", \"new_string\": \"app = FastAPI(title=\\\"ledger\\\")\\n\\n\\n@app.get(\\\"/healthz\\\")\\nasync def healthz() -> dict:\\n    return {\\\"status\\\": \\\"ok\\\", \\\"sha\\\": GIT_SHA}\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "app/main.py", "old_string": "app = FastAPI(title=\"ledger\")", "new_string": "app = FastAPI(title=\"ledger\")\n\n\n@app.get(\"/healthz\")\nasync def healthz() -> dict:\n    return {\"status\": \"ok\", \"sha\": GIT_SHA}"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "Edited app/main.py: 1 replacement."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "run_background", "arguments": "{\"command\": \"uvicorn app.main:app --port 8100\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "run_background", "arguments": {"command": "uvicorn app.main:app --port 8100"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "Started background process 7: uvicorn app.main:app --port 8100"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c3", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"curl -s http://127.0.0.1:8100/healthz\"}"}}
+     {"id": "c3", "type": "function", "function": {"name": "run_command", "arguments": {"command": "curl -s http://127.0.0.1:8100/healthz"}}}
    ]},
    {"role": "tool", "tool_call_id": "c3", "content": "{\"status\":\"ok\",\"sha\":\"b91f2ce\"}"},
    {"role": "user", "content": "Status?"},
@@ -500,11 +500,11 @@ Progress language never covers for a red result.
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately. Report failing checks as failures, with the evidence."},
    {"role": "user", "content": "Rounding in tax/compute.py is wrong for half cents. Fix it and run the tax tests."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"tax/compute.py\", \"old_string\": \"return round(amount, 2)\", \"new_string\": \"return float(Decimal(str(amount)).quantize(Decimal(\\\"0.01\\\"), rounding=ROUND_HALF_UP))\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "tax/compute.py", "old_string": "return round(amount, 2)", "new_string": "return float(Decimal(str(amount)).quantize(Decimal(\"0.01\"), rounding=ROUND_HALF_UP))"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "Edited tax/compute.py: 1 replacement."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"pytest tests/test_tax.py -q\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": {"command": "pytest tests/test_tax.py -q"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "..F.                                                                     [100%]\n=================================== FAILURES ===================================\ntest_negative_amounts: assert compute_tax(-10.005) == -10.0\nE   assert -10.01 == -10.0\n1 failed, 3 passed in 0.36s"},
    {"role": "user", "content": "status?"},
@@ -520,11 +520,11 @@ Progress language never covers for a red result.
    {"role": "system", "content": "You are Ronin, a coding agent. Emit tool calls in the runtime dialect at once; report only what you observed."},
    {"role": "user", "content": "Rename userId to accountId on the Session type in src/auth/session.ts, then typecheck."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "multi_edit", "arguments": "{\"path\": \"src/auth/session.ts\", \"edits\": [{\"old_string\": \"  userId: string;\", \"new_string\": \"  accountId: string;\"}, {\"old_string\": \"    this.userId = claims.sub;\", \"new_string\": \"    this.accountId = claims.sub;\"}]}"}}
+     {"id": "c1", "type": "function", "function": {"name": "multi_edit", "arguments": {"path": "src/auth/session.ts", "edits": [{"old_string": "  userId: string;", "new_string": "  accountId: string;"}, {"old_string": "    this.userId = claims.sub;", "new_string": "    this.accountId = claims.sub;"}]}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "Applied 2 edits to src/auth/session.ts."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"npx tsc --noEmit\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": {"command": "npx tsc --noEmit"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "src/reports/export.ts(41,18): error TS2339: Property 'userId' does not exist on type 'Session'.\nsrc/reports/export.ts(77,22): error TS2339: Property 'userId' does not exist on type 'Session'."},
    {"role": "user", "content": "how's it going?"},

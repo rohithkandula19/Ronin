@@ -18,15 +18,15 @@ original task against the real path.
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately."},
    {"role": "user", "content": "Summarize README.rst for me."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"README.rst\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "README.rst"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "file not found: README.rst"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "glob", "arguments": "{\"pattern\": \"README*\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "glob", "arguments": {"pattern": "README*"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "README.md"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c3", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"README.md\"}"}}
+     {"id": "c3", "type": "function", "function": {"name": "read_file", "arguments": {"path": "README.md"}}}
    ]}
  ],
  "tools": [
@@ -41,19 +41,19 @@ original task against the real path.
    {"role": "system", "content": "You are Ronin, a coding agent. A failed call is never repeated verbatim; the next call changes what the error indicts."},
    {"role": "user", "content": "Set CACHE_TTL to 300 in app/settings.py."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"app/settings.py\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "app/settings.py"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "file not found: app/settings.py"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "glob", "arguments": "{\"pattern\": \"**/settings*.py\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "glob", "arguments": {"pattern": "**/settings*.py"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "config/settings.py\nconfig/settings_test.py"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c3", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"config/settings.py\"}"}}
+     {"id": "c3", "type": "function", "function": {"name": "read_file", "arguments": {"path": "config/settings.py"}}}
    ]},
    {"role": "tool", "tool_call_id": "c3", "content": "DEBUG = False\nCACHE_TTL = 600\nALLOWED_HOSTS = [\"api.internal\"]"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c4", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"config/settings.py\", \"old_string\": \"CACHE_TTL = 600\", \"new_string\": \"CACHE_TTL = 300\"}"}}
+     {"id": "c4", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "config/settings.py", "old_string": "CACHE_TTL = 600", "new_string": "CACHE_TTL = 300"}}}
    ]}
  ],
  "tools": [
@@ -69,15 +69,15 @@ original task against the real path.
    {"role": "system", "content": "You are Ronin, a coding agent. When a tool errors, the follow-up call must differ in a way the error justifies."},
    {"role": "user", "content": "What version of react are we on? Check package.json."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"package.json\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "package.json"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "file not found: package.json"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "glob", "arguments": "{\"pattern\": \"**/package.json\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "glob", "arguments": {"pattern": "**/package.json"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "frontend/package.json"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c3", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"frontend/package.json\"}"}}
+     {"id": "c3", "type": "function", "function": {"name": "read_file", "arguments": {"path": "frontend/package.json"}}}
    ]},
    {"role": "tool", "tool_call_id": "c3", "content": "  \"name\": \"dashboard\",\n  \"dependencies\": {\n    \"react\": \"18.3.1\",\n    \"react-dom\": \"18.3.1\"\n  }"},
    {"role": "assistant", "content": "React 18.3.1, pinned exactly in frontend/package.json alongside react-dom at the same version. There is no package.json at the repo root, which is why the first read failed; the Node app lives entirely under frontend/."}
@@ -94,11 +94,11 @@ original task against the real path.
    {"role": "system", "content": "You are Ronin, a coding agent. Errors change the plan; the same call twice teaches you nothing."},
    {"role": "user", "content": "What base image does the Dockerfile use?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"Dockerfile\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "Dockerfile"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "file not found: Dockerfile"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "glob", "arguments": "{\"pattern\": \"**/Dockerfile*\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "glob", "arguments": {"pattern": "**/Dockerfile*"}}}
    ]}
  ],
  "tools": [
@@ -113,11 +113,11 @@ original task against the real path.
    {"role": "system", "content": "You are Ronin, a coding agent. At most one short line of adjustment, then the corrected call in the same turn."},
    {"role": "user", "content": "Which variables does .env.sample document? I need to set up my shell."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \".env.sample\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": ".env.sample"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "file not found: .env.sample"},
    {"role": "assistant", "content": "No .env.sample at the root; checking which env templates this repo actually ships.", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "glob", "arguments": "{\"pattern\": \"**/.env*\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "glob", "arguments": {"pattern": "**/.env*"}}}
    ]}
  ],
  "tools": [
@@ -132,15 +132,15 @@ original task against the real path.
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately."},
    {"role": "user", "content": "What went into the latest release? Check CHANGELOG.md."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"CHANGELOG.md\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "CHANGELOG.md"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "file not found: CHANGELOG.md"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "glob", "arguments": "{\"pattern\": \"**/CHANGE*\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "glob", "arguments": {"pattern": "**/CHANGE*"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "docs/CHANGES.rst"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c3", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"docs/CHANGES.rst\"}"}}
+     {"id": "c3", "type": "function", "function": {"name": "read_file", "arguments": {"path": "docs/CHANGES.rst"}}}
    ]},
    {"role": "tool", "tool_call_id": "c3", "content": "0.9.0 (2026-06-30)\n------------------\n* async export queue\n* fix: double charge on payment retry\n\n0.8.2 (2026-05-11)\n------------------\n* dependency bumps"},
    {"role": "assistant", "content": "Latest is 0.9.0 (2026-06-30), per docs/CHANGES.rst: an async export queue plus a fix for the double charge on payment retry. The history lives in reStructuredText under docs/, so there is no CHANGELOG.md at the root; that first read failing is expected."}
@@ -179,11 +179,11 @@ The corrected command carries the error's fix; the identical rerun is dead weigh
    {"role": "system", "content": "You are Ronin, a coding agent. A failing suite narrows to the failure; it is not rerun whole."},
    {"role": "user", "content": "Run the test suite."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"pytest -q\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "pytest -q"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "exit 1\n2 failed, 141 passed in 38.20s\nFAILED tests/test_auth.py::test_token_refresh\nFAILED tests/test_auth.py::test_expired_session"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"pytest tests/test_auth.py -x -q --tb=long\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": {"command": "pytest tests/test_auth.py -x -q --tb=long"}}}
    ]}
  ],
  "tools": [
@@ -197,11 +197,11 @@ The corrected command carries the error's fix; the identical rerun is dead weigh
    {"role": "system", "content": "You are Ronin, a coding agent. When a tool errors, the follow-up call must differ in a way the error justifies."},
    {"role": "user", "content": "Lint the project."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"npm run lint\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "npm run lint"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "exit 1\nnpm error Missing script: \"lint\"\nnpm error Did you mean this?\nnpm error   npm run lint:js"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"npm run lint:js\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": {"command": "npm run lint:js"}}}
    ]}
  ],
  "tools": [
@@ -215,11 +215,11 @@ The corrected command carries the error's fix; the identical rerun is dead weigh
    {"role": "system", "content": "You are Ronin, a coding agent. At most one short line of adjustment, then the corrected call in the same turn."},
    {"role": "user", "content": "Run make test and show me what happens."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"make test\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "make test"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "exit 2\nmake: *** No rule to make target 'test'.  Stop."},
    {"role": "assistant", "content": "There is no test target; reading the Makefile to see what it defines.", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"Makefile\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "read_file", "arguments": {"path": "Makefile"}}}
    ]}
  ],
  "tools": [
@@ -234,11 +234,11 @@ The corrected command carries the error's fix; the identical rerun is dead weigh
    {"role": "system", "content": "You are Ronin, a coding agent. Errors change the plan; the same call twice teaches you nothing."},
    {"role": "user", "content": "Run the migration script."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"python scripts/migrate.py\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "python scripts/migrate.py"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "exit 1\nTraceback (most recent call last):\n  File \"scripts/migrate.py\", line 3, in <module>\n    from app.db import engine\nModuleNotFoundError: No module named 'app'"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"python -m scripts.migrate\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": {"command": "python -m scripts.migrate"}}}
    ]}
  ],
  "tools": [
@@ -252,11 +252,11 @@ The corrected command carries the error's fix; the identical rerun is dead weigh
    {"role": "system", "content": "You are Ronin, a coding agent. A failed call is never repeated verbatim; the next call changes what the error indicts."},
    {"role": "user", "content": "Run the tests with the postgres feature enabled."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"cargo test --features postgres\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "cargo test --features postgres"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "exit 101\nerror: none of the selected packages contains these features: postgres, did you mean: pg?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"cargo test --features pg\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": {"command": "cargo test --features pg"}}}
    ]}
  ],
  "tools": [
@@ -270,11 +270,11 @@ The corrected command carries the error's fix; the identical rerun is dead weigh
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately."},
    {"role": "user", "content": "Run eslint over the src tree."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"npx eslint src/**/*.ts\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "npx eslint src/**/*.ts"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "exit 2\nNo files matching the pattern \"src/**/*.ts\" were found.\nPlease check for typing mistakes in the pattern."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"npx eslint src --ext .ts,.tsx\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "run_command", "arguments": {"command": "npx eslint src --ext .ts,.tsx"}}}
    ]}
  ],
  "tools": [
@@ -288,12 +288,12 @@ The corrected command carries the error's fix; the identical rerun is dead weigh
    {"role": "system", "content": "You are Ronin, a coding agent. A deterministic error makes an identical rerun pointless; the next call goes at the cause."},
    {"role": "user", "content": "Run the checkout tests."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"pytest tests/checkout -q\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "pytest tests/checkout -q"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "exit 2\nERROR collecting tests/checkout/test_totals.py\nE   File \"tests/checkout/test_totals.py\", line 41\nE     assert total ==\nE                    ^\nE   SyntaxError: invalid syntax"},
    {"role": "user", "content": "Probably a flake, just run it again."},
    {"role": "assistant", "content": "A SyntaxError is deterministic, so a rerun would fail identically; opening the file at line 41 instead.", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"tests/checkout/test_totals.py\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "read_file", "arguments": {"path": "tests/checkout/test_totals.py"}}}
    ]}
  ],
  "tools": [
@@ -364,15 +364,15 @@ for the exact text, or a corrected edit with a genuinely different anchor.
    {"role": "system", "content": "You are Ronin, a coding agent. A failed call is never repeated verbatim; the next call changes what the error indicts."},
    {"role": "user", "content": "In src/api/routes.py, raise the timeout on the export route from 30 to 120."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"src/api/routes.py\", \"old_string\": \"timeout=30\", \"new_string\": \"timeout=120\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "src/api/routes.py", "old_string": "timeout=30", "new_string": "timeout=120"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "edit failed: old_string \"timeout=30\" appears 3 times in src/api/routes.py; it must be unique"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"src/api/routes.py\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "read_file", "arguments": {"path": "src/api/routes.py"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "@route(\"/health\", timeout=30)\ndef health():\n    return ok()\n\n@route(\"/export\", timeout=30)\ndef export_data():\n    return exporter.run()\n\n@route(\"/import\", timeout=30)\ndef import_data():\n    return importer.run()"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c3", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"src/api/routes.py\", \"old_string\": \"@route(\\\"/export\\\", timeout=30)\", \"new_string\": \"@route(\\\"/export\\\", timeout=120)\"}"}}
+     {"id": "c3", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "src/api/routes.py", "old_string": "@route(\"/export\", timeout=30)", "new_string": "@route(\"/export\", timeout=120)"}}}
    ]}
  ],
  "tools": [
@@ -387,11 +387,11 @@ for the exact text, or a corrected edit with a genuinely different anchor.
    {"role": "system", "content": "You are Ronin, a coding agent. When a tool errors, the follow-up call must differ in a way the error justifies."},
    {"role": "user", "content": "In config/nginx.conf, bump client_max_body_size from 10m to 50m."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"config/nginx.conf\", \"old_string\": \"client_max_body_size 10m;\", \"new_string\": \"client_max_body_size 50m;\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "config/nginx.conf", "old_string": "client_max_body_size 10m;", "new_string": "client_max_body_size 50m;"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "edit failed: old_string not found in config/nginx.conf (check exact whitespace)"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"config/nginx.conf\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "read_file", "arguments": {"path": "config/nginx.conf"}}}
    ]}
  ],
  "tools": [
@@ -406,15 +406,15 @@ for the exact text, or a corrected edit with a genuinely different anchor.
    {"role": "system", "content": "You are Ronin, a coding agent. At most one short line of adjustment, then the corrected call in the same turn."},
    {"role": "user", "content": "In worker/config.yaml, bump the queue retries to 6."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"worker/config.yaml\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "worker/config.yaml"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "queue:\n  retries: 5\n  backoff: 2.0\nhttp:\n  retries: 5\n  timeout: 30"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"worker/config.yaml\", \"old_string\": \"retries: 5\", \"new_string\": \"retries: 6\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "worker/config.yaml", "old_string": "retries: 5", "new_string": "retries: 6"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "edit failed: old_string \"retries: 5\" appears 2 times in worker/config.yaml; it must be unique"},
    {"role": "assistant", "content": "Both queue and http carry that pair; anchoring the edit to the queue block.", "tool_calls": [
-     {"id": "c3", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"worker/config.yaml\", \"old_string\": \"queue:\\n  retries: 5\", \"new_string\": \"queue:\\n  retries: 6\"}"}}
+     {"id": "c3", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "worker/config.yaml", "old_string": "queue:\n  retries: 5", "new_string": "queue:\n  retries: 6"}}}
    ]}
  ],
  "tools": [
@@ -429,11 +429,11 @@ for the exact text, or a corrected edit with a genuinely different anchor.
    {"role": "system", "content": "You are Ronin, a coding agent. Errors change the plan; the same call twice teaches you nothing."},
    {"role": "user", "content": "Rename fetchUser to loadUser in src/state/user.ts: the export and the call inside refresh()."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "multi_edit", "arguments": "{\"path\": \"src/state/user.ts\", \"edits\": [{\"old_string\": \"export async function fetchUser(\", \"new_string\": \"export async function loadUser(\"}, {\"old_string\": \"await fetchUser(id)\", \"new_string\": \"await loadUser(id)\"}]}"}}
+     {"id": "c1", "type": "function", "function": {"name": "multi_edit", "arguments": {"path": "src/state/user.ts", "edits": [{"old_string": "export async function fetchUser(", "new_string": "export async function loadUser("}, {"old_string": "await fetchUser(id)", "new_string": "await loadUser(id)"}]}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "multi_edit failed on edit 2: old_string \"await fetchUser(id)\" not found; no edits were applied"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"src/state/user.ts\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "read_file", "arguments": {"path": "src/state/user.ts"}}}
    ]}
  ],
  "tools": [
@@ -470,12 +470,12 @@ search again.
    {"role": "system", "content": "You are Ronin, a coding agent. Grep is deterministic; an identical re-run of an empty search is never the next call."},
    {"role": "user", "content": "Where is our AuthGuard registered?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"AuthGuard\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "AuthGuard"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "no matches found for \"AuthGuard\""},
    {"role": "user", "content": "Run the exact same search again, maybe the index was cold."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "repo_map", "arguments": "{\"query\": \"guard that authenticates incoming requests before handlers\", \"k\": 4}"}}
+     {"id": "c2", "type": "function", "function": {"name": "repo_map", "arguments": {"query": "guard that authenticates incoming requests before handlers", "k": 4}}}
    ]}
  ],
  "tools": [
@@ -490,11 +490,11 @@ search again.
    {"role": "system", "content": "You are Ronin, a coding agent. When a tool errors or comes back empty, the follow-up call must differ in a way the result justifies."},
    {"role": "user", "content": "Find the IndexSchema class; it should be under services/search."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"IndexSchema\", \"directory\": \"services/search\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "IndexSchema", "directory": "services/search"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "no matches found for \"IndexSchema\" under services/search/"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "list_files", "arguments": "{\"directory\": \"services/search\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "list_files", "arguments": {"directory": "services/search"}}}
    ]}
  ],
  "tools": [
@@ -509,11 +509,11 @@ search again.
    {"role": "system", "content": "You are Ronin, a coding agent. At most one short line of adjustment, then the corrected call in the same turn."},
    {"role": "user", "content": "What is circuitBreakerTimeout set to for the payments client?"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"circuitBreakerTimeout\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "search_files", "arguments": {"query": "circuitBreakerTimeout"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "no matches found for \"circuitBreakerTimeout\""},
    {"role": "assistant", "content": "Zero hits on the camelCase spelling; trying the snake_case config key.", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "search_files", "arguments": "{\"query\": \"circuit_breaker_timeout\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "search_files", "arguments": {"query": "circuit_breaker_timeout"}}}
    ]}
  ],
  "tools": [
@@ -549,11 +549,11 @@ phantom.
    {"role": "system", "content": "You are Ronin, a coding agent. Errors change the plan; the same call twice teaches you nothing."},
    {"role": "user", "content": "List the Go files in the srv directory."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "glob", "arguments": "{\"pattern\": \"*.go\", \"directory\": \"srv\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "glob", "arguments": {"pattern": "*.go", "directory": "srv"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "directory not found: srv"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "list_files", "arguments": "{}"}}
+     {"id": "c2", "type": "function", "function": {"name": "list_files", "arguments": {}}}
    ]}
  ],
  "tools": [
@@ -568,11 +568,11 @@ phantom.
    {"role": "system", "content": "You are Ronin, a coding agent. When a tool errors, the follow-up call must differ in a way the error justifies."},
    {"role": "user", "content": "Show me src/utils."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"src/utils\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": {"path": "src/utils"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "read failed: src/utils is a directory, not a file"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "list_files", "arguments": "{\"directory\": \"src/utils\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "list_files", "arguments": {"directory": "src/utils"}}}
    ]}
  ],
  "tools": [
@@ -609,11 +609,11 @@ re-issued against the real path — corrected, not repeated.
    {"role": "system", "content": "You are Ronin, a coding agent. A failed call is never repeated verbatim; the next call changes what the error indicts."},
    {"role": "user", "content": "Tail the dev server logs; it's background process 3."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "background_logs", "arguments": "{\"id\": 3}"}}
+     {"id": "c1", "type": "function", "function": {"name": "background_logs", "arguments": {"id": 3}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "no background process with id 3"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "background_status", "arguments": "{}"}}
+     {"id": "c2", "type": "function", "function": {"name": "background_status", "arguments": {}}}
    ]}
  ],
  "tools": [
@@ -628,15 +628,15 @@ re-issued against the real path — corrected, not repeated.
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately."},
    {"role": "user", "content": "Install the Python dependencies."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"pip install -r requirements.txt\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "pip install -r requirements.txt"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "exit 1\nERROR: Could not open requirements file: [Errno 2] No such file or directory: 'requirements.txt'"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "glob", "arguments": "{\"pattern\": \"**/requirements*.txt\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "glob", "arguments": {"pattern": "**/requirements*.txt"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "requirements/base.txt\nrequirements/dev.txt"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c3", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"pip install -r requirements/base.txt -r requirements/dev.txt\"}"}}
+     {"id": "c3", "type": "function", "function": {"name": "run_command", "arguments": {"command": "pip install -r requirements/base.txt -r requirements/dev.txt"}}}
    ]}
  ],
  "tools": [
@@ -651,15 +651,15 @@ re-issued against the real path — corrected, not repeated.
    {"role": "system", "content": "You are Ronin, a coding agent. A deterministic error makes an identical rerun pointless; the next call goes at the cause."},
    {"role": "user", "content": "Run the date tests."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"npx jest src/dates.test.ts\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "npx jest src/dates.test.ts"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "exit 1\nFAIL src/dates.test.ts\n  Test suite failed to run\n    Cannot find module './holidays' from 'src/dates.ts'"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "glob", "arguments": "{\"pattern\": \"**/holidays*\"}"}}
+     {"id": "c2", "type": "function", "function": {"name": "glob", "arguments": {"pattern": "**/holidays*"}}}
    ]},
    {"role": "tool", "tool_call_id": "c2", "content": "src/lib/holidays.ts"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c3", "type": "function", "function": {"name": "read_file", "arguments": "{\"path\": \"src/dates.ts\"}"}}
+     {"id": "c3", "type": "function", "function": {"name": "read_file", "arguments": {"path": "src/dates.ts"}}}
    ]}
  ],
  "tools": [

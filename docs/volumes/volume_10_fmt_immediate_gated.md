@@ -18,7 +18,7 @@ goes out with empty content in the ordinary case.
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately."},
    {"role": "user", "content": "Pin Django to 4.2.11 in requirements.txt; it's at 4.2.7 right now."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"requirements.txt\", \"old_string\": \"Django==4.2.7\", \"new_string\": \"Django==4.2.11\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "requirements.txt", "old_string": "Django==4.2.7", "new_string": "Django==4.2.11"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "edit_file", "description": "Surgically replace an exact, unique string in an existing file (Claude-Code style). old_string must match exactly (incl. whitespace) and appear exactly once. SENSITIVE — gated by approval.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old_string": {"type": "string", "description": "Exact text to find — must be unique in the file."}, "new_string": {"type": "string", "description": "Replacement text."}}, "required": ["path", "old_string", "new_string"]}}}]}
@@ -30,7 +30,7 @@ goes out with empty content in the ordinary case.
    {"role": "system", "content": "You are Ronin, a coding agent. Asked for a concrete change, emit the call at once; the approval gate decides, not you."},
    {"role": "user", "content": "Our Go server binds addr := \":8080\" in cmd/server/main.go. Move it to 9090."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"cmd/server/main.go\", \"old_string\": \"addr := \\\":8080\\\"\", \"new_string\": \"addr := \\\":9090\\\"\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "cmd/server/main.go", "old_string": "addr := \":8080\"", "new_string": "addr := \":9090\""}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "edit_file", "description": "Surgically replace an exact, unique string in an existing file (Claude-Code style). old_string must match exactly (incl. whitespace) and appear exactly once. SENSITIVE — gated by approval.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old_string": {"type": "string", "description": "Exact text to find — must be unique in the file."}, "new_string": {"type": "string", "description": "Replacement text."}}, "required": ["path", "old_string", "new_string"]}}}]}
@@ -42,7 +42,7 @@ goes out with empty content in the ordinary case.
    {"role": "system", "content": "You are Ronin. Gated tools are still called directly; the gate handles permission, your job is a clean call."},
    {"role": "user", "content": "Customers see a typo on checkout: src/components/Checkout.tsx renders <span>Proccessing payment</span>. Fix the spelling."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"src/components/Checkout.tsx\", \"old_string\": \"<span>Proccessing payment</span>\", \"new_string\": \"<span>Processing payment</span>\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "src/components/Checkout.tsx", "old_string": "<span>Proccessing payment</span>", "new_string": "<span>Processing payment</span>"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "edit_file", "description": "Surgically replace an exact, unique string in an existing file (Claude-Code style). old_string must match exactly (incl. whitespace) and appear exactly once. SENSITIVE — gated by approval.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old_string": {"type": "string", "description": "Exact text to find — must be unique in the file."}, "new_string": {"type": "string", "description": "Replacement text."}}, "required": ["path", "old_string", "new_string"]}}}]}
@@ -54,7 +54,7 @@ goes out with empty content in the ordinary case.
    {"role": "system", "content": "You are Ronin, a coding agent. No permission speeches: emit the well-formed call and let the gate decide."},
    {"role": "user", "content": "Prod logs are drowning us. In src/main/resources/logback.xml switch <root level=\"DEBUG\"> to INFO."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"src/main/resources/logback.xml\", \"old_string\": \"<root level=\\\"DEBUG\\\">\", \"new_string\": \"<root level=\\\"INFO\\\">\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "src/main/resources/logback.xml", "old_string": "<root level=\"DEBUG\">", "new_string": "<root level=\"INFO\">"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "edit_file", "description": "Surgically replace an exact, unique string in an existing file (Claude-Code style). old_string must match exactly (incl. whitespace) and appear exactly once. SENSITIVE — gated by approval.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old_string": {"type": "string", "description": "Exact text to find — must be unique in the file."}, "new_string": {"type": "string", "description": "Replacement text."}}, "required": ["path", "old_string", "new_string"]}}}]}
@@ -69,7 +69,7 @@ still rides in the same turn.
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately."},
    {"role": "user", "content": "Sidekiq keeps starving for connections. Bump the pool in config/database.yml from 5 to 20."},
    {"role": "assistant", "content": "At pool: 20, check that Postgres max_connections covers web plus Sidekiq.", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"config/database.yml\", \"old_string\": \"pool: 5\", \"new_string\": \"pool: 20\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "config/database.yml", "old_string": "pool: 5", "new_string": "pool: 20"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "edit_file", "description": "Surgically replace an exact, unique string in an existing file (Claude-Code style). old_string must match exactly (incl. whitespace) and appear exactly once. SENSITIVE — gated by approval.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old_string": {"type": "string", "description": "Exact text to find — must be unique in the file."}, "new_string": {"type": "string", "description": "Replacement text."}}, "required": ["path", "old_string", "new_string"]}}}]}
@@ -81,7 +81,7 @@ still rides in the same turn.
    {"role": "system", "content": "You are Ronin. When the user names the change, the next thing you produce is the tool call."},
    {"role": "user", "content": "Design signed off on the new accent. In styles/theme.css change --accent: #7c3aed; to #0ea5e9."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": "{\"path\": \"styles/theme.css\", \"old_string\": \"--accent: #7c3aed;\", \"new_string\": \"--accent: #0ea5e9;\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "edit_file", "arguments": {"path": "styles/theme.css", "old_string": "--accent: #7c3aed;", "new_string": "--accent: #0ea5e9;"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "edit_file", "description": "Surgically replace an exact, unique string in an existing file (Claude-Code style). old_string must match exactly (incl. whitespace) and appear exactly once. SENSITIVE — gated by approval.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old_string": {"type": "string", "description": "Exact text to find — must be unique in the file."}, "new_string": {"type": "string", "description": "Replacement text."}}, "required": ["path", "old_string", "new_string"]}}}]}
@@ -107,7 +107,7 @@ single multi_edit call carrying every replacement, not a chain of narrated steps
    {"role": "system", "content": "You are Ronin, a coding agent. Several changes to one file go out as one multi_edit call, emitted immediately."},
    {"role": "user", "content": "Rename fetchUser to loadUser inside src/api.js. The definition reads export async function fetchUser(id) { and refreshSession calls it once as const user = await fetchUser(currentId);"},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "multi_edit", "arguments": "{\"path\": \"src/api.js\", \"edits\": [{\"old_string\": \"export async function fetchUser(id) {\", \"new_string\": \"export async function loadUser(id) {\"}, {\"old_string\": \"const user = await fetchUser(currentId);\", \"new_string\": \"const user = await loadUser(currentId);\"}]}"}}
+     {"id": "c1", "type": "function", "function": {"name": "multi_edit", "arguments": {"path": "src/api.js", "edits": [{"old_string": "export async function fetchUser(id) {", "new_string": "export async function loadUser(id) {"}, {"old_string": "const user = await fetchUser(currentId);", "new_string": "const user = await loadUser(currentId);"}]}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "multi_edit", "description": "Apply SEVERAL surgical string replacements to ONE file in a single approved step (all-or-nothing; each old_string must be unique when applied). SENSITIVE — gated by approval.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "edits": {"type": "array", "items": {"type": "object", "properties": {"old_string": {"type": "string"}, "new_string": {"type": "string"}}, "required": ["old_string", "new_string"]}}}, "required": ["path", "edits"]}}}]}
@@ -119,7 +119,7 @@ single multi_edit call carrying every replacement, not a chain of narrated steps
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately."},
    {"role": "user", "content": "Prep config/settings.py for the demo box: it still has DEBUG = True and ALLOWED_HOSTS = []. Turn DEBUG off and allow app.example.com."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "multi_edit", "arguments": "{\"path\": \"config/settings.py\", \"edits\": [{\"old_string\": \"DEBUG = True\", \"new_string\": \"DEBUG = False\"}, {\"old_string\": \"ALLOWED_HOSTS = []\", \"new_string\": \"ALLOWED_HOSTS = [\\\"app.example.com\\\"]\"}]}"}}
+     {"id": "c1", "type": "function", "function": {"name": "multi_edit", "arguments": {"path": "config/settings.py", "edits": [{"old_string": "DEBUG = True", "new_string": "DEBUG = False"}, {"old_string": "ALLOWED_HOSTS = []", "new_string": "ALLOWED_HOSTS = [\"app.example.com\"]"}]}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "multi_edit", "description": "Apply SEVERAL surgical string replacements to ONE file in a single approved step (all-or-nothing; each old_string must be unique when applied). SENSITIVE — gated by approval.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "edits": {"type": "array", "items": {"type": "object", "properties": {"old_string": {"type": "string"}, "new_string": {"type": "string"}}, "required": ["old_string", "new_string"]}}}, "required": ["path", "edits"]}}}]}
@@ -131,7 +131,7 @@ single multi_edit call carrying every replacement, not a chain of narrated steps
    {"role": "system", "content": "You are Ronin. Gated tools are still called directly; the gate handles permission, your job is a clean call."},
    {"role": "user", "content": "In main.tf, upgrade the web node: instance_type = \"t2.micro\" becomes \"t3.small\" and volume_size = 8 becomes 20."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "multi_edit", "arguments": "{\"path\": \"main.tf\", \"edits\": [{\"old_string\": \"instance_type = \\\"t2.micro\\\"\", \"new_string\": \"instance_type = \\\"t3.small\\\"\"}, {\"old_string\": \"volume_size = 8\", \"new_string\": \"volume_size = 20\"}]}"}}
+     {"id": "c1", "type": "function", "function": {"name": "multi_edit", "arguments": {"path": "main.tf", "edits": [{"old_string": "instance_type = \"t2.micro\"", "new_string": "instance_type = \"t3.small\""}, {"old_string": "volume_size = 8", "new_string": "volume_size = 20"}]}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "multi_edit", "description": "Apply SEVERAL surgical string replacements to ONE file in a single approved step (all-or-nothing; each old_string must be unique when applied). SENSITIVE — gated by approval.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "edits": {"type": "array", "items": {"type": "object", "properties": {"old_string": {"type": "string"}, "new_string": {"type": "string"}}, "required": ["old_string", "new_string"]}}}, "required": ["path", "edits"]}}}]}
@@ -143,7 +143,7 @@ single multi_edit call carrying every replacement, not a chain of narrated steps
    {"role": "system", "content": "You are Ronin, a coding agent. Asked for a concrete change, emit the call at once; the approval gate decides, not you."},
    {"role": "user", "content": "Modernize the Makefile: PY := python3.9 should be python3.12, and the test target's pytest -x should get -q too."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "multi_edit", "arguments": "{\"path\": \"Makefile\", \"edits\": [{\"old_string\": \"PY := python3.9\", \"new_string\": \"PY := python3.12\"}, {\"old_string\": \"pytest -x\", \"new_string\": \"pytest -x -q\"}]}"}}
+     {"id": "c1", "type": "function", "function": {"name": "multi_edit", "arguments": {"path": "Makefile", "edits": [{"old_string": "PY := python3.9", "new_string": "PY := python3.12"}, {"old_string": "pytest -x", "new_string": "pytest -x -q"}]}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "multi_edit", "description": "Apply SEVERAL surgical string replacements to ONE file in a single approved step (all-or-nothing; each old_string must be unique when applied). SENSITIVE — gated by approval.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "edits": {"type": "array", "items": {"type": "object", "properties": {"old_string": {"type": "string"}, "new_string": {"type": "string"}}, "required": ["old_string", "new_string"]}}}, "required": ["path", "edits"]}}}]}
@@ -170,7 +170,7 @@ flagging line at most.
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately."},
    {"role": "user", "content": "This Python repo has no .gitignore and my venv keeps showing up in git status. Add a sane one."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "write_file", "arguments": "{\"path\": \".gitignore\", \"content\": \"__pycache__/\\n*.pyc\\n.venv/\\n.env\\ndist/\\nbuild/\\n.pytest_cache/\\n\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "write_file", "arguments": {"path": ".gitignore", "content": "__pycache__/\n*.pyc\n.venv/\n.env\ndist/\nbuild/\n.pytest_cache/\n"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "write_file", "description": "Create a file or fully overwrite it. SENSITIVE — gated by approval. Prefer edit_file for changes to existing files.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}}}]}
@@ -182,7 +182,7 @@ flagging line at most.
    {"role": "system", "content": "You are Ronin. When the user names the change, the next thing you produce is the tool call."},
    {"role": "user", "content": "Add a GitHub Actions workflow at .github/workflows/lint.yml that runs ruff on every push and PR."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "write_file", "arguments": "{\"path\": \".github/workflows/lint.yml\", \"content\": \"name: lint\\non: [push, pull_request]\\njobs:\\n  ruff:\\n    runs-on: ubuntu-latest\\n    steps:\\n      - uses: actions/checkout@v4\\n      - run: pipx run ruff check .\\n\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "write_file", "arguments": {"path": ".github/workflows/lint.yml", "content": "name: lint\non: [push, pull_request]\njobs:\n  ruff:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: pipx run ruff check .\n"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "write_file", "description": "Create a file or fully overwrite it. SENSITIVE — gated by approval. Prefer edit_file for changes to existing files.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}}}]}
@@ -194,7 +194,7 @@ flagging line at most.
    {"role": "system", "content": "You are Ronin, a coding agent. No permission speeches: emit the well-formed call and let the gate decide."},
    {"role": "user", "content": "Replace config.yaml wholesale with the staging profile: env staging, log_level info, and the new_checkout feature on."},
    {"role": "assistant", "content": "This fully overwrites config.yaml:", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "write_file", "arguments": "{\"path\": \"config.yaml\", \"content\": \"env: staging\\nlog_level: info\\nfeatures:\\n  new_checkout: true\\n\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "write_file", "arguments": {"path": "config.yaml", "content": "env: staging\nlog_level: info\nfeatures:\n  new_checkout: true\n"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "write_file", "description": "Create a file or fully overwrite it. SENSITIVE — gated by approval. Prefer edit_file for changes to existing files.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}}}]}
@@ -206,7 +206,7 @@ flagging line at most.
    {"role": "system", "content": "You are Ronin, a coding agent. Asked for a concrete change, emit the call at once; the approval gate decides, not you."},
    {"role": "user", "content": "Create tests/conftest.py with a tmp_db fixture that hands each test a fresh sqlite path under tmp_path."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "write_file", "arguments": "{\"path\": \"tests/conftest.py\", \"content\": \"import pytest\\n\\n\\n@pytest.fixture\\ndef tmp_db(tmp_path):\\n    return tmp_path / \\\"test.sqlite3\\\"\\n\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "write_file", "arguments": {"path": "tests/conftest.py", "content": "import pytest\n\n\n@pytest.fixture\ndef tmp_db(tmp_path):\n    return tmp_path / \"test.sqlite3\"\n"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "write_file", "description": "Create a file or fully overwrite it. SENSITIVE — gated by approval. Prefer edit_file for changes to existing files.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}}}]}
@@ -218,7 +218,7 @@ flagging line at most.
    {"role": "system", "content": "You are Ronin. Gated tools are still called directly; the gate handles permission, your job is a clean call."},
    {"role": "user", "content": "New teammates keep asking which env vars we need. Add a .env.example listing DATABASE_URL, REDIS_URL and STRIPE_API_KEY with empty values."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "write_file", "arguments": "{\"path\": \".env.example\", \"content\": \"DATABASE_URL=\\nREDIS_URL=\\nSTRIPE_API_KEY=\\n\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "write_file", "arguments": {"path": ".env.example", "content": "DATABASE_URL=\nREDIS_URL=\nSTRIPE_API_KEY=\n"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "write_file", "description": "Create a file or fully overwrite it. SENSITIVE — gated by approval. Prefer edit_file for changes to existing files.", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}}}]}
@@ -245,7 +245,7 @@ of calling it.
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately."},
    {"role": "user", "content": "Run the pytest suite."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"python -m pytest -q\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "python -m pytest -q"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "run_command", "description": "Run a shell command in the project root. SENSITIVE — gated by approval.", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}}]}
@@ -257,7 +257,7 @@ of calling it.
    {"role": "system", "content": "You are Ronin. When the user names the change, the next thing you produce is the tool call."},
    {"role": "user", "content": "We need axios in this project. Add it."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"npm install axios\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "npm install axios"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "run_command", "description": "Run a shell command in the project root. SENSITIVE — gated by approval.", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}}]}
@@ -269,7 +269,7 @@ of calling it.
    {"role": "system", "content": "You are Ronin, a coding agent. No permission speeches: emit the well-formed call and let the gate decide."},
    {"role": "user", "content": "Build the image and tag it shopcart:dev."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"docker build -t shopcart:dev .\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "docker build -t shopcart:dev ."}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "run_command", "description": "Run a shell command in the project root. SENSITIVE — gated by approval.", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}}]}
@@ -281,7 +281,7 @@ of calling it.
    {"role": "system", "content": "You are Ronin. Gated tools are still called directly; the gate handles permission, your job is a clean call."},
    {"role": "user", "content": "Lint the crate with clippy and treat warnings as errors."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"cargo clippy --all-targets -- -D warnings\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "cargo clippy --all-targets -- -D warnings"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "run_command", "description": "Run a shell command in the project root. SENSITIVE — gated by approval.", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}}]}
@@ -293,7 +293,7 @@ of calling it.
    {"role": "system", "content": "You are Ronin, a coding agent. Asked for a concrete change, emit the call at once; the approval gate decides, not you."},
    {"role": "user", "content": "The new orders table migration is sitting there unapplied. Apply it."},
    {"role": "assistant", "content": "Heads up: this applies every pending migration, not just the orders table.", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": "{\"command\": \"alembic upgrade head\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_command", "arguments": {"command": "alembic upgrade head"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "run_command", "description": "Run a shell command in the project root. SENSITIVE — gated by approval.", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}}]}
@@ -320,7 +320,7 @@ substitute for the call.
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately."},
    {"role": "user", "content": "Start the dev server so I can poke at the UI."},
    {"role": "assistant", "content": "Long-running, so it goes to the background:", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_background", "arguments": "{\"command\": \"npm run dev\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_background", "arguments": {"command": "npm run dev"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "run_background", "description": "Start a LONG-RUNNING command in the background (dev server, `--watch` build, test watcher) and return immediately with a process id — use this instead of run_command when the command doesn't exit on its own. SENSITIVE — gated by approval. Args: command.", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}}]}
@@ -332,7 +332,7 @@ substitute for the call.
    {"role": "system", "content": "You are Ronin. When the user names the change, the next thing you produce is the tool call."},
    {"role": "user", "content": "I'm about to rework the reducers; keep jest watching so failures show up instantly."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_background", "arguments": "{\"command\": \"npx jest --watch\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_background", "arguments": {"command": "npx jest --watch"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "run_background", "description": "Start a LONG-RUNNING command in the background (dev server, `--watch` build, test watcher) and return immediately with a process id — use this instead of run_command when the command doesn't exit on its own. SENSITIVE — gated by approval. Args: command.", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}}]}
@@ -344,7 +344,7 @@ substitute for the call.
    {"role": "system", "content": "You are Ronin, a coding agent. No permission speeches: emit the well-formed call and let the gate decide."},
    {"role": "user", "content": "Boot the Rails app on port 3000 for me."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_background", "arguments": "{\"command\": \"bin/rails server -p 3000\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_background", "arguments": {"command": "bin/rails server -p 3000"}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "run_background", "description": "Start a LONG-RUNNING command in the background (dev server, `--watch` build, test watcher) and return immediately with a process id — use this instead of run_command when the command doesn't exit on its own. SENSITIVE — gated by approval. Args: command.", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}}]}
@@ -356,7 +356,7 @@ substitute for the call.
    {"role": "system", "content": "You are Ronin. Gated tools are still called directly; the gate handles permission, your job is a clean call."},
    {"role": "user", "content": "The dev server is background process 3 and it's hogging the port. Kill it."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "stop_background", "arguments": "{\"id\": 3}"}}
+     {"id": "c1", "type": "function", "function": {"name": "stop_background", "arguments": {"id": 3}}}
    ]}
  ],
  "tools": [{"type": "function", "function": {"name": "stop_background", "description": "Stop (kill) a background process and its child tree by id. Args: id.", "parameters": {"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]}}}]}
@@ -371,12 +371,12 @@ the later call rather than re-asked.
    {"role": "system", "content": "You are Ronin, a coding agent. When a task needs a tool, emit the tool call immediately."},
    {"role": "user", "content": "Start the TypeScript compiler in watch mode while I refactor."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c1", "type": "function", "function": {"name": "run_background", "arguments": "{\"command\": \"npx tsc --watch\"}"}}
+     {"id": "c1", "type": "function", "function": {"name": "run_background", "arguments": {"command": "npx tsc --watch"}}}
    ]},
    {"role": "tool", "tool_call_id": "c1", "content": "started background process id=7 (npx tsc --watch)"},
    {"role": "user", "content": "Done refactoring, stop the watcher."},
    {"role": "assistant", "content": "", "tool_calls": [
-     {"id": "c2", "type": "function", "function": {"name": "stop_background", "arguments": "{\"id\": 7}"}}
+     {"id": "c2", "type": "function", "function": {"name": "stop_background", "arguments": {"id": 7}}}
    ]}
  ],
  "tools": [
