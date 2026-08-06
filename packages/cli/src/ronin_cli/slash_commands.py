@@ -844,6 +844,45 @@ def _slash_theme(ctx: SlashCtx) -> str:
     return "handled"
 
 
+def _slash_presence(ctx: SlashCtx) -> str:
+    """Show or set human-centered interactive delivery preferences.
+
+    The setting controls how Ronin communicates. It is not a claim that Ronin
+    is human or that it stores a user's inferred emotional state.
+    """
+    from .config import save_config
+    from .presence import INTERACTION_STYLES
+
+    parts, console, config = ctx.parts, ctx.console, ctx.config
+    if len(parts) == 1:
+        checkins = "on" if config.relational_checkins else "off"
+        console.print(
+            f"[bold]presence[/bold] [#6b7089]. active [bold]{config.interaction_style}[/bold] . "
+            f"check-ins [bold]{checkins}[/bold][/#6b7089]"
+        )
+        console.print("  [dim]set with /presence balanced|direct|supportive|quiet . "
+                      "/presence checkins on|off[/dim]")
+        return "handled"
+
+    requested = parts[1].lower()
+    if requested in {"checkin", "checkins"}:
+        if len(parts) != 3 or parts[2].lower() not in {"on", "off", "true", "false"}:
+            console.print("  [#e0af68]usage:[/#e0af68] /presence checkins on|off")
+            return "handled"
+        config.relational_checkins = parts[2].lower() in {"on", "true"}
+        save_config(config)
+        state = "on" if config.relational_checkins else "off"
+        console.print(f"  [green]ok[/green] task-relevant check-ins [bold]{state}[/bold] [dim](saved)[/dim]")
+        return "handled"
+    if requested not in INTERACTION_STYLES:
+        console.print("  [#e0af68]unknown presence style[/#e0af68] - use " + ", ".join(INTERACTION_STYLES))
+        return "handled"
+    config.interaction_style = requested
+    save_config(config)
+    console.print(f"  [green]ok[/green] presence -> [bold]{requested}[/bold] [dim](saved; next message)[/dim]")
+    return "handled"
+
+
 # command name (and aliases) → handler
 SLASH_DISPATCH: dict[str, Callable[[SlashCtx], str]] = {
     "q": _slash_quit, "quit": _slash_quit, "exit": _slash_quit,
@@ -855,6 +894,7 @@ SLASH_DISPATCH: dict[str, Callable[[SlashCtx], str]] = {
     "mode": _slash_mode,
     "plan": _slash_plan,
     "theme": _slash_theme,
+    "presence": _slash_presence,
     "clear": _slash_clear,
     "undo": _slash_undo,
     "diff": _slash_diff,

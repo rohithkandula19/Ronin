@@ -15,6 +15,8 @@ from typing import Any
 import tomli_w
 from pydantic import BaseModel, Field, model_validator
 
+from .presence import normalize_interaction_style
+
 
 CONFIG_FILENAME = "config.toml"
 PROJECT_DIR = Path(".ronin")
@@ -185,6 +187,12 @@ class RoninConfig(BaseModel):
     # e.g. "dracula", "monokai", "github-dark", "nord"). None → ronin's default
     # (dracula). Set live + persisted via /theme; applied at session start.
     theme: str | None = None
+    # Interactive delivery preference. This applies only when a person is using
+    # Ronin directly; headless workers and evaluations remain task-focused.
+    interaction_style: str = "balanced"  # balanced | direct | supportive | quiet
+    # Permit an occasional, task-relevant check-in. Inferred feelings are never
+    # persisted and never affect safety or approval decisions.
+    relational_checkins: bool = True
 
     anthropic_api_key: str | None = None
     openai_api_key: str | None = None  # legacy shared slot (openai/together/groq/…)
@@ -228,6 +236,11 @@ class RoninConfig(BaseModel):
         if mode not in ("off", "warn", "gate"):
             mode = "off"
         self.faithfulness = mode
+        return self
+
+    @model_validator(mode="after")
+    def _normalize_interaction_style(self) -> "RoninConfig":
+        self.interaction_style = normalize_interaction_style(self.interaction_style)
         return self
 
     def resolved_model(self) -> str:

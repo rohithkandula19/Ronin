@@ -28,6 +28,13 @@ def test_coerce_str() -> None:
     assert coerce_value("route_fast", "cerebras:gpt-oss-120b") == "cerebras:gpt-oss-120b"
 
 
+def test_coerce_presence_settings() -> None:
+    assert coerce_value("interaction_style", "SUPPORTIVE") == "supportive"
+    assert coerce_value("relational_checkins", "off") is False
+    with pytest.raises(BadSetting):
+        coerce_value("interaction_style", "companion")
+
+
 def test_unknown_field() -> None:
     with pytest.raises(BadSetting):
         coerce_value("nope", "x")

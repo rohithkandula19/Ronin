@@ -4915,7 +4915,7 @@ def config(
 ) -> None:
     """⚙ View core settings, or set one with --set field=value.
 
-    Settable: provider · model · route_fast · route_strong · budget · sentinel.
+    Settable: provider · model · route_fast · route_strong · budget · sentinel · interaction_style.
     Example:  ronin config --set route_fast=cerebras:gpt-oss-120b
     """
     cfg = load_config()
@@ -4945,6 +4945,8 @@ def config(
         "route_strong": cfg.route_strong or "—",
         "budget": f"${cfg.budget:.2f}" if cfg.budget else "—",
         "sentinel": "on" if cfg.sentinel else "off",
+        "interaction_style": cfg.interaction_style,
+        "relational_checkins": "on" if cfg.relational_checkins else "off",
     }
     for k, v in rows.items():
         table.add_row(k, str(v), SETTABLE.get(k, ("", ""))[1])

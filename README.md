@@ -181,7 +181,8 @@ A coding agent that reads, edits, and runs your code: every write and shell comm
 - **Tools**: read / write / `edit` / `multi_edit` / `glob` / search / run, plus **`web_search` / `fetch_url`**, **read-only git** (`git_status` / `git_diff` / `git_log` / `git_blame`), **semantic code intelligence** (`diagnostics` / `definition` / `references` via LSP), a **`task`** subagent plus **`parallel_task`** (concurrent read-only fan-out) and **`isolated_task`** (parallel *mutating* sub-agents, each in its own git worktree so edits can't collide), and any **MCP** server's tools (`ronin mcp add …`).
 - **Integrations**: give the agent new tools three ways, each one command: **local MCP** servers (24-server catalog: `ronin mcp install github`), **remote/hosted MCP** servers (`ronin mcp add-remote …`), or **plugins** (200 built-ins like weather/currency/dns/uuid + scaffold your own with `ronin util plugin new`). See **[docs/INTEGRATIONS.md](docs/INTEGRATIONS.md)**.
 - **Project memory**: auto-loads `RONIN.md` / `CLAUDE.md` / `AGENTS.md` from the repo so it follows your conventions.
-- **34 slash commands** · steer across turns: `/help`, `/login`, `/provider`, `/free`, `/role`, `/model`, `/models`, `/theme`, `/mcp`, `/agents`, `/compact`, `/context`, `/copy`, `/export`, `/resume`, `/diff`, `/undo`, `/commit`, `/pr`, `/doctor`, `/config`, and more. `/provider` shows every provider with a free/paid + key-health view; `/free` switches to a $0 provider; `/role` picks a coding role; `/theme` restyles code blocks + diffs live. The chip strip + per-turn footer show the FREE/PAID badge, provider/model, mode, git branch, role, context, and time.
+- **40 slash commands** · steer across turns: `/help`, `/login`, `/provider`, `/free`, `/role`, `/model`, `/models`, `/theme`, `/presence`, `/mcp`, `/agents`, `/compact`, `/context`, `/copy`, `/export`, `/resume`, `/diff`, `/undo`, `/commit`, `/pr`, `/doctor`, `/config`, and more. `/provider` shows every provider with a free/paid + key-health view; `/free` switches to a $0 provider; `/role` picks a coding role; `/theme` restyles code blocks + diffs live. `/presence balanced|direct|supportive|quiet` adjusts the interactive delivery style, and `/presence checkins on|off` controls brief task-relevant check-ins. The chip strip + per-turn footer show the FREE/PAID badge, provider/model, mode, git branch, role, context, and time.
+- **Human-centered presence.** Ronin can meet explicit work friction, urgency, or progress with a short, useful acknowledgement before returning to the work. It does not claim human feelings or consciousness, diagnose a person, create attachment, retain inferred feelings, or let communication cues change tool permissions or safety decisions.
 
 ## 🧠 Supported providers
 
@@ -468,7 +469,7 @@ database_url = "postgres://readonly_user:...@host:5432/db"   # a read-only role
 | Command | What it does |
 |---|---|
 | **`ronin`** | **The unified agent: talk, code, generate media, query data in one conversation.** |
-| **`ronin code [task]`** | **Coding agent: streaming, plan tracker, project memory, 34 slash commands.** |
+| **`ronin code [task]`** | **Coding agent: streaming, plan tracker, project memory, 40 slash commands.** |
 | `ronin chat` | Talk/media REPL with short-term memory. |
 | **`ronin play [game]`** | **The arcade: 31 free terminal games — real-time (Snake / Tetris / 2048 / …), classics, ronin-flavoured (Bug Hunt / Big-O / Regex Golf), and provider-neutral AI games (Mind Reader / AI Adventure / AI Trivia).** |
 | `ronin init [--demo]` | Create a config file (interactive or demo). |

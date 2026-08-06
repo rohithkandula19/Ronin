@@ -831,6 +831,15 @@ def run_code_agent(
     if console is not None:
         from .capabilities import capability_block
         system += "\n\n" + capability_block([t.name for t in tools])
+        # Presence applies only to a person-facing interactive turn. Background
+        # workers, sub-agents, and evaluation runs retain their deterministic
+        # task prompt without inferred conversational cues.
+        from .presence import interaction_system_block
+        system += "\n\n" + interaction_system_block(
+            getattr(config, "interaction_style", "balanced"),
+            checkins=bool(getattr(config, "relational_checkins", True)),
+            task=task,
+        )
     # Bushido: the user's global code of honor, carried across every repo. Folded
     # in BEFORE project memory so a repo's own notes always override it.
     from .bushido import bushido_system_block
@@ -1316,6 +1325,7 @@ SLASH_COMMANDS: dict[str, str] = {
     "provider": "show providers (free/paid + key health), or switch: /provider <name>",
     "free": "free-mode status, or switch to a $0 provider: /free [on]",
     "theme": "show or switch the code syntax-highlight theme: /theme [name]",
+    "presence": "set conversation style: /presence [balanced|direct|supportive|quiet]",
     "role": "set a coding role (researcher/implementer/reviewer/tester/architect/debugger): /role <name>",
     "mode": "show or set the edit mode: /mode normal|plan|auto-accept (same as Shift+Tab)",
     "plan": "enter plan (read-only) mode — explore without mutating",
@@ -1363,7 +1373,7 @@ _HELP_GROUPS: list[tuple[str, list[str]]] = [
     ("🔒  safety", ["permissions"]),
     ("🔌  integrations", ["mcp", "integrations", "tools", "agents", "voice"]),
     ("📁  memory & context", ["memory", "init", "context", "compact", "export", "copy"]),
-    ("⚙️  session", ["theme", "vim", "config", "quit"]),
+    ("⚙️  session", ["theme", "presence", "vim", "config", "quit"]),
 ]
 
 
