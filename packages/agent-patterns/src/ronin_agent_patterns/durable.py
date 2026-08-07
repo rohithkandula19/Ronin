@@ -53,6 +53,18 @@ class BudgetLimits:
         if not 0 < self.warning_fraction < 1:
             raise ValueError("warning_fraction must be greater than 0 and less than 1")
 
+    def as_dict(self) -> dict[str, int | float | None]:
+        """Serialize explicit ceilings so a resumed host can retain them."""
+        return {
+            "max_tokens": self.max_tokens,
+            "max_cost_usd": self.max_cost_usd,
+            "max_wall_time_seconds": self.max_wall_time_seconds,
+            "max_tool_calls": self.max_tool_calls,
+            "max_concurrency": self.max_concurrency,
+            "max_subagent_depth": self.max_subagent_depth,
+            "warning_fraction": self.warning_fraction,
+        }
+
 
 @dataclass(frozen=True)
 class BudgetDecision:
@@ -249,10 +261,13 @@ class RunJournal:
         """Load the latest verified checkpoint and return the saved run state."""
         self._require_run(run_id)
         with self._connect() as con:
+            run = con.execute("SELECT status FROM runs WHERE id = ?", (run_id,)).fetchone()
             row = con.execute(
                 "SELECT path, digest FROM checkpoints WHERE run_id = ? ORDER BY sequence DESC LIMIT 1",
                 (run_id,),
             ).fetchone()
+        if run is None or str(run["status"]) not in {"running", "interrupted"}:
+            raise DurableRunError(f"run is not resumable: {run_id}")
         if row is None:
             raise DurableRunError(f"run has no checkpoint: {run_id}")
         path = Path(row["path"])

@@ -227,6 +227,22 @@ than replaying agents. The [execution-kernel architecture](docs/architecture/exe
 defines the contract shared by terminal, editor, mission, and remote-worker
 surfaces.
 
+Use durable orchestration for longer read-only investigations and bounded team
+analysis. It records local checkpoints under `.ronin/` and prints a run id that
+can be resumed after an interruption:
+
+```bash
+ronin util orchestrate "map the authentication boundary" --durable \
+  --max-run-tokens 50000 --max-run-cost-usd 5 --max-run-seconds 900
+ronin util orchestrate --resume-run run-... --root .
+```
+
+Durable orchestration is intentionally read-only. Code changes continue through
+the mission candidate workflow, which gives writes isolated workspaces, Docker
+verification, review/security evidence, and explicit approval gates. A resumed
+run retains its original budget ceilings; any limits supplied at resume time can
+only make those ceilings tighter.
+
 ### Editor Interoperability
 
 `ronin acp --root .` exposes the same coding runtime to a local

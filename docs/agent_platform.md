@@ -42,6 +42,20 @@ inside the verified checkpoint for recovery.
 See [the execution-kernel architecture](architecture/execution_kernel.md) for
 the cross-surface contract and product layering.
 
+The CLI exposes this as an explicit read-only operator surface:
+
+```bash
+ronin util orchestrate "map the authentication boundary" --durable \
+  --max-run-tokens 50000 --max-run-cost-usd 5 --max-run-seconds 900
+ronin util orchestrate --resume-run run-... --root .
+```
+
+`--resume-run` restores only a verified interrupted runtime checkpoint and
+reconstructs the original goal from it. Durable write orchestration is rejected:
+code changes must use mission candidates, which preserve the isolated workspace
+and evidence gates necessary to resume safely. Original runtime limits are
+restored on resume; operator-supplied limits are clamped to the tighter value.
+
 ## Typed Agent Contracts
 
 The core agent architecture uses `AgentRequest` and `ContextFragment` models,

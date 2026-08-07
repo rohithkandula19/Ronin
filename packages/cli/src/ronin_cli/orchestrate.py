@@ -297,6 +297,7 @@ class OrchestrateOutcome:
     proposal: dict[str, Any] | None = None
     constitution: dict[str, Any] = field(default_factory=dict)
     run_id: str | None = None
+    runtime_run_id: str | None = None
 
 
 def run_orchestrate(
@@ -317,6 +318,10 @@ def run_orchestrate(
     persist_state: bool = True,
     resume_from: str | None = None,
     resume_summary: str | None = None,
+    runtime_journal: Any | None = None,
+    runtime_run_id: str | None = None,
+    runtime_resume_state: dict[str, Any] | None = None,
+    runtime_budget: Any | None = None,
 ) -> OrchestrateOutcome:
     """Run the orchestrator on ``goal``.
 
@@ -328,6 +333,19 @@ def run_orchestrate(
     so their edits never touch the main checkout; the captured diff is appended to
     the result. Read-only runs explore in place (no worktree needed).
     """
+    if runtime_resume_state is not None:
+        saved_goal = runtime_resume_state.get("goal")
+        if not isinstance(saved_goal, str) or not saved_goal.strip():
+            return OrchestrateOutcome(success=False, output="", error="durable runtime state is missing its goal")
+        if goal and goal != saved_goal:
+            return OrchestrateOutcome(success=False, output="", error="resume goal does not match durable runtime state")
+        goal = saved_goal
+    if not read_only and (runtime_journal is not None or runtime_resume_state is not None):
+        return OrchestrateOutcome(
+            success=False, output="",
+            error="durable orchestration currently supports read-only runs only; use a mission candidate for writes",
+        )
+
     governance = governance or OrchestrationGovernance(
         max_agents=max_agents,
         max_parallel=min(4, max_agents),
@@ -380,6 +398,7 @@ def run_orchestrate(
                 "read_only": read_only,
                 "max_agents": max_agents,
                 "agent_manifest": str(agent_manifest) if agent_manifest is not None else None,
+                "durable_runtime_run_id": runtime_run_id,
             },
         )
         state["constitution"] = constitution.as_dict()
@@ -408,6 +427,8 @@ def run_orchestrate(
                     on_subtask_start=_on_subtask_start, max_iterations=max_iterations,
                     profiles=selected, workflow=workflow, governance=governance,
                     constitution=constitution,
+                    runtime_journal=runtime_journal, runtime_run_id=runtime_run_id,
+                    runtime_resume_state=runtime_resume_state, runtime_budget=runtime_budget,
                 )
             except Exception as exc:  # noqa: BLE001 - state must survive provider/setup failures
                 outcome = OrchestrateOutcome(
@@ -432,6 +453,8 @@ def run_orchestrate(
             on_step=_on_step, on_subtask_start=_on_subtask_start,
             max_iterations=max_iterations, diff="", profiles=selected,
             workflow=workflow, governance=governance,
+            runtime_journal=runtime_journal, runtime_run_id=runtime_run_id,
+            runtime_resume_state=runtime_resume_state, runtime_budget=runtime_budget,
         )
     except Exception as exc:  # noqa: BLE001 - return an honest, persisted setup failure
         outcome = OrchestrateOutcome(
@@ -445,7 +468,9 @@ def run_orchestrate(
 
 
 def _run_in_worktree(base, goal, *, roster_spec, root, on_step, on_subtask_start,
-                     max_iterations, profiles, workflow, governance, constitution):
+                     max_iterations, profiles, workflow, governance, constitution,
+                     runtime_journal=None, runtime_run_id=None, runtime_resume_state=None,
+                     runtime_budget=None):
     """Run each write role in an isolated worktree and capture attributed diffs.
 
     Review and test roles see the implementer's tree, so their dependent steps
@@ -474,6 +499,8 @@ def _run_in_worktree(base, goal, *, roster_spec, root, on_step, on_subtask_start
             on_step=on_step, on_subtask_start=on_subtask_start,
             max_iterations=max_iterations, diff="", profiles=profiles,
             workflow=workflow, governance=governance,
+            runtime_journal=runtime_journal, runtime_run_id=runtime_run_id,
+            runtime_resume_state=runtime_resume_state, runtime_budget=runtime_budget,
         )
         outcome.worktree_diffs = {
             role: diff for role, path in worktrees.items()
@@ -487,7 +514,8 @@ def _run_in_worktree(base, goal, *, roster_spec, root, on_step, on_subtask_start
 
 
 def _run_core(base, goal, *, roster_spec, tools_for_role, on_step, on_subtask_start,
-              max_iterations, diff, profiles, workflow, governance):
+              max_iterations, diff, profiles, workflow, governance, runtime_journal=None,
+              runtime_run_id=None, runtime_resume_state=None, runtime_budget=None):
     roster = parse_roster(roster_spec)
     roles = {profile.key: profile.system for profile in profiles}
     descriptions = {profile.key: profile.description for profile in profiles}
@@ -511,7 +539,15 @@ def _run_core(base, goal, *, roster_spec, tools_for_role, on_step, on_subtask_st
                           if workflow and governance.require_independent_acceptance else set()),
         max_total_subtask_iterations=governance.max_total_subtask_iterations,
     )
-    result = orch.run(goal, on_step=on_step, on_subtask_start=on_subtask_start)
+    result = orch.run(
+        goal,
+        on_step=on_step,
+        on_subtask_start=on_subtask_start,
+        journal=runtime_journal,
+        journal_run_id=runtime_run_id,
+        resume_state=runtime_resume_state,
+        budget=runtime_budget,
+    )
     result_dicts = [r.model_dump() for r in result.subtask_results]
     return OrchestrateOutcome(
         success=result.success,
@@ -525,6 +561,7 @@ def _run_core(base, goal, *, roster_spec, tools_for_role, on_step, on_subtask_st
         governance=governance.as_dict(),
         provider_health=provider_health(result_dicts),
         handoffs=inspect_handoffs(goal, result_dicts),
+        runtime_run_id=result.run_id,
     )
 
 

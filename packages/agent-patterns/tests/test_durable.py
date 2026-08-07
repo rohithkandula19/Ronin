@@ -32,6 +32,15 @@ def test_journal_migrates_checkpoints_and_detects_corruption(tmp_path) -> None:
         journal.resume(run_id)
 
 
+def test_journal_refuses_to_resume_a_terminal_run(tmp_path) -> None:
+    journal = RunJournal(tmp_path / "runs.sqlite")
+    run_id = journal.start({"phase": "inspect"})
+    journal.finish(run_id, status="completed")
+
+    with pytest.raises(DurableRunError, match="not resumable"):
+        journal.resume(run_id)
+
+
 def test_budget_warns_at_eighty_percent_and_blocks_the_next_tool() -> None:
     ticks = iter((0.0, 0.0, 0.0, 0.0))
     budget = RunBudget(BudgetLimits(max_tool_calls=2), clock=lambda: next(ticks))

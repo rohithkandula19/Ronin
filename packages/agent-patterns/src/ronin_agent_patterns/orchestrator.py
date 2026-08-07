@@ -438,6 +438,7 @@ class OrchestratorAgent(BaseModel):
                 "trace": [step.model_dump(mode="json") for step in trace],
                 "usage": usage,
                 "budget": budget.snapshot() if budget is not None else {},
+                "budget_limits": budget.limits.as_dict() if budget is not None else {},
                 "final_output": final_output,
             }
 

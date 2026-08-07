@@ -4943,7 +4943,7 @@ def sandbox_status() -> None:
 
 @util_app.command()
 def orchestrate(
-    goal: str = typer.Argument(..., help="The high-level goal to decompose and work."),
+    goal: Optional[str] = typer.Argument(None, help="The high-level goal to decompose and work."),
     roster: str = typer.Option(
         None, "--roster", "-r",
         help="Role→provider, e.g. 'researcher=anthropic,implementer=cerebras,"
@@ -4978,6 +4978,18 @@ def orchestrate(
     ),
     offline: bool = typer.Option(
         False, "--offline", help="Run on a local brain only; no network, no API keys."),
+    durable: bool = typer.Option(
+        False, "--durable", help="Persist plan/wave checkpoints for read-only recovery."),
+    resume_run: Optional[str] = typer.Option(
+        None, "--resume-run", help="Resume a durable read-only orchestration run id."),
+    max_run_tokens: Optional[int] = typer.Option(
+        None, "--max-run-tokens", min=1, help="Hard total reported-token ceiling across the team."),
+    max_run_cost_usd: Optional[float] = typer.Option(
+        None, "--max-run-cost-usd", min=0.01, help="Hard total reported-cost ceiling across the team."),
+    max_run_seconds: Optional[float] = typer.Option(
+        None, "--max-run-seconds", min=0.01, help="Hard wall-clock ceiling across the team."),
+    max_run_tool_calls: Optional[int] = typer.Option(
+        None, "--max-run-tool-calls", min=1, help="Hard tool-call ceiling across the team."),
 ) -> None:
     """🧭 Decompose a goal into subtasks, assign each to a specialist sub-agent, run
     them (in parallel where independent), and synthesize the results.
@@ -4998,6 +5010,64 @@ def orchestrate(
     from .agent_governance import OrchestrationGovernance
     from .agent_workflow import workflow_for_goal
     from .orchestrate import role_label, run_orchestrate, select_agents_for_goal
+
+    use_durable = durable or resume_run is not None or any((
+        max_run_tokens, max_run_cost_usd, max_run_seconds, max_run_tool_calls,
+    ))
+    runtime_journal = None
+    runtime_run_id = None
+    runtime_resume_state = None
+    runtime_budget = None
+    if use_durable:
+        if write:
+            console.print("[red]x[/red] durable orchestration is read-only; use `ronin util mission` candidates for writes")
+            raise typer.Exit(2)
+        from ronin_agent_patterns import BudgetLimits, DurableRunError, RunBudget, RunJournal
+
+        runtime_journal = RunJournal(root.resolve() / ".ronin" / "orchestrations.sqlite")
+        runtime_budget = RunBudget(BudgetLimits(
+            max_tokens=max_run_tokens,
+            max_cost_usd=max_run_cost_usd,
+            max_wall_time_seconds=max_run_seconds,
+            max_tool_calls=max_run_tool_calls,
+        ))
+        if resume_run:
+            if goal:
+                console.print("[red]x[/red] omit GOAL when using --resume-run")
+                raise typer.Exit(2)
+            try:
+                runtime_resume_state = runtime_journal.resume(resume_run)
+            except DurableRunError as exc:
+                console.print(f"[red]x[/red] {exc}")
+                raise typer.Exit(2)
+            saved_goal = runtime_resume_state.get("goal")
+            if not isinstance(saved_goal, str) or not saved_goal.strip():
+                console.print("[red]x[/red] durable run has no recoverable goal")
+                raise typer.Exit(2)
+            saved_limits = runtime_resume_state.get("budget_limits", {})
+            if isinstance(saved_limits, dict):
+                def tighter(requested, saved_name):
+                    saved = saved_limits.get(saved_name)
+                    candidates = [value for value in (requested, saved) if isinstance(value, (int, float))]
+                    return min(candidates) if candidates else None
+
+                runtime_budget = RunBudget(BudgetLimits(
+                    max_tokens=tighter(max_run_tokens, "max_tokens"),
+                    max_cost_usd=tighter(max_run_cost_usd, "max_cost_usd"),
+                    max_wall_time_seconds=tighter(max_run_seconds, "max_wall_time_seconds"),
+                    max_tool_calls=tighter(max_run_tool_calls, "max_tool_calls"),
+                    max_concurrency=tighter(None, "max_concurrency"),
+                    max_subagent_depth=tighter(None, "max_subagent_depth"),
+                    warning_fraction=float(saved_limits.get("warning_fraction", 0.8)),
+                ))
+            goal = saved_goal
+            runtime_run_id = resume_run
+        elif not goal:
+            console.print("[red]x[/red] GOAL is required unless using --resume-run")
+            raise typer.Exit(2)
+    elif not goal:
+        console.print("[red]x[/red] GOAL is required")
+        raise typer.Exit(2)
 
     config = load_config()
     if offline:
@@ -5050,9 +5120,15 @@ def orchestrate(
             profiles=selected, max_agents=max_agents, agent_manifest=agent_manifest,
             workflow=workflow_for_goal(goal, write=True) if write else None,
             governance=governance,
+            runtime_journal=runtime_journal,
+            runtime_run_id=runtime_run_id,
+            runtime_resume_state=runtime_resume_state,
+            runtime_budget=runtime_budget,
         )
 
     console.print()
+    if outcome.runtime_run_id:
+        console.print(f"[dim]durable runtime: {outcome.runtime_run_id}[/dim]")
     if not outcome.plan_subtasks:
         console.print(f"[red]✗ orchestration failed:[/red] {outcome.error or 'no plan'}")
         raise typer.Exit(1)

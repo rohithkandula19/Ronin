@@ -322,7 +322,7 @@ def test_write_mode_without_git_falls_back_readonly(monkeypatch, tmp_path) -> No
 # ---------- end-to-end CLI command ----------
 
 
-def test_cli_orchestrate_offline_runs(monkeypatch) -> None:
+def test_cli_orchestrate_offline_runs(monkeypatch, tmp_path) -> None:
     """`ronin orchestrate --offline` runs end-to-end on mock providers and prints
     the synthesized result + the per-subtask status."""
     from ronin_cli.main import app
@@ -340,7 +340,11 @@ def test_cli_orchestrate_offline_runs(monkeypatch) -> None:
     monkeypatch.setattr(orchestrate, "provider_for_spec", lambda b, s: base_provider)
     monkeypatch.setattr(orchestrate, "_tools_for_roles", lambda *a, **k: {})
 
-    result = runner.invoke(app, ["util", "orchestrate", "explore the repo", "--offline"])
+    result = runner.invoke(app, [
+        "util", "orchestrate", "explore the repo", "--offline", "--durable", "--root", str(tmp_path),
+    ])
     assert result.exit_code == 0, result.output
     assert "look" in result.output
     assert "entry point" in result.output.lower()
+    assert "durable runtime:" in result.output
+    assert (tmp_path / ".ronin" / "orchestrations.sqlite").exists()

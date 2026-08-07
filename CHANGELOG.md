@@ -12,6 +12,11 @@ All notable changes to this project will be documented here. Format follows [Kee
   real without embedding credential-shaped literals in source files.
 
 ### Added
+- **Durable orchestration CLI.** `ronin util orchestrate --durable` now saves
+  read-only multi-agent plan/wave checkpoints under `.ronin/`, prints a
+  recoverable runtime id, accepts hard team-wide token/cost/time/tool budgets,
+  and resumes only verified unfinished work with `--resume-run`. Write mode
+  remains intentionally routed through isolated mission candidates.
 - **Durable multi-agent execution kernel.** `OrchestratorAgent` can now share
   the same local `RunJournal` and thread-safe `RunBudget` as ReAct runs. It
   checkpoints plans and completed dependency waves, records compact lifecycle
