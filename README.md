@@ -207,12 +207,14 @@ and resumable runs on one attributable context contract.
 
 `ronin acp --root .` exposes the same coding runtime to a local
 [Agent Client Protocol](https://agentclientprotocol.com/) editor client over
-stdio. It provides ACP initialization, bounded sessions, text prompts, and
-streamed agent messages while preserving the normal typed context, project
-memory, provider routing, and agent history. The bridge is deliberately
-**read-only**: a client cannot select a workspace outside `--root`, inject MCP
-servers, or elevate tool permissions. Configure trusted Ronin tools separately,
-then use the terminal's approval-gated code flow for edits.
+stdio. It provides ACP initialization, persistent/resumable bounded sessions,
+text prompts, streamed agent messages, and local activity/usage evidence while
+preserving the normal typed context, project memory, provider routing, and agent
+history. The default `read_only` mode cannot edit. An editor may explicitly use
+the Ronin `proposal` mode, which delegates to the existing multi-agent
+orchestrator in detached worktrees and retains a reviewable proposal; it never
+writes into the editor workspace or stages a change. A client cannot select a
+workspace outside `--root`, inject MCP servers, or elevate tool permissions.
 
 ## 🛠 `ronin code` · the coding agent (Claude-Code shaped)
 

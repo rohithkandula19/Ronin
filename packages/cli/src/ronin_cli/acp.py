@@ -11,7 +11,9 @@ the terminal, gateway, and editor surfaces do not drift into separate agents.
 """
 from __future__ import annotations
 
+import datetime as _datetime
 import json
+import re
 import sys
 import uuid
 from dataclasses import dataclass, field
@@ -23,6 +25,8 @@ from . import __version__
 JSONRPC_VERSION = "2.0"
 PROTOCOL_VERSION = 1
 MAX_PROMPT_CHARS = 100_000
+_SESSION_ID = re.compile(r"^ronin-[0-9a-f-]{36}$")
+_MODES = frozenset({"read_only", "proposal"})
 
 
 @dataclass
@@ -32,9 +36,18 @@ class AcpSession:
     session_id: str
     cwd: Path
     history: list = field(default_factory=list)
+    mode: str = "read_only"
+    turns: int = 0
+    cancelled: bool = False
+    created: str = field(default_factory=lambda: _now())
+    updated: str = field(default_factory=lambda: _now())
 
 
-AgentRunner = Callable[[str, Path, list], Any]
+AgentRunner = Callable[[str, Path, list, str, Callable[[str], None]], Any]
+
+
+def _now() -> str:
+    return _datetime.datetime.now(_datetime.timezone.utc).isoformat(timespec="seconds")
 
 
 def _inside(path: Path, root: Path) -> bool:
@@ -46,6 +59,85 @@ def _inside(path: Path, root: Path) -> bool:
     return True
 
 
+def _safe_messages(messages: list) -> list[dict[str, Any]]:
+    """Serialize structured provider messages without making persistence brittle."""
+    safe: list[dict[str, Any]] = []
+    for message in messages:
+        if isinstance(message, dict):
+            safe.append(message)
+        elif hasattr(message, "model_dump"):
+            try:
+                value = message.model_dump()
+            except Exception:  # noqa: BLE001 - session persistence is best effort.
+                continue
+            if isinstance(value, dict):
+                safe.append(value)
+    return safe
+
+
+class AcpSessionStore:
+    """Project-local, atomic ACP session persistence.
+
+    Sessions are deliberately stored under the trusted root instead of the
+    user's global home, so a client cannot resume a conversation in an unrelated
+    repository simply by guessing an identifier.
+    """
+
+    def __init__(self, root: Path) -> None:
+        self.directory = root / ".ronin" / "acp-sessions"
+
+    def save(self, session: AcpSession) -> None:
+        self.directory.mkdir(parents=True, exist_ok=True)
+        path = self.directory / f"{session.session_id}.json"
+        payload = {
+            "version": 1,
+            "session_id": session.session_id,
+            "cwd": str(session.cwd),
+            "history": _safe_messages(session.history),
+            "mode": session.mode,
+            "turns": session.turns,
+            "cancelled": session.cancelled,
+            "created": session.created,
+            "updated": session.updated,
+        }
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        temporary.replace(path)
+
+    def load(self, session_id: str) -> AcpSession | None:
+        if not _SESSION_ID.fullmatch(session_id):
+            return None
+        path = self.directory / f"{session_id}.json"
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        if not isinstance(payload, dict) or payload.get("version") != 1:
+            return None
+        cwd = payload.get("cwd")
+        mode = payload.get("mode", "read_only")
+        if not isinstance(cwd, str) or mode not in _MODES:
+            return None
+        history = payload.get("history")
+        if not isinstance(history, list):
+            history = []
+        try:
+            from ronin_agent_patterns import Message
+            restored = [Message(**item) for item in history if isinstance(item, dict)]
+        except Exception:  # noqa: BLE001 - legacy/session drift starts with a safe blank history.
+            restored = []
+        return AcpSession(
+            session_id=session_id,
+            cwd=Path(cwd).resolve(),
+            history=restored,
+            mode=mode,
+            turns=int(payload.get("turns", 0) or 0),
+            cancelled=bool(payload.get("cancelled", False)),
+            created=str(payload.get("created", "") or _now()),
+            updated=str(payload.get("updated", "") or _now()),
+        )
+
+
 class AcpServer:
     """Stateful ACP v1 handler independent of stdio for straightforward tests."""
 
@@ -54,6 +146,7 @@ class AcpServer:
         self.runner = runner
         self.initialized = False
         self.sessions: dict[str, AcpSession] = {}
+        self.store = AcpSessionStore(self.root)
 
     @staticmethod
     def _response(request_id: Any, result: dict[str, Any]) -> dict[str, Any]:
@@ -81,6 +174,30 @@ class AcpServer:
             },
         }
 
+    @staticmethod
+    def _activity(session: AcpSession, state: str, **details: Any) -> dict[str, Any]:
+        """Ronin extension notification for progress, budget, and proposal evidence."""
+        return {
+            "jsonrpc": JSONRPC_VERSION,
+            "method": "ronin/activity",
+            "params": {
+                "sessionId": session.session_id,
+                "state": state,
+                "mode": session.mode,
+                "turns": session.turns,
+                **details,
+            },
+        }
+
+    def _persist(self, session: AcpSession) -> None:
+        session.updated = _now()
+        try:
+            self.store.save(session)
+        except OSError:
+            # An editor transport must remain available when its local session
+            # directory is temporarily unwritable; its in-memory session survives.
+            pass
+
     def _new_session(self, request_id: Any, params: Any) -> list[dict[str, Any]]:
         if not isinstance(params, dict):
             return [self._error(request_id, -32602, "session/new params must be an object")]
@@ -102,9 +219,23 @@ class AcpServer:
                 -32602,
                 f"workspace cwd must be inside the configured trusted root: {self.root}",
             )]
+        mode = params.get("roninMode", "read_only")
+        if mode not in _MODES:
+            return [self._error(request_id, -32602, "roninMode must be read_only or proposal")]
         session_id = f"ronin-{uuid.uuid4()}"
-        self.sessions[session_id] = AcpSession(session_id=session_id, cwd=cwd)
+        session = AcpSession(session_id=session_id, cwd=cwd, mode=mode)
+        self.sessions[session_id] = session
+        self._persist(session)
         return [self._response(request_id, {"sessionId": session_id})]
+
+    def _load_session(self, request_id: Any, params: Any) -> list[dict[str, Any]]:
+        if not isinstance(params, dict) or not isinstance(params.get("sessionId"), str):
+            return [self._error(request_id, -32602, "session/load requires a sessionId")]
+        session = self.store.load(params["sessionId"])
+        if session is None or not session.cwd.is_dir() or not _inside(session.cwd, self.root):
+            return [self._error(request_id, -32602, "saved session is unavailable in this trusted root")]
+        self.sessions[session.session_id] = session
+        return [self._response(request_id, {"sessionId": session.session_id})]
 
     def _prompt(self, request_id: Any, params: Any) -> list[dict[str, Any]]:
         if not isinstance(params, dict):
@@ -113,6 +244,10 @@ class AcpServer:
         session = self.sessions.get(session_id) if isinstance(session_id, str) else None
         if session is None:
             return [self._error(request_id, -32602, "unknown sessionId")]
+        if session.cancelled:
+            session.cancelled = False
+            self._persist(session)
+            return [self._response(request_id, {"stopReason": "cancelled"})]
         blocks = params.get("prompt")
         if not isinstance(blocks, list) or not blocks:
             return [self._error(request_id, -32602, "session/prompt requires non-empty text content")]
@@ -134,8 +269,15 @@ class AcpServer:
         if len(prompt) > MAX_PROMPT_CHARS:
             return [self._error(request_id, -32602, f"prompt exceeds {MAX_PROMPT_CHARS} characters")]
 
+        streamed: list[str] = []
+
+        def emit(text: str) -> None:
+            if isinstance(text, str) and text:
+                streamed.append(text)
+
+        activity = [self._activity(session, "running")]
         try:
-            result = self.runner(prompt, session.cwd, session.history)
+            result = self.runner(prompt, session.cwd, session.history, session.mode, emit)
         except Exception as exc:  # The transport must remain alive after one bad turn.
             return [self._error(request_id, -32000, f"Ronin agent turn failed: {exc}")]
 
@@ -143,9 +285,42 @@ class AcpServer:
         messages = getattr(result, "messages", None)
         if isinstance(messages, list) and messages:
             session.history = messages
-        updates = [self._update(session.session_id, output)] if output else []
+        session.turns += 1
+        self._persist(session)
+        updates = activity + [self._update(session.session_id, text) for text in streamed]
+        if output and not streamed:
+            updates.append(self._update(session.session_id, output))
+        usage = getattr(result, "usage", {}) or {}
+        proposal = getattr(result, "proposal", None)
+        updates.append(self._activity(
+            session,
+            "completed" if bool(getattr(result, "success", True)) else "failed",
+            usage=usage if isinstance(usage, dict) else {},
+            proposal=proposal if isinstance(proposal, dict) else None,
+            run_id=getattr(result, "run_id", None),
+        ))
+        self._record_run(session, prompt, result)
         updates.append(self._response(request_id, {"stopReason": "end_turn"}))
         return updates
+
+    def _record_run(self, session: AcpSession, prompt: str, result: Any) -> None:
+        """Publish a compact local record for the existing dashboard/run archive."""
+        try:
+            from .run_store import save_run
+            save_run({
+                "kind": "acp",
+                "goal": prompt[:500],
+                "success": bool(getattr(result, "success", False)),
+                "planner": "ronin-acp",
+                "output": str(getattr(result, "output", "") or ""),
+                "session_id": session.session_id,
+                "mode": session.mode,
+                "usage": getattr(result, "usage", {}) or {},
+                "agent_task_run_id": getattr(result, "run_id", None),
+                "proposal": getattr(result, "proposal", None),
+            })
+        except Exception:  # noqa: BLE001 - dashboard evidence never breaks an editor turn.
+            pass
 
     def handle(self, request: Any) -> list[dict[str, Any]]:
         """Handle one JSON-RPC request and return any notifications plus reply."""
@@ -165,7 +340,7 @@ class AcpServer:
             return [self._response(request_id, {
                 "protocolVersion": PROTOCOL_VERSION,
                 "agentCapabilities": {
-                    "loadSession": False,
+                    "loadSession": True,
                     "promptCapabilities": {
                         "image": False,
                         "audio": False,
@@ -182,12 +357,20 @@ class AcpServer:
             return [self._error(request_id, -32002, "initialize must complete before creating a session")]
         if method == "session/new":
             return self._new_session(request_id, params)
+        if method == "session/load":
+            return self._load_session(request_id, params)
         if method == "session/prompt":
             return self._prompt(request_id, params)
         if method == "session/cancel":
-            # Turns run synchronously so a completed local turn cannot be
-            # cancelled retroactively. Keeping this method explicit gives ACP
-            # clients a deterministic, standards-shaped acknowledgement.
+            if isinstance(params, dict) and isinstance(params.get("sessionId"), str):
+                session = self.sessions.get(params["sessionId"])
+                if session is not None:
+                    # The stdio adapter serializes turns. A cancellation received
+                    # between turns is therefore durable and prevents the next
+                    # requested model call; active provider calls remain bounded
+                    # by their normal iteration/time budgets.
+                    session.cancelled = True
+                    self._persist(session)
             return [self._response(request_id, {})]
         return [self._error(request_id, -32601, f"unsupported ACP method: {method}")]
 
@@ -199,7 +382,20 @@ def build_runner(*, max_iterations: int) -> AgentRunner:
 
     config = load_config()
 
-    def run(prompt: str, cwd: Path, history: list) -> Any:
+    def run(prompt: str, cwd: Path, history: list, mode: str, emit: Callable[[str], None]) -> Any:
+        if mode == "proposal":
+            # Writes are never directed into the editor workspace. The existing
+            # orchestrator creates detached worktrees and retains an explicit,
+            # reviewable proposal before anything can be staged.
+            from .agent_workflow import workflow_for_goal
+            from .orchestrate import run_orchestrate
+
+            emit("Planning an isolated implementation proposal.\n")
+            return run_orchestrate(
+                config, prompt, root=cwd, read_only=False,
+                max_iterations=max_iterations, max_agents=4,
+                workflow=workflow_for_goal(prompt, write=True),
+            )
         return run_code_agent(
             config,
             prompt,
@@ -210,6 +406,7 @@ def build_runner(*, max_iterations: int) -> AgentRunner:
             read_only=True,
             include_image_tool=False,
             role="reviewer",
+            on_text_cb=emit,
         )
 
     return run

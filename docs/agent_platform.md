@@ -45,14 +45,19 @@ the original decision, even when a memory or retrieval provider has changed.
 clients through [ACP v1](https://agentclientprotocol.com/protocol/v1/).
 The adapter speaks JSON-RPC only on stdio and delegates each turn to the normal
 typed-context code runner, rather than maintaining a separate editor-specific
-agent. It supports initialization, session creation, text prompt turns, and
-agent-message updates.
+agent. It supports initialization, persisted session creation/load, text prompt
+turns, agent-message updates, and Ronin activity notifications with local usage
+and proposal evidence. A normal ACP session is read-only. The explicit Ronin
+`proposal` session mode calls the existing bounded multi-agent orchestrator;
+all implementation work occurs in detached worktrees and is retained as an
+explicit proposal for review.
 
 The bridge is an intentionally conservative boundary: every session workspace
-must be inside the configured root, all turns are read-only, and editor-supplied
-MCP server definitions are rejected. Therefore an editor can neither expand the
-trusted tool surface nor obtain write or command authority through ACP. Write
-work remains a terminal approval-gated or isolated-worktree workflow.
+must be inside the configured root, editor-supplied MCP server definitions are
+rejected, and no ACP path stages or merges code. Therefore an editor can neither
+expand the trusted tool surface nor obtain direct write or command authority
+through ACP. Write work remains an explicit isolated-worktree proposal and
+approval workflow.
 
 ## Isolated Write Work
 

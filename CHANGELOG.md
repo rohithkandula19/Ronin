@@ -17,6 +17,11 @@ All notable changes to this project will be documented here. Format follows [Kee
   coding agent's typed context, project memory, provider routing, and structured
   conversation history without letting editor clients escape the trusted root,
   attach arbitrary MCP servers, or gain write/command authority.
+- **Durable editor sessions and isolated ACP proposals.** ACP sessions now
+  persist locally and can be loaded by a later editor process. They emit compact
+  activity/usage evidence to the run archive, and an explicit `proposal` mode
+  invokes Ronin's bounded multi-agent worktree workflow, retaining reviewable
+  patches without writing into the editor workspace or staging a change.
 - **Evidence-backed learned project instincts.** `ronin util instincts` now
   stores candidate practices locally with supporting evidence, confidence,
   observation counts, and expiry. Only explicitly reinforced active instincts
