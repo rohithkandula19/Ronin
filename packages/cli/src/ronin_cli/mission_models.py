@@ -293,6 +293,20 @@ class PullRequestDraft(StrictModel):
     status: Literal["ready", "published", "superseded"] = "ready"
 
 
+class ImplementationEvidence(StrictModel):
+    """Safe, durable evidence from an agent turn in an isolated candidate."""
+
+    runner: str = Field(min_length=1, max_length=100)
+    success: bool
+    iterations: int = Field(default=0, ge=0)
+    input_tokens: int = Field(default=0, ge=0)
+    output_tokens: int = Field(default=0, ge=0)
+    changed_files: list[str] = Field(default_factory=list, max_length=500)
+    diff_digest: str = Field(default="", max_length=128)
+    error: str = Field(default="", max_length=4_000)
+    recorded_at: str = Field(default_factory=now_utc)
+
+
 class MissionArtifacts(StrictModel):
     context_packs: list[ContextPack] = Field(default_factory=list, max_length=20)
     issue_analysis: IssueAnalysis | None = None
@@ -303,6 +317,7 @@ class MissionArtifacts(StrictModel):
     review_report: ReviewReport | None = None
     security_scan: SecurityScan | None = None
     verification_report: VerificationReport | None = None
+    implementation_evidence: list[ImplementationEvidence] = Field(default_factory=list, max_length=20)
     self_review: SelfReviewNotes | None = None
     evaluation_gate: EvaluationGate | None = None
     pull_request_draft: PullRequestDraft | None = None

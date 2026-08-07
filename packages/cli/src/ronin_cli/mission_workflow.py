@@ -19,6 +19,7 @@ from .mission_models import (
     EvaluationCheck,
     EvaluationGate,
     IssueAnalysis,
+    ImplementationEvidence,
     MissionArtifacts,
     MissionRecord,
     MissionStage,
@@ -125,6 +126,86 @@ class MissionWorkflow:
             mission.id, MissionStage.IMPLEMENTING, actor=f"approval:{approver}",
             summary="human approved verified implementation plan",
         )
+
+    def execute_implementation(
+        self,
+        mission_id: str,
+        runner: Callable[[str, Path, int], object],
+        *,
+        max_iterations: int = 25,
+    ) -> MissionRecord:
+        """Run one bounded implementation turn only in the attached candidate.
+
+        ``runner`` is injected so the workflow retains its evidence/state-machine
+        ownership while the CLI owns provider construction. It receives a trusted
+        mission-derived task and the detached candidate path. It must never be
+        called before an approved plan, against the parent checkout, or after the
+        mission has exhausted its declared resources.
+        """
+        if not 1 <= max_iterations <= 100:
+            raise ValueError("implementation max_iterations must be between 1 and 100")
+        mission = self._require_stage(mission_id, MissionStage.IMPLEMENTING)
+        candidate = self._candidate_for(mission)
+        if not candidate.image:
+            raise ValueError("candidate needs a Docker image before agent implementation")
+        if mission.usage.tool_calls >= mission.budget.max_tool_calls:
+            raise ValueError("mission tool-call budget is exhausted before implementation")
+        if mission.usage.repair_attempts > mission.budget.max_repair_attempts:
+            raise ValueError("mission repair budget is exhausted before implementation")
+        plan = mission.artifacts.plan
+        if plan is None or not plan.steps:
+            raise ValueError("mission needs an approved structured plan before implementation")
+
+        result = runner(_implementation_task(mission), Path(candidate.path), max_iterations)
+        diff = self.candidates.diff(candidate.id)
+        usage = getattr(result, "usage", {}) or {}
+        input_tokens = _usage_count(usage, "input_tokens")
+        output_tokens = _usage_count(usage, "output_tokens")
+        iterations = max(0, int(getattr(result, "iterations", 0) or 0))
+        tool_calls = sum(
+            1 for step in (getattr(result, "steps", []) or [])
+            if getattr(step, "kind", "") == "tool"
+        )
+        success = bool(getattr(result, "success", False))
+        error = str(getattr(result, "error", "") or "")[:4_000]
+        evidence = ImplementationEvidence(
+            runner="candidate-code-agent",
+            success=success,
+            iterations=iterations,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            changed_files=changed_files(diff),
+            diff_digest=hashlib.sha256(diff.encode("utf-8")).hexdigest() if diff else "",
+            error=error,
+        )
+        next_usage = MissionUsage(
+            tokens=mission.usage.tokens + input_tokens + output_tokens,
+            cost_usd=mission.usage.cost_usd,
+            wall_time_seconds=mission.usage.wall_time_seconds,
+            tool_calls=mission.usage.tool_calls + tool_calls,
+            repair_attempts=mission.usage.repair_attempts + (0 if success else 1),
+        )
+        recorded = self.store.set_usage(mission.id, next_usage, actor="candidate-agent")
+        artifacts = recorded.artifacts.model_copy(update={
+            "implementation_evidence": [*recorded.artifacts.implementation_evidence, evidence],
+        })
+        recorded = self.store.save_artifacts(recorded.id, artifacts, actor="candidate-agent")
+        exceeded = next_usage.exceeded(recorded.budget)
+        if exceeded:
+            return self.store.transition(
+                recorded.id, MissionStage.FAILED, actor="candidate-agent",
+                summary="agent implementation exceeded mission budget",
+                error="implementation exceeded mission budget: " + ", ".join(exceeded),
+            )
+        if not success and next_usage.repair_attempts > recorded.budget.max_repair_attempts:
+            return self.store.transition(
+                recorded.id, MissionStage.FAILED, actor="candidate-agent",
+                summary="agent implementation retry budget exhausted",
+                error="agent implementation failed after repair budget was exhausted",
+            )
+        # A successful turn deliberately remains IMPLEMENTING. Docker-only tests
+        # and independent review/security gates decide whether it may advance.
+        return recorded
 
     def verify_candidate(
         self,
@@ -383,6 +464,38 @@ class MissionWorkflow:
         return self.store.transition(
             blocked.id, MissionStage.FAILED, actor=actor, summary="candidate verification blocked", error=reason,
         )
+
+
+def _implementation_task(mission: MissionRecord) -> str:
+    """Build a bounded, trusted task from the mission's approved local artifacts."""
+    plan = mission.artifacts.plan
+    assert plan is not None  # checked by execute_implementation before this helper.
+    steps = "\n".join(
+        f"- {step.id}: {step.description}"
+        + (f" (files: {', '.join(step.files)})" if step.files else "")
+        for step in plan.steps
+    )
+    requirements = "\n".join(f"- {item}" for item in mission.spec.requirements) or "- No extra requirements recorded."
+    acceptance = "\n".join(f"- {item}" for item in mission.spec.acceptance_criteria) or "- Preserve existing behavior outside this change."
+    return (
+        "Implement the approved mission in the current detached candidate checkout.\n\n"
+        f"Mission: {mission.spec.title}\n"
+        f"Request:\n{mission.spec.issue_text[:30_000]}\n\n"
+        f"Requirements:\n{requirements}\n\n"
+        f"Approved plan:\n{steps}\n\n"
+        f"Acceptance criteria:\n{acceptance}\n\n"
+        "Work only in this candidate checkout. Make focused edits and run useful local checks. "
+        "Do not commit, push, alter Git remotes, or modify policy files. Finish with a concise summary of changed files and verification."
+    )
+
+
+def _usage_count(usage: object, key: str) -> int:
+    if not isinstance(usage, dict):
+        return 0
+    try:
+        return max(0, int(usage.get(key, 0) or 0))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _missing_preplan_evidence(mission: MissionRecord) -> tuple[str, ...]:

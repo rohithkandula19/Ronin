@@ -136,6 +136,71 @@ def test_issue_to_pr_workflow_requires_real_evidence_at_every_gate(tmp_path: Pat
     CandidateWorkspaceService(tmp_path).destroy(candidate.id)
 
 
+def test_mission_agent_implementation_stays_in_candidate_and_records_evidence(tmp_path: Path) -> None:
+    _repo(tmp_path)
+    mission = _mission(tmp_path)
+    workflow = MissionWorkflow(tmp_path)
+    workflow.record_plan(mission.id, _plan())
+    candidate = _prepare_candidate(tmp_path, mission.id)
+
+    class Result:
+        success = True
+        iterations = 3
+        usage = {"input_tokens": 12, "output_tokens": 8}
+        error = None
+        steps = []
+
+    def runner(task: str, candidate_root: Path, max_iterations: int):
+        assert "approved mission" in task
+        assert max_iterations == 7
+        (candidate_root / "agent_change.py").write_text("VALUE = 'candidate'\n", encoding="utf-8")
+        return Result()
+
+    recorded = workflow.execute_implementation(mission.id, runner, max_iterations=7)
+
+    evidence = recorded.artifacts.implementation_evidence[-1]
+    assert recorded.stage is MissionStage.IMPLEMENTING
+    assert evidence.success is True
+    assert evidence.input_tokens == 12 and evidence.output_tokens == 8
+    assert "agent_change.py" in evidence.changed_files
+    assert (Path(candidate.path) / "agent_change.py").is_file()
+    assert not (tmp_path / "agent_change.py").exists()
+    assert recorded.usage.tokens == 20
+    assert MissionStore(tmp_path).verify_audit(mission.id).valid
+    CandidateWorkspaceService(tmp_path).destroy(candidate.id)
+
+
+def test_mission_implement_cli_forces_candidate_sandbox(tmp_path: Path, monkeypatch) -> None:
+    _repo(tmp_path)
+    mission = _mission(tmp_path)
+    MissionWorkflow(tmp_path).record_plan(mission.id, _plan())
+    candidate = _prepare_candidate(tmp_path, mission.id)
+    seen: dict[str, object] = {}
+
+    class Result:
+        success = True
+        iterations = 1
+        usage = {}
+        error = None
+        steps = []
+
+    def fake_run(config, task, **kwargs):
+        seen.update(config=config, task=task, **kwargs)
+        return Result()
+
+    monkeypatch.setattr("ronin_cli.code_mode.run_code_agent", fake_run)
+    result = CliRunner().invoke(
+        app,
+        ["util", "mission", "implement", mission.id, "--root", str(tmp_path), "--offline"],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    assert seen["root"] == Path(candidate.path)
+    assert seen["yolo"] is True
+    assert seen["config"].full_access is False
+    CandidateWorkspaceService(tmp_path).destroy(candidate.id)
+
+
 def test_verified_issue_to_pr_workflow_requires_discovery_plan_approval_and_self_review(tmp_path: Path) -> None:
     _repo(tmp_path)
     mission = _verified_mission(tmp_path)

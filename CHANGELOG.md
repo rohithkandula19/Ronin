@@ -12,6 +12,12 @@ All notable changes to this project will be documented here. Format follows [Kee
   real without embedding credential-shaped literals in source files.
 
 ### Added
+- **Bounded mission implementation turn.** `ronin util mission implement` now
+  runs an approved plan only inside its attached detached candidate checkout and
+  records typed usage, changed-file, digest, iteration, and outcome evidence.
+  The command requires a Docker-configured candidate for the following test
+  gate, never edits the parent checkout, and cannot stage, commit, push, or
+  publish a change.
 - **Evidence-weighted competing agent trials.** Trial selection now evaluates
   every attributable worktree diff, rejects candidates with credential findings
   or failed handoff contracts, and uses a bounded score from successful role

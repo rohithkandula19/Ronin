@@ -142,6 +142,22 @@ queue bounded candidate verification work to authenticated remote Docker
 workers. See [the agent platform guide](docs/agent_platform.md) for the full
 mission, workspace, event, and remote-worker contract.
 
+An approved plan can now drive one real coding-agent implementation turn inside
+the attached detached candidate checkout:
+
+```bash
+ronin util mission implement MISSION_ID --max-steps 25
+ronin util mission verify MISSION_ID "pytest -q" --yes
+ronin util mission review MISSION_ID
+ronin util mission security MISSION_ID
+```
+
+The implementation turn records only typed outcome, usage, changed-file, and
+diff-digest evidence in the mission audit. It cannot edit the parent checkout,
+stage, commit, push, or publish. Verification remains Docker-only and the
+existing review, security, evaluation, and human-approval gates still decide
+whether a local PR draft may be prepared.
+
 Persistent specialist identities add durable project-local role experience on
 top of mission execution. `ronin util team init` creates the architect,
 implementer, reviewer, tester, security, and release roles; `team supervise`

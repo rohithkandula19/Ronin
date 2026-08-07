@@ -2908,6 +2908,59 @@ def mission_approve_plan(
     console.print(f"[green]plan approved[/green] [cyan]{mission.id}[/cyan] is now [bold]{mission.stage.value}[/bold]")
 
 
+@mission_app.command("implement")
+def mission_implement(
+    mission_id: str = typer.Argument(..., help="Mission with an approved plan and attached candidate checkout."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    max_steps: int = typer.Option(25, "--max-steps", min=1, max=100, help="Bounded coding-agent iteration limit."),
+    offline: bool = typer.Option(False, "--offline", help="Use a local provider only."),
+) -> None:
+    """Implement one approved mission only in its detached candidate checkout.
+
+    This never edits the caller's checkout, stages a change, commits, pushes, or
+    opens a pull request. Follow with `mission verify`, `mission review`, and
+    `mission security` to advance through the evidence gates.
+    """
+    from .agent_mode import has_real_key
+    from .code_mode import run_code_agent
+    from .mission_workflow import MissionWorkflow
+
+    config = load_config()
+    if offline:
+        from .offline import apply_offline
+        config = apply_offline(config.model_copy(update={"offline": True}))
+    elif not has_real_key(config):
+        console.print(f"[red]x[/red] mission implementation needs credentials for {config.provider}; use --offline or configure a provider")
+        raise typer.Exit(2)
+    # A mission's authority is the attached detached checkout, even when the
+    # interactive CLI was previously launched with --full-access.
+    config = config.model_copy(update={"full_access": False})
+
+    def runner(task: str, candidate_root: Path, iterations: int):
+        return run_code_agent(
+            config, task, root=candidate_root, console=None, yolo=True,
+            max_iterations=iterations, include_image_tool=False, role="implementer",
+        )
+
+    try:
+        mission = MissionWorkflow(root).execute_implementation(
+            mission_id, runner, max_iterations=max_steps,
+        )
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    evidence = mission.artifacts.implementation_evidence[-1] if mission.artifacts.implementation_evidence else None
+    if evidence is None:
+        console.print(f"[red]x[/red] no implementation evidence was recorded")
+        raise typer.Exit(1)
+    console.print(
+        f"[green]candidate implementation recorded[/green] [cyan]{mission.id}[/cyan] "
+        f"[dim]success={evidence.success}; files={len(evidence.changed_files)}; next={mission.stage.value}[/dim]"
+    )
+    if not evidence.success or mission.stage.value == "failed":
+        raise typer.Exit(1)
+
+
 @mission_app.command("verify")
 def mission_verify(
     mission_id: str = typer.Argument(..., help="Mission with an active candidate checkout."),
