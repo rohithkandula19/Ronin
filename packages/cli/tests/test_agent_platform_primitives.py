@@ -14,7 +14,7 @@ from ronin_cli.constitution import RepositoryConstitution, load_constitution
 from ronin_cli.orchestrate import core_agent_profiles, run_orchestrate
 from ronin_cli.project_memory import ProjectMemory, build_project_memory_tools
 from ronin_cli.config import RoninConfig
-from ronin_cli.worktree_trials import TrialResult, choose_trial
+from ronin_cli.worktree_trials import TrialCandidate, TrialResult, choose_trial, run_trials
 
 
 def test_constitution_blocks_writes_but_not_required_read_access(tmp_path: Path) -> None:
@@ -108,3 +108,29 @@ def test_trial_selection_and_parallel_queue_require_terminal_evidence(tmp_path: 
     assert len(finished) == 2
     assert all(job.status == "completed" for job in finished)
     assert len(set(seen)) == 2
+
+
+def test_trials_reject_secret_bearing_or_contract_failed_candidates() -> None:
+    class Outcome:
+        success = True
+        subtask_results = [{"success": True}, {"success": True}]
+        error = None
+
+        def __init__(self, *, contract: str, diff: str) -> None:
+            self.handoffs = {"contract": {"final_contract_status": contract}}
+            self.worktree_diffs = {"implementer": diff}
+            self.diff = ""
+
+    def runner(candidate: TrialCandidate):
+        if candidate.name == "leaky":
+            key = "sk-" + ("a" * 40)
+            return Outcome(contract="passed", diff=f"+++ b/config.py\n+api_key = '{key}'\n")
+        return Outcome(contract="failed", diff="+++ b/app.py\nvalue = 1\n")
+
+    results = run_trials(
+        [TrialCandidate("leaky", ""), TrialCandidate("contract-failed", "")], runner,
+    )
+
+    assert results[0].security_findings == 1
+    assert results[1].verifier_passed is False
+    assert choose_trial(results).winner is None

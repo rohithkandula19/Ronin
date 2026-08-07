@@ -12,6 +12,11 @@ All notable changes to this project will be documented here. Format follows [Kee
   real without embedding credential-shaped literals in source files.
 
 ### Added
+- **Evidence-weighted competing agent trials.** Trial selection now evaluates
+  every attributable worktree diff, rejects candidates with credential findings
+  or failed handoff contracts, and uses a bounded score from successful role
+  outcomes plus typed contract evidence. Winners remain review-only proposals;
+  no trial command stages or merges code.
 - **Local ACP editor bridge.** `ronin acp --root <directory>` now exposes a
   read-only, stdio-only Agent Client Protocol v1 session surface. It reuses the
   coding agent's typed context, project memory, provider routing, and structured

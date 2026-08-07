@@ -4573,9 +4573,14 @@ def trials_run(
     table.add_column("Candidate")
     table.add_column("Success")
     table.add_column("Verified")
+    table.add_column("Contract")
+    table.add_column("Security", justify="right")
     table.add_column("Quality")
     for result in results:
-        table.add_row(result.name, str(result.success), str(result.verifier_passed), str(round(result.quality, 3)))
+        table.add_row(
+            result.name, str(result.success), str(result.verifier_passed),
+            result.contract_status, str(result.security_findings), str(round(result.quality, 3)),
+        )
     console.print(table)
     if decision.winner is None:
         console.print("[red]no trial met the acceptance rule; no diff was applied.[/red]")
