@@ -12,6 +12,11 @@ All notable changes to this project will be documented here. Format follows [Kee
   real without embedding credential-shaped literals in source files.
 
 ### Added
+- **Durable multi-agent execution kernel.** `OrchestratorAgent` can now share
+  the same local `RunJournal` and thread-safe `RunBudget` as ReAct runs. It
+  checkpoints plans and completed dependency waves, records compact lifecycle
+  evidence, accounts parallel specialist usage to one hard budget, and resumes
+  only unfinished waves from a verified checkpoint.
 - **Project-bound Ronin API keys.** `ronin util api-keys` now issues raw keys
   once and retains only salted hashes with scope, expiry, rate, token, cost, and
   concurrency policy. Keys can be listed, revoked, rotated, reserved/settled by

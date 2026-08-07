@@ -25,6 +25,23 @@ current behavior until they pass a `RunJournal`, `RunBudget`, or both. Journal
 events retain only lifecycle metadata; complete serialized state remains in the
 local checkpoint file required for crash recovery.
 
+## Durable Orchestration Runtime
+
+The same primitives now govern `OrchestratorAgent`, so a multi-agent run is no
+longer a one-shot fan-out. Passing a `RunJournal` checkpoints the durable plan
+and each completed dependency wave. `OrchestratorAgent.resume(run_id, journal)`
+restores verified state and executes only subtasks that have no recorded result;
+it does not ask an already-completed specialist to repeat work.
+
+A shared `RunBudget` is safe to use across the parallel specialists in a wave.
+Provider and tool usage is accounted to one thread-safe run budget, and a later
+provider or tool action is refused once a hard ceiling is reached. Events expose
+only counts, ids, outcomes, and error classes, while complete local state stays
+inside the verified checkpoint for recovery.
+
+See [the execution-kernel architecture](architecture/execution_kernel.md) for
+the cross-surface contract and product layering.
+
 ## Typed Agent Contracts
 
 The core agent architecture uses `AgentRequest` and `ContextFragment` models,

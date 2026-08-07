@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from concurrent.futures import ThreadPoolExecutor
 
 from ronin_agent_patterns import (
     BudgetLimits,
@@ -45,6 +46,17 @@ def test_budget_warns_at_eighty_percent_and_blocks_the_next_tool() -> None:
     assert second.allowed and any("tool calls budget warning" in warning for warning in second.warnings)
     assert not blocked.allowed
     assert "tool calls budget reached" in blocked.reason
+
+
+def test_budget_reservations_are_atomic_across_parallel_tools() -> None:
+    budget = RunBudget(BudgetLimits(max_concurrency=1))
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        decisions = list(workers.map(lambda _: budget.begin_tool(), range(2)))
+
+    assert sum(decision.allowed for decision in decisions) == 1
+    budget.finish_tool()
+    assert budget.begin_tool().allowed
 
 
 def test_react_resumes_pending_tool_call_from_a_verified_checkpoint(tmp_path) -> None:

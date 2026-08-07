@@ -219,6 +219,14 @@ persistent `ronin index` is used when available; otherwise the existing
 in-memory retrieval path remains best-effort. This keeps interactive, streaming,
 and resumable runs on one attributable context contract.
 
+The same local execution kernel now also drives multi-agent orchestration:
+`RunJournal` checkpoints the plan and every completed dependency wave, while a
+single thread-safe `RunBudget` accounts for parallel specialists. Recovery runs
+continue only the unfinished wave, preserving already completed evidence rather
+than replaying agents. The [execution-kernel architecture](docs/architecture/execution_kernel.md)
+defines the contract shared by terminal, editor, mission, and remote-worker
+surfaces.
+
 ### Editor Interoperability
 
 `ronin acp --root .` exposes the same coding runtime to a local

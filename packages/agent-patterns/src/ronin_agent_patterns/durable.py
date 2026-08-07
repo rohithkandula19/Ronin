@@ -14,6 +14,7 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import time
+import threading
 from typing import Any, Callable
 import uuid
 
@@ -73,6 +74,7 @@ class RunBudget:
     tool_calls: int = 0
     active_actions: int = 0
     subagent_depth: int = 0
+    _lock: threading.RLock = field(default_factory=threading.RLock, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.started_at = self.clock()
@@ -87,60 +89,68 @@ class RunBudget:
 
     def before_provider(self) -> BudgetDecision:
         """Check the limits before asking a provider to start another request."""
-        return self._check()
+        with self._lock:
+            return self._check()
 
     def record_provider_usage(self, usage: dict[str, int | float]) -> BudgetDecision:
         """Add explicit provider usage without inferring prices from model names."""
-        self.input_tokens += int(usage.get("input_tokens", 0) or 0)
-        self.output_tokens += int(usage.get("output_tokens", 0) or 0)
-        self.cost_usd += float(usage.get("cost_usd", 0) or 0)
-        return self._check()
+        with self._lock:
+            self.input_tokens += int(usage.get("input_tokens", 0) or 0)
+            self.output_tokens += int(usage.get("output_tokens", 0) or 0)
+            self.cost_usd += float(usage.get("cost_usd", 0) or 0)
+            return self._check()
 
     def begin_tool(self) -> BudgetDecision:
         """Reserve one tool slot before invoking the handler."""
-        decision = self._check(
-            next_tool_calls=self.tool_calls + 1,
-            next_active_actions=self.active_actions + 1,
-        )
-        if decision.allowed:
-            self.tool_calls += 1
-            self.active_actions += 1
-        return decision
+        with self._lock:
+            decision = self._check(
+                next_tool_calls=self.tool_calls + 1,
+                next_active_actions=self.active_actions + 1,
+            )
+            if decision.allowed:
+                self.tool_calls += 1
+                self.active_actions += 1
+            return decision
 
     def finish_tool(self) -> None:
-        self.active_actions = max(0, self.active_actions - 1)
+        with self._lock:
+            self.active_actions = max(0, self.active_actions - 1)
 
     def enter_subagent(self) -> BudgetDecision:
-        decision = self._check(next_subagent_depth=self.subagent_depth + 1)
-        if decision.allowed:
-            self.subagent_depth += 1
-        return decision
+        with self._lock:
+            decision = self._check(next_subagent_depth=self.subagent_depth + 1)
+            if decision.allowed:
+                self.subagent_depth += 1
+            return decision
 
     def exit_subagent(self) -> None:
-        self.subagent_depth = max(0, self.subagent_depth - 1)
+        with self._lock:
+            self.subagent_depth = max(0, self.subagent_depth - 1)
 
     def snapshot(self) -> dict[str, int | float]:
-        return {
-            "input_tokens": self.input_tokens,
-            "output_tokens": self.output_tokens,
-            "total_tokens": self.total_tokens,
-            "cost_usd": self.cost_usd,
-            "tool_calls": self.tool_calls,
-            "active_actions": self.active_actions,
-            "subagent_depth": self.subagent_depth,
-            "elapsed_seconds": self.elapsed_seconds,
-        }
+        with self._lock:
+            return {
+                "input_tokens": self.input_tokens,
+                "output_tokens": self.output_tokens,
+                "total_tokens": self.total_tokens,
+                "cost_usd": self.cost_usd,
+                "tool_calls": self.tool_calls,
+                "active_actions": self.active_actions,
+                "subagent_depth": self.subagent_depth,
+                "elapsed_seconds": self.elapsed_seconds,
+            }
 
     def restore(self, snapshot: dict[str, int | float]) -> None:
         """Restore a persisted budget snapshot before resuming a run."""
-        self.input_tokens = max(0, int(snapshot.get("input_tokens", 0) or 0))
-        self.output_tokens = max(0, int(snapshot.get("output_tokens", 0) or 0))
-        self.cost_usd = max(0.0, float(snapshot.get("cost_usd", 0) or 0))
-        self.tool_calls = max(0, int(snapshot.get("tool_calls", 0) or 0))
-        self.active_actions = 0
-        self.subagent_depth = max(0, int(snapshot.get("subagent_depth", 0) or 0))
-        elapsed = max(0.0, float(snapshot.get("elapsed_seconds", 0) or 0))
-        self.started_at = self.clock() - elapsed
+        with self._lock:
+            self.input_tokens = max(0, int(snapshot.get("input_tokens", 0) or 0))
+            self.output_tokens = max(0, int(snapshot.get("output_tokens", 0) or 0))
+            self.cost_usd = max(0.0, float(snapshot.get("cost_usd", 0) or 0))
+            self.tool_calls = max(0, int(snapshot.get("tool_calls", 0) or 0))
+            self.active_actions = 0
+            self.subagent_depth = max(0, int(snapshot.get("subagent_depth", 0) or 0))
+            elapsed = max(0.0, float(snapshot.get("elapsed_seconds", 0) or 0))
+            self.started_at = self.clock() - elapsed
 
     def _check(
         self,
