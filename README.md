@@ -232,6 +232,28 @@ orchestrator in detached worktrees and retains a reviewable proposal; it never
 writes into the editor workspace or stages a change. A client cannot select a
 workspace outside `--root`, inject MCP servers, or elevate tool permissions.
 
+## Ronin API Keys
+
+Ronin can issue project-bound keys for CI, editor integrations, remote workers,
+and a self-hosted API gateway. A raw key is displayed once, while Ronin stores
+only a per-key salted digest. Keys have explicit scopes, expiry, request rate,
+token, cost, and concurrency limits, with revocation, rotation, and a safe local
+audit log.
+
+```bash
+ronin util api-keys create github-actions --scope mission:read --scope proposal:read \
+  --max-tokens 50000 --max-cost-usd 5 --expires-at 2026-12-31T00:00:00Z
+ronin util api-keys list
+ronin util api-keys revoke key-... --yes
+ronin util api-keys serve --root .
+```
+
+The gateway exposes public health and scoped, read-only identity/mission-status
+endpoints. It cannot modify a checkout, invoke a provider, access provider
+credentials, or grant approvals. These are **Ronin** credentials, not provider
+credentials: Anthropic, OpenAI, Gemini, and other provider keys must be issued
+by their providers and are kept separate from Ronin API-key storage.
+
 ## 🛠 `ronin code` · the coding agent (Claude-Code shaped)
 
 ```bash

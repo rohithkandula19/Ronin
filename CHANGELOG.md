@@ -12,6 +12,11 @@ All notable changes to this project will be documented here. Format follows [Kee
   real without embedding credential-shaped literals in source files.
 
 ### Added
+- **Project-bound Ronin API keys.** `ronin util api-keys` now issues raw keys
+  once and retains only salted hashes with scope, expiry, rate, token, cost, and
+  concurrency policy. Keys can be listed, revoked, rotated, reserved/settled by
+  a gateway, and audited locally without persisting secret values. They remain
+  distinct from user-supplied provider credentials.
 - **Bounded mission implementation turn.** `ronin util mission implement` now
   runs an approved plan only inside its attached detached candidate checkout and
   records typed usage, changed-file, digest, iteration, and outcome evidence.

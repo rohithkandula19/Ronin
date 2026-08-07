@@ -2513,6 +2513,152 @@ mission_app = typer.Typer(
 )
 util_app.add_typer(mission_app, name="mission")
 
+api_keys_app = typer.Typer(
+    help="Issue, scope, rotate, and revoke project-bound Ronin API keys.", no_args_is_help=True,
+)
+util_app.add_typer(api_keys_app, name="api-keys")
+
+
+@api_keys_app.command("create")
+def api_keys_create(
+    name: str = typer.Argument(..., help="Human-readable integration name."),
+    scope: List[str] = typer.Option(..., "--scope", help="Repeatable capability scope."),
+    root: Path = typer.Option(Path("."), "--root", help="Project this key is bound to."),
+    expires_at: Optional[str] = typer.Option(None, "--expires-at", help="Optional ISO-8601 expiry with timezone."),
+    requests_per_minute: int = typer.Option(60, "--requests-per-minute", min=1, max=100_000),
+    max_tokens: int = typer.Option(100_000, "--max-tokens", min=1, max=10_000_000),
+    max_cost_usd: float = typer.Option(25.0, "--max-cost-usd", min=0.0, max=1_000_000.0),
+    max_concurrency: int = typer.Option(1, "--max-concurrency", min=1, max=32),
+) -> None:
+    """Create one scoped Ronin API key and display its raw value exactly once."""
+    from .api_keys import ApiKeyPolicy, ApiKeyStore
+
+    try:
+        issued = ApiKeyStore(root).create(
+            name, scopes=scope, expires_at=expires_at,
+            policy=ApiKeyPolicy(requests_per_minute, max_tokens, max_cost_usd, max_concurrency),
+        )
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print("[green]Ronin API key created[/green] [bold]shown once below[/bold]")
+    console.print(issued.token)
+    console.print(
+        f"[dim]id={issued.record.id}; scopes={', '.join(issued.record.scopes)}; "
+        f"project-bound; raw value is not stored[/dim]"
+    )
+
+
+@api_keys_app.command("list")
+def api_keys_list(
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    all_keys: bool = typer.Option(False, "--all", help="Include revoked keys."),
+) -> None:
+    """List safe API-key metadata; raw values are never recoverable."""
+    from .api_keys import ApiKeyStore
+
+    rows = ApiKeyStore(root).list(include_revoked=all_keys)
+    if not rows:
+        console.print("[dim]no Ronin API keys for this project.[/dim]")
+        return
+    table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+    table.add_column("ID")
+    table.add_column("Name")
+    table.add_column("Scopes")
+    table.add_column("State")
+    table.add_column("Usage")
+    for row in rows:
+        state = "active" if row.active else ("revoked" if row.revoked_at else "expired")
+        table.add_row(row.id, row.name, ", ".join(row.scopes), state, f"{row.usage['tokens']} tokens / ${row.usage['cost_usd']:.2f}")
+    console.print(table)
+
+
+@api_keys_app.command("revoke")
+def api_keys_revoke(
+    key_id: str = typer.Argument(..., help="Ronin API key identifier."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    yes: bool = typer.Option(False, "--yes", help="Confirm permanent key revocation."),
+) -> None:
+    """Revoke a key immediately; it can no longer authorize a request."""
+    if not yes:
+        console.print("[yellow]not revoked[/yellow] (rerun with --yes)")
+        raise typer.Exit(2)
+    from .api_keys import ApiKeyStore
+
+    try:
+        record = ApiKeyStore(root).revoke(key_id)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print(f"[green]revoked[/green] {record.id}")
+
+
+@api_keys_app.command("rotate")
+def api_keys_rotate(
+    key_id: str = typer.Argument(..., help="Ronin API key identifier."),
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    expires_at: Optional[str] = typer.Option(None, "--expires-at", help="Replacement key expiry."),
+    yes: bool = typer.Option(False, "--yes", help="Confirm revocation and replacement."),
+) -> None:
+    """Revoke one key and show a replacement with the same scope/policy once."""
+    if not yes:
+        console.print("[yellow]not rotated[/yellow] (rerun with --yes)")
+        raise typer.Exit(2)
+    from .api_keys import ApiKeyStore
+
+    try:
+        issued = ApiKeyStore(root).rotate(key_id, expires_at=expires_at)
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+    console.print("[green]replacement Ronin API key created[/green] [bold]shown once below[/bold]")
+    console.print(issued.token)
+    console.print(f"[dim]new id={issued.record.id}; old key revoked[/dim]")
+
+
+@api_keys_app.command("audit")
+def api_keys_audit(
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    limit: int = typer.Option(50, "--limit", min=1, max=500),
+) -> None:
+    """Show safe API-key lifecycle and policy events without raw key material."""
+    from .api_keys import ApiKeyStore
+
+    events = ApiKeyStore(root).audit(limit=limit)
+    if not events:
+        console.print("[dim]no API-key audit events.[/dim]")
+        return
+    table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+    table.add_column("At")
+    table.add_column("Key")
+    table.add_column("Action")
+    table.add_column("Scope")
+    for event in events:
+        table.add_row(str(event["at"]), str(event["key_id"]), str(event["action"]), str(event["scope"]))
+    console.print(table)
+
+
+@api_keys_app.command("serve")
+def api_keys_serve(
+    root: Path = typer.Option(Path("."), "--root", help="Project directory."),
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind host."),
+    port: int = typer.Option(8787, "--port", min=1, max=65535, help="Bind port."),
+) -> None:
+    """Serve the scoped, read-only local Ronin project gateway."""
+    try:
+        import uvicorn
+    except ImportError:
+        console.print("[red]x[/red] uvicorn is required. Install [bold]ronin-cli[server][/bold].")
+        raise typer.Exit(2)
+    from .api_gateway import make_app
+
+    console.print(
+        f"[green]Ronin API-key gateway[/green] http://{host}:{port}/v1/health "
+        "[dim](read-only, scoped keys required for project data)[/dim]"
+    )
+    uvicorn.run(make_app(root), host=host, port=port, log_level="info")
+
+
 mission_workspace_app = typer.Typer(
     help="Create, inspect, verify, and destroy disposable mission candidate workspaces.",
     no_args_is_help=True,
