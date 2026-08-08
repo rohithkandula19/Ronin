@@ -1,0 +1,468 @@
+"""The ReAct loop: a pure async generator with zero provider and zero UI knowledge.
+
+Everything the loop can talk to arrives through a protocol
+(:mod:`ronin.core.protocols`), so a scripted fake replaces a real model with no
+network and no monkeypatching. Everything it says leaves as an ``Event``.
+
+**All state changes go through one place.** ``_advance`` is the only function that
+produces a new :class:`AgentState`; nothing else in this module rebinds it, and
+there are no module-level mutables. The final state rides out on ``TurnEnd`` so a
+consumer can resume from it without reaching into the loop.
+
+Three decisions were made here rather than guessed silently — they are recorded in
+``docs/ARCHITECTURE.md`` §8 with their alternatives:
+
+1. **Approval is answered by the injected policy**, not by the consumer through
+   the stream, because the work order injects ``policy`` and types the return as
+   ``AsyncIterator[Event]``. ``ApprovalRequest`` is still emitted so a UI can show
+   what is being decided; it is informational.
+2. **The stall nudge is a system-role message** appended to the transcript. The
+   loop stays provider-agnostic: rendering a mid-transcript system message for an
+   API whose ``system`` is a separate parameter is the adapter's job.
+3. **Interrupt is cooperative *and* cancellation-safe.** ``policy.cancelled()`` is
+   polled at every await point, which is what lets the loop stay in control and
+   emit a well-formed ``ToolEnd``/``TurnEnd``; a hard ``task.cancel()`` is also
+   caught around tool execution so the synthetic result still reaches the
+   transcript before the ``CancelledError`` propagates. Both are required by the
+   spec ("cancellable at any await point" *and* "conversation stays well-formed"),
+   so this is one design meeting two constraints, not two competing designs.
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+from collections import deque
+from collections.abc import AsyncIterator, Iterable, Sequence
+from dataclasses import replace
+from enum import StrEnum
+
+from .protocols import (
+    FinalMessage,
+    ModelClient,
+    Policy,
+    ResetChunk,
+    TextChunk,
+    ToolRegistry,
+)
+from .types import (
+    AgentState,
+    ApprovalRequest,
+    Budget,
+    DangerLevel,
+    Error,
+    Event,
+    Message,
+    Role,
+    StreamReset,
+    Text,
+    TextDelta,
+    ToolEnd,
+    ToolResult,
+    ToolSpec,
+    ToolStart,
+    ToolUse,
+    TurnEnd,
+    TurnStart,
+    TurnState,
+)
+
+DEFAULT_MAX_ITERATIONS = 100
+DEFAULT_MAX_TOOL_RESULT_CHARS = 16_000
+
+#: Stall window: the same call fingerprint this many times…
+STALL_REPEATS = 3
+#: …within a rolling window of this many calls.
+STALL_WINDOW = 6
+
+NUDGE = (
+    "You have repeated the same action {n} times without progress. State what you "
+    "are stuck on and try a different approach."
+)
+
+INTERRUPTED_ERROR = "interrupted by user"
+STALL_ABORTED = "not run: the turn was aborted because the model stalled"
+
+
+class StopReason(StrEnum):
+    """Why a turn ended. Every one is reachable and separately tested."""
+
+    NO_TOOL_CALLS = "no_tool_calls"
+    MAX_ITERATIONS = "max_iterations"
+    TOKEN_BUDGET = "token_budget"
+    COST_BUDGET = "cost_budget"
+    INTERRUPTED = "interrupted"
+    STALLED = "stalled"
+
+
+class StalledError(RuntimeError):
+    """The model repeated itself after already being nudged.
+
+    Raised rather than returned: a stall is a failure of the *run*, not the
+    outcome of a tool, so it does not travel as a ``ToolResult``.
+
+    It carries ``agent_state`` because an abort is still a checkpoint — the
+    transcript up to the stall is valid, and throwing it away would make the one
+    failure mode users most want to inspect the one they cannot.
+    """
+
+    def __init__(
+        self, fingerprint: str, repeats: int, agent_state: AgentState | None = None
+    ) -> None:
+        super().__init__(
+            f"stalled: the same action repeated {repeats} times after a nudge "
+            f"(fingerprint {fingerprint})"
+        )
+        self.fingerprint = fingerprint
+        self.repeats = repeats
+        self.agent_state = agent_state
+
+
+# --------------------------------------------------------------------------- #
+# Pure helpers
+# --------------------------------------------------------------------------- #
+
+
+def truncate_for_model(
+    content: str, limit: int = DEFAULT_MAX_TOOL_RESULT_CHARS
+) -> str:
+    """Deterministically cut ``content`` and say exactly what was removed.
+
+    The marker is part of the contract: the model must be able to tell the
+    difference between "the file ends here" and "we stopped showing you the file".
+    """
+    if limit <= 0 or len(content) <= limit:
+        return content
+    head = content[:limit]
+    cut_chars = len(content) - limit
+    cut_lines = content.count("\n") - head.count("\n")
+    return f"{head}\n…[truncated: {cut_chars} chars, {cut_lines} lines cut]"
+
+
+def fingerprint(use: ToolUse) -> str:
+    """A stable identity for "the same action", for stall detection.
+
+    Arguments are normalized by sorting keys, so ``{"a":1,"b":2}`` and
+    ``{"b":2,"a":1}`` are the same action. Unserializable values fall back to
+    ``repr``, which is still stable within a process.
+    """
+    try:
+        args = json.dumps(dict(use.arguments), sort_keys=True, default=repr)
+    except (TypeError, ValueError):  # pragma: no cover - default=repr covers this
+        args = repr(sorted(use.arguments.items()))
+    return f"{use.name}:{args}"
+
+
+def _all_read_only(specs: Iterable[ToolSpec | None]) -> bool:
+    """Parallel execution is only safe when nothing in the batch mutates."""
+    resolved = list(specs)
+    return bool(resolved) and all(
+        spec is not None and spec.danger_level == DangerLevel.READ_ONLY
+        for spec in resolved
+    )
+
+
+def _fold_usage(budget: Budget, final: FinalMessage) -> Budget:
+    """Add one model response's reported usage into the budget."""
+    return replace(
+        budget,
+        spent_tokens=budget.spent_tokens + final.input_tokens + final.output_tokens,
+        spent_usd=budget.spent_usd + final.cost_usd,
+    )
+
+
+def _advance(
+    state: AgentState,
+    *,
+    messages: Sequence[Message] | None = None,
+    budget: Budget | None = None,
+) -> AgentState:
+    """The single place a new :class:`AgentState` is produced."""
+    return replace(
+        state,
+        messages=tuple(messages) if messages is not None else state.messages,
+        budget=budget if budget is not None else state.budget,
+    )
+
+
+def _interrupted_result() -> ToolResult:
+    return ToolResult(ok=False, error=INTERRUPTED_ERROR)
+
+
+def _results_message(pairs: Sequence[tuple[ToolUse, ToolResult]], limit: int) -> Message:
+    """One tool-role message answering every call in the batch, in order.
+
+    Answering the whole batch in one message keeps the pairing invariant trivially
+    satisfied: the ids that went out in one assistant message come back together.
+    """
+    blocks = tuple(
+        replace(
+            result.as_block(use.id),
+            content=truncate_for_model(
+                result.content if result.ok else result.error, limit
+            ),
+        )
+        for use, result in pairs
+    )
+    return Message(role=Role.TOOL, content_blocks=blocks)
+
+
+# --------------------------------------------------------------------------- #
+# The loop
+# --------------------------------------------------------------------------- #
+
+
+async def run_turn(
+    state: AgentState,
+    model: ModelClient,
+    tools: ToolRegistry,
+    policy: Policy,
+    *,
+    system: str = "",
+    max_iterations: int = DEFAULT_MAX_ITERATIONS,
+    max_tool_result_chars: int = DEFAULT_MAX_TOOL_RESULT_CHARS,
+) -> AsyncIterator[Event]:
+    """Run one turn to completion, yielding every observable step.
+
+    Stops for exactly one of :class:`StopReason`, and says which on ``TurnEnd``.
+    Raises only :class:`StalledError` (a repeat after a nudge) and
+    ``asyncio.CancelledError`` (a hard cancel) — everything else, including a tool
+    that raises, becomes a value.
+    """
+    specs = list(tools.specs())
+    messages: list[Message] = list(state.messages)
+    budget = state.budget
+    recent: deque[str] = deque(maxlen=STALL_WINDOW)
+    nudged = False
+    index = 0
+
+    for index in range(max_iterations):
+        yield TurnStart(turn_index=index)
+
+        if policy.cancelled():
+            state = _advance(state, messages=messages, budget=budget)
+            yield TurnEnd(
+                turn_index=index,
+                state=TurnState.INTERRUPTED,
+                stop_reason=StopReason.INTERRUPTED.value,
+                agent_state=state,
+            )
+            return
+
+        if (reason := policy.check_budget(budget)) is not None:
+            state = _advance(state, messages=messages, budget=budget)
+            yield TurnEnd(
+                turn_index=index,
+                state=TurnState.DONE,
+                stop_reason=reason,
+                agent_state=state,
+            )
+            return
+
+        # ------------------------------------------------------ model streaming
+        final: FinalMessage | None = None
+        async for chunk in model.stream(system=system, messages=messages, tools=specs):
+            if isinstance(chunk, TextChunk):
+                yield TextDelta(text=chunk.text, thinking=chunk.thinking)
+            elif isinstance(chunk, ResetChunk):
+                yield StreamReset(reason=chunk.reason)
+            else:
+                final = chunk
+
+        if final is None:
+            state = _advance(state, messages=messages, budget=budget)
+            yield Error(
+                message="model stream ended without a final message",
+                kind="protocol",
+                recoverable=False,
+            )
+            yield TurnEnd(
+                turn_index=index,
+                state=TurnState.ERROR,
+                stop_reason="protocol_error",
+                agent_state=state,
+            )
+            return
+
+        messages.append(final.message)
+        budget = _fold_usage(budget, final)
+        calls = final.message.tool_uses
+
+        # -------------------------------------------------- (a) no tool calls
+        if not calls:
+            state = _advance(state, messages=messages, budget=budget)
+            yield TurnEnd(
+                turn_index=index,
+                state=TurnState.DONE,
+                stop_reason=StopReason.NO_TOOL_CALLS.value,
+                agent_state=state,
+            )
+            return
+
+        # ------------------------------------------------------ (f) stall check
+        nudge_for: str | None = None
+        for use in calls:
+            mark = fingerprint(use)
+            recent.append(mark)
+            repeats = sum(1 for seen in recent if seen == mark)
+            if repeats >= STALL_REPEATS:
+                if nudged:
+                    # The calls in this batch never ran, so the transcript would
+                    # carry unpaired tool_use ids and a provider would reject the
+                    # state we just promised was resumable. Answer them, exactly
+                    # as an interrupt does, then abort.
+                    messages.append(
+                        _results_message(
+                            [(call, ToolResult(ok=False, error=STALL_ABORTED)) for call in calls],
+                            max_tool_result_chars,
+                        )
+                    )
+                    raise StalledError(
+                        mark, repeats, _advance(state, messages=messages, budget=budget)
+                    )
+                nudge_for = mark
+        if nudge_for is not None:
+            nudged = True
+            repeats = sum(1 for seen in recent if seen == nudge_for)
+            messages.append(
+                Message(
+                    role=Role.SYSTEM,
+                    content_blocks=(Text(NUDGE.format(n=repeats)),),
+                    metadata={"kind": "stall_nudge", "fingerprint": nudge_for},
+                )
+            )
+
+        # --------------------------------------------------- approval + execute
+        resolved = [tools.get(use.name) for use in calls]
+        pairs: list[tuple[ToolUse, ToolResult]] = []
+        approved: list[tuple[ToolUse, ToolSpec]] = []
+
+        for use, spec in zip(calls, resolved, strict=True):
+            yield ToolStart(tool_use_id=use.id, name=use.name, arguments=use.arguments)
+
+            if spec is None:
+                pairs.append(
+                    (use, ToolResult(ok=False, error=f"tool {use.name!r} is not registered"))
+                )
+                yield ToolEnd(tool_use_id=use.id, name=use.name, result=pairs[-1][1])
+                continue
+
+            if policy.cancelled():
+                pairs.append((use, _interrupted_result()))
+                yield ToolEnd(tool_use_id=use.id, name=use.name, result=pairs[-1][1])
+                continue
+
+            if spec.requires_approval:
+                rendered = _render(use)
+                yield ApprovalRequest(
+                    tool_use_id=use.id,
+                    name=use.name,
+                    danger_level=spec.danger_level,
+                    rendered=rendered,
+                    reason=spec.danger_level.name.lower(),
+                )
+                decision = await policy.approve(spec, use, rendered=rendered)
+                if not decision.approved:
+                    detail = decision.reason or "the user declined this action"
+                    pairs.append((use, ToolResult(ok=False, error=f"DENIED: {detail}")))
+                    yield ToolEnd(tool_use_id=use.id, name=use.name, result=pairs[-1][1])
+                    continue
+
+            approved.append((use, spec))
+
+        # Parallel only when every approved call is read-only; serial otherwise.
+        if len(approved) > 1 and _all_read_only([spec for _, spec in approved]):
+            results = await _execute_parallel(tools, [use for use, _ in approved])
+        else:
+            results = []
+            for use, _spec in approved:
+                if policy.cancelled():
+                    results.append(_interrupted_result())
+                    continue
+                results.append(await _execute_one(tools, use))
+
+        for (use, _spec), result in zip(approved, results, strict=True):
+            pairs.append((use, result))
+            yield ToolEnd(tool_use_id=use.id, name=use.name, result=result)
+
+        # Order results the way the calls were made, so the transcript reads
+        # in the same order the model asked.
+        order = {use.id: position for position, use in enumerate(calls)}
+        pairs.sort(key=lambda pair: order[pair[0].id])
+        messages.append(_results_message(pairs, max_tool_result_chars))
+
+        # ------------------------------------------------------- (e) interrupt
+        if policy.cancelled():
+            state = _advance(state, messages=messages, budget=budget)
+            yield TurnEnd(
+                turn_index=index,
+                state=TurnState.INTERRUPTED,
+                stop_reason=StopReason.INTERRUPTED.value,
+                agent_state=state,
+            )
+            return
+
+    # ------------------------------------------------------ (b) max iterations
+    state = _advance(state, messages=messages, budget=budget)
+    yield TurnEnd(
+        turn_index=index,
+        state=TurnState.ERROR,
+        stop_reason=StopReason.MAX_ITERATIONS.value,
+        agent_state=state,
+    )
+
+
+def _render(use: ToolUse) -> str:
+    """What the human is shown, and therefore what they approve."""
+    args = json.dumps(dict(use.arguments), sort_keys=True, default=repr)
+    return f"{use.name}({args})"
+
+
+async def _execute_one(tools: ToolRegistry, use: ToolUse) -> ToolResult:
+    """Execute one call, converting any escape into a value.
+
+    A registry is *supposed* to return a ``ToolResult``; a protocol cannot make it,
+    so the boundary is enforced here. ``CancelledError`` is caught so the
+    conversation still gets a well-formed answer, then re-raised.
+    """
+    try:
+        return await tools.execute(use)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        return ToolResult(ok=False, error=f"{type(exc).__name__}: {exc}")
+
+
+async def _execute_parallel(
+    tools: ToolRegistry, uses: Sequence[ToolUse]
+) -> list[ToolResult]:
+    """Run a read-only batch concurrently, preserving order."""
+    gathered = await asyncio.gather(
+        *(_execute_one(tools, use) for use in uses), return_exceptions=True
+    )
+    results: list[ToolResult] = []
+    for outcome in gathered:
+        if isinstance(outcome, asyncio.CancelledError):  # pragma: no cover - see tests
+            results.append(_interrupted_result())
+        elif isinstance(outcome, BaseException):
+            results.append(
+                ToolResult(ok=False, error=f"{type(outcome).__name__}: {outcome}")
+            )
+        else:
+            results.append(outcome)
+    return results
+
+
+__all__ = [
+    "DEFAULT_MAX_ITERATIONS",
+    "DEFAULT_MAX_TOOL_RESULT_CHARS",
+    "INTERRUPTED_ERROR",
+    "NUDGE",
+    "STALL_ABORTED",
+    "STALL_REPEATS",
+    "STALL_WINDOW",
+    "StalledError",
+    "StopReason",
+    "fingerprint",
+    "run_turn",
+    "truncate_for_model",
+]
