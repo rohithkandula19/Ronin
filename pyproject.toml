@@ -54,3 +54,39 @@ faulthandler_timeout = 90
 markers = [
     "adapter_smoke: LIVE fine-tuned-adapter smoke tests (need mlx-lm + a trained adapter; skipped elsewhere)",
 ]
+
+# Strict typing + lint for the new src/ronin contract tree. Two dev deps, each
+# justified in one line:
+#   mypy — the only way "strict typing" is a gate rather than an intention.
+#   ruff — lint + format in one fast binary, replacing nothing we already have.
+[dependency-groups]
+dev = [
+    "mypy>=1.11",
+    "ruff>=0.6",
+]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src/ronin", "tests/core"]
+strict = true
+warn_unreachable = true
+# Without __init__.py files mypy would name these modules `test_types` rather
+# than `tests.core.test_types`, and the per-module override below would not match.
+explicit_package_bases = true
+mypy_path = "src"
+# The legacy packages/* tree is not strict-clean yet; this gate covers the new
+# contract only, and widens as code moves into src/ronin.
+# pytest's @parametrize is an untyped decorator as far as mypy is concerned;
+# that is a property of pytest, not a hole in our typing.
+[[tool.mypy.overrides]]
+module = "tests.core.*"
+disallow_untyped_decorators = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+include = ["src/ronin/**/*.py", "tests/core/**/*.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
