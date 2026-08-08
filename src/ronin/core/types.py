@@ -533,6 +533,28 @@ class TextDelta:
 
 
 @dataclass(frozen=True, slots=True)
+class StreamReset:
+    """Discard the text already rendered for this turn and start over.
+
+    Emitted when a turn is re-streamed from scratch — a provider retry after a
+    mid-stream drop, or a failover to another provider once tokens were already
+    sent. Without it a consumer renders the answer twice; the shipped provider
+    layer carries regression tests for exactly that duplication.
+
+    Scope is deliberately narrow: it invalidates the :class:`TextDelta` events
+    emitted since the last ``TurnStart`` or ``StreamReset``, whichever is later.
+    It says nothing about tools — a tool that already ran has already had its
+    effect, and no event can undo that.
+    """
+
+    reason: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.reason, str):
+            raise TypeError("StreamReset.reason must be a str")
+
+
+@dataclass(frozen=True, slots=True)
 class ToolStart:
     tool_use_id: str
     name: str
@@ -649,6 +671,7 @@ class Error:
 Event = (
     TurnStart
     | TextDelta
+    | StreamReset
     | ToolStart
     | ToolEnd
     | ApprovalRequest
@@ -659,6 +682,7 @@ Event = (
 EVENT_TYPES: tuple[type, ...] = (
     TurnStart,
     TextDelta,
+    StreamReset,
     ToolStart,
     ToolEnd,
     ApprovalRequest,
@@ -688,6 +712,7 @@ __all__ = [
     "Mode",
     "RESTING_STATES",
     "Role",
+    "StreamReset",
     "TRANSITIONS",
     "Text",
     "TextDelta",

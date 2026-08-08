@@ -159,13 +159,15 @@ mutated, and `exhausted` is a pure property over both.
 ```python
 TurnStart(turn_index, state=THINKING)
 TextDelta(text, thinking=False)
+StreamReset(reason="")                       # discard rendered text; re-streamed
 ToolStart(tool_use_id, name, arguments={})
 ToolEnd(tool_use_id, name, result: ToolResult)
 ApprovalRequest(tool_use_id, name, danger_level, rendered, reason="")
 TurnEnd(turn_index, state, stop_reason="")
 Error(message, kind="unknown", recoverable=False)
 
-Event = TurnStart | TextDelta | ToolStart | ToolEnd | ApprovalRequest | TurnEnd | Error
+Event = (TurnStart | TextDelta | StreamReset | ToolStart | ToolEnd
+         | ApprovalRequest | TurnEnd | Error)
 ```
 
 - `TextDelta.thinking` marks reasoning **in the event**, so a renderer never has
@@ -383,22 +385,20 @@ bridge the old shapes are written knowingly rather than accreted.
 | Import-boundary enforcement test | ❌ not yet — first addition alongside `loop/` |
 | Everything in the §0 diagram | ❌ not built; this is the contract it will be built against |
 
-### One known gap in the event union, flagged rather than silently added
+### `StreamReset`, and why it is in the union
 
-The `Event` union above is exactly the seven types specified. The shipped
-provider layer emits a **third** stream event the union does not cover:
-`StreamEvent(type="reset")`, meaning *"a retry re-streamed this turn from
-scratch — discard what you already rendered"*. It exists because failing over or
-retrying after partial output otherwise duplicates the answer on screen, and the
-repo carries regression tests for exactly that (`test_stream_retry_dedup.py`,
-`test_stream_retry_render_dedup.py`).
+A turn can be re-streamed from scratch — a provider retry after a mid-stream
+drop, or a failover once tokens were already emitted. Without an explicit event
+for it, a consumer renders the answer **twice**; the shipped provider layer
+carries regression tests for exactly that duplication
+(`test_stream_retry_dedup.py`, `test_stream_retry_render_dedup.py`).
 
-Without an equivalent, any consumer built on this contract will re-render
-duplicated text on a mid-stream retry. The fix is one more member —
-`StreamReset(reason: str = "")` — but it widens a union the work order specified
-explicitly, so it is a **review ask, not a unilateral addition**.
+Its scope is deliberately narrow: it invalidates the `TextDelta` events emitted
+since the last `TurnStart` or `StreamReset`, whichever is later. **It says nothing
+about tools** — a tool that already ran has already had its effect, and no event
+can undo that.
 
-**Review asks.** (1) Add `StreamReset` to the union? (2) Is `ApprovalDecision`
-(and therefore `Generator` rather than `Iterator`) the right way to keep approval
-out of callbacks? (3) Should `DangerLevel` collapse the five existing danger
-vocabularies (§6) in this pass, or is that migration work for later?
+**Review asks.** (1) Is `ApprovalDecision` the right way to keep approval out of
+callbacks — see the open question in §8. (2) Should `DangerLevel` collapse the
+five existing danger vocabularies (§6) in this pass, or is that migration work
+for later?

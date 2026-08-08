@@ -25,6 +25,7 @@ from ronin.core.types import (
     Message,
     Mode,
     Role,
+    StreamReset,
     Text,
     TextDelta,
     Thinking,
@@ -469,6 +470,15 @@ def test_text_delta_distinguishes_reasoning_from_the_answer() -> None:
     assert TextDelta("hmm", thinking=True).thinking is True
 
 
+def test_stream_reset_invalidates_rendered_text_and_nothing_else() -> None:
+    reset = StreamReset()
+    assert reset.reason == ""
+    assert StreamReset(reason="provider retry").reason == "provider retry"
+    assert is_event(reset)
+    with pytest.raises(TypeError, match="StreamReset.reason must be a str"):
+        StreamReset(reason=None)  # type: ignore[arg-type]
+
+
 def test_tool_start_and_end_require_a_pairing_id() -> None:
     start = ToolStart(tool_use_id="t1", name="read", arguments={"path": "a"})
     assert start.arguments["path"] == "a"
@@ -555,6 +565,7 @@ def test_the_event_union_is_closed_and_complete() -> None:
     samples = [
         TurnStart(turn_index=0),
         TextDelta("hi"),
+        StreamReset(reason="retry"),
         ToolStart(tool_use_id="t1", name="read"),
         ToolEnd(tool_use_id="t1", name="read", result=ToolResult(ok=True)),
         ApprovalRequest(
