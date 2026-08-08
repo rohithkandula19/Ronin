@@ -1,0 +1,3 @@
+<ronin:tool_call>
+{"arguments": {"path": "a.py"}}
+</ronin:tool_call>

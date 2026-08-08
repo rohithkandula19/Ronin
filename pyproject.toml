@@ -67,7 +67,7 @@ dev = [
 
 [tool.mypy]
 python_version = "3.11"
-files = ["src/ronin", "tests/core"]
+files = ["src/ronin", "tests/core", "tests/providers"]
 strict = true
 warn_unreachable = true
 # Without __init__.py files mypy would name these modules `test_types` rather
@@ -76,20 +76,41 @@ explicit_package_bases = true
 # tests/core is on the path so the shared `fakes` module resolves for mypy the
 # same way pytest resolves it (test dirs stay non-packages on purpose — making
 # them packages breaks collection across the rest of the monorepo).
-mypy_path = "src:tests/core"
+mypy_path = "src:tests/core:tests/providers"
 # The legacy packages/* tree is not strict-clean yet; this gate covers the new
 # contract only, and widens as code moves into src/ronin.
 # pytest's @parametrize is an untyped decorator as far as mypy is concerned;
 # that is a property of pytest, not a hole in our typing.
 [[tool.mypy.overrides]]
-module = ["test_types", "test_loop", "fakes"]
+module = [
+    "test_types",
+    "test_loop",
+    "fakes",
+    "test_jsonargs",
+    "test_normalize",
+    "test_shim",
+    "test_adapters",
+    "test_golden_streams",
+    "test_router",
+    "test_assembly",
+    "test_accounting",
+    "test_bridge",
+    "replay",
+]
 disallow_untyped_decorators = false
+
+# mlx-lm is an Apple-silicon-only optional dependency, imported inside a function
+# so that nothing else in the tree needs it. It ships no stubs and CI is Linux, so
+# there is nothing to type against — the adapter's own signatures are still checked.
+[[tool.mypy.overrides]]
+module = ["mlx_lm.*"]
+ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
-include = ["src/ronin/**/*.py", "tests/core/**/*.py"]
+include = ["src/ronin/**/*.py", "tests/core/**/*.py", "tests/providers/**/*.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]

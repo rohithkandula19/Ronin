@@ -391,10 +391,22 @@ bridge the old shapes are written knowingly rather than accreted.
 | Deliverable | State |
 |---|---|
 | `src/ronin/core/types.py` | ✅ types + transition table, **no logic** |
-| `tests/core/test_types.py` | ✅ 80 tests, **100% statement + branch coverage** of the module |
+| `tests/core/test_types.py` | ✅ 83 tests, **100% statement + branch coverage** of the module |
 | This document | ✅ |
-| Import-boundary enforcement test | ❌ not yet — first addition alongside `loop/` |
-| Everything in the §0 diagram | ❌ not built; this is the contract it will be built against |
+| `src/ronin/core/loop.py` | ✅ see §9 |
+| `src/ronin/providers/` | ✅ four adapters, normalizer, shim, router, cache-aware assembly, ledger — see [`docs/PROVIDERS.md`](PROVIDERS.md) |
+| Import-boundary enforcement test | ❌ not yet — still documentation, not a gate |
+| The rest of the §0 diagram | ❌ not built; this is the contract it will be built against |
+
+**On the model layer and this contract.** The provider layer implements its own
+`ModelClient` (`ModelRequest` in, `ModelDelta` out) rather than `core.protocols.ModelClient`
+(`system`/`messages`/`tools` in, `ModelChunk` out), and `providers.bridge.LoopClient`
+translates between them in about forty lines. Both seams are deliberate: the loop's
+stays narrow so it need not change when a provider does, and the provider's needs a
+request object so the cacheable prefix, the cache marker and the sampling knobs travel
+together. **Whether to unify them is an open review ask** — the alternative is widening
+`core.protocols` and the loop's 93 tests with fields the loop never reads. The bridge
+is trivial on purpose so reversing this is cheap.
 
 ### `StreamReset`, and why it is in the union
 
