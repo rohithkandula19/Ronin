@@ -19,9 +19,10 @@ to enforce them rather than to be polite:
 """
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from enum import Enum
-from typing import Any, Mapping, Sequence
+from enum import Enum, StrEnum
+from typing import Any
 
 # --------------------------------------------------------------------------- #
 # Content blocks
@@ -104,7 +105,7 @@ _BLOCK_TYPES: tuple[type, ...] = (Text, ToolUse, ToolResultBlock, Thinking)
 # --------------------------------------------------------------------------- #
 
 
-class Role(str, Enum):
+class Role(StrEnum):
     """Who produced a message."""
 
     SYSTEM = "system"
@@ -129,7 +130,8 @@ class Message:
     def __post_init__(self) -> None:
         if not isinstance(self.role, Role):
             raise TypeError("Message.role must be a Role")
-        if isinstance(self.content_blocks, (str, bytes)):
+        blocks: object = self.content_blocks
+        if isinstance(blocks, (str, bytes)):
             raise TypeError(
                 "Message.content_blocks must be a sequence of blocks, not a string"
             )
@@ -271,7 +273,7 @@ class ToolResult:
 # --------------------------------------------------------------------------- #
 
 
-class TodoStatus(str, Enum):
+class TodoStatus(StrEnum):
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
@@ -330,7 +332,7 @@ class Budget:
         )
 
 
-class Mode(str, Enum):
+class Mode(StrEnum):
     """How much the agent may do without asking.
 
     Deliberately a permissiveness ladder rather than a set of booleans, so
@@ -394,7 +396,7 @@ class AgentState:
         return unpaired_tool_uses(self.messages)
 
     def with_message(self, message: Message) -> AgentState:
-        return replace(self, messages=self.messages + (message,))
+        return replace(self, messages=(*self.messages, message))
 
 
 # --------------------------------------------------------------------------- #
@@ -402,7 +404,7 @@ class AgentState:
 # --------------------------------------------------------------------------- #
 
 
-class TurnState(str, Enum):
+class TurnState(StrEnum):
     IDLE = "idle"
     THINKING = "thinking"
     TOOL_PENDING = "tool_pending"
@@ -635,13 +637,23 @@ DENY_UNATTENDED = ApprovalDecision(
 
 @dataclass(frozen=True, slots=True)
 class TurnEnd:
+    """The last event of a turn.
+
+    ``agent_state`` carries the state the turn ended with, so a consumer can
+    resume (or checkpoint) without reaching into the loop. It is optional because
+    a consumer replaying a recorded stream has no state to hand back.
+    """
+
     turn_index: int
     state: TurnState
     stop_reason: str = ""
+    agent_state: AgentState | None = None
 
     def __post_init__(self) -> None:
         if self.turn_index < 0:
             raise ValueError("TurnEnd.turn_index must be >= 0")
+        if self.agent_state is not None and not isinstance(self.agent_state, AgentState):
+            raise TypeError("TurnEnd.agent_state must be an AgentState or None")
         if self.state not in _TURN_END_STATES:
             raise ValueError(
                 f"TurnEnd.state must be one of "
@@ -697,23 +709,23 @@ def is_event(value: object) -> bool:
 
 
 __all__ = [
+    "DENY_UNATTENDED",
+    "EVENT_TYPES",
+    "RESTING_STATES",
+    "TRANSITIONS",
     "AgentState",
     "ApprovalDecision",
     "ApprovalRequest",
     "Budget",
     "ContentBlock",
-    "DENY_UNATTENDED",
     "DangerLevel",
-    "EVENT_TYPES",
     "Error",
     "Event",
     "IllegalTransition",
     "Message",
     "Mode",
-    "RESTING_STATES",
     "Role",
     "StreamReset",
-    "TRANSITIONS",
     "Text",
     "TextDelta",
     "Thinking",
