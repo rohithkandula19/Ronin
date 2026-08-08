@@ -42,7 +42,7 @@ jobs:
       # release tag. `pytest packages apps training` mirrors the Makefile and
       # collects the full suite.
       - name: Test (Python — full workspace)
-        run: uv run --python ${{ matrix.python }} pytest packages apps training -q
+        run: uv run --python ${{ matrix.python }} pytest packages apps training tests -q
 
   gates:
     name: gates (build · smoke · docs-stats)

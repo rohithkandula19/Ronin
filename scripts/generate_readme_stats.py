@@ -9,7 +9,7 @@ README (default) or verifies it is current (``--check``, wired into CI so a
 stale number fails the build).
 
 Numbers owned here:
-  * test count      — ``pytest --collect-only`` across packages + apps
+  * test count      — ``pytest --collect-only`` across packages + apps + training + tests
   * total packages  — directories under ``packages/``
   * arcade games    — entries in ``ronin_arcade.games.GAMES``
 
@@ -31,7 +31,7 @@ README = ROOT / "README.md"
 def test_count() -> int:
     out = subprocess.run(
         [sys.executable, "-m", "pytest", "--collect-only", "-q",
-         "packages", "apps", "training"],
+         "packages", "apps", "training", "tests"],
         cwd=ROOT, capture_output=True, text=True,
     ).stdout
     m = re.search(r"(\d+)\s+tests? collected", out)

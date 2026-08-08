@@ -45,7 +45,11 @@ members = [
 # headless GitHub Actions runner).
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["packages", "apps"]
+# `src` is on the path so the new core contract (src/ronin/core/) is importable
+# as `ronin.core.*` without a build step — it is pure stdlib dataclasses and has
+# no install-time dependencies. `tests` collects the contract's invariant tests.
+pythonpath = ["src"]
+testpaths = ["packages", "apps", "tests"]
 faulthandler_timeout = 90
 markers = [
     "adapter_smoke: LIVE fine-tuned-adapter smoke tests (need mlx-lm + a trained adapter; skipped elsewhere)",
