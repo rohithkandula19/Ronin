@@ -73,13 +73,16 @@ warn_unreachable = true
 # Without __init__.py files mypy would name these modules `test_types` rather
 # than `tests.core.test_types`, and the per-module override below would not match.
 explicit_package_bases = true
-mypy_path = "src"
+# tests/core is on the path so the shared `fakes` module resolves for mypy the
+# same way pytest resolves it (test dirs stay non-packages on purpose — making
+# them packages breaks collection across the rest of the monorepo).
+mypy_path = "src:tests/core"
 # The legacy packages/* tree is not strict-clean yet; this gate covers the new
 # contract only, and widens as code moves into src/ronin.
 # pytest's @parametrize is an untyped decorator as far as mypy is concerned;
 # that is a property of pytest, not a hole in our typing.
 [[tool.mypy.overrides]]
-module = "tests.core.*"
+module = ["test_types", "test_loop", "fakes"]
 disallow_untyped_decorators = false
 
 [tool.ruff]

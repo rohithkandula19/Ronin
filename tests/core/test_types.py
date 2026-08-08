@@ -7,6 +7,7 @@ covered, because a contract that isn't enforced is a comment.
 from __future__ import annotations
 
 import dataclasses
+import itertools
 
 import pytest
 
@@ -53,7 +54,7 @@ from ronin.core.types import (
 
 def test_text_requires_a_string() -> None:
     assert Text("hi").text == "hi"
-    with pytest.raises(TypeError, match="must be a str"):
+    with pytest.raises(TypeError, match=r"must be a str"):
         Text(42)  # type: ignore[arg-type]
 
 
@@ -61,7 +62,7 @@ def test_thinking_carries_an_opaque_signature() -> None:
     block = Thinking("because", signature="sig-bytes")
     assert (block.text, block.signature) == ("because", "sig-bytes")
     assert Thinking("x").signature == ""
-    with pytest.raises(TypeError, match="must be a str"):
+    with pytest.raises(TypeError, match=r"must be a str"):
         Thinking(None)  # type: ignore[arg-type]
 
 
@@ -70,19 +71,19 @@ def test_tool_use_requires_id_name_and_mapping_arguments() -> None:
     assert call.arguments["path"] == "a.py"
     assert ToolUse(id="t1", name="x").arguments == {}
 
-    with pytest.raises(ValueError, match="ToolUse.id is required"):
+    with pytest.raises(ValueError, match=r"ToolUse.id is required"):
         ToolUse(id="", name="read_file")
-    with pytest.raises(ValueError, match="ToolUse.name is required"):
+    with pytest.raises(ValueError, match=r"ToolUse.name is required"):
         ToolUse(id="t1", name="")
     # A JSON *string* is the provider layer's problem, not the contract's.
-    with pytest.raises(TypeError, match="must be a mapping"):
+    with pytest.raises(TypeError, match=r"must be a mapping"):
         ToolUse(id="t1", name="x", arguments='{"path": "a.py"}')  # type: ignore[arg-type]
 
 
 def test_tool_result_block_must_answer_some_call() -> None:
     block = ToolResultBlock(tool_use_id="t1", content="ok")
     assert block.is_error is False
-    with pytest.raises(ValueError, match="tool_use_id is required"):
+    with pytest.raises(ValueError, match=r"tool_use_id is required"):
         ToolResultBlock(tool_use_id="", content="ok")
 
 
@@ -92,19 +93,19 @@ def test_tool_result_block_must_answer_some_call() -> None:
 
 
 def test_message_rejects_a_bare_string_for_content() -> None:
-    with pytest.raises(TypeError, match="not a string"):
+    with pytest.raises(TypeError, match=r"not a string"):
         Message(role=Role.USER, content_blocks="hello")  # type: ignore[arg-type]
 
 
 def test_message_requires_a_role_and_a_tuple() -> None:
-    with pytest.raises(TypeError, match="must be a Role"):
+    with pytest.raises(TypeError, match=r"must be a Role"):
         Message(role="user")  # type: ignore[arg-type]
-    with pytest.raises(TypeError, match="must be a tuple"):
+    with pytest.raises(TypeError, match=r"must be a tuple"):
         Message(role=Role.USER, content_blocks=[Text("hi")])  # type: ignore[arg-type]
 
 
 def test_message_rejects_unknown_block_types() -> None:
-    with pytest.raises(TypeError, match="unknown content block type: int"):
+    with pytest.raises(TypeError, match=r"unknown content block type: int"):
         Message(role=Role.USER, content_blocks=(1,))  # type: ignore[arg-type]
 
 
@@ -113,7 +114,7 @@ def test_message_rejects_unknown_block_types() -> None:
     "block", [ToolUse(id="t1", name="x"), Thinking("reasoning")], ids=["tooluse", "thinking"]
 )
 def test_only_the_assistant_may_call_tools_or_think(role: Role, block: object) -> None:
-    with pytest.raises(ValueError, match="may only appear on an assistant"):
+    with pytest.raises(ValueError, match=r"may only appear on an assistant"):
         Message(role=role, content_blocks=(block,))  # type: ignore[arg-type]
 
 
@@ -190,11 +191,11 @@ def test_tool_spec_happy_path() -> None:
 
 
 def test_tool_spec_requires_name_description_and_typed_danger() -> None:
-    with pytest.raises(ValueError, match="name is required"):
+    with pytest.raises(ValueError, match=r"name is required"):
         ToolSpec(name="", description="x")
-    with pytest.raises(ValueError, match="description is required"):
+    with pytest.raises(ValueError, match=r"description is required"):
         ToolSpec(name="x", description="")
-    with pytest.raises(TypeError, match="must be a DangerLevel"):
+    with pytest.raises(TypeError, match=r"must be a DangerLevel"):
         ToolSpec(name="x", description="y", danger_level=2)  # type: ignore[arg-type]
 
 
@@ -202,7 +203,7 @@ def test_tool_spec_requires_name_description_and_typed_danger() -> None:
     "level", [DangerLevel.DESTRUCTIVE, DangerLevel.IRREVERSIBLE]
 )
 def test_a_destructive_tool_cannot_opt_out_of_approval(level: DangerLevel) -> None:
-    with pytest.raises(ValueError, match="cannot opt out of"):
+    with pytest.raises(ValueError, match=r"cannot opt out of"):
         ToolSpec(name="rm", description="delete", danger_level=level, requires_approval=False)
     # …but may declare it, which is the only legal shape.
     assert ToolSpec(
@@ -223,13 +224,13 @@ def test_tool_result_success_and_failure_are_the_same_shape() -> None:
 
 
 def test_tool_result_rejects_contradictory_or_silent_failures() -> None:
-    with pytest.raises(ValueError, match="cannot be ok=True and carry an error"):
+    with pytest.raises(ValueError, match=r"cannot be ok=True and carry an error"):
         ToolResult(ok=True, error="boom")
-    with pytest.raises(ValueError, match="must say why"):
+    with pytest.raises(ValueError, match=r"must say why"):
         ToolResult(ok=False)
-    with pytest.raises(ValueError, match="tokens_estimate must be >= 0"):
+    with pytest.raises(ValueError, match=r"tokens_estimate must be >= 0"):
         ToolResult(ok=True, tokens_estimate=-1)
-    with pytest.raises(TypeError, match="artifacts must be a tuple"):
+    with pytest.raises(TypeError, match=r"artifacts must be a tuple"):
         ToolResult(ok=True, artifacts=["a.txt"])  # type: ignore[arg-type]
 
 
@@ -249,11 +250,11 @@ def test_tool_result_projects_into_the_transcript_preserving_the_error_flag() ->
 def test_todo_invariants() -> None:
     todo = Todo(id="1", subject="write tests")
     assert todo.status is TodoStatus.PENDING
-    with pytest.raises(ValueError, match="Todo.id is required"):
+    with pytest.raises(ValueError, match=r"Todo.id is required"):
         Todo(id="", subject="x")
-    with pytest.raises(ValueError, match="Todo.subject is required"):
+    with pytest.raises(ValueError, match=r"Todo.subject is required"):
         Todo(id="1", subject="")
-    with pytest.raises(TypeError, match="must be a TodoStatus"):
+    with pytest.raises(TypeError, match=r"must be a TodoStatus"):
         Todo(id="1", subject="x", status="pending")  # type: ignore[arg-type]
 
 
@@ -266,13 +267,13 @@ def test_budget_defaults_are_unbounded_and_never_exhausted() -> None:
 @pytest.mark.parametrize("name", ["max_tokens", "max_usd", "max_wall_seconds"])
 @pytest.mark.parametrize("value", [0, -1])
 def test_budget_limits_must_be_positive_or_none(name: str, value: float) -> None:
-    with pytest.raises(ValueError, match=f"Budget.{name} must be positive or None"):
-        Budget(**{name: value})
+    with pytest.raises(ValueError, match=rf"Budget.{name} must be positive or None"):
+        Budget(**{name: value})  # type: ignore[arg-type]  # name is parametrized
 
 
 @pytest.mark.parametrize("name", ["spent_tokens", "spent_usd", "elapsed_seconds"])
 def test_budget_spend_cannot_be_negative(name: str) -> None:
-    with pytest.raises(ValueError, match=f"Budget.{name} must be >= 0"):
+    with pytest.raises(ValueError, match=rf"Budget.{name} must be >= 0"):
         Budget(**{name: -1})
 
 
@@ -287,8 +288,10 @@ def test_budget_spend_cannot_be_negative(name: str) -> None:
         ({"max_wall_seconds": 5.0, "elapsed_seconds": 1.0}, False),
     ],
 )
-def test_budget_exhaustion_per_dimension(kwargs: dict, expected: bool) -> None:
-    assert Budget(**kwargs).exhausted is expected
+def test_budget_exhaustion_per_dimension(
+    kwargs: dict[str, float], expected: bool
+) -> None:
+    assert Budget(**kwargs).exhausted is expected  # type: ignore[arg-type]
 
 
 def test_mode_is_a_permissiveness_ladder() -> None:
@@ -313,24 +316,24 @@ def test_agent_state_defaults_are_a_valid_empty_session() -> None:
 
 
 def test_agent_state_requires_frozen_collections_and_a_real_cwd() -> None:
-    with pytest.raises(TypeError, match="messages must be a tuple"):
+    with pytest.raises(TypeError, match=r"messages must be a tuple"):
         AgentState(messages=[])  # type: ignore[arg-type]
-    with pytest.raises(TypeError, match="todos must be a tuple"):
+    with pytest.raises(TypeError, match=r"todos must be a tuple"):
         AgentState(todos=[])  # type: ignore[arg-type]
-    with pytest.raises(TypeError, match="mode must be a Mode"):
+    with pytest.raises(TypeError, match=r"mode must be a Mode"):
         AgentState(mode="ask")  # type: ignore[arg-type]
-    with pytest.raises(ValueError, match="cwd must be non-empty"):
+    with pytest.raises(ValueError, match=r"cwd must be non-empty"):
         AgentState(cwd="")
 
 
 def test_agent_state_rejects_duplicate_todo_ids() -> None:
-    with pytest.raises(ValueError, match="duplicate ids"):
+    with pytest.raises(ValueError, match=r"duplicate ids"):
         AgentState(todos=(Todo(id="1", subject="a"), Todo(id="1", subject="b")))
 
 
 def test_agent_state_checkpoint_id_is_none_or_meaningful() -> None:
     assert AgentState(checkpoint_id="ckpt-1").checkpoint_id == "ckpt-1"
-    with pytest.raises(ValueError, match="checkpoint_id must be None or non-empty"):
+    with pytest.raises(ValueError, match=r"checkpoint_id must be None or non-empty"):
         AgentState(checkpoint_id="")
 
 
@@ -384,7 +387,7 @@ def test_the_happy_path_is_walkable() -> None:
         TurnState.DONE,
         TurnState.IDLE,
     ]
-    for source, target in zip(path, path[1:]):
+    for source, target in itertools.pairwise(path):
         assert can_transition(source, target), f"{source} -> {target}"
 
 
@@ -437,9 +440,11 @@ def test_no_state_transitions_to_itself() -> None:
 
 
 def test_resting_states_are_the_only_ones_allowed_to_wait() -> None:
-    assert RESTING_STATES == frozenset(
-        {TurnState.IDLE, TurnState.DONE, TurnState.AWAITING_APPROVAL}
-    )
+    assert set(RESTING_STATES) == {
+        TurnState.IDLE,
+        TurnState.DONE,
+        TurnState.AWAITING_APPROVAL,
+    }
 
 
 def test_assert_transition_returns_the_target_or_raises() -> None:
@@ -461,7 +466,7 @@ def test_assert_transition_returns_the_target_or_raises() -> None:
 def test_turn_start_defaults_to_thinking() -> None:
     event = TurnStart(turn_index=0)
     assert event.state is TurnState.THINKING
-    with pytest.raises(ValueError, match="turn_index must be >= 0"):
+    with pytest.raises(ValueError, match=r"turn_index must be >= 0"):
         TurnStart(turn_index=-1)
 
 
@@ -475,7 +480,7 @@ def test_stream_reset_invalidates_rendered_text_and_nothing_else() -> None:
     assert reset.reason == ""
     assert StreamReset(reason="provider retry").reason == "provider retry"
     assert is_event(reset)
-    with pytest.raises(TypeError, match="StreamReset.reason must be a str"):
+    with pytest.raises(TypeError, match=r"StreamReset.reason must be a str"):
         StreamReset(reason=None)  # type: ignore[arg-type]
 
 
@@ -483,14 +488,14 @@ def test_tool_start_and_end_require_a_pairing_id() -> None:
     start = ToolStart(tool_use_id="t1", name="read", arguments={"path": "a"})
     assert start.arguments["path"] == "a"
     assert ToolStart(tool_use_id="t1", name="read").arguments == {}
-    with pytest.raises(ValueError, match="ToolStart.tool_use_id is required"):
+    with pytest.raises(ValueError, match=r"ToolStart.tool_use_id is required"):
         ToolStart(tool_use_id="", name="read")
 
     end = ToolEnd(tool_use_id="t1", name="read", result=ToolResult(ok=True))
     assert end.result.ok
-    with pytest.raises(ValueError, match="ToolEnd.tool_use_id is required"):
+    with pytest.raises(ValueError, match=r"ToolEnd.tool_use_id is required"):
         ToolEnd(tool_use_id="", name="read", result=ToolResult(ok=True))
-    with pytest.raises(TypeError, match="must be a ToolResult"):
+    with pytest.raises(TypeError, match=r"must be a ToolResult"):
         ToolEnd(tool_use_id="t1", name="read", result="ok")  # type: ignore[arg-type]
 
 
@@ -504,15 +509,15 @@ def test_approval_request_must_show_what_it_asks_about() -> None:
     )
     assert request.rendered == "rm -rf build/"
 
-    with pytest.raises(ValueError, match="tool_use_id is required"):
+    with pytest.raises(ValueError, match=r"tool_use_id is required"):
         ApprovalRequest(
             tool_use_id="", name="x", danger_level=DangerLevel.MUTATING, rendered="y"
         )
-    with pytest.raises(ValueError, match="cannot approve what is not shown"):
+    with pytest.raises(ValueError, match=r"cannot approve what is not shown"):
         ApprovalRequest(
             tool_use_id="t1", name="x", danger_level=DangerLevel.MUTATING, rendered=""
         )
-    with pytest.raises(TypeError, match="must be a DangerLevel"):
+    with pytest.raises(TypeError, match=r"must be a DangerLevel"):
         ApprovalRequest(tool_use_id="t1", name="x", danger_level=1, rendered="y")  # type: ignore[arg-type]
 
 
@@ -528,13 +533,13 @@ def test_approval_decision_is_the_only_value_sent_back_into_the_loop() -> None:
     assert ApprovalDecision(approved=True, remember=True).remember is True
     assert ApprovalDecision(approved=False, remember=True).remember is True
 
-    with pytest.raises(TypeError, match="reason must be a str"):
+    with pytest.raises(TypeError, match=r"reason must be a str"):
         ApprovalDecision(approved=False, reason=None)  # type: ignore[arg-type]
 
 
 def test_an_unattended_consumer_denies_rather_than_auto_allowing() -> None:
     assert DENY_UNATTENDED.approved is False
-    assert "no human" in DENY_UNATTENDED.reason
+    assert DENY_UNATTENDED.reason.count("no human") == 1
     # It is a decision, not an event — it travels the other way.
     assert not is_event(DENY_UNATTENDED)
 
@@ -547,9 +552,9 @@ def test_turn_end_only_reports_a_terminal_state(state: TurnState) -> None:
 
 
 def test_turn_end_rejects_mid_turn_states_and_bad_indexes() -> None:
-    with pytest.raises(ValueError, match="TurnEnd.state must be one of"):
+    with pytest.raises(ValueError, match=r"TurnEnd.state must be one of"):
         TurnEnd(turn_index=0, state=TurnState.THINKING)
-    with pytest.raises(ValueError, match="turn_index must be >= 0"):
+    with pytest.raises(ValueError, match=r"turn_index must be >= 0"):
         TurnEnd(turn_index=-1, state=TurnState.DONE)
 
 
@@ -557,7 +562,7 @@ def test_error_requires_a_message_and_defaults_to_unrecoverable() -> None:
     error = Error(message="boom")
     assert (error.kind, error.recoverable) == ("unknown", False)
     assert Error(message="429", kind="rate_limit", recoverable=True).recoverable
-    with pytest.raises(ValueError, match="Error.message is required"):
+    with pytest.raises(ValueError, match=r"Error.message is required"):
         Error(message="")
 
 
