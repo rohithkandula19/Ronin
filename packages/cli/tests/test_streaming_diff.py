@@ -37,8 +37,24 @@ def test_streaming_diff_rows_fit_requested_width_and_summarize() -> None:
 
 
 def test_streaming_diff_never_interprets_diff_content_as_rich_markup() -> None:
+    rows = render_unified_diff(_DIFF, path="example.py", width=80, max_rows=None)
+
+    # Markup in file content stays literal: parsing it would have consumed the
+    # brackets and left "new" behind as a bold span.
+    assert any("[bold]new[/bold]" in row.plain for row in rows)
+
     buf = io.StringIO()
-    console = Console(file=buf, force_terminal=True, no_color=True, width=80)
+    Console(file=buf, force_terminal=True, no_color=True, width=80).print(*rows, sep="\n")
+    assert "[bold]new[/bold]" in buf.getvalue()
+
+
+def test_streaming_diff_emits_no_escapes_when_the_console_is_not_a_terminal() -> None:
+    # The NO_COLOR / piped-output contract. A terminal console legitimately gets
+    # escapes here — the renderer styles the diff chrome, and rich's no_color
+    # drops color while keeping bold/dim/italic attributes — so the strict
+    # "no escapes" guarantee is asserted where it actually holds.
+    buf = io.StringIO()
+    console = Console(file=buf, width=80)
 
     for row in render_unified_diff(_DIFF, path="example.py", width=80, max_rows=None):
         console.print(row)
