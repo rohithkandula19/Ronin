@@ -303,11 +303,22 @@ while True:
         ...
 ```
 
-**Why `Generator`, not `Iterator`.** Approval is inherently request/response, and
-a pure iterator cannot carry a reply — which is exactly where a callback would
-sneak back in and re-invert control. `ApprovalDecision` is the *only* value a
-consumer ever sends, so the channel stays narrow: one event type expects a reply,
-everything else is fire-and-forget (`send(None)`).
+**Superseded — the injected policy answers approvals.** The loop shipped in
+`src/ronin/core/loop.py` is a plain `AsyncIterator[Event]`, and approval is
+answered by the injected `Policy` (`await policy.approve(spec, use, rendered=…)`),
+not sent back through the stream. Two consequences worth being explicit about:
+
+- The event stream stays strictly **one-way**, so recording it, replaying it, and
+  fanning it out to several consumers are all trivial.
+- `ApprovalRequest` is **informational**: a UI renders it to show what is being
+  decided, but the decision does not travel back over the stream.
+- `ApprovalDecision` is still the value that answers — it is just returned by the
+  policy rather than sent by the consumer. `DENY_UNATTENDED` remains the correct
+  answer for a policy with no human attached.
+
+The `asend()` design below is what §4 originally specified; it is kept as the
+rejected alternative because the tradeoff is real (a `Policy` that prompts a human
+mixes decision-making with UI, which is the cost of the shipped choice).
 
 The contract:
 
@@ -402,3 +413,54 @@ can undo that.
 callbacks — see the open question in §8. (2) Should `DangerLevel` collapse the
 five existing danger vocabularies (§6) in this pass, or is that migration work
 for later?
+
+---
+
+## 9. The loop as built (`src/ronin/core/loop.py`)
+
+```python
+async def run_turn(state, model, tools, policy, *, system="",
+                   max_iterations=100, max_tool_result_chars=16_000) -> AsyncIterator[Event]
+```
+
+Zero provider knowledge, zero UI knowledge: `model`, `tools`, and `policy` are
+protocols (`src/ronin/core/protocols.py`), so a scripted fake replaces a provider
+with no network and no monkeypatching.
+
+**Stop conditions** — every one explicit, named on `TurnEnd.stop_reason`, and
+separately tested:
+
+| `StopReason` | Trigger | Ends in |
+|---|---|---|
+| `NO_TOOL_CALLS` | the model answered with text only | `DONE` |
+| `MAX_ITERATIONS` | the iteration cap (default 100) | `ERROR` |
+| `TOKEN_BUDGET` / `COST_BUDGET` | `policy.check_budget()` returned a reason | `DONE` |
+| `INTERRUPTED` | `policy.cancelled()` | `INTERRUPTED` |
+| `STALLED` | a repeat after a nudge | raises `StalledError` |
+
+**Stall detection.** A call's fingerprint is `name` plus its arguments with sorted
+keys, so `{"a":1,"b":2}` and `{"b":2,"a":1}` are the same action. Three
+occurrences inside a rolling window of six inject a **system-role nudge**; a
+further repeat raises `StalledError`. The error carries `agent_state`, because an
+abort is still a checkpoint — and the outstanding calls are answered with a
+synthetic result first, so the state it carries is genuinely sendable rather than
+a transcript with dangling tool_use ids (a bug the demo caught).
+
+**Truncation.** Every result the model sees goes through `truncate_for_model`,
+which appends `…[truncated: N chars, M lines cut]`. The marker is the contract: the
+model must be able to distinguish "the file ends here" from "we stopped showing
+you the file".
+
+**Parallelism.** A batch runs concurrently only when **every** approved call in it
+is `READ_ONLY`; one mutating call makes the whole batch serial. Results are
+re-ordered to the order the model asked in, so the transcript reads sequentially
+either way.
+
+**Interrupt.** `policy.cancelled()` is polled at every await point, and
+`CancelledError` is caught around tool execution. A cancelled call gets
+`ToolResult(ok=False, error="interrupted by user")`, so the transcript stays
+well-formed and `TurnEnd.agent_state` is resumable.
+
+**Demo:** `uv run python -m ronin.demo` — offline, no key, two scenarios showing
+parallel execution, a denied approval, the truncation marker, the stall nudge, and
+that state survives an abort.
