@@ -76,6 +76,7 @@ dev = [
 python_version = "3.11"
 files = [
     "src/ronin",
+    "tests/agents",
     "tests/core",
     "tests/providers",
     "tests/tools",
@@ -83,13 +84,14 @@ files = [
 strict = true
 warn_unreachable = true
 explicit_package_bases = true
-mypy_path = "src:tests/core:tests/providers:tests/tools"
+mypy_path = "src:tests/agents:tests/core:tests/providers:tests/tools"
 
 # pytest's @parametrize is an untyped decorator as far as mypy is concerned;
 # that is a property of pytest, not a hole in our typing. Enumerated rather
 # than wildcarded because mypy rejects a partial-component pattern.
 [[tool.mypy.overrides]]
 module = [
+    "agents_harness",
     "fakes",
     "harness",
     "replay",
@@ -97,12 +99,14 @@ module = [
     "test_assembly",
     "test_boundaries",
     "test_bridge",
+    "test_definitions",
     "test_files",
     "test_golden_streams",
     "test_jsonargs",
     "test_loop",
     "test_net",
     "test_normalize",
+    "test_plan_mode",
     "test_registry",
     "test_resilience",
     "test_router",
@@ -128,6 +132,7 @@ target-version = "py311"
 src = ["src", "tests"]
 include = [
     "src/ronin/**/*.py",
+    "tests/agents/**/*.py",
     "tests/core/**/*.py",
     "tests/providers/**/*.py",
     "tests/tools/**/*.py",

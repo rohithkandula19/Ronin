@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from harness import MislabelledWrite, context, registry, use
+from agents_harness import MislabelledWrite, context, registry, use
 
 from ronin.agents.plan_mode import (
     FORBIDDEN_IN_PLAN_MODE,

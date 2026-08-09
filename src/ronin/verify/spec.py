@@ -157,7 +157,15 @@ class VerifySpec:
         return self.build
 
     def with_command(self, kind: CommandKind, command: DetectedCommand) -> VerifySpec:
-        return replace(self, **{kind.value: command})
+        # Spelled out rather than `replace(self, **{kind.value: ...})`: the dict
+        # form type-checks as `Any` and would survive a renamed field.
+        if kind is CommandKind.TEST:
+            return replace(self, test=command)
+        if kind is CommandKind.LINT:
+            return replace(self, lint=command)
+        if kind is CommandKind.TYPECHECK:
+            return replace(self, typecheck=command)
+        return replace(self, build=command)
 
     def with_note(self, note: str) -> VerifySpec:
         return replace(self, notes=(*self.notes, note))
@@ -386,7 +394,8 @@ def _from_pyproject(root: Path) -> VerifySpec:
 
     if _declares_dependency(data, "build"):
         spec = spec.with_command(
-            CommandKind.BUILD, command(("python", "-m", "build"), "`build` is a declared dependency")
+            CommandKind.BUILD,
+            command(("python", "-m", "build"), "`build` is a declared dependency"),
         )
     elif _table(data, "build-system") is not None:
         spec = spec.with_note(

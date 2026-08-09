@@ -818,47 +818,50 @@ def _dotted_names(path: str) -> tuple[str, ...]:
 
 
 def _resolve_python(
-    source_path: str, ref: ImportRef, index: Mapping[str, str | None]
+    source_path: str,
+    ref: ImportRef,
+    index: Mapping[str, str | None],
+    nodes: set[str],
 ) -> str | None:
     if ref.level:
-        return _resolve_relative_python(source_path, ref)
+        return _resolve_relative_python(source_path, ref, nodes)
+    if not ref.target:
+        return None
+    # `from pkg.mod import name`: the module is `pkg.mod`, but `import pkg.mod.name`
+    # names a module too, so try the full dotted path before its parent.
     candidates = [ref.target]
     if "." in ref.target:
-        # `from pkg.mod import name` also matches a module named `pkg.mod.name`
-        # in the wild; try the longer form first so the more specific file wins.
-        candidates.insert(0, ref.target)
-    parent = ref.target.rsplit(".", 1)[0] if "." in ref.target else ""
-    if parent:
-        candidates.append(parent)
+        candidates.append(ref.target.rsplit(".", 1)[0])
     for candidate in candidates:
-        if not candidate:
-            continue
         found = index.get(candidate)
         if found is not None:
             return found
     return None
 
 
-def _resolve_relative_python(source_path: str, ref: ImportRef) -> str | None:
+def _resolve_relative_python(
+    source_path: str, ref: ImportRef, nodes: set[str]
+) -> str | None:
     """``from ..core.types import X`` against the importer's own directory.
 
-    Exact, unlike the dotted-name lookup: relative imports are defined by position
-    on disk, so there is nothing to guess.
+    Exact, unlike the dotted-name lookup: a relative import is defined by position
+    on disk, so there is nothing to guess — but the resolved file still has to be
+    one we walked, or the edge points outside the map.
     """
     directory = Path(source_path).parent
     for _ in range(ref.level - 1):
         directory = directory.parent
     target = directory
-    if ref.target:
-        for part in ref.target.split("."):
-            target = target / part
+    for part in ref.target.split(".") if ref.target else []:
+        target = target / part
     for candidate in (
         target.with_suffix(".py"),
         target / "__init__.py",
-        target.parent.with_suffix(".py"),
+        # `from ..types import X` where `types` is a symbol in `..__init__`
+        target.parent / "__init__.py",
     ):
         as_posix = candidate.as_posix()
-        if as_posix and not as_posix.startswith(".."):
+        if as_posix in nodes:
             return as_posix
     return None
 

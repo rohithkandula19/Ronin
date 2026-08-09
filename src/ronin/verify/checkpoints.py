@@ -417,7 +417,10 @@ class CheckpointStore:
             return DiffResult(
                 ok=False,
                 reason=CheckpointReason.NO_CHECKPOINTS,
-                detail="no checkpoint has been made this session, so there is no base to diff against",
+                detail=(
+                    "no checkpoint has been made this session, so there is no base "
+                    "to diff against"
+                ),
             )
         staged = await self._git_args("add", "-A", "--", ".")
         if not staged.ok:

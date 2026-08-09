@@ -160,8 +160,9 @@ DENY_REASONS: Mapping[DenyCode, DenyReason] = {
     ),
     DenyCode.SECRET_WRITE: DenyReason(
         why=(
-            "these files hold credentials that frequently exist nowhere else; an "
-            "overwrite locks the user out of their own accounts and machines"
+            "these files hold credentials that frequently exist nowhere else, so "
+            "overwriting or moving one locks the user out of their own accounts and "
+            "machines, and copying one somewhere else is how it leaks"
         ),
         alternative=(
             "write to a new file and tell the user what to merge, or ask them to make "
@@ -360,12 +361,25 @@ class Denylist:
                     subject=segment.raw,
                     detail=f"{redirect.target} is a block device",
                 )
-        writes = binary in WRITE_BINARIES
+        writes = self._writes(segment)
+        seen: set[tuple[DenyCode, str]] = set()
         for word in segment.path_words:
-            targeted = writes or any(
-                r.writes and r.target == word for r in segment.redirects
-            )
-            yield from self._path_hits(word, cwd, write=targeted, subject=segment.raw)
+            targeted = writes or any(r.names_a_file and r.target == word for r in segment.redirects)
+            for hit in self._path_hits(word, cwd, write=targeted, subject=segment.raw):
+                key = (hit.code, word)
+                if key not in seen:
+                    seen.add(key)
+                    yield hit
+
+    def _writes(self, segment: Segment) -> bool:
+        """Whether this segment's path arguments are write candidates.
+
+        ``sed FILE`` prints; ``sed -i FILE`` rewrites. Treating the two the same would
+        deny ``sed -n '1,5p' /etc/hosts``, which is a read and nobody's problem.
+        """
+        if segment.binary in {"sed", "perl", "ruby", "awk"}:
+            return segment.has_flag("-i", "--in-place")
+        return segment.binary in WRITE_BINARIES
 
     def _rm_hits(self, segment: Segment) -> Iterator[DenyHit]:
         if not segment.has_flag("-r", "-R", "--recursive"):
@@ -511,9 +525,7 @@ class Denylist:
         parts = path.parts
         name = path.name
         secret_directory = any(part in SECRET_DIRECTORIES for part in parts)
-        key_material = name.endswith(KEY_SUFFIXES) or (
-            secret_directory and name in {"credentials", "config", "known_hosts"}
-        )
+        key_material = name.endswith(KEY_SUFFIXES)
         dotenv = name == ".env" or name.startswith(".env.")
         if key_material or (secret_directory and not name.endswith(".pub")):
             yield DenyHit(

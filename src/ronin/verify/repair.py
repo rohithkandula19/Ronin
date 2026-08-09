@@ -226,7 +226,9 @@ def _collapse(failures: list[Failure]) -> tuple[Failure, ...]:
     collapsing by location there would hide failures.
     """
     full_ids = {
-        failure.where for failure in failures if failure.kind is FailureKind.TEST and "::" in failure.where
+        failure.where
+        for failure in failures
+        if failure.kind is FailureKind.TEST and "::" in failure.where
     }
     best: dict[str, Failure] = {}
     others: list[Failure] = []

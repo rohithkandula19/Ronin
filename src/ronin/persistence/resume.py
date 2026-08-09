@@ -372,7 +372,7 @@ def replay(events: Sequence[Event]) -> ReplayResult:
         state = replace(recorded, messages=(*recorded.messages, *tail))
         if tail:
             notes.append(
-                f"{len(turns) - checkpoint - 1} turn(s) recorded after the last "
+                f"{len(turns) - position - 1} turn(s) recorded after the last "
                 f"checkpoint were folded on top of it ({len(tail)} message(s)); the "
                 f"session crashed mid-turn, which is why the checkpoint is behind "
                 f"the end of the file"

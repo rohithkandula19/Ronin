@@ -474,7 +474,10 @@ class VerifyPlan:
         return not self.steps
 
     def render(self) -> str:
-        lines = [f"{step.kind.value:<9} {step.display}   [{step.scope.value}]" for step in self.steps]
+        lines = [
+            f"{step.kind.value:<9} {step.display}   [{step.scope.value}]"
+            for step in self.steps
+        ]
         if not lines:
             lines.append("(nothing to run)")
         lines.extend(f"note: {note}" for note in self.notes)
@@ -782,7 +785,8 @@ def as_tool_result(
             content=f"verify: nothing to run.\n{body}\n\n{_UNKNOWN_NEXT_STEP}",
         )
     if outcome.ok:
-        return ToolResult(ok=True, content=f"verify: all {len(outcome.results)} check(s) passed.\n{body}")
+        passed = f"verify: all {len(outcome.results)} check(s) passed."
+        return ToolResult(ok=True, content=f"{passed}\n{body}")
     failed = ", ".join(result.step.kind.value for result in outcome.failures)
     detail = clamp_output(outcome.failure_output, limit=limit)
     return ToolResult(

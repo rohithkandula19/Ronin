@@ -168,6 +168,15 @@ class Redirect:
         """Whether this redirect can create or truncate ``target``."""
         return self.operator.startswith((">", "&>", "1>", "2>")) and bool(self.target)
 
+    @property
+    def names_a_file(self) -> bool:
+        """Whether ``target`` is a filename rather than a file descriptor.
+
+        ``2>&1`` writes to fd 1, not to a file called ``1``; treating it as a path is
+        how a redirect check ends up denying ``npm test 2>&1``.
+        """
+        return self.writes and not self.operator.endswith("&") and not self.target.isdigit()
+
 
 @dataclass(frozen=True, slots=True)
 class Segment:
@@ -261,12 +270,14 @@ class Segment:
     def path_words(self) -> tuple[str, ...]:
         """Every word that could name a file, plus every write redirect target.
 
-        Deliberately generous. A path check that misses an argument is a check that
-        misses the one command that mattered, and the cost of an extra candidate is a
-        cheap string comparison.
+        Deliberately generous on operands — a path check that misses an argument is a
+        check that misses the one command that mattered, and an extra candidate costs a
+        string comparison. Redirect targets skip the heuristic entirely: ``> notes.txt``
+        names a file even though the word has no ``/`` in it, and that is exactly the
+        case a "looks like a path" test gets wrong.
         """
         words = [word for word in self.operands if _looks_like_path(word)]
-        words.extend(r.target for r in self.redirects if r.target and _looks_like_path(r.target))
+        words.extend(r.target for r in self.redirects if r.names_a_file)
         return tuple(words)
 
 
