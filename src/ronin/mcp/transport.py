@@ -536,10 +536,8 @@ class StdioTransport:
         self._alive = False
         streams, self._streams = self._streams, None
         if streams is not None:
-            try:
+            with suppress(OSError, RuntimeError):
                 streams.writer.close()
-            except (OSError, RuntimeError):
-                pass
         process, self._process = self._process, None
         if process is not None and process.returncode is None:
             process.terminate()

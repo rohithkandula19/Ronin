@@ -42,9 +42,10 @@ block. The invariant is asserted afterwards — ``state.pairing_errors`` is empt
 :class:`ReplayError` is raised — because a state that cannot be sent is not a
 resume, it is a delayed crash.
 
-``ronin --resume`` picks a session from :func:`sessions_for_cwd`; ``ronin
---continue`` is :func:`resume_latest`, and it filters on cwd because "the most
-recent session" almost never means the one from another checkout.
+``ronin --resume`` picks a session from :func:`sessions_for_cwd` and loads it with
+:func:`resume_session`; ``ronin --continue`` is :func:`resume_latest`, and it filters
+on cwd because "the most recent session" almost never means the one from another
+checkout.
 """
 from __future__ import annotations
 
@@ -443,7 +444,7 @@ def load_session(path: Path) -> tuple[ReadResult, ReplayResult]:
     return read, replay(read.events)
 
 
-def resume(directory: Path, session_id: str) -> ResumedSession:
+def resume_session(directory: Path, session_id: str) -> ResumedSession:
     """Load and replay one named session — what ``--resume <id>`` calls."""
     path = session_path(directory, session_id)
     read, replayed = load_session(path)
@@ -466,7 +467,7 @@ def resume_latest(directory: Path, cwd: str) -> ResumedSession | None:
     rows = sessions_for_cwd(directory, cwd)
     if not rows:
         return None
-    return resume(directory, rows[0].session_id)
+    return resume_session(directory, rows[0].session_id)
 
 
 __all__ = [
@@ -479,8 +480,8 @@ __all__ = [
     "fold_turns",
     "load_session",
     "replay",
-    "resume",
     "resume_latest",
+    "resume_session",
     "same_cwd",
     "sessions_for_cwd",
 ]

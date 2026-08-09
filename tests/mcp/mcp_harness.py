@@ -294,6 +294,24 @@ class ScriptedSender:
             yield payload[start : start + self.chunk_size]
 
 
+class _Raiser:
+    """An async iterator whose first step raises.
+
+    A class rather than ``async def ... raise ...; yield`` because a generator
+    with an unreachable ``yield`` is exactly the shape ``warn_unreachable``
+    objects to, and silencing it would be silencing a check that is usually right.
+    """
+
+    def __init__(self, exc: BaseException) -> None:
+        self._exc = exc
+
+    def __aiter__(self) -> _Raiser:
+        return self
+
+    async def __anext__(self) -> bytes:
+        raise self._exc
+
+
 class FailingSender:
     """A sender that raises, for the transport's failure path."""
 
@@ -301,7 +319,7 @@ class FailingSender:
         self.exc = exc or OSError("connection reset by peer")
         self.calls = 0
 
-    async def post(
+    def post(
         self,
         *,
         url: str,
@@ -309,8 +327,7 @@ class FailingSender:
         body: Mapping[str, Any],
     ) -> AsyncIterator[bytes]:
         self.calls += 1
-        raise self.exc
-        yield b""  # pragma: no cover - unreachable, keeps this an async generator
+        return _Raiser(self.exc)
 
 
 def sse_bytes(*payloads: str, event: str = "message") -> bytes:

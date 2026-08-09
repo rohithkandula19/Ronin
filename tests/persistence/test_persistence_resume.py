@@ -41,8 +41,8 @@ from ronin.persistence.resume import (
     fold_turns,
     load_session,
     replay,
-    resume,
     resume_latest,
+    resume_session,
     same_cwd,
     sessions_for_cwd,
 )
@@ -386,7 +386,7 @@ def test_resuming_a_crashed_session_reports_the_torn_line_and_still_replays(
         path = transcript.path
     truncate_mid_line(path)
 
-    resumed = resume(directory, "s1")
+    resumed = resume_session(directory, "s1")
     assert len(resumed.skipped) == 1
     assert resumed.meta.model == "m-1"
     assert resumed.state.pairing_errors == ()
@@ -402,7 +402,7 @@ def test_resuming_an_id_that_does_not_exist_fails_by_name(tmp_path: Path) -> Non
     directory = sessions_dir(tmp_path)
     directory.mkdir(parents=True)
     with pytest.raises(TranscriptError, match="never-existed"):
-        resume(directory, "never-existed")
+        resume_session(directory, "never-existed")
 
 
 def test_the_replayed_state_keeps_todos_mode_and_checkpoint(tmp_path: Path) -> None:

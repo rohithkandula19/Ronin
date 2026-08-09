@@ -14,7 +14,13 @@ import asyncio
 import json
 from pathlib import Path
 
-from mcp_harness import FakeMcpServer, echo, multi_provider, tool_descriptor
+from mcp_harness import (
+    FakeMcpServer,
+    echo,
+    multi_provider,
+    server_config,
+    tool_descriptor,
+)
 
 from ronin.core.types import ApprovalDecision, ApprovalRequest, DangerLevel, ToolUse
 from ronin.mcp.client import McpClient, connect_all
@@ -77,7 +83,6 @@ async def test_a_session_survives_a_server_dying_mid_conversation(tmp_path: Path
         # ...and everything else is untouched, including the specs the model sees.
         assert (await registry.execute(_use("read", path="notes.md"))).ok
         assert (await registry.execute(_use("mcp__tickets__open", query="still"))).ok
-        assert (await registry.execute(_use("glob", pattern="*.md"))).ok or True
         assert registry.get("mcp__docs__search") is not None
 
         # Repeated calls stay values and stop reconnecting.
@@ -139,8 +144,6 @@ async def test_ronin_talks_to_ronin_and_ronin_task_becomes_a_namespaced_tool(
     )
     near, far = memory_duplex()
     serving = asyncio.create_task(serve_stdio(inner, far))
-
-    from mcp_harness import server_config
 
     config = server_config(
         "self", danger_level=DangerLevel.READ_ONLY, requires_approval=False
@@ -206,8 +209,6 @@ async def test_a_gated_tool_over_the_wire_is_refused_when_nobody_is_attached(
     )
     near, far = memory_duplex()
     serving = asyncio.create_task(serve_stdio(inner, far))
-
-    from mcp_harness import server_config
 
     client = McpClient(
         server_config("self", danger_level=DangerLevel.READ_ONLY, requires_approval=False),

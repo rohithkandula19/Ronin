@@ -32,7 +32,8 @@ def _text(app: object, region: str) -> str:
     from textual.widgets import Static
 
     widget = app.query_one(f"#{region}", Static)  # type: ignore[attr-defined]
-    return str(widget.renderable)
+    # `visual` is the parsed content: markup resolved, so this is what a human sees.
+    return str(widget.visual)
 
 
 async def test_the_app_paints_every_region_from_the_scripted_stream() -> None:
@@ -56,10 +57,20 @@ async def test_a_dropped_stream_is_not_rendered_twice_in_the_widget() -> None:
 
 
 async def test_the_diff_reaches_the_approval_region_before_any_decision() -> None:
-    app = _build_app(Session(events=stream(approval_turn())))
+    # Cut the script at the ApprovalRequest: the region must show the command while
+    # the decision is still outstanding, which is the whole point of the gate.
+    pending = approval_turn()[:4]
+    app = _build_app(Session(events=stream(pending)))
     async with app.run_test() as pilot:
         await pilot.pause()
         assert APPROVAL.rendered in _text(app, APPROVAL_ID)
+
+
+async def test_the_approval_region_clears_once_the_tool_reports_back() -> None:
+    app = _build_app(Session(events=stream(approval_turn())))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert _text(app, APPROVAL_ID) == ""
 
 
 async def test_text_appears_before_the_stream_ends() -> None:

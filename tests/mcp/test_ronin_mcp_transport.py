@@ -123,7 +123,7 @@ async def test_a_silent_stdio_server_times_out_rather_than_wedging_the_turn() ->
     near, _far = memory_duplex()
     transport = StdioTransport(streams=near, timeout=0.05)
     await transport.start()
-    with pytest.raises(TransportTimeout, match="within 0.05s"):
+    with pytest.raises(TransportTimeout, match=r"within 0\.05s"):
         await transport.send(PING)
     assert not transport.alive
 

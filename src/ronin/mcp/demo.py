@@ -34,6 +34,7 @@ from .config import McpServerConfig, TransportKind, parse_mcp_config
 from .jsonrpc import (
     INVALID_PARAMS,
     JsonRpcError,
+    ProtocolError,
     Request,
     Response,
     TransportClosed,
@@ -43,7 +44,7 @@ from .jsonrpc import (
 )
 from .server import McpServer, serve_stdio
 from .tools import extend_registry
-from .transport import ProtocolError, StdioTransport, StreamPair, memory_duplex, read_frame
+from .transport import StdioTransport, StreamPair, memory_duplex, read_frame
 
 #: A tool handler on the fake server: arguments in, text out.
 Handler = Callable[[Mapping[str, Any]], str]
@@ -432,7 +433,9 @@ async def main() -> int:
     configs = parse_mcp_config(CONFIG_JSON)
     assert all(config.transport is TransportKind.STDIO for config in configs)
     fakes = {
-        "docs": FakeServer("fake-docs", tools={"search": ("Search the docs corpus.", _docs_search)}),
+        "docs": FakeServer(
+            "fake-docs", tools={"search": ("Search the docs corpus.", _docs_search)}
+        ),
         "tickets": FakeServer(
             "fake-tickets",
             tools={

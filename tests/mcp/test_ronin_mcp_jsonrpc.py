@@ -161,6 +161,7 @@ def test_an_unknown_code_still_describes_itself() -> None:
 
 
 def test_a_request_rejects_a_boolean_id() -> None:
-    """`True` is an int in Python and would silently become id=1."""
+    """`True` is an int in Python, so the type checker allows it and it would
+    silently become id=1 on the wire; only a runtime check catches it."""
     with pytest.raises(TypeError):
-        Request(method="ping", id=True)  # type: ignore[arg-type]
+        Request(method="ping", id=True)

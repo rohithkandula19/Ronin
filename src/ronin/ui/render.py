@@ -8,6 +8,12 @@ possible:
   asks an injected :class:`Styles` map to wrap a semantic token. ``PLAIN`` (the
   default) is the identity, so every test asserts on text rather than on escape
   codes, and a new front end supplies its own map instead of a new renderer.
+- **Untrusted text is escaped at the same seam.** A front end whose markup is
+  in-band (Textual's ``Static`` parses ``[red]…[/red]``) would otherwise let a
+  diff line containing ``[dim]`` disappear from the screen. :class:`Styles` carries
+  the escape for its own markup dialect, and every renderer routes model-derived
+  text through it, so the escaping cannot be forgotten in one renderer and applied
+  in the others.
 - **Nothing is discovered at render time.** No ``git`` subprocess for the branch,
   no ``os.getcwd()``, no clock. Every fact arrives as an argument, because a
   renderer that shells out cannot be called from a test or from a hot redraw.
@@ -19,7 +25,7 @@ rather than merely ugly.
 from __future__ import annotations
 
 import difflib
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from ronin.core.types import ApprovalRequest, Todo, TodoStatus
@@ -53,11 +59,29 @@ TOKENS: frozenset[str] = frozenset(
 )
 
 
+def escape_markup(text: str) -> str:
+    """Neutralize console-markup metacharacters in text we did not write.
+
+    Escaping ``[`` alone is deliberate and was checked against the installed
+    Textual (8.2.5): its parser strips exactly one backslash before a ``[`` and
+    leaves every other backslash alone, so doubling backslashes — what Rich's own
+    ``escape`` does — puts a spurious ``\\`` on screen for a Windows path such as
+    ``C:\\dir[1]``. ``tests/ui`` pins the round trip.
+    """
+    return text.replace("[", "\\[")
+
+
 @dataclass(frozen=True, slots=True)
 class Styles:
-    """A token → ``(prefix, suffix)`` map. Absent tokens render unwrapped."""
+    """A token → ``(prefix, suffix)`` map, plus the escape for its own dialect.
+
+    Absent tokens render unwrapped. ``escape`` is ``None`` for out-of-band dialects
+    (plain text, ANSI), where nothing in the payload can be mistaken for a control
+    sequence, and set for in-band ones (console markup).
+    """
 
     pairs: Mapping[str, tuple[str, str]] = field(default_factory=dict)
+    escape: Callable[[str], str] | None = None
 
     def __post_init__(self) -> None:
         unknown = sorted(set(self.pairs) - TOKENS)
@@ -65,6 +89,10 @@ class Styles:
             raise ValueError(
                 f"unknown style tokens {unknown}; known tokens are {sorted(TOKENS)}"
             )
+
+    def text(self, raw: str) -> str:
+        """Make model-derived text safe to embed. Every renderer calls this."""
+        return raw if self.escape is None else self.escape(raw)
 
     def wrap(self, token: str, text: str) -> str:
         if token not in TOKENS:
@@ -108,7 +136,8 @@ ANSI = Styles(
 
 #: Textual/Rich console markup, for the app.
 MARKUP = Styles(
-    {
+    escape=escape_markup,
+    pairs={
         "added": ("[green]", "[/green]"),
         "removed": ("[red]", "[/red]"),
         "hunk": ("[cyan]", "[/cyan]"),
@@ -122,7 +151,7 @@ MARKUP = Styles(
         "thinking": ("[dim italic]", "[/dim italic]"),
         "tool_error": ("[red]", "[/red]"),
         "tool_running": ("[dim]", "[/dim]"),
-    }
+    },
 )
 
 # --------------------------------------------------------------------------- #
@@ -220,9 +249,10 @@ def render_diff(
         )
     )
     if not raw:
+        safe_path = styles.text(path)
         header = [
-            styles.wrap("meta", f"--- a/{path}"),
-            styles.wrap("meta", f"+++ b/{path}"),
+            styles.wrap("meta", f"--- a/{safe_path}"),
+            styles.wrap("meta", f"+++ b/{safe_path}"),
         ]
         # Equal line lists with unequal trailing newlines is the one case a
         # line-based diff cannot show; saying "no changes" there would be a lie.
@@ -231,16 +261,17 @@ def render_diff(
 
     styled: list[str] = []
     for line in raw:
+        safe = styles.text(_visible(line))
         if line.startswith(("---", "+++")):
-            styled.append(styles.wrap("meta", line))
+            styled.append(styles.wrap("meta", safe))
         elif line.startswith("@@"):
-            styled.append(styles.wrap("hunk", line))
+            styled.append(styles.wrap("hunk", safe))
         elif line.startswith("+"):
-            styled.append(styles.wrap("added", _visible(line)))
+            styled.append(styles.wrap("added", safe))
         elif line.startswith("-"):
-            styled.append(styles.wrap("removed", _visible(line)))
+            styled.append(styles.wrap("removed", safe))
         else:
-            styled.append(styles.wrap("context", _visible(line)))
+            styled.append(styles.wrap("context", safe))
     if old_newline != new_newline:
         styled.append(styles.wrap("meta", TRAILING_NEWLINE_NOTE))
     return truncate_lines("\n".join(styled), max_lines, what="diff", styles=styles)
@@ -274,7 +305,8 @@ def render_todos(
         return ""
     lines = [
         styles.wrap(
-            TODO_TOKENS[todo.status], f"{TODO_GLYPHS[todo.status]} {todo.subject}"
+            TODO_TOKENS[todo.status],
+            f"{TODO_GLYPHS[todo.status]} {styles.text(todo.subject)}",
         )
         for todo in todos
     ]
@@ -316,20 +348,21 @@ def render_status(
         raise ValueError("cost_usd must be >= 0.0")
     percent = OVER_CAPACITY if context_used > 1.0 else f"{round(context_used * 100)}%"
     segments = [
-        model or NO_MODEL,
+        styles.text(model) or NO_MODEL,
         f"{percent} ctx",
         f"${cost_usd:.4f}",
-        cwd,
-        branch or NO_BRANCH,
+        styles.text(cwd),
+        styles.text(branch) or NO_BRANCH,
     ]
     if mode:
-        segments.insert(1, mode)
+        segments.insert(1, styles.text(mode))
     line = STATUS_SEPARATOR.join(segments)
     if len(line) > max_width:
         # The path is the only segment that can be shortened without losing a
         # fact, so it absorbs the overflow first.
         overflow = len(line) - max_width
-        segments[segments.index(cwd)] = _elide_left(cwd, max(len(cwd) - overflow, 1))
+        safe_cwd = styles.text(cwd)
+        segments[segments.index(safe_cwd)] = _elide_left(safe_cwd, max(len(safe_cwd) - overflow, 1))
         line = STATUS_SEPARATOR.join(segments)
     if len(line) > max_width:
         line = line[: max(max_width - 1, 0)] + "…"
@@ -377,12 +410,12 @@ def render_approval(
     """
     head = styles.wrap(
         "danger",
-        f"{DANGER_MARKER} {request.name} · {request.danger_level.name.lower()}",
+        f"{DANGER_MARKER} {styles.text(request.name)} · {request.danger_level.name.lower()}",
     )
     parts = [head]
     if request.reason:
-        parts.append(styles.wrap("meta", request.reason))
-    body = request.rendered
+        parts.append(styles.wrap("meta", styles.text(request.reason)))
+    body = styles.text(request.rendered)
     lines = body.split("\n")
     if len(lines) > max_lines > 0:
         body = truncate_lines(body, max_lines, what="approval text", styles=styles)
@@ -410,19 +443,20 @@ def render_transcript(
     parts: list[str] = []
     if show_thinking and state.thinking:
         reasoning = "\n".join(
-            f"{THINKING_PREFIX}{line}" for line in state.thinking.split("\n")
+            f"{THINKING_PREFIX}{styles.text(line)}" for line in state.thinking.split("\n")
         )
         parts.append(styles.wrap("thinking", reasoning))
     if state.text:
-        parts.append(state.text)
+        parts.append(styles.text(state.text))
     return truncate_lines("\n".join(parts), max_lines, what="transcript", styles=styles)
 
 
 def render_tool_line(line: ToolLine, *, styles: Styles = PLAIN) -> str:
     """One collapsed tool line, coloured by outcome."""
+    safe = styles.text(line.text)
     if line.ok is None:
-        return styles.wrap("tool_running", line.text)
-    return styles.wrap("tool_ok" if line.ok else "tool_error", line.text)
+        return styles.wrap("tool_running", safe)
+    return styles.wrap("tool_ok" if line.ok else "tool_error", safe)
 
 
 def render_tool_lines(
@@ -441,7 +475,8 @@ def render_errors(state: ViewState, *, styles: Styles = PLAIN) -> str:
     if not state.errors:
         return ""
     return "\n".join(
-        styles.wrap("tool_error", f"{error.kind}: {error.message}") for error in state.errors
+        styles.wrap("tool_error", styles.text(f"{error.kind}: {error.message}"))
+        for error in state.errors
     )
 
 
@@ -503,6 +538,7 @@ __all__ = [
     "TRAILING_NEWLINE_NOTE",
     "Panels",
     "Styles",
+    "escape_markup",
     "render_approval",
     "render_diff",
     "render_errors",

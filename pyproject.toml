@@ -111,6 +111,7 @@ module = [
     "test_context_budget",
     "test_context_compaction",
     "test_context_filestate",
+    "test_context_memory",
     "test_context_repomap",
     "test_definitions",
     "test_files",

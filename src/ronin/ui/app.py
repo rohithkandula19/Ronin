@@ -182,7 +182,9 @@ def _build_app(session: Session) -> Any:
         CSS = APP_CSS
         BINDINGS: ClassVar[list[Any]] = [
             binding("escape", "escape", "interrupt / rewind", show=True),
-            binding("shift+tab", "cycle_mode", "mode", show=True),
+            # priority: Textual's own screen-level shift+tab moves focus, and a
+            # non-priority binding loses to it, so the mode key would never fire.
+            binding("shift+tab", "cycle_mode", "mode", show=True, priority=True),
             binding("ctrl+c", "quit", "quit", show=True),
         ]
 
