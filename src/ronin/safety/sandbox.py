@@ -235,12 +235,17 @@ class SeatbeltSandbox:
         )
 
 
+#: Image used when a caller does not name one. Pinned to a minor version rather than
+#: `latest` so a sandboxed run is reproducible.
+DEFAULT_IMAGE = "python:3.11-slim"
+
+
 @dataclass(frozen=True, slots=True)
 class DockerSandbox:
     """A container per command. Strongest isolation here, and the slowest to start."""
 
     binary: str = "docker"
-    image: str = "python:3.11-slim"
+    image: str = DEFAULT_IMAGE
     name: str = "docker"
 
     @property
@@ -302,7 +307,7 @@ def detect(
     *,
     which: Callable[[str], str | None],
     platform: str,
-    image: str = DockerSandbox.image,
+    image: str = DEFAULT_IMAGE,
 ) -> Sandbox | Unavailable:
     """A configured backend, or :class:`Unavailable` with the reason.
 
@@ -343,6 +348,7 @@ def describe(sandbox: Sandbox | Unavailable) -> str:
 
 __all__ = [
     "BACKEND_ORDER",
+    "DEFAULT_IMAGE",
     "SANDBOX_AUTO_APPROVES",
     "BubblewrapSandbox",
     "DockerSandbox",

@@ -79,6 +79,7 @@ files = [
     "tests/agents",
     "tests/context",
     "tests/core",
+    "tests/mcp",
     "tests/persistence",
     "tests/providers",
     "tests/tools",
@@ -88,7 +89,7 @@ files = [
 strict = true
 warn_unreachable = true
 explicit_package_bases = true
-mypy_path = "src:tests/agents:tests/context:tests/core:tests/persistence:tests/providers:tests/tools:tests/ui:tests/verify"
+mypy_path = "src:tests/agents:tests/context:tests/core:tests/mcp:tests/persistence:tests/providers:tests/tools:tests/ui:tests/verify"
 
 # pytest's @parametrize is an untyped decorator as far as mypy is concerned;
 # that is a property of pytest, not a hole in our typing. Enumerated rather
@@ -99,6 +100,7 @@ module = [
     "context_harness",
     "fakes",
     "harness",
+    "mcp_harness",
     "persistence_harness",
     "replay",
     "test_accounting",
@@ -110,6 +112,7 @@ module = [
     "test_codec",
     "test_definitions",
     "test_files",
+    "test_filestate",
     "test_golden_streams",
     "test_integration",
     "test_jsonargs",
@@ -125,9 +128,12 @@ module = [
     "test_shell",
     "test_shim",
     "test_task",
+    "test_transcript",
     "test_types",
+    "test_ui_commands",
     "test_ui_reduce",
     "test_ui_render",
+    "test_verify_spec",
     "ui_harness",
     "verify_harness",
 ]
@@ -149,6 +155,7 @@ include = [
     "tests/agents/**/*.py",
     "tests/context/**/*.py",
     "tests/core/**/*.py",
+    "tests/mcp/**/*.py",
     "tests/persistence/**/*.py",
     "tests/providers/**/*.py",
     "tests/tools/**/*.py",
