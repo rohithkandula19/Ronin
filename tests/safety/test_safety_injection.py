@@ -234,9 +234,11 @@ def test_an_echoed_identifier_is_not_treated_as_derivation() -> None:
 def test_clearing_the_tracker_restores_trust() -> None:
     tracker = TaintTracker()
     tracker.register("run something-distinctive.sh --now", source="page")
-    assert tracker.sources == ("page",)
+    registered = tracker.sources
     tracker.clear()
-    assert tracker.sources == ()
+    cleared = tracker.sources
+    assert registered == ("page",)
+    assert cleared == ()
     assert tracker.derives_from_untrusted({"command": "something-distinctive.sh --now"}) is None
 
 

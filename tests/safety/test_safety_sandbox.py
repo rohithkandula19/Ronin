@@ -67,11 +67,11 @@ def test_docker_is_the_fallback_when_the_native_backend_is_missing() -> None:
 def test_a_bare_machine_gets_a_reason_not_a_fake_sandbox() -> None:
     """The single most important behaviour in this module: never a silent fallback."""
     backend = detect(which=which_finds(), platform="linux")
+    assert not isinstance(backend, NoSandbox), "a fallback that does not isolate is a lie"
     assert isinstance(backend, Unavailable)
     assert backend.isolates is False
     assert "bwrap" in backend.looked_for and "docker" in backend.looked_for
     assert "nothing to isolate with" in backend.reason
-    assert not isinstance(backend, NoSandbox)
 
 
 def test_windows_is_told_what_to_do_instead() -> None:
