@@ -267,8 +267,14 @@ class Loaded:
         Appended to the system prompt rather than injected as a user message so it
         lands inside the provider's cached prefix — which is the whole reason the repo
         map is budgeted and rendered in a stable order.
+
+        A map with no entries is dropped rather than rendered. ``RepoMap.render()``
+        always emits its two header lines, so an empty workspace would otherwise pay
+        for ``"# repo map — 0 of 0 file(s)"`` on every single request — a rounding
+        error, but one that says nothing and costs forever.
         """
-        parts = [text for text in (self.memory.render(), self.repo_map.render()) if text]
+        rendered_map = self.repo_map.render() if self.repo_map.entries else ""
+        parts = [text for text in (self.memory.render(), rendered_map) if text]
         return "\n\n".join(parts)
 
     def render(self) -> str:

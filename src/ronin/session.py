@@ -392,6 +392,7 @@ def build_session(
     ledger: Ledger | None = None,
     session_id: str = "session",
     repo_map: str = "",
+    subagent_repo_map: str | None = None,
     max_tokens: int = 4096,
     subagent_types: dict[str, SubagentType] | None = None,
     subagent_policy: SubagentPolicyFactory = SubagentPolicy,
@@ -403,6 +404,14 @@ def build_session(
     ``task`` on top, wired to a runner that subsets ``base_tools`` for children. That
     ordering is the one non-obvious part of the assembly, and doing it the other way
     round is a cycle.
+
+    ``repo_map`` goes into the *main* client's stable prefix; ``subagent_repo_map``
+    goes into each child's, defaulting to the same string. They are separate because
+    a caller that puts the map in the **system prompt** instead — which is where it
+    belongs, since that is what lands in the provider's cached prefix — passes
+    ``repo_map=""`` and would then silently give children no map at all. A subagent is
+    the caller most likely to need one: an `explore` child that cannot see the shape
+    of the repo greps blind. Found by wiring `cli/wire.py`, not by reading this.
     """
     from .tools.task import TaskTool
 
@@ -411,7 +420,7 @@ def build_session(
         base_tools,
         ledger=ledger,
         session_id=session_id,
-        repo_map=repo_map,
+        repo_map=repo_map if subagent_repo_map is None else subagent_repo_map,
         policy_for=subagent_policy,
     )
     task_tool = TaskTool(runner, types=subagent_types)

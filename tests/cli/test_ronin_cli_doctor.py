@@ -352,7 +352,8 @@ async def test_the_gitignore_check_prints_the_patch_for_this_repos_own_rule(
     assert check.status is CheckStatus.WARN
     assert ".ronin/settings.json" in check.detail
     assert ".ronin/settings.local.json" in check.remedy
-    assert "enumerated" in check.remedy
+    assert ".ronin/*" in check.remedy
+    assert "!.ronin/settings.json" in check.remedy
     assert report.exit_code() == 0
 
 

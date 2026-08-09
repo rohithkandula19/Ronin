@@ -63,19 +63,25 @@ GENERATED_PATHS: tuple[str, ...] = (
     ".ronin/checkpoints/",
 )
 
-#: The replacement for a blanket ``.ronin/`` rule. Enumerating what to ignore is the
-#: *only* correct shape: git cannot re-include a file whose parent directory is
-#: excluded, so the obvious fix — keep ``.ronin/`` and add ``!.ronin/settings.json`` —
-#: does not work, and looks like it does.
+#: The replacement for a blanket ``.ronin/`` rule, and the shape this repo's own
+#: ``.gitignore`` now uses. Default-deny with an explicit allowlist, because the
+#: directory holds both plaintext API keys and the files a team must share; the crucial
+#: character is the ``*`` in ``.ronin/*``, since git does not descend into an ignored
+#: *directory* and no ``!`` negation under a blanket ``.ronin/`` can rescue anything.
 GITIGNORE_PATCH = """\
-# ronin — ignore the local layer (plaintext API keys) and generated state, and
-# COMMIT the shared config. Note: a blanket `.ronin/` rule cannot be undone with
-# `!.ronin/settings.json` — git will not re-include a file whose parent directory
-# is excluded — so the entries have to be enumerated.
+# ronin workspace config. Default-deny with an explicit allowlist: this directory
+# holds both plaintext API keys and the files a team is supposed to share. Note
+# `.ronin/*`, not `.ronin/` — git does not descend into an ignored directory, so
+# under a blanket rule no `!` negation inside it can rescue anything.
+.ronin/*
+!.ronin/settings.json
+!.ronin/mcp.json
+!.ronin/hooks.json
+!.ronin/agents/
+!.ronin/commands/
+# ...but never the local layer, even though its parent is now walkable.
 .ronin/settings.local.json
-.ronin/cache/
-.ronin/sessions/
-.ronin/checkpoints/
+.ronin/*.local.json
 """
 
 
@@ -385,7 +391,7 @@ def _mcp_checks(
             )
             continue
         checks.append(Check(name=name, status=CheckStatus.OK, detail=f"stdio {found}"))
-    return checks
+    return tuple(checks)
 
 
 @dataclass(frozen=True, slots=True)

@@ -730,3 +730,47 @@ async def test_an_injected_policy_lets_a_child_act_on_standing_permission(
 
     assert seen, "the injected policy was never consulted"
     assert (tmp_path / "fixed.txt").read_bytes() == b"after\n"
+
+
+async def test_a_subagent_can_be_given_a_repo_map_the_main_client_does_not_carry(
+    tmp_path: Path,
+) -> None:
+    """The map belongs in the system prompt, which children never see.
+
+    A caller that puts the repo map in the *system* text — where it lands in the
+    provider's cached prefix — passes `repo_map=""`, and before this parameter existed
+    that silently left children with no map at all. An `explore` child that cannot see
+    the shape of the repo greps blind, so it is the caller most likely to need one.
+    """
+    fast = ScriptedModel([says("child")])
+    big = ScriptedModel([says("parent")])
+    ctx = context(tmp_path)
+    session = build_session(
+        router_with({"small": fast, "big": big}),
+        ctx,
+        base_tools=build_registry(ctx),
+        repo_map="",
+        subagent_repo_map="# repo map\nsrc/parser.py: parse()",
+    )
+
+    await session.subagents.run("find the parser", EXPLORE)
+
+    assert "src/parser.py" in fast.requests[0].prefix
+    main_request = session.main.build_request(system="you are ronin", messages=(), tools=())
+    assert "src/parser.py" not in main_request.prefix, (
+        "the main client's map lives in the system text, not its stable prefix"
+    )
+
+
+async def test_the_subagent_map_defaults_to_the_main_one(tmp_path: Path) -> None:
+    """Omitting it must not change behaviour for a caller that never thought about it."""
+    fast = ScriptedModel([says("child")])
+    ctx = context(tmp_path)
+    session = build_session(
+        router_with({"small": fast, "big": ScriptedModel([says("m")], "big")}),
+        ctx,
+        base_tools=build_registry(ctx),
+        repo_map="# shared map",
+    )
+    await session.subagents.run("q", EXPLORE)
+    assert "# shared map" in fast.requests[0].prefix

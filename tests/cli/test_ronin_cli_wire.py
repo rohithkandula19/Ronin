@@ -29,6 +29,8 @@ from wire_harness import (
     write,
 )
 
+from ronin.cli.gate import GatedRegistry
+from ronin.cli.spine import Loaded
 from ronin.cli.wire import (
     BASE_SYSTEM_PROMPT,
     LocalRuleWriter,
@@ -38,6 +40,7 @@ from ronin.cli.wire import (
     subagent_policy_factory,
     system_prompt,
 )
+from ronin.context.budget import estimate_tokens
 from ronin.context.repomap import ParserUnavailable, Signature
 from ronin.core.types import Budget, DangerLevel, Mode, ToolSpec, ToolUse
 from ronin.mcp.config import TransportKind
@@ -57,14 +60,12 @@ from ronin.session import SubagentPolicy
 from ronin.tools.shell import PersistentShell, ShellSession
 
 
-def subjects(loaded: object) -> tuple[str, ...]:
-    notes = getattr(loaded, "notes")
-    return tuple(note.subject for note in notes)
+def subjects(loaded: Loaded) -> tuple[str, ...]:
+    return tuple(note.subject for note in loaded.notes)
 
 
-def note_for(loaded: object, subject: str) -> str:
-    notes = getattr(loaded, "notes")
-    for note in notes:
+def note_for(loaded: Loaded, subject: str) -> str:
+    for note in loaded.notes:
         if note.subject == subject:
             return note.detail
     raise AssertionError(f"no note for {subject!r}; got {subjects(loaded)}")
@@ -252,12 +253,19 @@ def test_pinned_prefix_tokens_counts_ronin_md_and_the_repo_map(tmp_path: Path) -
     bare = load_workspace(workspace(tmp_path / "bare"))
 
     assert rich.repo_map.token_estimate > 0
-    assert rich.pinned_prefix_tokens() > 0
-    assert bare.pinned_prefix_tokens() == 0
+    assert rich.pinned_prefix_tokens() == (
+        estimate_tokens(rich.memory.render()) + rich.repo_map.token_estimate
+    )
+    # An empty workspace still renders a repo-map header, so the floor is not zero —
+    # what matters is that RONIN.md and the signatures are both counted.
+    assert estimate_tokens(rich.memory.render()) > 0
+    assert rich.pinned_prefix_tokens() > bare.pinned_prefix_tokens()
+    assert estimate_tokens(bare.memory.render()) == 0
     # And the same two things are what lands in the system prompt.
     assert rich.memory.render() in system_prompt(rich)
     assert rich.repo_map.render() in system_prompt(rich)
-    assert system_prompt(bare).strip() == BASE_SYSTEM_PROMPT.strip()
+    assert system_prompt(bare).startswith(BASE_SYSTEM_PROMPT.rstrip())
+    assert "# memory (RONIN.md)" not in system_prompt(bare)
 
 
 def test_a_ronin_md_test_command_written_in_prose_is_reported_as_undetectable(
@@ -284,7 +292,7 @@ def test_a_ronin_md_test_command_written_in_prose_is_reported_as_undetectable(
              decision=Decision.ALLOW, source="remembered", reason="approved by the user"),
         Rule(tool="*", matcher=parse_rule({"decision": "deny", "path": "secrets/**"},
                                           source="x").matcher, decision=Decision.DENY),
-        Rule(tool="bash", matcher=parse_rule({"decision": "ask", "command": "^terraform"},
+        Rule(tool="bash", matcher=parse_rule({"decision": "ask", "command": "^flyctl"},
                                              source="x").matcher, decision=Decision.ASK,
              unwaivable=True),
         Rule(tool="write", matcher=parse_rule({"decision": "allow"}, source="x").matcher,
@@ -442,7 +450,7 @@ async def test_settings_reach_the_policy_engine_and_the_denylist(tmp_path: Path)
         json.dumps(
             {
                 "protected_branches": ["main", "prod"],
-                "rules": [{"tool": "bash", "decision": "allow", "command": "^terraform"}],
+                "rules": [{"tool": "bash", "decision": "allow", "command": "^flyctl"}],
             }
         ),
     )
@@ -481,12 +489,12 @@ async def test_a_remembered_rule_from_an_approval_lands_in_the_local_settings_fi
         )
         decision = await runtime.policy.approve(
             spec,
-            ToolUse(id="c1", name="bash", arguments={"command": "terraform plan"}),
-            rendered="terraform plan",
+            ToolUse(id="c1", name="bash", arguments={"command": "flyctl deploy"}),
+            rendered="flyctl deploy",
         )
         assert decision.approved
         body = json.loads(paths.local_settings.read_text(encoding="utf-8"))
-        assert body["rules"][0]["match"]["value"] == "terraform plan"
+        assert body["rules"][0]["match"]["value"] == "flyctl deploy"
     finally:
         await runtime.aclose()
 
@@ -641,15 +649,15 @@ async def test_a_subagent_may_act_on_standing_permission_but_cannot_ask_for_more
         )
         refused = await child.approve(
             bash_spec(),
-            ToolUse(id="c2", name="bash", arguments={"command": "terraform apply"}),
-            rendered="terraform apply",
+            ToolUse(id="c2", name="bash", arguments={"command": "flyctl deploy"}),
+            rendered="flyctl deploy",
         )
     finally:
         await runtime.aclose()
 
     # `pytest` is on the shipped allowlist, so the child needs no new question.
     assert allowed.approved
-    # `terraform` is not, and a child has nobody to ask — so it comes back with the
+    # `flyctl deploy` is not, and a child has nobody to ask — so it comes back with the
     # feedback the unattended asker supplies, which the child can report upward.
     assert not refused.approved
     assert "no human is attached" in refused.reason
@@ -688,19 +696,19 @@ async def test_a_session_remembered_rule_covers_a_subagent_running_the_same_comm
     try:
         before = await factory(Budget()).approve(
             bash_spec(),
-            ToolUse(id="c1", name="bash", arguments={"command": "terraform apply"}),
-            rendered="terraform apply",
+            ToolUse(id="c1", name="bash", arguments={"command": "flyctl deploy"}),
+            rendered="flyctl deploy",
         )
         # The user approves it once, in the parent, for the session.
         await runtime.policy.approve(
             bash_spec(),
-            ToolUse(id="c2", name="bash", arguments={"command": "terraform apply"}),
-            rendered="terraform apply",
+            ToolUse(id="c2", name="bash", arguments={"command": "flyctl deploy"}),
+            rendered="flyctl deploy",
         )
         after = await factory(Budget()).approve(
             bash_spec(),
-            ToolUse(id="c3", name="bash", arguments={"command": "terraform apply"}),
-            rendered="terraform apply",
+            ToolUse(id="c3", name="bash", arguments={"command": "flyctl deploy"}),
+            rendered="flyctl deploy",
         )
     finally:
         await runtime.aclose()
@@ -737,7 +745,7 @@ async def test_a_whole_workspace_becomes_one_wired_runtime(tmp_path: Path) -> No
             {
                 "taint_min_span": 24,
                 "rules": [
-                    {"tool": "bash", "decision": "allow", "command": "^terraform plan$"}
+                    {"tool": "bash", "decision": "allow", "command": "^flyctl deploy$"}
                 ],
             }
         ),
@@ -759,17 +767,18 @@ async def test_a_whole_workspace_becomes_one_wired_runtime(tmp_path: Path) -> No
         assert any(rule.source == "local" for rule in runtime.policy.rules.rules)
         verdict = runtime.policy.evaluate(
             bash_spec(),
-            ToolUse(id="c1", name="bash", arguments={"command": "terraform plan"}),
+            ToolUse(id="c1", name="bash", arguments={"command": "flyctl deploy"}),
         )
         assert verdict.decision is Decision.ALLOW
 
         # policy → gate: the gate holds the same objects the loop is handed, so an
         # audit trail a UI shows cannot diverge from the decisions that were acted on.
         gate = runtime.registry
-        assert getattr(gate, "policy") is runtime.policy
-        assert getattr(gate, "taint") is runtime.taint
-        assert getattr(gate, "files") is runtime.files
-        assert getattr(gate, "hooks") is runtime.hooks
+        assert isinstance(gate, GatedRegistry)
+        assert gate.policy is runtime.policy
+        assert gate.taint is runtime.taint
+        assert gate.files is runtime.files
+        assert gate.hooks is runtime.hooks
 
         # gate → registry: local tools, the task tool added on top of them, and the
         # MCP tools folded in — all behind one gate.

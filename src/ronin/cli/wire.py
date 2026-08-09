@@ -54,11 +54,10 @@ from typing import Any
 from ..agents.definitions import (
     BUILTIN_AGENTS,
     AgentDefinition,
-    FrontmatterError,
     load_agents,
     subagent_catalogue,
 )
-from ..agents.hooks import HookConfig, HookConfigError, HookRunner, load_hook_config
+from ..agents.hooks import HookConfig, HookRunner, load_hook_config
 from ..context.budget import OutputBudget
 from ..context.filestate import FileStateTracker
 from ..context.memory import Memory, load_memory
@@ -71,7 +70,8 @@ from ..context.repomap import (
 from ..core.protocols import Policy
 from ..core.types import Budget
 from ..mcp.client import TransportProvider, connect_all, default_transport_provider
-from ..mcp.config import ConfigError, McpServerConfig, load_mcp_config
+from ..mcp.config import McpServerConfig, load_mcp_config
+from ..mcp.jsonrpc import McpError
 from ..mcp.tools import extend_registry
 from ..persistence.transcript import Transcript, new_session_id
 from ..providers.router import Role as ModelRole
@@ -79,7 +79,6 @@ from ..providers.router import Router
 from ..safety.denylist import Denylist
 from ..safety.injection import TaintTracker
 from ..safety.policy import (
-    AnyUse,
     Asker,
     CommandRegex,
     Exact,
@@ -211,10 +210,8 @@ def load_workspace(
     if hooks_note is not None:
         notes.append(hooks_note)
 
-    verify = detect_verify_spec(paths.workspace_root)
-    verify_note = _verify_declaration_note(memory, verify)
-    if verify_note is not None:
-        notes.append(verify_note)
+    verify, verify_notes = _load_verify(paths, memory)
+    notes.extend(verify_notes)
 
     servers, mcp_note = _load_mcp(paths, environ=environ)
     if mcp_note is not None:
@@ -311,7 +308,11 @@ def _load_agents(paths: Paths) -> tuple[dict[str, AgentDefinition], Note | None]
     """
     try:
         return load_agents(paths.workspace_root), None
-    except (FrontmatterError, OSError) as exc:
+    # `ValueError` covers both arms that can actually reach here: `FrontmatterError`
+    # is one, and a non-UTF-8 definition file raises `UnicodeDecodeError`, which is
+    # the other. Narrowing to FrontmatterError alone would let a mojibake file take
+    # the session down.
+    except (ValueError, OSError) as exc:
         return dict(BUILTIN_AGENTS), Note(
             subject="subagents",
             detail=(
@@ -324,7 +325,7 @@ def _load_agents(paths: Paths) -> tuple[dict[str, AgentDefinition], Note | None]
 def _load_hooks(paths: Paths) -> tuple[HookConfig, Note | None]:
     try:
         return load_hook_config(paths.hooks_config), None
-    except (HookConfigError, OSError) as exc:
+    except (ValueError, OSError) as exc:  # HookConfigError is a ValueError
         return HookConfig(), Note(
             subject="hooks",
             detail=(
@@ -339,7 +340,9 @@ def _load_mcp(
 ) -> tuple[tuple[McpServerConfig, ...], Note | None]:
     try:
         return load_mcp_config(paths.workspace_root, environ=environ), None
-    except ConfigError as exc:
+    # `McpError` for a config the loader rejects, `ValueError` for the handful of
+    # invariants `McpServerConfig.__post_init__` checks and does not re-wrap.
+    except (McpError, ValueError, OSError) as exc:
         return (), Note(
             subject="mcp config",
             detail=(
@@ -352,7 +355,7 @@ def _load_mcp(
 def _load_commands(paths: Paths) -> tuple[CommandRegistry, Note | None]:
     try:
         return load_registry(paths.workspace_root), None
-    except OSError as exc:
+    except (ValueError, OSError) as exc:
         return CommandRegistry(), Note(
             subject="slash commands",
             detail=(
@@ -374,6 +377,30 @@ def _load_sandbox(
     if not settings.sandbox:
         return NoSandbox()
     return detect(which=which, platform=platform)
+
+
+def _load_verify(paths: Paths, memory: Memory) -> tuple[VerifySpec, tuple[Note, ...]]:
+    """Detect this repo's verify commands. A detector that cannot read a file survives.
+
+    ``detect_verify_spec`` reads six file formats and swallows the I/O failures itself;
+    the guard is for the residue — a ``pyproject.toml`` whose declared value is a shape
+    ``DetectedCommand`` rejects. Verification going quiet is survivable; a session that
+    will not start because a manifest is odd is not.
+    """
+    try:
+        spec = detect_verify_spec(paths.workspace_root)
+    except (ValueError, OSError) as exc:
+        return VerifySpec(), (
+            Note(
+                subject="verify",
+                detail=(
+                    f"detection failed ({exc}); /verify will report 'unknown' rather "
+                    "than run anything, so check changes by hand"
+                ),
+            ),
+        )
+    note = _verify_declaration_note(memory, spec)
+    return spec, (note,) if note is not None else ()
 
 
 def _verify_declaration_note(memory: Memory, verify: VerifySpec) -> Note | None:
