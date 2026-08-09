@@ -665,6 +665,7 @@ async def test_a_result_the_gate_itself_chokes_on_is_still_a_value() -> None:
 
     assert result.ok is False
     assert "the tool gate failed unexpectedly" in result.error
+    assert "*after* read had already run" in result.error
     assert gate.log[-1].blocked_by is GateStage.GATE
 
 
