@@ -18,6 +18,7 @@ def plant(root: Path, tree: Mapping[str, str], *, git: bool = True) -> Path:
     Writes bytes so a test can assert on line endings without universal-newline
     translation quietly normalizing them first.
     """
+    root.mkdir(parents=True, exist_ok=True)
     if git:
         (root / ".git").mkdir(exist_ok=True)
     for relative, content in tree.items():

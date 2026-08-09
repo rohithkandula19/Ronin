@@ -128,6 +128,9 @@ class _TurnBuilder:
     """Accumulator for one turn. Mutable because a fold is accumulation."""
 
     index: int
+    #: True when no ``TurnStart`` opened this turn, so its index is a guess until a
+    #: ``TurnEnd`` tells us the real one.
+    implicit: bool = False
     text: list[str] = field(default_factory=list)
     thinking: list[str] = field(default_factory=list)
     resets: int = 0
@@ -179,7 +182,7 @@ def fold_turns(events: Sequence[Event]) -> tuple[ReplayTurn, ...]:
             current = _TurnBuilder(index=event.turn_index)
             continue
         if current is None:
-            current = _TurnBuilder(index=event.turn_index if isinstance(event, TurnEnd) else 0)
+            current = _TurnBuilder(index=0, implicit=True)
         if isinstance(event, TextDelta):
             (current.thinking if event.thinking else current.text).append(event.text)
         elif isinstance(event, StreamReset):
@@ -197,6 +200,8 @@ def fold_turns(events: Sequence[Event]) -> tuple[ReplayTurn, ...]:
             current.errors.append(event)
         elif isinstance(event, TurnEnd):
             current.end = event
+            if current.implicit:
+                current.index = event.turn_index
             turns.append(current.finish())
             current = None
     if current is not None:

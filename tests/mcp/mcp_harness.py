@@ -288,6 +288,7 @@ class FailingSender:
 
     def __init__(self, exc: BaseException | None = None) -> None:
         self.exc = exc or OSError("connection reset by peer")
+        self.calls = 0
 
     async def post(
         self,
@@ -296,6 +297,7 @@ class FailingSender:
         headers: Mapping[str, str],
         body: Mapping[str, Any],
     ) -> AsyncIterator[bytes]:
+        self.calls += 1
         raise self.exc
         yield b""  # pragma: no cover - unreachable, keeps this an async generator
 
