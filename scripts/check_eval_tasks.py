@@ -188,6 +188,22 @@ def overlay(source: Path, destination: Path) -> None:
             doomed.unlink()
 
 
+def clear_bytecode(workspace: Path) -> None:
+    """Remove every ``__pycache__`` before running a check.
+
+    CPython validates a cached ``.pyc`` against the source's mtime **and size**. Two
+    plausible one-line fixes can be byte-identical in length — ``total // size + 1``
+    versus ``-(-total // size)`` is exactly 4 characters either way — so overwriting
+    one with the other inside the same second leaves the stale bytecode looking valid,
+    and the *corrected* tree runs the *old* code. A task author hit precisely that and
+    saw a fixed fixture fail; the inverse (a bare fixture appearing solved) is the same
+    bug pointing the other way, and it would inflate a score silently.
+    """
+    for cache in workspace.rglob("__pycache__"):
+        if cache.is_dir():
+            shutil.rmtree(cache, ignore_errors=True)
+
+
 def run_verify(task: Task, workspace: Path, *, timeout: float) -> tuple[int | None, str]:
     """Run one ``verify.sh`` **in place**, with ``workspace`` as cwd and as ``$1``.
 
@@ -208,6 +224,7 @@ def run_verify(task: Task, workspace: Path, *, timeout: float) -> tuple[int | No
     holding only what the agent would actually see.
     """
     script = task.verify
+    clear_bytecode(workspace)
     try:
         # A repo-local script by construction: the path comes from rglob under the
         # suite root, never from input.

@@ -193,6 +193,7 @@ module = [
     "test_ronin_telemetry_docsite",
     "test_ronin_telemetry_payload",
     "test_ronin_telemetry_transport",
+    "test_ronin_ui_approvals",
     "test_router",
     "test_safety_command",
     "test_safety_denylist",

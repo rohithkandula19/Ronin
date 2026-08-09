@@ -64,6 +64,7 @@ from ..ui.commands import parse as parse_command
 from ..ui.headless import (
     EXIT_ERROR,
     EXIT_OK,
+    ApprovalTracker,
     OutputFormat,
     exit_code_for,
     run_headless,
@@ -661,7 +662,8 @@ async def _one_turn(
 ) -> int:
     """Stream one turn to the terminal, and report what it exited as."""
     state = ViewState()
-    approvals: list[ApprovalRequest] = []
+    # See ApprovalTracker: counting raw requests made every approved gated call exit 2.
+    tracker = ApprovalTracker()
     # Only this turn's notes: the list accumulates across the session, and reprinting
     # turn one's degradation after every later turn trains the user to ignore it.
     before = len(agent.conversation.notes)
@@ -673,12 +675,11 @@ async def _one_turn(
     ):
         state = reduce_event(state, event)
         _print_event(event, streams)
-        if isinstance(event, ApprovalRequest):
-            approvals.append(event)
+        tracker.observe(event)
     streams.out("\n")
     for note in agent.conversation.notes[before:]:
         streams.err(f"note: {note}\n")
-    return exit_code_for(state, approvals)
+    return exit_code_for(state, tracker.resolve())
 
 
 def _print_event(event: Event, streams: Streams) -> None:
