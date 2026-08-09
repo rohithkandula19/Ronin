@@ -12,16 +12,26 @@ different hat. :func:`fold_turns` is the one implementation of that rule, and
 :mod:`ronin.persistence.export` uses it too so the exported transcript and the
 resumed state can never disagree about what the model said.
 
-**2. ``TurnEnd.agent_state`` is preferred, and reconciled — not trusted.** The
+**2. ``TurnEnd.agent_state`` is preferred, reconciled — and then built on.** The
 recorded state is strictly richer than anything folding can produce: it carries
 ``Thinking.signature`` (which no ``TextDelta`` records and which must survive
 byte-identical), the ``Budget``, the mode, the cwd, the todos, and any system
-message the loop injected. So it wins. But "wins" without a check is how a codec
-bug ships silently, so the fold is compared against it on the parts both can know
-— the sequence of tool-use ids, the sequence of tool-result ids with their error
-flags, and the assistant prose — and any disagreement lands in
-:attr:`ReplayResult.mismatches` for the caller to show. Neither side is quietly
-discarded.
+message the loop injected. So the newest one wins as the base. But "wins" without a
+check is how a codec bug ships silently, so the turns up to that checkpoint are
+compared against it on the parts both can know — the tool-use ids, the tool-result
+ids with their error flags, and the assistant prose — and any disagreement lands in
+:attr:`ReplayResult.mismatches` for the caller to show.
+
+The comparison is a *suffix* match, not equality: a session that was itself resumed
+carries history in its state that the events of this recording never contained, and
+demanding equality there would report a mismatch on every continued session and
+train the reader to ignore the list. A suffix match still catches the failure that
+matters — duplicated or reordered prose and calls.
+
+Turns recorded *after* the last checkpoint are folded on top of it. A crash happens
+mid-turn by definition, so the newest ``TurnEnd`` is usually one or more turns
+behind the end of the file; taking the checkpoint alone would silently throw away
+the tool call the session died in the middle of.
 
 **3. An unanswered tool call is repaired, not rejected.** A crash between
 ``ToolStart`` and the turn's end is the *normal* shape of an interrupted session,
@@ -261,6 +271,13 @@ def _result_keys(messages: Sequence[Message]) -> tuple[tuple[str, bool], ...]:
     )
 
 
+def _is_suffix(folded: Sequence[object], recorded: Sequence[object]) -> bool:
+    """Whether the folded sequence is the tail of the recorded one (or equal)."""
+    return len(folded) <= len(recorded) and tuple(recorded[len(recorded) - len(folded):]) == tuple(
+        folded
+    )
+
+
 def _reconcile(folded: Sequence[Message], recorded: Sequence[Message]) -> tuple[str, ...]:
     """Where the fold and the recorded state disagree about the same facts.
 
@@ -271,23 +288,24 @@ def _reconcile(folded: Sequence[Message], recorded: Sequence[Message]) -> tuple[
     """
     problems: list[str] = []
     folded_ids, recorded_ids = _tool_use_ids(folded), _tool_use_ids(recorded)
-    if folded_ids != recorded_ids:
+    if not _is_suffix(folded_ids, recorded_ids):
         problems.append(
-            f"tool-use ids differ: events replayed {list(folded_ids)}, the recorded "
-            f"state carries {list(recorded_ids)}"
+            f"tool-use ids differ: events replayed {list(folded_ids)}, which is not "
+            f"the tail of the recorded state's {list(recorded_ids)}"
         )
     folded_results, recorded_results = _result_keys(folded), _result_keys(recorded)
-    if folded_results != recorded_results:
+    if not _is_suffix(folded_results, recorded_results):
         problems.append(
-            f"tool results differ: events replayed {list(folded_results)}, the "
-            f"recorded state carries {list(recorded_results)} (id, is_error)"
+            f"tool results differ: events replayed {list(folded_results)}, which is "
+            f"not the tail of the recorded state's {list(recorded_results)} "
+            f"(id, is_error)"
         )
     folded_text, recorded_text = _assistant_text(folded), _assistant_text(recorded)
-    if folded_text != recorded_text:
+    if not recorded_text.endswith(folded_text):
         problems.append(
-            f"assistant text differs: replayed {len(folded_text)} chars, recorded "
-            f"{len(recorded_text)} chars — if the session had a StreamReset this is "
-            f"where a mishandled reset shows up as duplicated prose"
+            f"assistant text differs: replayed {len(folded_text)} chars are not the "
+            f"tail of the recorded {len(recorded_text)} chars — a mishandled "
+            f"StreamReset shows up here as duplicated prose"
         )
     return tuple(problems)
 
@@ -320,33 +338,45 @@ def _repair_pairing(
     return repaired, tuple(notes)
 
 
+def _last_checkpoint(turns: Sequence[ReplayTurn]) -> tuple[int, AgentState] | None:
+    """The newest turn whose ``TurnEnd`` carried a state, with its position."""
+    found: tuple[int, AgentState] | None = None
+    for position, turn in enumerate(turns):
+        if turn.end is not None and turn.end.agent_state is not None:
+            found = (position, turn.end.agent_state)
+    return found
+
+
 def replay(events: Sequence[Event]) -> ReplayResult:
     """Fold a recorded stream into a state that can be sent to a provider as-is."""
     turns = fold_turns(events)
-    folded = _folded_messages(turns)
-    recorded = next(
-        (
-            event.agent_state
-            for event in reversed(events)
-            if isinstance(event, TurnEnd) and event.agent_state is not None
-        ),
-        None,
-    )
+    checkpoint = _last_checkpoint(turns)
 
     notes: list[str] = []
     mismatches: tuple[str, ...] = ()
-    if recorded is not None:
-        source = StateSource.RECORDED
-        state = recorded
-        mismatches = _reconcile(folded, recorded.messages)
-    else:
+    if checkpoint is None:
         source = StateSource.FOLDED
-        state = AgentState(messages=folded)
+        state = AgentState(messages=_folded_messages(turns))
         notes.append(
             "no TurnEnd carried an agent_state, so the state was folded from events "
             "alone: budget, mode, cwd, todos and thinking signatures are not "
             "recoverable and are left at their defaults"
         )
+    else:
+        source = StateSource.RECORDED
+        position, recorded = checkpoint
+        mismatches = _reconcile(
+            _folded_messages(turns[: position + 1]), recorded.messages
+        )
+        tail = _folded_messages(turns[position + 1 :])
+        state = replace(recorded, messages=(*recorded.messages, *tail))
+        if tail:
+            notes.append(
+                f"{len(turns) - checkpoint - 1} turn(s) recorded after the last "
+                f"checkpoint were folded on top of it ({len(tail)} message(s)); the "
+                f"session crashed mid-turn, which is why the checkpoint is behind "
+                f"the end of the file"
+            )
 
     known = {
         event.tool_use_id: event.result.as_block(event.tool_use_id)

@@ -296,7 +296,7 @@ def test_approving_into_plan_mode_is_a_contradiction_and_raises() -> None:
         PlanApproval(plan=parse_plan(NUMBERED), approved=True, execute_mode=Mode.PLAN)
 
 
-def test_an_approval_carries_the_plan_it_approved(tmp_path: Path) -> None:
+def test_an_approval_carries_the_plan_it_approved() -> None:
     """After a compaction the transcript may not hold the plan the user read."""
     plan = parse_plan(NUMBERED)
     decision = approve(plan)

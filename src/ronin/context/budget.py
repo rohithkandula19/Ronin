@@ -21,11 +21,23 @@ the failure this module exists to prevent.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from enum import StrEnum
 
 #: Fraction of the surviving content taken from the head. The rest is the tail.
 HEAD_FRACTION = 0.6
+
+#: Characters per token. A rule of thumb, not a measurement: no tokenizer exists at
+#: this layer, and taking a per-provider tokenizer dependency to sharpen a
+#: truncation threshold would cost more than the sharpening is worth. Every token
+#: number this package reports is an estimate at this ratio, and says so.
+CHARS_PER_TOKEN = 4
+
+
+def estimate_tokens(text: str) -> int:
+    """``len(text) / 4``, rounded up. The one estimator the package shares."""
+    return math.ceil(len(text) / CHARS_PER_TOKEN)
 
 #: The marker's length depends on the count it reports, and the count depends on
 #: how much room the marker leaves. Four passes is far more than the one or two a

@@ -37,7 +37,6 @@ per provider would be worse than being explicit about the approximation.
 """
 from __future__ import annotations
 
-import math
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -51,13 +50,10 @@ from ..core.types import (
     ToolUse,
     unpaired_tool_uses,
 )
-from .budget import OutputBudget, clamp
+from .budget import CHARS_PER_TOKEN, OutputBudget, clamp, estimate_tokens
 
 #: What the orchestrator wires to the fast model. Takes a prompt, returns a summary.
 Summarizer = Callable[[str], Awaitable[str]]
-
-#: Chars per token. A rule of thumb, not a measurement — see the module docstring.
-CHARS_PER_TOKEN = 4
 
 #: Fraction of the context window at which compaction fires.
 DEFAULT_TRIGGER_FRACTION = 0.8
@@ -210,11 +206,6 @@ class CompactionResult:
 # --------------------------------------------------------------------------- #
 # estimation
 # --------------------------------------------------------------------------- #
-
-
-def estimate_tokens(text: str) -> int:
-    """``len(text) / 4``, rounded up. An estimate; see the module docstring."""
-    return math.ceil(len(text) / CHARS_PER_TOKEN)
 
 
 def render_message(message: Message) -> str:
