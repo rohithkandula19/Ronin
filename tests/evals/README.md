@@ -25,6 +25,41 @@ Two scripts own this tree, and both run in CI:
 | `scripts/gen_eval_manifest.py --check` | `manifest.toml` matches the tree |
 | `scripts/check_eval_tasks.py` | every `verify.sh` discriminates (below) |
 
+## Running it
+
+```sh
+# what would run — no model, no key, no network
+ronin eval --dry-run --regression-gate
+
+# the real thing; --model names a model in your models.toml [models] table
+ronin eval --model kimi-k2 --parallel 8 --json run.json --markdown run.md
+
+# one category, or one task
+ronin eval --model kimi-k2 --category injection-resistance
+ronin eval --model kimi-k2 --task single-file/strip-bom-before-parse
+
+# two models, same tasks, same per-task seeds, paired scoreboard
+ronin duel --model kimi-k2 --model ronin-qwen-local --seed 7
+
+# transcripts per task — what the phase-12 harvest reads
+ronin eval --model kimi-k2 --record
+```
+
+`--dry-run` is the branch that needs no provider: it loads the suite, applies the
+selection and prints what would run. It is also the only form CI can exercise, since
+the suite must work offline with no credentials.
+
+Exit codes are worth being precise about. **1 means the suite could not be run** — a
+missing suite, a model name your config does not define, a selection matching nothing.
+**0 means a measurement happened**, whatever it measured: a 0% pass rate is a result,
+not a command failure. A CI step that conflated the two could not tell a broken harness
+from a weak model, which is the distinction the taxonomy exists for.
+
+`--model` names an entry in your config's `[models]` table, not a provider's model id.
+Accepting an id would mean Ronin inventing a price per million tokens for it, and an
+invented price becomes a wrong number in a cost report. A wrong name lists the defined
+ones.
+
 Eight categories, each measuring something different:
 
 | category | tasks | what it measures |

@@ -112,6 +112,24 @@ jobs:
       - name: Eval tasks discriminate (bare fails, solution passes)
         run: uv run python scripts/check_eval_tasks.py --parallel 4 --quiet
 
+      # `ronin eval` is how anyone actually reaches the suite, and for most of its
+      # life the runner was complete, tested and unreachable from a command line.
+      # --dry-run is the branch that needs no model, no key and no network, so it is
+      # the branch CI can prove still works. PYTHONPATH=src because the v2 tree is
+      # not the installed console script yet (see docs/ARCHITECTURE.md).
+      - name: Eval is reachable from argv (--dry-run, no model)
+        env:
+          PYTHONPATH: src
+        run: |
+          uv run python -m ronin eval --dry-run --regression-gate
+          uv run python -m ronin duel --dry-run --limit 2
+          # A selection that matches nothing must fail rather than report 0/0, which
+          # would read as a clean run over an empty suite.
+          if uv run python -m ronin eval --dry-run --task no/such-task; then
+            echo "expected a nonexistent task id to exit non-zero" >&2
+            exit 1
+          fi
+
       - name: Build packages (sdist + wheel)
         run: uv build --all-packages
 

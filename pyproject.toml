@@ -166,6 +166,7 @@ module = [
     "test_plan_mode",
     "test_registry",
     "test_resilience",
+    "test_ronin_cli_bench",
     "test_ronin_cli_doctor",
     "test_ronin_cli_gate",
     "test_ronin_cli_integration",
