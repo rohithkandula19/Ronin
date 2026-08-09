@@ -79,6 +79,7 @@ OK = HookCompletion(exit_code=0)
 #: The refusal :class:`RecordingAsker` gives unless a test scripts something else.
 DECLINED = Answer(outcome=Outcome.NO, feedback="not this time")
 
+
 def use(name: str, *, call_id: str = "call_1", **arguments: Any) -> ToolUse:
     """A ``ToolUse``, with the id defaulted so tests only name what they care about."""
     return ToolUse(id=call_id, name=name, arguments=dict(arguments))
