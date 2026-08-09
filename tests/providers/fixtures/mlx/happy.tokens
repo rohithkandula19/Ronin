@@ -1,0 +1,12 @@
+I'll 
+read 
+that 
+file.
+ <ronin
+:tool
+_call>
+{"name": "read_file", 
+"arguments": {"path": 
+"src/main.py"}}
+</ronin
+:tool_call>
