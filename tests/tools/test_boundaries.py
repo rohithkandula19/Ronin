@@ -28,8 +28,10 @@ SRC = Path(__file__).resolve().parents[2] / "src" / "ronin"
 #: failure in an unrelated test. The rule is "the application layer may import
 #: anything", so that is what is written down.
 ORCHESTRATOR_MODULES = frozenset({"ronin.session", "ronin.session_demo"})
-ORCHESTRATOR_PACKAGES = ("ronin.cli",)
-
+#: ``evals`` drives the assembled agent through ``cli.sdk.Agent``, so it sits *above*
+#: cli rather than beside it. Listing it as an orchestrator package is the honest
+#: description: a harness that measures the application is part of the application.
+ORCHESTRATOR_PACKAGES = ("ronin.cli", "ronin.evals")
 
 
 def is_orchestrator(dotted: str) -> bool:
@@ -46,16 +48,30 @@ def is_orchestrator(dotted: str) -> bool:
 #: injected callable rather than importing one, which is what lets each of them
 #: be tested with no provider, no network and no shell. An import here would not
 #: just be untidy: it would make that testability impossible to rely on.
+#: Every leaf layer forbids the same set, so name it once. Repeating a six-element
+#: tuple five times is how one row quietly ends up missing an entry.
+LEAF_FORBIDDEN: tuple[str, ...] = (
+    "ronin.providers",
+    "ronin.tools",
+    "ronin.agents",
+    "ronin.mcp",
+    "ronin.cli",
+    "ronin.evals",
+)
+
+#: The two application-layer packages. Nothing below them may import them.
+ABOVE: tuple[str, ...] = ("ronin.cli", "ronin.evals")
+
 LAYER_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("context", ("ronin.providers", "ronin.tools", "ronin.agents", "ronin.mcp", "ronin.cli")),
-    ("safety", ("ronin.providers", "ronin.tools", "ronin.agents", "ronin.mcp", "ronin.cli")),
-    ("verify", ("ronin.providers", "ronin.tools", "ronin.agents", "ronin.mcp", "ronin.cli")),
-    ("persistence", ("ronin.providers", "ronin.tools", "ronin.agents", "ronin.mcp", "ronin.cli")),
-    ("ui", ("ronin.providers", "ronin.tools", "ronin.agents", "ronin.mcp", "ronin.cli")),
+    ("context", LEAF_FORBIDDEN),
+    ("safety", LEAF_FORBIDDEN),
+    ("verify", LEAF_FORBIDDEN),
+    ("persistence", LEAF_FORBIDDEN),
+    ("ui", LEAF_FORBIDDEN),
     # These two sit above the tool layer: they produce Tools, so they may import
     # it. They still may not know which model is calling them.
-    ("agents", ("ronin.providers", "ronin.cli")),
-    ("mcp", ("ronin.providers", "ronin.cli")),
+    ("agents", ("ronin.providers", *ABOVE)),
+    ("mcp", ("ronin.providers", *ABOVE)),
 )
 
 
@@ -115,18 +131,18 @@ def violations(package: str, forbidden: tuple[str, ...]) -> list[str]:
 
 def test_the_tool_layer_knows_nothing_about_providers_or_the_loop() -> None:
     """A tool that knew which model was calling it would special-case for it."""
-    assert violations("tools", ("ronin.providers", "ronin.core.loop", "ronin.cli")) == []
+    assert violations("tools", ("ronin.providers", "ronin.core.loop", *ABOVE)) == []
 
 
 def test_the_provider_layer_knows_nothing_about_tools() -> None:
     """An adapter that imports tools ends up executing them, which is how the
     provider layer quietly becomes a second agent loop."""
-    assert violations("providers", ("ronin.tools", "ronin.cli")) == []
+    assert violations("providers", ("ronin.tools", *ABOVE)) == []
 
 
 def test_the_core_contract_knows_nothing_about_providers_or_tools() -> None:
     """The loop takes both as injected protocols; importing either is the cycle."""
-    assert violations("core", ("ronin.providers", "ronin.tools", "ronin.cli")) == []
+    assert violations("core", ("ronin.providers", "ronin.tools", *ABOVE)) == []
 
 
 @pytest.mark.parametrize(("package", "forbidden"), LAYER_RULES, ids=[r[0] for r in LAYER_RULES])
@@ -150,7 +166,7 @@ def test_the_layer_rules_cover_every_package_that_exists() -> None:
         for path in SRC.iterdir()
         if path.is_dir() and path.name != "__pycache__" and (path / "__init__.py").exists()
     }
-    known = {rule[0] for rule in LAYER_RULES} | {"core", "providers", "tools", "cli"}
+    known = {rule[0] for rule in LAYER_RULES} | {"core", "providers", "tools", "cli", "evals"}
     assert on_disk <= known, (
         f"package(s) with no entry in LAYER_RULES: {sorted(on_disk - known)} — "
         "add them to the table with their prohibitions, or the graph is a lie"
@@ -231,3 +247,26 @@ def test_a_lazy_import_inside_a_function_is_still_caught(tmp_path: Path) -> None
         "    return Router\n"
     )
     assert imported_modules(path, "ronin.tools.m") == {"ronin.providers.router"}
+
+
+def test_telemetry_depends_on_core_only() -> None:
+    """The most privacy-sensitive module in the tree, kept unable to reach anything.
+
+    ``telemetry`` is a single module, so the directory-driven ``LAYER_RULES`` above
+    never sees it — which is exactly how a module acquires an import nobody notices.
+    It must not reach the tool layer (paths, commands, file contents), the provider
+    layer (prompts), or ``cli``; if it cannot see them, it cannot send them.
+    """
+    path = SRC / "telemetry.py"
+    if not path.exists():
+        pytest.skip("telemetry.py not present")
+    imports = imported_modules(path, "ronin.telemetry")
+    forbidden = sorted(
+        name
+        for name in imports
+        if not name.startswith("ronin.core")
+    )
+    assert forbidden == [], (
+        f"telemetry imports {forbidden}; it may only see ronin.core, because a module "
+        "that cannot reach prompts, paths or code cannot transmit them"
+    )

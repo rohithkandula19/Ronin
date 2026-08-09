@@ -68,6 +68,14 @@ asyncio_mode = "auto"
 # no install-time dependencies. `tests` collects the contract's invariant tests.
 pythonpath = ["src"]
 testpaths = ["packages", "apps", "tests"]
+# `tests/evals/` holds eval *task fixtures*, not tests: small repos the agent is
+# pointed at, several of which legitimately contain their own `test_*.py`. Collecting
+# them would run another project's tests as if they were ours — and the "add a test"
+# category deliberately ships tests that FAIL until the agent fixes the code, so the
+# suite would go red by design. `tests/evals/conftest.py` also sets
+# `collect_ignore_glob`; this is the belt to that braces, because the two mechanisms
+# fail in different ways (a deleted conftest vs. a renamed directory).
+norecursedirs = ["tests/evals"]
 faulthandler_timeout = 90
 markers = [
     "adapter_smoke: LIVE fine-tuned-adapter smoke tests (need mlx-lm + a trained adapter; skipped elsewhere)",
