@@ -287,10 +287,14 @@ walks the import graph with `ast` and fails on a violation. It parses rather tha
 imports, so a lazy `from ronin.providers... import` *inside a function* — the exact
 place a boundary quietly dissolves, deferred to "avoid the cycle" — is caught too.
 
-One module is exempt: `ronin/session.py`, the orchestrator seat, which exists to
-import all three layers and introduce them. The test asserts both halves of that —
-nothing else imports all three, *and* `session.py` still does. If the wiring ever
-migrates somewhere it should not be, the second assertion is what notices.
+Two things are exempt. `ronin/session.py`, the orchestrator seat, exists to import
+all three layers and introduce them; the test asserts *both* halves of that —
+nothing else imports all three, **and** `session.py` still does. If the wiring ever
+migrates somewhere it should not be, the second assertion is what notices. And the
+whole of `ronin/cli/`, stated as a package rather than module by module: the
+enumerated form was worse than useless, because a new `cli` module was unconstrained
+until someone remembered to list it and the only signal was a failure in an
+unrelated test.
 
 ---
 
@@ -410,8 +414,11 @@ bridge the old shapes are written knowingly rather than accreted.
 | This document | ✅ |
 | `src/ronin/core/loop.py` | ✅ see §9 |
 | `src/ronin/providers/` | ✅ four adapters, normalizer, shim, router, cache-aware assembly, ledger — see [`docs/PROVIDERS.md`](PROVIDERS.md) |
-| Import-boundary enforcement test | ❌ not yet — still documentation, not a gate |
-| The rest of the §0 diagram | ❌ not built; this is the contract it will be built against |
+| `src/ronin/tools/` | ✅ read/write/edit/multi_edit, glob/grep/ls, persistent bash, task, todo, net — see [`docs/TOOLS.md`](TOOLS.md) |
+| `src/ronin/session.py` | ✅ the orchestrator seat; `task` wired to a nested turn on `router.for_subagent()` |
+| Import-boundary enforcement test | ✅ `tests/tools/test_boundaries.py` — §3's table walked with `ast`, so a lazy import inside a function is caught too |
+| `context/` `safety/` `agents/` `verify/` `persistence/` `ui/` `mcp/` | ✅ built, each mypy-strict, ruff clean, with unit + integration tests and an offline demo — see [`docs/SUBSYSTEMS.md`](SUBSYSTEMS.md) |
+| `cli/` — the joins | see [`docs/SUBSYSTEMS.md`](SUBSYSTEMS.md) §2. This is the only layer whose mistakes no test below it can catch, which is why it is the thinnest package in the tree. |
 
 **On the model layer and this contract.** The provider layer implements its own
 `ModelClient` (`ModelRequest` in, `ModelDelta` out) rather than `core.protocols.ModelClient`
