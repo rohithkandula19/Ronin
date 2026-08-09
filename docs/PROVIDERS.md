@@ -304,7 +304,39 @@ made-up number in the ledger.
 
 ---
 
-## 8. Tests
+## 8. Retry and failover
+
+Migrated from `packages/agent-patterns` and rewritten against this package's seams.
+Both are decorators over `ModelClient`, so anything that takes a client takes a
+retrying or failing-over one without knowing it.
+
+```python
+RetryingClient(inner, RetryPolicy())          # 2 · 4 · 8 · 16 · 30 · 30 seconds
+FailoverClient([primary, secondary, local])   # advances to the next on failure
+```
+
+**The ladder is 2/4/8/16/30/30 — about 60 seconds across six attempts.** That is not
+an arbitrary curve: it is sized to ride out a free-tier per-minute rate window, which
+is the failure this project actually hits. A `Retry-After` header wins over the
+ladder, clamped at 60s so a hostile or mistaken header cannot park the agent.
+
+**Two things it deliberately does not do:**
+
+- **It never retries across a partial stream silently.** If any delta was already
+  emitted, a `StreamReset` is yielded before the retry. Consumers that concatenate
+  text must clear on reset — the demo had this bug, which is the whole reason the
+  event exists.
+- **Failover narrows capabilities to the intersection of the chain.** A chain whose
+  fallback lacks native tools reports `native_tools=False` *up front*, so the shim
+  engages from the first token rather than after a mid-conversation switch discovers
+  the second model cannot do what the first was asked to.
+
+`RetryStats` and `FailoverStats` record what happened. A retry that succeeded is
+still a fact worth surfacing; a silent one hides a degrading provider.
+
+---
+
+## 9. Tests
 
 309 tests, no network anywhere.
 
@@ -325,7 +357,7 @@ asserts the resulting `AgentState` has no unpaired tool calls.
 
 ---
 
-## 9. Honest status
+## 10. Honest status
 
 **The two `ModelClient` protocols are not one protocol.** `ronin.core.protocols.ModelClient`
 takes `(system, messages, tools)`; this package's takes a `ModelRequest`. Both are
@@ -338,11 +370,6 @@ bridge is deliberately trivial so reversing it later is cheap.
 
 **Not built here, and not pretended:**
 
-- No retry/backoff on transient statuses. `HttpTransport` classifies them
-  (`ProviderError.retryable`) but nothing acts on it yet. The legacy
-  `packages/agent-patterns` provider has a real retry ladder that should move over.
-- No failover between providers. Same story — `packages/agent-patterns/providers/failover.py`
-  exists and is not wired here.
 - `vision` is declared in `Capabilities` and no adapter renders an image block yet.
   It is a promise about a model, not a feature.
 - The legacy `packages/agent-patterns/providers/` tree still exists and is what the

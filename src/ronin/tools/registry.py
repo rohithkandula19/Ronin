@@ -54,6 +54,10 @@ class ToolRegistry:
         """The tool object itself. Not part of the loop's protocol; used by tests."""
         return self._tools.get(name)
 
+    def tools(self) -> tuple[Tool, ...]:
+        """Every tool, in registration order. For re-assembling a wider registry."""
+        return tuple(self._tools.values())
+
     async def execute(self, use: ToolUse) -> ToolResult:
         """Run one call. Returns a result; a hallucinated name is a value, not a raise."""
         tool = self._tools.get(use.name)
@@ -67,17 +71,23 @@ class ToolRegistry:
             )
         return await tool.execute(use.arguments, self.ctx)
 
-    def subset(self, names: Sequence[str]) -> ToolRegistry:
+    def subset(self, names: Sequence[str], *, ctx: ToolContext | None = None) -> ToolRegistry:
         """A registry with only ``names``. How a subagent gets a narrower toolset.
 
         Silently skipping an unknown name would give a subagent fewer tools than its
         type declared, and the failure would look like the model being unhelpful
         rather than a typo in a config.
+
+        ``ctx`` defaults to the parent's, but a *subagent* is given its own — sharing
+        one would mean a file the child read counts as "seen" for the parent's
+        ``write`` guard, quietly weakening the rule that prevents most destructive
+        edits. The tools themselves are shared: they are stateless, and the state
+        that matters lives in the context.
         """
         missing = [name for name in names if name not in self._tools]
         if missing:
             raise ValueError(f"cannot build a subset with unknown tools: {missing}")
-        return ToolRegistry((self._tools[name] for name in names), self.ctx)
+        return ToolRegistry((self._tools[name] for name in names), ctx or self.ctx)
 
 
 def file_tools() -> tuple[Tool, ...]:

@@ -103,6 +103,8 @@ module = [
     "test_task",
     "test_net",
     "test_registry",
+    "test_session",
+    "test_boundaries",
     "harness",
 ]
 disallow_untyped_decorators = false
