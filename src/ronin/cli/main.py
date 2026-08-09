@@ -400,16 +400,18 @@ async def dispatch(
 
     paths = Paths.discover(options.cwd)
     if options.command is Command.DOCTOR:
-        loaded = _load(paths, options, env, streams)
-        if loaded is None:
-            return EXIT_ERROR
-        streams.out(_doctor_report(loaded) + "\n")
-        return EXIT_OK if loaded.healthy else EXIT_ERROR
+        report = await run_doctor(
+            load_workspace(paths, flags=options.flags, environ=env),
+            router=_router_or_none(paths, env),
+            environ=env,
+        )
+        streams.out(report.render())
+        return report.exit_code()
 
     if agent is None:
         first_run = not paths.ronin_dir.exists()
         if first_run and options.wizard:
-            await _first_run(paths, options, env, streams)
+            _first_run(paths, streams)
         built = await _open_agent(options, paths, env, streams)
         if built is None:
             return EXIT_ERROR
