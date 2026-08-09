@@ -97,13 +97,16 @@ _WORD_RE = re.compile(r"[a-z0-9_]+")
 
 #: Words that appear in every task description and every agent description, so
 #: counting them would make everything match everything.
-STOPWORDS: frozenset[str] = frozenset(
-    """a an and any are as at be but by can code do does doing for from has have how
-    in into is it its not of on or that the their then there these this to use used
-    using was what when where which who why will with you your file files find get
-    make new one only other same see should some than them they thing things time up
-    want way we work""".split()
-)
+STOPWORDS: frozenset[str] = frozenset({
+    "a", "an", "and", "any", "are", "as", "at", "be", "but", "by", "can", "code",
+    "do", "does", "doing", "file", "files", "find", "for", "from", "get", "has",
+    "have", "how", "in", "into", "is", "it", "its", "make", "new", "not", "of",
+    "on", "one", "only", "or", "other", "same", "see", "should", "some", "than",
+    "that", "the", "their", "them", "then", "there", "these", "they", "thing",
+    "things", "this", "time", "to", "up", "use", "used", "using", "want", "was",
+    "way", "we", "what", "when", "where", "which", "who", "why", "will", "with",
+    "work", "you", "your",
+})
 
 
 class FrontmatterError(ValueError):
@@ -160,9 +163,9 @@ def _inline_list(raw: str, source: str, line: int) -> tuple[str, ...]:
     return tuple(items)
 
 
-def parse_frontmatter(text: str, *, source: str = "<string>") -> tuple[
-    Mapping[str, FrontmatterValue], str
-]:
+def parse_frontmatter(
+    text: str, *, source: str = "<string>"
+) -> tuple[Mapping[str, FrontmatterValue], str]:
     """Split ``text`` into ``(frontmatter, body)``.
 
     The document must open with a ``---`` fence and close it. Everything after the

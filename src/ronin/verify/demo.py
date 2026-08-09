@@ -170,11 +170,15 @@ async def _demo_repair() -> tuple[int, RepairReport]:
 
     async def fix(snapshot: FailureSnapshot, attempt: int) -> str:
         del snapshot
-        return f"--- a/src/pkg/thing.py\n+++ b/src/pkg/thing.py\n(attempt {attempt}: tweaked rounding)"
+        return (
+            f"--- a/src/pkg/thing.py (attempt {attempt}: tweaked the rounding)\n"
+            "+++ b/src/pkg/thing.py"
+        )
 
     report = await repair_loop(verify=verify, fix=fix)
     print(report.render())
-    signatures = {snapshot.signature for snapshot in (report.baseline, *[a.snapshot for a in report.attempts])}
+    runs = (report.baseline, *(attempt.snapshot for attempt in report.attempts))
+    signatures = {snapshot.signature for snapshot in runs}
     print()
     print(f"distinct signatures across all three runs: {len(signatures)} "
           f"(tmpdir, line number and duration differed every time)")

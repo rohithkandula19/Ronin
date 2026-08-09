@@ -89,6 +89,7 @@ def script() -> tuple[Event, ...]:
         TextDelta(text="Let me look at "),
         TextDelta(text="the file — DROPPED MID-SENTENCE"),
         StreamReset(reason="provider retry after a mid-stream drop"),
+        TextDelta(text="Reading src/main.py first.", thinking=True),
         TextDelta(text="Looking at src/main.py "),
         TextDelta(text="and then editing it.\n"),
         ToolStart(tool_use_id="t1", name="Read", arguments={"path": "src/main.py"}),

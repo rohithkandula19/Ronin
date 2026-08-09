@@ -192,6 +192,28 @@ async def main() -> int:
         print(f"  'written in turn 3' still in context: {'written in turn 3' in surviving}")
         print(f"  unpaired tool uses: {unpaired_tool_uses(result.messages)}")
         print(f"  retained paths: {len(result.retained_paths)} (one per unique file)")
+        print(
+            f"  still at/over the trigger: {result.still_over_trigger} — this scripted "
+            "session touches a NEW file every turn, the worst case for per-path\n"
+            "  retention. Unbounded retention is what keeps turn 3 answerable; bounding "
+            "it trades that away:"
+        )
+        bounded = await compact(
+            transcript,
+            policy=CompactionPolicy(context_window=8000, max_retained_paths=20),
+            summarizer=fake_summarizer,
+        )
+        bounded_text = "\n".join(
+            block.content
+            for message in bounded.messages
+            for block in message.content_blocks
+            if isinstance(block, ToolResultBlock)
+        )
+        print(
+            f"    max_retained_paths=20 → ~{bounded.token_estimate_after} tokens, "
+            f"over trigger: {bounded.still_over_trigger}, "
+            f"turn 3 kept: {'written in turn 3' in bounded_text}"
+        )
 
         # ----------------------------------------------------------- filestate
         rule("4. FILE STATE — catching an edit the user made while the model thought")

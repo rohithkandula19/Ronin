@@ -78,13 +78,15 @@ files = [
     "src/ronin",
     "tests/agents",
     "tests/core",
+    "tests/persistence",
     "tests/providers",
     "tests/tools",
+    "tests/ui",
 ]
 strict = true
 warn_unreachable = true
 explicit_package_bases = true
-mypy_path = "src:tests/agents:tests/core:tests/providers:tests/tools"
+mypy_path = "src:tests/agents:tests/core:tests/persistence:tests/providers:tests/tools:tests/ui"
 
 # pytest's @parametrize is an untyped decorator as far as mypy is concerned;
 # that is a property of pytest, not a hole in our typing. Enumerated rather
@@ -94,14 +96,17 @@ module = [
     "agents_harness",
     "fakes",
     "harness",
+    "persistence_harness",
     "replay",
     "test_accounting",
+    "test_agent_hooks",
     "test_assembly",
     "test_boundaries",
     "test_bridge",
     "test_definitions",
     "test_files",
     "test_golden_streams",
+    "test_integration",
     "test_jsonargs",
     "test_loop",
     "test_net",
@@ -116,6 +121,7 @@ module = [
     "test_shim",
     "test_task",
     "test_types",
+    "ui_harness",
 ]
 disallow_untyped_decorators = false
 
@@ -134,8 +140,10 @@ include = [
     "src/ronin/**/*.py",
     "tests/agents/**/*.py",
     "tests/core/**/*.py",
+    "tests/persistence/**/*.py",
     "tests/providers/**/*.py",
     "tests/tools/**/*.py",
+    "tests/ui/**/*.py",
 ]
 
 [tool.ruff.lint]

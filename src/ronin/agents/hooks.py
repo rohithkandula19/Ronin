@@ -69,6 +69,7 @@ event JSON on stdin looks like ``{"event": "PreToolUse", "tool_name": "write",
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import signal
@@ -248,13 +249,10 @@ async def run_shell_hook(invocation: HookInvocation) -> HookCompletion:
         )
     except TimeoutError:
         _kill_group(process.pid)
-        try:
+        # A group that refuses SIGKILL (uninterruptible sleep) is not worth waiting
+        # on: we have already given up, and the timeout is the honest outcome.
+        with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(process.wait(), timeout=KILL_GRACE_SECONDS)
-        except TimeoutError:
-            # The group refused SIGKILL (uninterruptible sleep, most likely). We
-            # have already stopped waiting for it; reporting the timeout is the
-            # honest outcome and the caller treats it as a warning.
-            pass
         return HookCompletion(exit_code=-1, timed_out=True)
     return HookCompletion(
         exit_code=process.returncode if process.returncode is not None else -1,
@@ -265,12 +263,10 @@ async def run_shell_hook(invocation: HookInvocation) -> HookCompletion:
 
 def _kill_group(pid: int) -> None:
     """SIGKILL the process group led by ``pid``, tolerating a race with exit."""
-    try:
+    # Already gone, or reparented out of reach: either way there is nothing left to
+    # kill, and raising here would mask the timeout we are reporting.
+    with contextlib.suppress(ProcessLookupError, PermissionError):
         os.killpg(os.getpgid(pid), signal.SIGKILL)
-    except (ProcessLookupError, PermissionError):
-        # Already gone, or reparented out of our reach. Either way there is
-        # nothing left to kill and raising here would mask the timeout.
-        pass
 
 
 @dataclass(frozen=True, slots=True)

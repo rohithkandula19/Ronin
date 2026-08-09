@@ -133,7 +133,7 @@ def test_crlf_frontmatter_parses_the_same_as_lf() -> None:
 
 
 def test_every_shipped_model_role_is_one_the_router_knows() -> None:
-    assert MODEL_ROLES == {"main", "plan", "fast"}
+    assert {"main", "plan", "fast"} == MODEL_ROLES
     for definition in BUILTIN_AGENTS.values():
         assert definition.model in MODEL_ROLES
 
@@ -159,7 +159,7 @@ def test_a_missing_agents_directory_is_normal_and_yields_nothing(tmp_path: Path)
 def test_one_broken_file_fails_the_load_instead_of_disappearing(tmp_path: Path) -> None:
     (tmp_path / "ok.md").write_text(GOOD, encoding="utf-8")
     (tmp_path / "bad.md").write_text("---\nname: b\ntool: [read]\n---\nb\n", encoding="utf-8")
-    with pytest.raises(FrontmatterError, match="bad.md:3"):
+    with pytest.raises(FrontmatterError, match=re.escape("bad.md:3")):
         load_directory(tmp_path)
 
 

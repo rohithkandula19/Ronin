@@ -139,6 +139,14 @@ class CompactionPolicy:
     #: Defaults to no ceiling because the point of retention is *full* text; a
     #: caller whose files are enormous can bound it and get a marked truncation.
     max_retained_chars: int | None = None
+    #: Ceiling on how many paths are retained at all; ``None`` for no ceiling.
+    #: Unbounded by default, and that default is load-bearing: it is what makes a
+    #: file edited in turn 3 still answerable in turn 200. Setting it keeps the
+    #: most recently touched paths and **gives that guarantee up** — a session
+    #: that touches more unique files than the window can hold their results is
+    #: the case where compaction alone cannot get under the trigger, and the
+    #: caller has to choose which property to keep.
+    max_retained_paths: int | None = None
 
     def __post_init__(self) -> None:
         if self.context_window <= 0:
@@ -155,6 +163,8 @@ class CompactionPolicy:
             )
         if self.max_retained_chars is not None and self.max_retained_chars <= 0:
             raise ValueError("CompactionPolicy.max_retained_chars must be positive or None")
+        if self.max_retained_paths is not None and self.max_retained_paths <= 0:
+            raise ValueError("CompactionPolicy.max_retained_paths must be positive or None")
 
     @property
     def trigger_tokens(self) -> int:
@@ -201,6 +211,20 @@ class CompactionResult:
     missing_sections: tuple[str, ...] = ()
     #: Orphan tool blocks :func:`repair_pairing` had to remove. Should be zero.
     dropped_blocks: int = 0
+    #: The policy's trigger, carried so a caller can see the one case compaction
+    #: cannot fix on its own: retained tool results alone exceeding the trigger.
+    trigger_tokens: int = 0
+
+    @property
+    def still_over_trigger(self) -> bool:
+        """Whether the compacted transcript is *still* at or above the trigger.
+
+        True means retention (or the pinned tail) is bigger than the budget allows,
+        and the orchestrator must escalate — bound ``max_retained_paths``, bound
+        ``max_retained_chars``, or start a fresh session. Compacting again would
+        change nothing, and a caller that loops on ``should_compact`` without
+        checking this spins."""
+        return bool(self.trigger_tokens) and self.token_estimate_after >= self.trigger_tokens
 
 
 # --------------------------------------------------------------------------- #
@@ -429,11 +453,13 @@ async def maybe_compact(
     if not should_compact(
         messages, policy=policy, pinned_prefix_tokens=pinned_prefix_tokens
     ):
+        total = transcript_tokens(messages)
         return CompactionResult(
             messages=tuple(messages),
             compacted=False,
-            token_estimate_before=transcript_tokens(messages),
-            token_estimate_after=transcript_tokens(messages),
+            token_estimate_before=total,
+            token_estimate_after=total,
+            trigger_tokens=policy.trigger_tokens,
         )
     return await compact(messages, policy=policy, summarizer=summarizer)
 
@@ -456,6 +482,7 @@ async def compact(
             compacted=False,
             token_estimate_before=before,
             token_estimate_after=before,
+            trigger_tokens=policy.trigger_tokens,
         )
 
     head = list(messages[: plan.head_end])
@@ -513,6 +540,7 @@ async def compact(
         summarizer_error=error,
         missing_sections=missing_sections(summary),
         dropped_blocks=repaired,
+        trigger_tokens=policy.trigger_tokens,
     )
 
 
@@ -648,15 +676,20 @@ def _retained_couples(
     """
     latest = latest_tool_result_per_path(messages)
     order: dict[str, int] = {}
-    for message in messages:
+    for index, message in enumerate(messages):
         for block in message.content_blocks:
             if not isinstance(block, ToolUse):
                 continue
             path = file_path_from_arguments(block.arguments)
-            if path is not None and path in latest and path not in order:
-                order[path] = len(order)
+            if path is not None and path in latest:
+                order[path] = index
+    selected = sorted(latest, key=lambda p: order.get(p, 0))
+    if policy.max_retained_paths is not None and len(selected) > policy.max_retained_paths:
+        # Keep the most recently touched. See the field's docstring for what this
+        # costs: an early-turn file can fall out of the retained set entirely.
+        selected = selected[-policy.max_retained_paths :]
     couples: list[tuple[str, tuple[Message, Message]]] = []
-    for path in sorted(latest, key=lambda p: order.get(p, 0)):
+    for path in selected:
         use, result = latest[path]
         content = result.content
         if policy.max_retained_chars is not None:

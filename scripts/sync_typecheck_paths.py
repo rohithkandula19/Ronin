@@ -46,27 +46,58 @@ def test_dirs() -> list[str]:
     return found
 
 
-def test_modules() -> list[str]:
-    """Every test module basename, deduplicated.
+#: Everything pytest collects, from `testpaths` in pyproject.toml. The collision
+#: check has to span all of it, not just `tests/` — see `assert_no_collisions`.
+COLLECTED_ROOTS = ("packages", "apps", "tests", "training")
 
-    Two directories holding the same basename would collide under
-    ``explicit_package_bases``; that is a real problem with the non-package test
-    layout, so surface it here rather than letting mypy report it obscurely.
+
+def assert_no_collisions() -> None:
+    """Fail if two non-package modules anywhere pytest collects share a basename.
+
+    A directory without ``__init__.py`` contributes its modules to ``sys.path`` by
+    bare basename, so two of them cannot coexist: the first one imported wins and
+    the second silently resolves to it. The symptom is an ``ImportError`` for a name
+    the *other* file does not export, reported against a test that has nothing to do
+    with the change — which is exactly as confusing as it sounds.
+
+    This has now bitten twice. First ``tests/agents/harness.py`` shadowed
+    ``tests/tools/harness.py`` and broke seven tool tests. Then, with an earlier
+    version of this check that only looked under ``tests/``,
+    ``tests/agents/test_hooks.py`` collided with ``packages/cli/tests/test_hooks.py``
+    and the suite went red again — the narrow check had reported "up to date" and
+    bought false confidence. So the scope here is every root pytest collects.
     """
     seen: dict[str, str] = {}
     collisions: list[str] = []
-    for name in test_dirs():
-        for path in sorted((TESTS / name).glob("*.py")):
-            stem = path.stem
-            if stem in seen and seen[stem] != name:
-                collisions.append(f"tests/{seen[stem]}/{stem}.py vs tests/{name}/{stem}.py")
-            seen.setdefault(stem, name)
+    for root_name in COLLECTED_ROOTS:
+        root = ROOT / root_name
+        if not root.is_dir():
+            continue
+        for path in sorted(root.rglob("*.py")):
+            if "__pycache__" in path.parts or ".venv" in path.parts:
+                continue
+            if (path.parent / "__init__.py").exists():
+                continue  # a real package; its modules are namespaced
+            relative = str(path.relative_to(ROOT))
+            if path.stem in seen and seen[path.stem] != relative:
+                collisions.append(f"{seen[path.stem]} vs {relative}")
+            seen.setdefault(path.stem, relative)
     if collisions:
         raise SystemExit(
-            "duplicate test module basenames across non-package test dirs "
-            "(mypy would conflate them):\n  " + "\n  ".join(collisions)
+            "duplicate module basenames in non-package directories pytest collects; "
+            "the second import silently resolves to the first:\n  "
+            + "\n  ".join(collisions)
         )
-    return sorted(seen)
+
+
+def test_modules() -> list[str]:
+    """Every ``tests/*`` module basename, for the mypy override list."""
+    assert_no_collisions()
+    return sorted(
+        path.stem
+        for name in test_dirs()
+        for path in (TESTS / name).glob("*.py")
+    )
 
 
 def render() -> str:

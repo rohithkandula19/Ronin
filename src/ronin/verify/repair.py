@@ -357,6 +357,12 @@ class RepairReport:
     baseline: FailureSnapshot
     stable_signature: str = ""
     diagnosis: str = ""
+    #: How many *runs* produced :attr:`stable_signature`, counting the failing run
+    #: that started the loop. The stop rule is stated in these terms because "the
+    #: same test failed identically three times" is three observations, which is
+    #: two wasted edits — stopping there is one edit cheaper than waiting for a
+    #: third attempt to tell us what we already knew.
+    identical_seen: int = 0
 
     @property
     def fixed(self) -> bool:
@@ -400,6 +406,12 @@ class RepairReport:
             )
             if attempt.note:
                 lines.append(f"     note: {attempt.note}")
+
+        if self.verdict is RepairVerdict.STUCK:
+            lines.append(
+                f"     (that signature has now been seen {self.identical_seen} times, "
+                "counting the run before the first edit — that is the stop rule)"
+            )
 
         lines.append("")
         lines.append(f"what i think is wrong: {self.diagnosis}")
@@ -489,6 +501,7 @@ async def repair_loop(
                 baseline=baseline,
                 stable_signature=snapshot.signature,
                 diagnosis=_STUCK_DIAGNOSIS.format(n=len(attempts)),
+                identical_seen=seen[snapshot.signature],
             )
         previous = snapshot
 

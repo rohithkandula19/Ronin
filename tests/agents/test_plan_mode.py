@@ -1,6 +1,7 @@
 """plan mode: the registry guarantee, and the plan → approval → objective path."""
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -251,7 +252,7 @@ def test_a_plan_cannot_be_constructed_empty() -> None:
 
 
 def test_plan_steps_must_be_numbered_in_order() -> None:
-    with pytest.raises(ValueError, match="numbered 1..n"):
+    with pytest.raises(ValueError, match=re.escape("numbered 1..n")):
         Plan(steps=(PlanStep(index=2, text="second"),))
 
 

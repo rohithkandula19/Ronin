@@ -121,7 +121,7 @@ async def demo_plan_registry(base: ToolRegistry) -> None:
     print("\n  And widening it by hand fails loudly rather than quietly:")
     try:
         assert_read_only(base.subset(["read", "grep", "write"]))
-    except Exception as exc:  # noqa: BLE001 - the demo is showing the message
+    except Exception as exc:  # the demo exists to show the message
         print(f"      ✗ {type(exc).__name__}: {exc}")
 
 
@@ -143,7 +143,7 @@ def demo_plan_pinning() -> None:
     print("\n  An unparseable answer is an error that keeps the raw text:")
     try:
         parse_plan("I had a look and honestly it seems fine to me.")
-    except Exception as exc:  # noqa: BLE001 - the demo is showing the message
+    except Exception as exc:  # the demo exists to show the message
         print(f"      ✗ {type(exc).__name__}: {exc}")
         print(f"        raw preserved: {getattr(exc, 'raw', '')!r}")
 

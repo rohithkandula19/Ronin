@@ -102,7 +102,11 @@ class Memory:
             "Ordered least-local first. Where two files conflict, the LAST one wins.",
         ]
         for file in sections:
+            # A rule between sections, because a RONIN.md carries its own `##`
+            # headings and without a separator the provenance label reads as a
+            # sibling of the content it introduces.
             parts.append("")
+            parts.append("---")
             parts.append(f"## {file.label()}")
             parts.append("")
             parts.append(file.text.strip())
