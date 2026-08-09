@@ -116,6 +116,7 @@ module = [
     "test_golden_streams",
     "test_integration",
     "test_jsonargs",
+    "test_jsonrpc",
     "test_loop",
     "test_net",
     "test_normalize",

@@ -15,6 +15,7 @@ from persistence_harness import (
 )
 
 from ronin.core.types import (
+    AgentState,
     Budget,
     Message,
     Role,
@@ -111,7 +112,6 @@ def test_events_round_trip_through_a_real_file(tmp_path: Path) -> None:
 def test_an_empty_file_reads_as_nothing(tmp_path: Path) -> None:
     path = tmp_path / "empty.jsonl"
     path.write_bytes(b"")
-    assert read_events(path) == read_events(path)
     assert read_events(path).events == ()
     assert read_events(path).header is None
 
@@ -416,7 +416,7 @@ def test_the_sidecar_is_never_ahead_of_the_log(tmp_path: Path) -> None:
             TurnEnd(
                 turn_index=0,
                 state=TurnState.DONE,
-                agent_state=full_state().__class__(budget=Budget(spent_usd=0.5)),
+                agent_state=AgentState(budget=Budget(spent_usd=0.5)),
             )
         )
         sidecar = json.loads(meta_path(directory, SESSION).read_text(encoding="utf-8"))
