@@ -94,6 +94,14 @@ jobs:
       - name: README stats are current
         run: uv run python scripts/generate_readme_stats.py --check
 
+      # The reference pages under docs/site/ are derived from the real objects — the
+      # tool registry, the settings loader, the hook events, the provider table — so a
+      # page cannot disagree with the code without this going red. It earned the slot
+      # immediately: registering the local-adapter provider made providers.md stale and
+      # this is what said so.
+      - name: Docs site pages are current
+        run: uv run python docs/site/generate.py --check
+
       # The manifest is what makes a *deleted* eval fixture detectable: the loader
       # refuses a tree that disagrees with it. Generated, so it must be current.
       - name: Eval manifest is current

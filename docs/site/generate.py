@@ -955,6 +955,7 @@ _PROTOCOL_TITLE: Mapping[str, str] = {
     "_build_openai_compat": "OpenAI-compatible (including every local server)",
     "_build_moonshot": "Moonshot / Kimi",
     "_build_mlx": "MLX, in-process on Apple silicon",
+    "_build_local_adapter_entry": "the fine-tuned adapter, in-process and offline",
 }
 
 _PROTOCOL_DOC: Mapping[str, str] = {
@@ -962,6 +963,7 @@ _PROTOCOL_DOC: Mapping[str, str] = {
     "_build_openai_compat": "OpenAI chat-completions",
     "_build_moonshot": "Moonshot (OpenAI-shaped, vendor quirks handled)",
     "_build_mlx": "in-process, no HTTP at all",
+    "_build_local_adapter_entry": "in-process; picks mlx or transformers for you",
 }
 
 _KEY_DOC: Mapping[str, str] = {
@@ -969,6 +971,7 @@ _KEY_DOC: Mapping[str, str] = {
     "_build_openai_compat": "`api_key_env`, or nothing for a keyless local server",
     "_build_moonshot": "`api_key_env`",
     "_build_mlx": "no key; the weights are on disk",
+    "_build_local_adapter_entry": "no key, ever — this is the $0 lane",
 }
 
 _SETUP: Mapping[str, tuple[str, ...]] = {
@@ -985,6 +988,38 @@ _SETUP: Mapping[str, tuple[str, ...]] = {
         "",
         "Needs the `http` extra and `ANTHROPIC_API_KEY` in the environment. "
         "`base_url` defaults to the public API and only needs setting for a proxy.",
+    ),
+    "_build_local_adapter_entry": (
+        "The fine-tuned adapter, served from local weights. **No API key, no network, "
+        "no cost** — which makes it the only lane that can run the eval suite under a "
+        "$0 budget, and the reason the whole offline path exists.",
+        "",
+        "```toml",
+        "[roles]",
+        'main = "ronin-qwen-local"',
+        "# Point every role at it, not just main: a config that routes `fast` to a",
+        "# hosted model needs a key, which defeats the purpose.",
+        'plan = "ronin-qwen-local"',
+        'fast = "ronin-qwen-local"',
+        "",
+        "[models.ronin-qwen-local]",
+        'provider = "local-adapter"',
+        'model = "Qwen/Qwen2.5-Coder-1.5B-Instruct"',
+        "```",
+        "",
+        "The backend is chosen for you — `mlx_lm` on Apple silicon, `transformers` "
+        "elsewhere — and `RONIN_LOCAL_BACKEND` overrides it. Set `RONIN_ADAPTER` to a "
+        "trained checkpoint directory to serve the fine-tune; leave it unset to run "
+        "the bare base model.",
+        "",
+        "A checkpoint that has a config but no weights is **refused at startup** "
+        "rather than silently falling back to the base model. Serving the base when "
+        "the adapter was asked for produces a number that reads as a measurement of "
+        "the fine-tune and is not one.",
+        "",
+        "The adapter itself teaches *ronin-native behaviour* — tool syntax, gate "
+        "handling, recovery, planning. It does **not** add coding knowledge, and a "
+        "1.5B model is not a substitute for a frontier one on hard tasks.",
     ),
     "_build_openai_compat": (
         "This one adapter covers hosted providers and every local server, because "

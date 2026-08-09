@@ -34,6 +34,7 @@ variable instead, because a config file with a secret in it ends up in a git his
 | `provider =` | wire protocol | default base url | key from |
 |---|---|---|---|
 | `anthropic` | Anthropic messages API | — | `api_key_env` |
+| `local-adapter` | in-process; picks mlx or transformers for you | — | no key, ever — this is the $0 lane |
 | `mlx` | in-process, no HTTP at all | — | no key; the weights are on disk |
 | `kimi` | Moonshot (OpenAI-shaped, vendor quirks handled) | — | `api_key_env` |
 | `moonshot` | Moonshot (OpenAI-shaped, vendor quirks handled) | — | `api_key_env` |
@@ -67,6 +68,31 @@ api_key_env = "ANTHROPIC_API_KEY"
 ```
 
 Needs the `http` extra and `ANTHROPIC_API_KEY` in the environment. `base_url` defaults to the public API and only needs setting for a proxy.
+
+### the fine-tuned adapter, in-process and offline
+
+Reached by `provider = "local-adapter"`.
+
+The fine-tuned adapter, served from local weights. **No API key, no network, no cost** — which makes it the only lane that can run the eval suite under a $0 budget, and the reason the whole offline path exists.
+
+```toml
+[roles]
+main = "ronin-qwen-local"
+# Point every role at it, not just main: a config that routes `fast` to a
+# hosted model needs a key, which defeats the purpose.
+plan = "ronin-qwen-local"
+fast = "ronin-qwen-local"
+
+[models.ronin-qwen-local]
+provider = "local-adapter"
+model = "Qwen/Qwen2.5-Coder-1.5B-Instruct"
+```
+
+The backend is chosen for you — `mlx_lm` on Apple silicon, `transformers` elsewhere — and `RONIN_LOCAL_BACKEND` overrides it. Set `RONIN_ADAPTER` to a trained checkpoint directory to serve the fine-tune; leave it unset to run the bare base model.
+
+A checkpoint that has a config but no weights is **refused at startup** rather than silently falling back to the base model. Serving the base when the adapter was asked for produces a number that reads as a measurement of the fine-tune and is not one.
+
+The adapter itself teaches *ronin-native behaviour* — tool syntax, gate handling, recovery, planning. It does **not** add coding knowledge, and a 1.5B model is not a substitute for a frontier one on hard tasks.
 
 ### MLX, in-process on Apple silicon
 

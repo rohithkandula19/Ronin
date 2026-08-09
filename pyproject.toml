@@ -184,6 +184,7 @@ module = [
     "test_ronin_evals_swebench",
     "test_ronin_evals_task",
     "test_ronin_evals_taxonomy",
+    "test_ronin_local_adapter",
     "test_ronin_mcp_client",
     "test_ronin_mcp_config",
     "test_ronin_mcp_integration",

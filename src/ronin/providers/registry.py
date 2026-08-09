@@ -13,6 +13,7 @@ from dataclasses import replace
 
 from .anthropic import AnthropicClient
 from .base import HttpTransport, ModelClient, Transport
+from .local_adapter import build_local_adapter
 from .mlx_local import LOCAL_DEFAULTS, MLXClient
 from .openai_compat import KNOWN_BASE_URLS, MoonshotClient, OpenAICompatClient
 from .router import ModelSpec
@@ -85,6 +86,23 @@ def _build_mlx(
     )
 
 
+def _build_local_adapter_entry(
+    spec: ModelSpec, transport: Transport, env: Mapping[str, str] | None
+) -> ModelClient:
+    """The ``local-adapter`` provider: the fine-tuned adapter, served in-process.
+
+    A thin forward to :func:`~ronin.providers.local_adapter.build_local_adapter`,
+    which already has this exact signature — the indirection exists only so the
+    ``ADAPTERS`` entry reads like its neighbours rather than reaching into another
+    module's namespace.
+
+    Returns the *unshimmed* client on purpose: :func:`build_client` applies the shim
+    from capabilities, and a builder that shimmed itself would be shimmed twice —
+    which emits the tool-call tags twice and parses neither.
+    """
+    return build_local_adapter(spec, transport, env)
+
+
 #: Every provider Ronin can talk to. One entry per *wire protocol*, not per
 #: vendor — which is why eight OpenAI-compatible hosts share a single line.
 ADAPTERS: Mapping[str, Builder] = {
@@ -102,6 +120,10 @@ ADAPTERS: Mapping[str, Builder] = {
     "moonshot": _build_moonshot,
     "kimi": _build_moonshot,
     "mlx": _build_mlx,
+    # The fine-tuned adapter, served in-process. Distinct from "mlx" because it
+    # picks its own backend (mlx on Apple silicon, transformers elsewhere) and
+    # carries the adapter path, whereas "mlx" is the generic Apple-silicon lane.
+    "local-adapter": _build_local_adapter_entry,
 }
 
 
