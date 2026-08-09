@@ -76,11 +76,18 @@ _BANNER = re.compile(
     r"collected \d+|collecting|cachedir:|Found \d+ errors?|Success: no issues)"
 )
 
+#: A source location *after* normalization: the line number is already gone, so
+#: the patterns below have to accept the ``L`` token as well as raw digits (they
+#: are also used directly on un-normalized text by callers' tests).
+_LOC = r"(?:L|\d+(?::\d+)?)"
+
 _PYTEST_FAILED = re.compile(r"^(?:FAILED|ERROR)\s+(\S+?)(?:\s+-\s+(.*))?$")
 _PYTEST_HEADER = re.compile(r"^_{3,}\s+(.+?)\s+_{3,}$")
-_PYTEST_ASSERT = re.compile(r"^E\s{2,}(.*)$")
-_MYPY = re.compile(r"^(?P<file>[^\s:]+):(?P<line>\d+)(?::\d+)?:\s*error:\s*(?P<msg>.*)$")
-_RUFF = re.compile(r"^(?P<file>[^\s:]+):(?P<line>\d+):(?P<col>\d+):\s*(?P<code>[A-Z]+\d+)\s+(?P<msg>.*)$")
+_PYTEST_ASSERT = re.compile(r"^E\s+(.*)$")
+_RUFF = re.compile(
+    rf"^(?P<file>[^\s:]+):{_LOC}:\s*(?P<code>[A-Z]{{1,4}}\d{{3,4}})\s+(?P<msg>.*)$"
+)
+_MYPY = re.compile(rf"^(?P<file>[^\s:]+):{_LOC}:\s*error:\s*(?P<msg>.*)$")
 _PYTEST_SUMMARY = re.compile(r"\b(\d+) failed\b")
 _PYTEST_ERRORS = re.compile(r"\b(\d+) errors?\b")
 
@@ -137,7 +144,6 @@ def parse_failures(output: str) -> tuple[Failure, ...]:
             failures.append(failure)
 
     current_test: str | None = None
-    summaries: dict[str, str] = {}
 
     for raw in output.splitlines():
         line = normalize_line(raw)
@@ -151,11 +157,13 @@ def parse_failures(output: str) -> tuple[Failure, ...]:
 
         summary = _PYTEST_FAILED.match(line)
         if summary is not None:
-            where = summary.group(1)
-            detail = (summary.group(2) or "").strip()
-            if detail:
-                summaries[where] = detail
-            add(Failure(kind=FailureKind.TEST, where=where, detail=detail))
+            add(
+                Failure(
+                    kind=FailureKind.TEST,
+                    where=summary.group(1),
+                    detail=(summary.group(2) or "").strip(),
+                )
+            )
             continue
 
         assertion = _PYTEST_ASSERT.match(line)
@@ -192,10 +200,10 @@ def parse_failures(output: str) -> tuple[Failure, ...]:
             continue
 
     if failures:
-        return _collapse(failures, summaries)
+        return _collapse(failures)
 
-    body = [line for line in (normalize_line(l) for l in output.splitlines()) if line]
-    meaningful = [line for line in body if not _BANNER.match(line)]
+    normalized = (normalize_line(raw) for raw in output.splitlines())
+    meaningful = [line for line in normalized if line and not _BANNER.match(line)]
     if not meaningful:
         return ()
     return (
@@ -207,24 +215,45 @@ def parse_failures(output: str) -> tuple[Failure, ...]:
     )
 
 
-def _collapse(failures: list[Failure], summaries: dict[str, str]) -> tuple[Failure, ...]:
-    """Drop the empty-detail placeholder when a richer record exists.
+def _collapse(failures: list[Failure]) -> tuple[Failure, ...]:
+    """One record per failing test; type and lint errors stay one-per-message.
 
-    pytest names a failure twice: once in the section header with its ``E`` lines
-    and once in the short summary. Keeping both is harmless for stability but
-    makes the count wrong, and the count is what "progress" is measured with.
+    pytest names the same failure twice — once in the ``____ test_x ____`` section
+    with its ``E`` assertion lines, once in the short summary as
+    ``FAILED path::test_x`` — and counting both makes "3 failing" read as 6, which
+    breaks the progress comparison the repair loop runs on. Type and lint output
+    is the opposite: several distinct errors legitimately share one file, so
+    collapsing by location there would hide failures.
     """
-    kept: list[Failure] = []
-    detailed = {failure.where for failure in failures if failure.detail}
+    full_ids = {
+        failure.where for failure in failures if failure.kind is FailureKind.TEST and "::" in failure.where
+    }
+    best: dict[str, Failure] = {}
+    others: list[Failure] = []
     for failure in failures:
-        if not failure.detail and failure.where in detailed:
+        if failure.kind is not FailureKind.TEST:
+            others.append(failure)
             continue
-        if failure.kind is FailureKind.TEST and not failure.detail:
-            fallback = summaries.get(failure.where, "")
-            kept.append(replace(failure, detail=fallback))
-            continue
-        kept.append(failure)
-    return tuple(kept)
+        where = _canonical_test_id(failure.where, full_ids)
+        current = best.get(where)
+        if current is None or len(failure.detail) > len(current.detail):
+            best[where] = replace(failure, where=where)
+    return (*best.values(), *others)
+
+
+def _canonical_test_id(where: str, full_ids: set[str]) -> str:
+    """Map a section-header name onto the full ``path::test`` id when one exists.
+
+    ``____ TestThing.test_x ____`` and ``FAILED tests/t.py::TestThing::test_x`` are
+    the same failure, and only the second form is unambiguous.
+    """
+    if where in full_ids:
+        return where
+    suffix = where.replace(".", "::")
+    for candidate in full_ids:
+        if candidate.endswith(f"::{suffix}") or candidate.endswith(f"::{where}"):
+            return candidate
+    return where
 
 
 def failure_signature(output: str) -> str:

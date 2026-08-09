@@ -282,6 +282,7 @@ def parse_plan(text: str) -> Plan:
                 bodies[-1].append(line.strip())
             continue
 
+        is_heading = _HEADING.match(line) is not None
         stripped = _HEADING.sub("", line).strip()
         if not stripped:
             continue
@@ -295,6 +296,10 @@ def parse_plan(text: str) -> Plan:
             bodies.append([_clean(bullet.group(1))])
             continue
 
+        if is_heading:
+            # A heading is structure, not reasoning. "## Plan" landing in the
+            # rationale reads as though the model said the word "Plan" to us.
+            continue
         if not bodies:
             preamble.append(stripped)
         elif line[:1] in {" ", "\t"}:

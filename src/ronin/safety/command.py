@@ -209,7 +209,9 @@ class Segment:
         ``^git status`` survive ``env GIT_PAGER=cat /usr/bin/git status`` — and what
         stops ``r''m -rf /`` from dodging a rule written against ``rm``.
         """
-        return " ".join(self.argv)
+        if not self.argv:
+            return ""
+        return " ".join((self.binary, *self.argv[1:]))
 
     @property
     def flags(self) -> tuple[str, ...]:
@@ -343,7 +345,6 @@ class _Lexer:
         self.text = text
         self.i = 0
         self.items: list[_Item] = []
-        self.heredocs: list[_Here] = []
         self._pending: list[_Here] = []
         self._start: int | None = None
         self._raw: list[str] = []
@@ -768,9 +769,9 @@ def _parse_into(
 ) -> None:
     if depth > _MAX_DEPTH or not text.strip():
         return
-    items, heredocs = _Lexer(text).run()
-    heredoc_bodies = tuple(here.body for here in heredocs)
+    items = _Lexer(text).run()
     for group in _group_items(items):
+        heredoc_bodies = tuple(here.body for here in group.heredocs)
         binary, argv, prefixes, assignments = resolve_binary([w.value for w in group.words])
         binary_raw = group.words[0].raw if group.words else ""
         segment = Segment(
@@ -787,7 +788,7 @@ def _parse_into(
             redirects=tuple(
                 Redirect(operator=r.operator, target=r.target.value) for r in group.redirects
             ),
-            heredocs=heredoc_bodies if binary else (),
+            heredocs=heredoc_bodies,
         )
         out.append(segment)
         index = len(out) - 1
@@ -812,23 +813,39 @@ def _parse_nested(
         for body in heredoc_bodies:
             _parse_into(body, out, depth=depth + 1, parent=index, origin=Origin.HEREDOC)
     if segment.binary in EVAL_BINARIES and len(segment.argv) > 1:
-        _parse_into(
-            " ".join(segment.argv[1:]), out, depth=depth + 1, parent=index, origin=Origin.EVAL
-        )
+        payload = " ".join(segment.argv[1:])
+        # `eval "$(curl …)"` already yielded the inner fetch as a substitution segment;
+        # re-parsing the wrapper would duplicate it and invent a nonsense binary.
+        if not _is_bare_substitution(payload):
+            _parse_into(payload, out, depth=depth + 1, parent=index, origin=Origin.EVAL)
     flags = CODE_INTERPRETERS.get(segment.binary)
     if flags is not None:
         payload = _payload_after(segment.argv, flags)
         if payload:
-            # Commas become spaces so `subprocess.run("rm -rf /", shell=True)` splits
-            # into words the resolver can see. Crude, and it only has to be good
-            # enough to stop a payload from hiding behind Python's punctuation.
             _parse_into(
-                payload.replace(",", " "),
+                _flatten_code(payload),
                 out,
                 depth=depth + 1,
                 parent=index,
                 origin=Origin.INTERPRETER,
             )
+
+
+def _is_bare_substitution(payload: str) -> bool:
+    stripped = payload.strip()
+    return stripped.startswith(("$(", "`")) and stripped.endswith((")", "`"))
+
+
+#: Punctuation that separates words in a programming language but glues them together
+#: in shell. Flattening it is what lets ``os.system('rm -rf /')`` be seen as ``rm``
+#: rather than as one opaque word. It is a heuristic over code, not a language parser,
+#: and it is only ever used on an interpreter's inline payload — which is escalated to
+#: `ask` on its own merits, so a false split costs a prompt and nothing worse.
+_CODE_PUNCTUATION = str.maketrans({",": " ", "'": " ", '"': " ", "+": " "})
+
+
+def _flatten_code(payload: str) -> str:
+    return payload.translate(_CODE_PUNCTUATION)
 
 
 #: Recursion ceiling for nested substitution. A hand-written string can nest `$( )`

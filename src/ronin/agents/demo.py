@@ -30,7 +30,6 @@ from .definitions import (
 from .hooks import HookConfig, HookEvent, HookRunner
 from .plan_mode import (
     PLAN_MODE_TOOLS,
-    PLAN_MODEL_ROLE,
     approve,
     assert_read_only,
     enter_plan_mode,
@@ -54,7 +53,7 @@ This keeps the change to three files and leaves the retry logic alone.
 WRITER_DEFINITION = """\
 ---
 name: doc-writer
-description: Writes and updates documentation under docs/. Use it for README and
+description: Updates documentation under docs/ when the change is prose, not code.
 model: fast
 tools: [read, glob, grep, write]
 write_paths:
@@ -135,8 +134,8 @@ def demo_plan_pinning() -> None:
     print(f"  rationale: {plan.rationale[:70]}…\n")
 
     decision = approve(plan, note="looks right, go")
-    print(f"  approved → mode becomes {decision.mode.value!r} "
-          f"(was {PLAN_MODEL_ROLE!r} mode)")
+    print(f"  approved → session mode becomes {decision.mode.value!r}, "
+          f"leaving plan mode behind")
     print("  pinned into context every turn from here on:\n")
     for line in decision.objective.split("\n"):
         print(f"      │ {line}")
@@ -165,8 +164,8 @@ def demo_definitions(root: Path) -> None:
 
     print("\n  Dispatch fallback (the model normally names the type itself):")
     for task in (
-        "find where the retry backoff is implemented",
-        "add a regression test for the CRLF bug",
+        "where is the retry backoff handled in this repository",
+        "write a regression test for the CRLF bug",
         "order me a sandwich",
     ):
         chosen = select(task, catalogue)

@@ -27,9 +27,9 @@ names, per the SSE spec, because MCP puts more than one message on a stream.
 from __future__ import annotations
 
 import asyncio
-import os
 from collections import deque
-from collections.abc import AsyncIterator, Callable, Iterable, Mapping, Sequence
+from collections.abc import AsyncIterator, Iterable, Mapping, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -342,12 +342,6 @@ class Transport(Protocol):
         ...
 
 
-#: How the client makes a *fresh* transport when reconnecting. Reconnect must not
-#: reuse a transport object: a half-read stream is indistinguishable from a
-#: healthy one, and reusing it is how a "reconnect" silently keeps failing.
-TransportFactory = Callable[[], Transport]
-
-
 class HttpSender(Protocol):
     """POST a JSON body and yield the response body's bytes.
 
@@ -395,6 +389,8 @@ class StdioTransport:
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
         max_frame_bytes: int = MAX_FRAME_BYTES,
     ) -> None:
+        # env=None means "inherit whatever this process has". Nothing here reads
+        # os.environ: a session that wants a curated environment injects one.
         if streams is None and not command:
             raise ValueError(
                 "StdioTransport needs either streams (in-process, for tests and "
@@ -443,7 +439,7 @@ class StdioTransport:
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env=self._env if self._env is not None else dict(os.environ),
+                env=self._env,
                 cwd=self._cwd,
                 limit=READER_LIMIT,
             )
@@ -550,7 +546,7 @@ class StdioTransport:
             try:
                 await asyncio.wait_for(process.wait(), timeout=2.0)
             except (TimeoutError, ProcessLookupError):
-                with _suppress_process_errors():
+                with suppress(ProcessLookupError, OSError):
                     process.kill()
         task, self._stderr_task = self._stderr_task, None
         if task is not None:
@@ -578,16 +574,6 @@ async def _drain(reader: asyncio.StreamReader, sink: deque[str]) -> None:
         text = line.decode("utf-8", errors="replace").rstrip()
         if text:
             sink.append(text)
-
-
-class _suppress_process_errors:
-    """``contextlib.suppress`` without the import, for one two-line use."""
-
-    def __enter__(self) -> None:
-        return None
-
-    def __exit__(self, exc_type: object, exc: object, tb: object) -> bool:
-        return isinstance(exc, (ProcessLookupError, OSError))
 
 
 # --------------------------------------------------------------------------- #
@@ -861,7 +847,6 @@ __all__ = [
     "StdioTransport",
     "StreamPair",
     "Transport",
-    "TransportFactory",
     "TransportTimeout",
     "frames_of",
     "join_url",
