@@ -216,3 +216,14 @@ def test_a_sweep_with_no_passing_run_produces_no_sft_corpus_and_says_so(tmp_path
     assert counts.shortfall() == 3_000
     # The failures are still usable: that is the point of mining them separately.
     assert mine_all([bad])
+
+
+async def test_the_demo_runs_offline_and_reports_success(capsys):
+    """The demo is how a human sees this subsystem work, so it must not rot silently."""
+    from ronin_training.harvest.demo import main
+
+    assert await main() == 0
+    printed = capsys.readouterr().out
+    assert "rows failing the schema: 0" in printed
+    for name in ("malformed_tool_json", "ignored_denial", "looping", "edit_without_read"):
+        assert name in printed

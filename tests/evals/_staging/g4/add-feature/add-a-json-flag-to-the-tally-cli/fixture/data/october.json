@@ -1,0 +1,7 @@
+[
+  {"name": "alice", "hours": 3.5, "note": "review"},
+  {"name": "bob", "hours": 2.0, "note": "pairing"},
+  {"name": "alice", "hours": 4.0, "note": "migration"},
+  {"name": "carol", "hours": 1.25, "note": "triage"},
+  {"name": "bob", "hours": 0.5, "note": "standup"}
+]

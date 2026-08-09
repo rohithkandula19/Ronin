@@ -1,0 +1,25 @@
+id = "multi-file/thread-a-timeout-through-the-fetcher"
+category = "multi-file"
+prompt = """
+Every fetchkit request waits the same hard-coded 10 seconds, which is far too long
+for the health-check poller and far too short for the export endpoint.
+
+I want a per-call timeout: `client.get("/v1/things", timeout=2.5)`. It has to reach
+the transport that actually sends the request -- including when the caching transport
+is in the way -- and it has to be settable through the retry helper too. Ten seconds
+stays the default when nobody asks for anything.
+"""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = [
+  "fetchkit/transport.py",
+  "fetchkit/client.py",
+  "fetchkit/retry.py",
+  "fetchkit/backends/cached.py",
+  "tests/test_client.py",
+]
+max_turns = 16
+timeout_seconds = 180
+tags = ["python", "signature-change", "subclass-override", "layered-call-chain"]
+regression_gate = false

@@ -1,0 +1,19 @@
+id = "add-feature/render-the-invoice-as-csv"
+category = "add-feature"
+prompt = """Finance want the invoices as CSV so they can paste them into a spreadsheet instead of retyping the emailed text version.
+
+Add a `render_csv(invoice)` alongside `render_text` that returns the invoice as a CSV string: a header row `description,quantity,unit_price,amount`, then one row per line item with the money as plain numbers to two decimal places and no currency symbol, then a final row whose description is TOTAL and whose amount is the invoice total, with the quantity and unit_price columns left empty. For example a single 3 x 19.99 line comes out as
+
+    description,quantity,unit_price,amount
+    Bolts,3,19.99,59.97
+    TOTAL,,,59.97
+
+Leave `render_text` as it is — the emails still go out that way."""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = ["billing/invoice.py"]
+max_turns = 12
+timeout_seconds = 180
+tags = ["python", "serialization", "csv"]
+regression_gate = false

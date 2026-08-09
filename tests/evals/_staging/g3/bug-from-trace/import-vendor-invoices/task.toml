@@ -1,0 +1,30 @@
+id = "bug-from-trace/import-vendor-invoices"
+category = "bug-from-trace"
+prompt = """
+Traceback (most recent call last):
+  File "import_ledger.py", line 23, in <module>
+    sys.exit(main(sys.argv))
+             ^^^^^^^^^^^^^^
+  File "import_ledger.py", line 16, in main
+    invoices = load_invoices(source)
+               ^^^^^^^^^^^^^^^^^^^^^
+  File "ledgerimp/invoices.py", line 40, in load_invoices
+    return parse_invoices(read_text(path))
+                          ^^^^^^^^^^^^^^^
+  File "ledgerimp/reader.py", line 12, in read_text
+    return path.read_text()
+           ^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/pathlib.py", line 1059, in read_text
+    return f.read()
+           ^^^^^^^^
+  File "<frozen codecs>", line 322, in decode
+UnicodeDecodeError: 'utf-8' codec can't decode byte 0xfc in position 28: invalid start byte
+"""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = ["ledgerimp/reader.py"]
+max_turns = 12
+timeout_seconds = 120
+tags = ["python", "unicodedecodeerror", "encoding", "localization"]
+regression_gate = false

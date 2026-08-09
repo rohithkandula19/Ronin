@@ -1,0 +1,5 @@
+job,bytes_out,seconds
+export-nightly,524288000,42.5
+thumbnailer,10485760,3.25
+index-rebuild,0,
+mailer-digest,2097152,0.8

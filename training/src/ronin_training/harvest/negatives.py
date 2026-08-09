@@ -23,9 +23,14 @@ Not a general failure taxonomy — four named classes, chosen because they are w
 
 ``edit_without_read``
     A write or edit on a path never read — the exact rule ``ToolContext.read_files``
-    guards. A successful write also counts as a read, mirroring the tool's own
-    ``mark_read`` after writing, or the second edit of a file the model just wrote
-    would be mined as a violation it is not.
+    guards. Two nuances, both taken from the tools themselves rather than assumed:
+    ``edit``/``multi_edit`` require a prior read *unconditionally*, while ``write``
+    only refuses when the file **already exists** (``files.py``: ``if path.exists()
+    and not ctx.has_been_read(path)``), so a write that succeeded created a new file
+    and is not a violation. And a successful write counts as a read afterwards,
+    mirroring the tool's own ``mark_read``, or the second edit of a file the model
+    just wrote would be mined as a violation it is not. Measuring the existing corpus
+    without the first nuance produced 127 false positives against 33 real ones.
 
 Tool *names* are configurable because Ronin has shipped two registries: v1 named
 its file reader ``read_file`` and v2 names it ``read``. A miner with either name
@@ -62,10 +67,19 @@ class NegativeClass(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ToolRoles:
-    """Which tool names read and which write, per registry generation."""
+    """Which tool names read, which edit, and which overwrite — per registry generation.
+
+    ``writers`` and ``overwriters`` are separate because their read requirement is:
+    an edit of a file you have not seen is always a guess, while writing a file that
+    does not exist yet is ordinary work. Collapsing them makes every legitimate file
+    creation in the corpus look like a violation.
+    """
 
     readers: frozenset[str] = frozenset()
+    #: Require a prior read unconditionally (``edit``, ``multi_edit``).
     writers: frozenset[str] = frozenset()
+    #: Require a prior read only when the file already exists (``write``).
+    overwriters: frozenset[str] = frozenset()
 
     def is_reader(self, name: str) -> bool:
         return name in self.readers
@@ -73,12 +87,20 @@ class ToolRoles:
     def is_writer(self, name: str) -> bool:
         return name in self.writers
 
+    def is_overwriter(self, name: str) -> bool:
+        return name in self.overwriters
+
+    def touches_file(self, name: str) -> bool:
+        """Whether a successful call leaves the model having seen the file."""
+        return self.is_reader(name) or self.is_writer(name) or self.is_overwriter(name)
+
 
 #: Both shipped registries. v1 (``training/config/tool_registry.json``) and v2
 #: (``src/ronin/tools/files.py``) name the same operations differently.
 DEFAULT_TOOL_ROLES = ToolRoles(
     readers=frozenset({"read", "read_file"}),
-    writers=frozenset({"write", "write_file", "edit", "edit_file", "multi_edit"}),
+    writers=frozenset({"edit", "edit_file", "multi_edit"}),
+    overwriters=frozenset({"write", "write_file"}),
 )
 
 
@@ -271,7 +293,7 @@ def _mine_edit_without_read(
             path = _path_of(call)
             result = step.result_for(call.id)
             succeeded = result is None or result.ok
-            if roles.is_writer(call.name) and path and path not in read:
+            if path and path not in read and _violates_read_first(call, roles, succeeded):
                 found.append(
                     Negative(
                         trajectory=trajectory,
@@ -286,10 +308,23 @@ def _mine_edit_without_read(
                         evidence={"path": path, "writer": call.name},
                     )
                 )
-            if path and succeeded and (roles.is_reader(call.name) or roles.is_writer(call.name)):
+            if path and succeeded and roles.touches_file(call.name):
                 # A successful write marks the file read, exactly as the tool does.
                 read.add(path)
     return found
+
+
+def _violates_read_first(call: RecordedCall, roles: ToolRoles, succeeded: bool) -> bool:
+    """Whether this call broke the read-before-write rule as the tools define it.
+
+    An overwriting write is only a violation when the harness *refused* it: the guard
+    fires exactly when the file already exists and has not been read, so a write that
+    went through created a new file. Inferring a violation from a successful write
+    would be inventing a fact the transcript does not contain.
+    """
+    if roles.is_writer(call.name):
+        return True
+    return roles.is_overwriter(call.name) and not succeeded
 
 
 def mine(

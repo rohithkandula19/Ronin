@@ -1,0 +1,7 @@
+{
+  "columns": [
+    { "field": "subtotalMinor", "header": "Subtotal", "formatter": "formatMoney" },
+    { "field": "taxMinor", "header": "Tax", "formatter": "formatMoney" },
+    { "field": "taxRateBp", "header": "Rate", "formatter": "formatPercent" }
+  ]
+}

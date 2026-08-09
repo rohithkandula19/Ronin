@@ -67,12 +67,20 @@ if (Math.abs(totalKb - WANT_TOTAL) > 1e-9) {
   );
 }
 
+// The orders you get from comparing the sizes as text ("98" > "120.5" > "1024"),
+// with the two equal-size tags either way round depending on the comparator.
+const STRING_ORDERS = [
+  ["v1.1", "v1.4", "v1.0", "v1.3"].join(","),
+  ["v1.4", "v1.1", "v1.0", "v1.3"].join(","),
+];
 if (tags.length !== WANT_TAGS.length || tags.some((tag, i) => tag !== WANT_TAGS[i])) {
-  const sortedLexically = [...tags].join(",") === [...tags].sort().reverse().join(",");
+  const stringSorted = STRING_ORDERS.includes(tags.join(","));
   fail(
     "report.tags is " + JSON.stringify(tags) + ", expected " + JSON.stringify(WANT_TAGS) +
     " (largest bundle first, ties broken by tag ascending)" +
-    (sortedLexically ? " -- the order looks lexicographic, which is what comparing the string sizes gives: " + TYPE_LIE : "")
+    (stringSorted
+      ? " -- that is exactly the order you get comparing the sizes as text rather than as numbers: " + TYPE_LIE
+      : "")
   );
 }
 

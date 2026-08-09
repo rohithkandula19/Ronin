@@ -72,7 +72,9 @@ if sorted(got) != WANT:
         detail.append(f"unexpected {extra}")
     fail(
         f"plugin_inventory returned {got!r}: {', '.join(detail)} -- the manifest "
-        f"declares {len(WANT)} plugins across nested groups -- {STALE_NOTE}"
+        f"declares {len(WANT)} plugins and nests groups inside groups more than "
+        f"one level deep; nothing flattens it (load_manifest is a plain "
+        f"json.loads plus a version check), so every level has to be walked"
     )
 
 if got != WANT:

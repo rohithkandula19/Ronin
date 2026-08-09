@@ -234,8 +234,9 @@ def test_reading_before_editing_is_not_mined(tmp_path):
 
 
 def test_a_successful_write_counts_as_a_read_for_the_next_edit(tmp_path):
-    """Mirrors the tool's own ``mark_read`` after writing. Without this, the second
-    edit of a file the model just created would be mined as a violation it is not."""
+    """Two nuances at once. The write succeeded, so the file did not exist and creating
+    it was ordinary work — not a violation. And it now counts as read, so the following
+    edit of the file the model just wrote is not a violation either."""
     events = [
         *turn(
             index=0,
@@ -255,7 +256,7 @@ def test_a_successful_write_counts_as_a_read_for_the_next_edit(tmp_path):
     traj = load_recorded(
         tmp_path, "run-write-then-edit", events, task_id="t", prompt="p", tools=_TOOLS
     )
-    assert [n.step_index for n in mine(traj) if n.kind is NegativeClass.EDIT_WITHOUT_READ] == [0]
+    assert [n.step_index for n in mine(traj) if n.kind is NegativeClass.EDIT_WITHOUT_READ] == []
 
 
 def test_a_denied_write_does_not_count_as_a_read(tmp_path):
@@ -284,17 +285,68 @@ def test_class_counts_shows_a_zero_class_as_zero():
     assert class_counts(mine(clean)) == {str(k): 0 for k in NegativeClass}
 
 
-def test_a_run_with_no_recognised_reader_still_mines_the_write(tmp_path):
-    """v2 spells the reader ``read``; a miner configured for neither must not go blind."""
+def test_the_tool_names_are_configurable_because_two_registries_shipped(tmp_path):
+    """v1 spells the editor ``edit_file``, v2 spells it ``edit``. A miner configured for
+    only one goes silently blind on the other's transcripts."""
     events = turn(
         index=0,
-        calls=[("c0", "write_file", {"path": "src/a.py", "content": "x"})],
-        results=[("c0", "write_file", True, "ok", "")],
+        calls=[("c0", "edit_file", {"path": "src/a.py", "old_string": "1", "new_string": "2"})],
+        results=[("c0", "edit_file", True, "1 replacement", "")],
     )
     traj = load_recorded(tmp_path, "run-roles", events, task_id="t", prompt="p", tools=_TOOLS)
-    v2_only = ToolRoles(readers=frozenset({"read"}), writers=frozenset({"write", "edit"}))
+    v2_only = ToolRoles(
+        readers=frozenset({"read"}),
+        writers=frozenset({"edit", "multi_edit"}),
+        overwriters=frozenset({"write"}),
+    )
     assert class_counts(mine(traj, roles=v2_only))["edit_without_read"] == 0
     assert class_counts(mine(traj, roles=DEFAULT_TOOL_ROLES))["edit_without_read"] == 1
+
+
+def test_creating_a_new_file_is_not_an_edit_without_read(tmp_path):
+    """``write`` refuses only when the file already exists (``files.py``: ``if
+    path.exists() and not ctx.has_been_read(path)``). A write that went through created
+    a new file, so calling it a violation would fabricate a fact the run does not carry.
+    Measured on the shipped corpus, the naive rule gave 127 false positives to 33 real."""
+    events = turn(
+        index=0,
+        calls=[("c0", "write_file", {"path": "src/brand_new.py", "content": "x = 1\n"})],
+        results=[("c0", "write_file", True, "wrote 1 file", "")],
+    )
+    traj = load_recorded(tmp_path, "run-create", events, task_id="t", prompt="p", tools=_TOOLS)
+    assert class_counts(mine(traj))["edit_without_read"] == 0
+
+
+def test_a_write_the_guard_refused_is_mined(tmp_path):
+    """The refusal is the harness saying the file existed and had not been read — the
+    one signal that distinguishes an overwrite from a creation."""
+    events = turn(
+        index=0,
+        calls=[("c0", "write_file", {"path": "src/existing.py", "content": "x = 1\n"})],
+        results=[
+            (
+                "c0",
+                "write_file",
+                False,
+                "",
+                "src/existing.py already exists and has not been read in this session",
+            )
+        ],
+    )
+    traj = load_recorded(tmp_path, "run-clobber", events, task_id="t", prompt="p", tools=_TOOLS)
+    assert class_counts(mine(traj))["edit_without_read"] == 1
+
+
+def test_an_edit_that_slipped_through_is_still_a_violation(tmp_path):
+    """An edit requires a prior read unconditionally, so a run whose harness did not
+    enforce it still demonstrates the wrong behaviour and must still be mined."""
+    events = turn(
+        index=0,
+        calls=[("c0", "edit_file", {"path": "src/a.py", "old_string": "1", "new_string": "2"})],
+        results=[("c0", "edit_file", True, "1 replacement", "")],
+    )
+    traj = load_recorded(tmp_path, "run-slip", events, task_id="t", prompt="p", tools=_TOOLS)
+    assert class_counts(mine(traj))["edit_without_read"] == 1
 
 
 # --------------------------------------------------------------------------- #
@@ -427,8 +479,8 @@ def test_mining_is_ordered_by_step_so_a_report_reads_chronologically():
                 index=0,
                 calls=(
                     RecordedCall(
-                        id="a", name="write_file",
-                        arguments={"path": "x.py", "content": "1"},
+                        id="a", name="edit_file",
+                        arguments={"path": "x.py", "old_string": "1", "new_string": "2"},
                     ),
                 ),
             ),
