@@ -244,12 +244,43 @@ renderer that rewrote every line ending in the file. The fuzz cases read bytes.
 
 ---
 
+## The wiring (`ronin.session`)
+
+`task` is injected a `SubagentRunner`, and `ronin/session.py` is the module that
+supplies the real one. It is the orchestrator seat in `docs/ARCHITECTURE.md` §0 and
+the **only** module allowed to import the loop, the providers and the tools at once —
+which is precisely why it exists: something has to introduce three layers that are
+each written not to know about the others.
+
+```
+uv run python -m ronin.session_demo     # all three layers, offline
+```
+
+Five decisions live there, each a place where the obvious wiring is subtly wrong:
+
+1. **The fast model, always.** `for_subagent()` takes no role argument.
+2. **A subagent cannot spawn a subagent.** `task` is stripped from every child
+   registry. Depth-1 is a limit, not an oversight: unbounded nesting is one request
+   fanning out with no budget that sees the whole tree.
+3. **A subagent cannot escalate to the user.** Its policy denies anything requiring
+   approval. Forwarding would hang, or surface a prompt to a user who asked for
+   something else three steps ago.
+4. **A subagent gets its own `read_files`.** Sharing the parent's would mean a file the
+   *child* read counts as "seen" for the parent's `write` guard — quietly weakening the
+   one rule that prevents most destructive edits. There is a test for exactly this.
+5. **Failure is a value.** A stalled, capped or misconfigured child returns text the
+   parent can act on, labelled `[partial: …]` when the answer was cut off. Raising
+   would kill the parent's turn over a child's problem. `CancelledError` is the one
+   exception and propagates.
+
+The demo found one more gap: only subagents were reaching the ledger, so the per-role
+split showed a single row on a session where the main model had plainly just run.
+`Session.record_turn` bills the parent, and the demo now prints both.
+
 ## Honest status
 
-- **`task`'s runner is a stub outside tests.** The tool, its type registry, the tool
-  subsetting and the read-only guarantee are all real; what is injected is a callable
-  that runs a nested `run_turn`, and wiring that to `providers.router.for_subagent()` is
-  the next step. The demo passes a fake so you can see the shape.
+- ~~`task`'s runner is a stub outside tests.~~ **Done** — `ronin.session` wires it to a
+  real nested `run_turn` on `router.for_subagent()`. See below.
 - **`web_fetch`/`web_search` take injected callables** and nothing supplies real ones
   yet. There is no HTTP client and no search backend wired in; `providers.base.HttpTransport`
   is the obvious source for the first, and the second needs a provider decision.

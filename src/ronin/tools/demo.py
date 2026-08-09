@@ -37,8 +37,12 @@ def show(label: str, result: ToolResult) -> None:
         print(f"      … ({len(lines) - len(head)} more lines)")
 
 
-async def fake_runner(prompt: str, subagent: SubagentType) -> str:
-    """Stands in for a nested loop. The real one uses the `fast` model."""
+async def scripted_runner(prompt: str, subagent: SubagentType) -> str:
+    """Stands in for the wiring, which lives in ``ronin.session``.
+
+    This demo is about the *tools*; ``uv run python -m ronin.session_demo`` shows the
+    real nested turn on the fast model.
+    """
     return (
         f"[{subagent.name} subagent, tools={', '.join(subagent.tools)}]\n"
         f"Asked: {prompt}\n"
@@ -222,7 +226,7 @@ async def main() -> int:
         registry = build_registry(
             ctx,
             shell=shell,
-            subagent_runner=fake_runner,
+            subagent_runner=scripted_runner,
             fetch=fake_fetch,
             extract=fake_extract,
             search=fake_search,

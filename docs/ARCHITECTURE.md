@@ -272,10 +272,15 @@ Deliberate choices worth arguing about:
 prohibition *natural* rather than aspirational: the provider layer needs tool
 **descriptions**, and descriptions are core types.
 
-The rule is currently documentation. It should be enforced by a test that walks
-the import graph and fails on a violation — cheap, and the only version of this
-rule that survives contact with a deadline. **Not yet written** (this deliverable
-is types + contract only); it is the first thing to add alongside `loop/`.
+**These rules are now a gate, not documentation.** `tests/tools/test_boundaries.py`
+walks the import graph with `ast` and fails on a violation. It parses rather than
+imports, so a lazy `from ronin.providers... import` *inside a function* — the exact
+place a boundary quietly dissolves, deferred to "avoid the cycle" — is caught too.
+
+One module is exempt: `ronin/session.py`, the orchestrator seat, which exists to
+import all three layers and introduce them. The test asserts both halves of that —
+nothing else imports all three, *and* `session.py` still does. If the wiring ever
+migrates somewhere it should not be, the second assertion is what notices.
 
 ---
 
