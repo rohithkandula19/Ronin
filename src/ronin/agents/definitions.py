@@ -305,13 +305,19 @@ class AgentDefinition:
             raise ValueError(f"agent {self.name!r} needs max_iterations >= 1")
 
     def to_subagent_type(self) -> SubagentType:
-        """The value ``ronin.tools.task.TaskTool`` consumes, unchanged."""
+        """The value ``ronin.tools.task.TaskTool`` consumes.
+
+        ``model`` travels as ``model_role`` — a role *name*, which is all this layer
+        may know. The orchestrator resolves it against the router; an empty string
+        means the subagent default.
+        """
         return SubagentType(
             name=self.name,
             description=self.description,
             tools=self.tools,
             system_prompt=self.system_prompt,
             max_iterations=self.max_iterations,
+            model_role=self.model,
         )
 
 
