@@ -233,27 +233,29 @@ Deliberate choices worth arguing about:
 ## 3. Package boundaries and the dependency graph
 
 ```
-                        ┌──────────────┐
-                        │  core/types  │   imports nothing from ronin
-                        └──────▲───────┘
-        ┌──────────────┬───────┴───────┬──────────────┐
-        │              │               │              │
-   ┌────┴─────┐  ┌─────┴────┐   ┌──────┴─────┐  ┌─────┴──────┐
-   │providers/│  │  tools/   │   │  context/  │  │  safety/   │
-   └────▲─────┘  └─────▲────┘   └──────▲─────┘  └─────▲──────┘
-        │              │               │              │
-        └──────────────┴───────┬───────┴──────────────┘
-                               │
-                        ┌──────┴───────┐
-                        │    loop/     │   imports all of the above
-                        └──────▲───────┘
-                        ┌──────┴───────┐
-                        │ orchestrator/│   session, interrupt, resume
-                        └──────▲───────┘
-        ┌──────────────┬───────┴───────┬──────────────┐
-   ┌────┴─────┐  ┌─────┴────┐   ┌──────┴─────┐  ┌─────┴──────┐
-   │   tui/   │  │ headless/│   │    sdk/    │  │   lsp/     │
-   └──────────┘  └──────────┘   └────────────┘  └────────────┘
+                          ┌──────────────┐
+                          │  core/types  │  imports nothing from ronin
+                          └──────▲───────┘
+    ┌───────────┬───────────┬────┴───┬───────────┬───────────┬──────────┐
+┌───┴────┐ ┌────┴───┐ ┌─────┴──┐ ┌───┴────┐ ┌────┴─────┐ ┌───┴───┐ ┌────┴───┐
+│context/│ │safety/ │ │verify/ │ │persist/│ │providers/│ │tools/ │ │  ui/   │
+└───┬────┘ └────┬───┘ └─────┬──┘ └───┬────┘ └────┬─────┘ └───┬─┬─┘ └────┬───┘
+    │           │           │        │           │           │ │        │
+    │           │           │        │           │      ┌────┴─┴───┐    │
+    │           │           │        │           │      │ agents/  │    │
+    │           │           │        │           │      │  mcp/    │    │
+    │           │           │        │           │      └────┬─────┘    │
+    └───────────┴───────────┴────────┴─────┬─────┴───────────┘──────────┘
+                                           │
+                                  ┌────────┴────────┐
+                                  │  core/loop      │  providers + tools,
+                                  └────────▲────────┘  as injected protocols
+                                  ┌────────┴────────┐
+                                  │  session.py     │  the orchestrator seat
+                                  └────────▲────────┘
+                                  ┌────────┴────────┐
+                                  │     cli/        │  app, SDK, headless
+                                  └─────────────────┘
 ```
 
 **The rules, stated as prohibitions:**
@@ -263,10 +265,18 @@ Deliberate choices worth arguing about:
 | `core/` imports **nothing** from `ronin.*` | It is the shared vocabulary; a dependency here would make every other rule unenforceable. |
 | **nothing in `tools/` may import from `providers/`** | A tool that knows which model is calling it will special-case for one. Tools take arguments and return a `ToolResult`, full stop. |
 | **nothing in `providers/` may import from `tools/`** | An adapter that imports tools ends up executing them, which is how "the provider layer" quietly becomes a second agent loop. Adapters receive `ToolSpec` *data*. |
-| `loop/` imports both | It is the only place allowed to know about both halves — that is its job. |
-| `tui/`, `headless/`, `sdk/`, `lsp/` may import `core/` and `orchestrator/`, never `providers/` or `tools/` | A UI that reaches into the tool layer will eventually execute something. |
-| **nothing in `loop/`, `providers/`, `tools/` may import `tui/`** | The inverse of §4. |
-| `safety/` and `context/` depend only on `core/` | They must be testable against types, not against a live model or a live filesystem. |
+| `core/loop` takes both as **injected protocols** | It is the only place that needs both halves, and it gets them without importing either — which is what lets it be tested with a scripted fake and no network. |
+| `context/`, `safety/`, `verify/`, `persistence/`, `ui/` depend only on `core/` | They must be testable against types, not against a live model, a live shell, or a live filesystem. Each takes what it needs — a summarizer, a subprocess runner, an event stream — as an injected callable. |
+| `agents/` and `mcp/` may import `core/` **and** `tools/`, never `providers/` | Both *produce* tools, so they sit above the tool layer. Neither may learn which model is calling. |
+| `session.py` imports all three layers; nothing else does | It exists to introduce them. §0's orchestrator seat. |
+| `cli/` may import anything | It is the application. Everything below it is a library. |
+| **nothing below `cli/` may import `cli/`** | The inverse of §4: the loop emits `Event`s and never knows who is rendering them. |
+
+Every row above is a test. `tests/tools/test_boundaries.py` holds the table as
+`LAYER_RULES` and walks the import graph with `ast`, so the prohibitions fail CI
+rather than needing a reviewer to notice. One further test asserts the table
+*covers* every package on disk — an allowlist that silently stops covering a new
+directory is the failure mode of every allowlist ever written.
 
 `ToolSpec` carrying no handler (§1.2) is what makes the `providers/`↮`tools/`
 prohibition *natural* rather than aspirational: the provider layer needs tool
