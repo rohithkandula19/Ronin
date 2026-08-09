@@ -9,19 +9,33 @@ putting it anywhere else would put a cycle between two layers the architecture k
 apart.
 
 What it wires: ``task(prompt, subagent_type)`` → a nested ``run_turn`` on
-``router.for_subagent()``, which is the ``fast`` model by construction.
+``router.for_subagent()``, which is the ``fast`` model by construction — unless the
+subagent's own definition on disk names a different role, which is decision 1.
 
 Five decisions are encoded here rather than left to the caller, because each is a
 place where the obvious wiring is subtly wrong:
 
-1. **The fast model, always.** ``for_subagent()`` takes no role argument, so this
-   cannot accidentally spend the main model on search triage.
+1. **The fast model by default, and only a file on disk may say otherwise.**
+   ``for_subagent()`` takes no role argument, so a ``task`` call cannot spend the
+   main model on search triage. A ``SubagentType`` carrying a ``model_role`` — which
+   only reaches here from a ``.ronin/agents/*.md`` definition the user wrote — is
+   honoured, because the honest default is wrong for one case: the ``fixer``, which
+   edits code and reruns a test, is not mechanical work, and running it cheap spends
+   more tokens than it saves. The model still cannot choose its own tier.
 2. **A subagent cannot spawn a subagent.** ``task`` is stripped from every child
    registry. Depth-1 is a design limit, not an oversight — unbounded nesting turns
    one user request into an unbounded fan-out with no budget that sees the whole tree.
-3. **A subagent cannot escalate to the user.** Its policy denies anything requiring
-   approval. The parent's approval flow is not reachable from inside a nested turn,
-   so forwarding would either hang or surface a prompt with no context.
+3. **A subagent cannot escalate to the user, but it can act on standing permission.**
+   The parent's approval flow is not reachable from inside a nested turn, so
+   forwarding would either hang or put a prompt in front of a user who asked for
+   something else three steps ago. The default policy therefore denies every gated
+   call — with a reason the child can report. But "denies everything gated" made the
+   builtin ``fixer`` unable to run the test it exists to fix: it declares ``bash``,
+   and every ``bash`` call came back refused. So the policy is **injected**
+   (``subagent_policy``), and a caller that owns a real ``PolicyEngine`` passes one
+   backed by an unattended asker: a command the user has already allowlisted runs,
+   anything that would need a fresh question is denied with feedback, and the
+   unconditional deny floor still applies. Standing permission is not escalation.
 4. **A subagent gets its own ``read_files``.** Sharing the parent's would mean a file
    the *subagent* read counts as "seen" for the parent's ``write`` guard — which
    quietly weakens the one rule that prevents most destructive edits.
@@ -32,10 +46,12 @@ place where the obvious wiring is subtly wrong:
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .core.loop import StalledError, run_turn
+from .core.protocols import Policy
 from .core.types import (
     AgentState,
     ApprovalDecision,
@@ -64,6 +80,11 @@ DEFAULT_SUBAGENT_BUDGET_TOKENS = 200_000
 #: Never handed to a child. See decision 2 in the module docstring.
 FORBIDDEN_IN_SUBAGENTS = frozenset({"task"})
 
+#: Builds the policy one nested turn runs under, from that turn's budget. Injected so
+#: a caller holding a real ``PolicyEngine`` can let a child act on permission the user
+#: already granted, without the child being able to ask for more. See decision 3.
+SubagentPolicyFactory = Callable[[Budget], Policy]
+
 
 @dataclass(frozen=True, slots=True)
 class SubagentRun:
@@ -84,12 +105,18 @@ class SubagentRun:
 
 
 class SubagentPolicy:
-    """The policy a nested turn runs under: no escalation, its own budget.
+    """The default policy a nested turn runs under: no escalation, its own budget.
 
     Denies every gated call rather than forwarding to the parent. The built-in
     subagent types are read-only so this never fires for them; a custom type that
     lists a gated tool gets an explicit denial the child can report, instead of a
     prompt appearing in front of a user who asked for something else three steps ago.
+
+    This is the *safe* default, not the right one for every caller: it is what makes
+    the builtin ``fixer`` — which declares ``bash`` — unable to run the test it exists
+    to fix. A caller that owns a real ``PolicyEngine`` should inject a policy instead
+    (:data:`SubagentPolicyFactory`), so a command the user has already allowlisted
+    runs while anything needing a fresh question is still refused.
     """
 
     def __init__(self, budget: Budget) -> None:
@@ -131,7 +158,21 @@ class SubagentSession:
     session_id: str = "session"
     budget_tokens: int = DEFAULT_SUBAGENT_BUDGET_TOKENS
     repo_map: str = ""
+    policy_for: SubagentPolicyFactory = SubagentPolicy
     runs: list[SubagentRun] = field(default_factory=list)
+
+    def role_for(self, subagent: SubagentType) -> ModelRole:
+        """The router role this child runs on. See decision 1.
+
+        An unrecognised role name falls back to ``FAST`` rather than raising: the name
+        arrives from a markdown file, and a typo in one subagent definition must not
+        take down a session. ``agents.definitions`` validates the value at parse time,
+        so a bad one here means the type was built some other way.
+        """
+        try:
+            return ModelRole(subagent.model_role) if subagent.model_role else ModelRole.FAST
+        except ValueError:
+            return ModelRole.FAST
 
     def child_context(self) -> ToolContext:
         """A fresh context for a child: same root, its own read set.
@@ -156,9 +197,10 @@ class SubagentSession:
             # the model can neither fix nor route around it. Say so plainly.
             return f"the {subagent.name} subagent could not start: {exc}"
 
-        spec = self.router.spec_for(ModelRole.FAST)
+        role = self.role_for(subagent)
+        spec = self.router.spec_for(role)
         client = LoopClient(
-            self.router.for_subagent(),
+            self.router.for_subagent() if role is ModelRole.FAST else self.router.client_for(role),
             model=spec.model,
             repo_map=self.repo_map,
         )
@@ -178,7 +220,7 @@ class SubagentSession:
                 state,
                 client,
                 tools,
-                SubagentPolicy(budget),
+                self.policy_for(budget),
                 system=subagent.system_prompt,
                 max_iterations=subagent.max_iterations,
             ):
@@ -214,7 +256,7 @@ class SubagentSession:
             spent_usd=final_state.budget.spent_usd,
         )
         self.runs.append(run)
-        self._record(run, client)
+        self._record(run, client, role)
 
         if not summary:
             return (
@@ -227,8 +269,14 @@ class SubagentSession:
             return f"{summary}\n\n[partial: the subagent stopped on {stop_reason}]"
         return summary
 
-    def _record(self, run: SubagentRun, client: LoopClient) -> None:
-        """Bill the child to the FAST role, so the split is visible in the ledger."""
+    def _record(self, run: SubagentRun, client: LoopClient, role: ModelRole) -> None:
+        """Bill the child to the role it actually ran on, so the split is honest.
+
+        Billing every child to ``fast`` was fine while every child *was* fast. Once a
+        definition can request ``main``, a hardcoded role would hide the one thing the
+        per-role split exists to make visible: expensive work routed to an expensive
+        model.
+        """
         if self.ledger is None:
             return
         request = client.last_request
@@ -236,8 +284,8 @@ class SubagentSession:
         self.ledger.record(
             session_id=self.session_id,
             request_id=f"subagent-{len(self.runs)}-{run.kind}",
-            role=ModelRole.FAST,
-            spec=self.router.spec_for(ModelRole.FAST),
+            role=role,
+            spec=self.router.spec_for(role),
             usage=Usage(input_tokens=run.spent_tokens, cost_usd=run.spent_usd),
             reported=run.spent_tokens > 0,
             prefix_fingerprint=fingerprint,
@@ -264,6 +312,7 @@ def build_subagent_runner(
     session_id: str = "session",
     budget_tokens: int = DEFAULT_SUBAGENT_BUDGET_TOKENS,
     repo_map: str = "",
+    policy_for: SubagentPolicyFactory = SubagentPolicy,
 ) -> tuple[SubagentRunner, SubagentSession]:
     """The runner to hand ``build_registry``, plus the session that tracks it.
 
@@ -283,6 +332,7 @@ def build_subagent_runner(
         session_id=session_id,
         budget_tokens=budget_tokens,
         repo_map=repo_map,
+        policy_for=policy_for,
     )
     return session.run, session
 
@@ -342,8 +392,10 @@ def build_session(
     ledger: Ledger | None = None,
     session_id: str = "session",
     repo_map: str = "",
+    subagent_repo_map: str | None = None,
     max_tokens: int = 4096,
     subagent_types: dict[str, SubagentType] | None = None,
+    subagent_policy: SubagentPolicyFactory = SubagentPolicy,
 ) -> Session:
     """Assemble a session from a router, a tool context and a base registry.
 
@@ -352,6 +404,14 @@ def build_session(
     ``task`` on top, wired to a runner that subsets ``base_tools`` for children. That
     ordering is the one non-obvious part of the assembly, and doing it the other way
     round is a cycle.
+
+    ``repo_map`` goes into the *main* client's stable prefix; ``subagent_repo_map``
+    goes into each child's, defaulting to the same string. They are separate because
+    a caller that puts the map in the **system prompt** instead — which is where it
+    belongs, since that is what lands in the provider's cached prefix — passes
+    ``repo_map=""`` and would then silently give children no map at all. A subagent is
+    the caller most likely to need one: an `explore` child that cannot see the shape
+    of the repo greps blind. Found by wiring `cli/wire.py`, not by reading this.
     """
     from .tools.task import TaskTool
 
@@ -360,7 +420,8 @@ def build_session(
         base_tools,
         ledger=ledger,
         session_id=session_id,
-        repo_map=repo_map,
+        repo_map=repo_map if subagent_repo_map is None else subagent_repo_map,
+        policy_for=subagent_policy,
     )
     task_tool = TaskTool(runner, types=subagent_types)
     full = ToolRegistry([*base_tools.tools(), task_tool], ctx)
@@ -385,6 +446,7 @@ __all__ = [
     "FORBIDDEN_IN_SUBAGENTS",
     "Session",
     "SubagentPolicy",
+    "SubagentPolicyFactory",
     "SubagentRun",
     "SubagentSession",
     "build_session",

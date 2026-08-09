@@ -17,7 +17,16 @@ from pathlib import Path
 import pytest
 from harness import context, use, write_file
 
-from ronin.core.types import Message, Role, Text, ToolUse
+from ronin.core.types import (
+    ApprovalDecision,
+    Budget,
+    DangerLevel,
+    Message,
+    Role,
+    Text,
+    ToolSpec,
+    ToolUse,
+)
 from ronin.providers import (
     Capabilities,
     Completed,
@@ -568,3 +577,200 @@ async def test_recording_a_turn_without_a_ledger_is_a_no_op(tmp_path: Path) -> N
     session.record_turn(
         session.state("x").__class__(budget=CoreBudget(spent_tokens=1)), request_id="t"
     )
+
+
+# --------------------------------------------------------------------------- #
+# Decision 1, second half: a definition on disk may name a role
+# --------------------------------------------------------------------------- #
+
+#: The shape the builtin `fixer` has: it edits and reruns tests, and its definition
+#: asks for the main model because that work is not mechanical.
+FIXER = SubagentType(
+    name="fixer",
+    description="Given a failing test, makes it pass.",
+    tools=("read", "glob", "grep", "write", "edit", "multi_edit"),
+    system_prompt="You are the fixer subagent.",
+    model_role="main",
+)
+
+
+async def test_a_definition_may_name_the_main_model_and_it_is_honoured(tmp_path: Path) -> None:
+    """A subagent that edits code is not mechanical work; the config may say so.
+
+    Guarded by decision 1's other half: only a definition reaches this field, so the
+    model cannot upgrade its own tier by naming one in a `task` call.
+    """
+    fast = ScriptedModel([says("fast answered")], "fast")
+    big = ScriptedModel([says("main answered")], "big")
+    subagents, _ = session_for(tmp_path, fast, big=big)
+
+    answer = await subagents.run("make test_x pass", FIXER)
+
+    assert "main answered" in answer
+    assert len(big.requests) == 1
+    assert fast.requests == [], "an explicit model_role must not fall through to fast"
+
+
+async def test_an_unknown_role_name_falls_back_to_fast_rather_than_crashing(
+    tmp_path: Path,
+) -> None:
+    """A typo in one markdown file must not take the session down."""
+    fast = ScriptedModel([says("fast answered")], "fast")
+    big = ScriptedModel([says("main answered")], "big")
+    subagents, _ = session_for(tmp_path, fast, big=big)
+    typo = SubagentType(
+        name="odd",
+        description="d",
+        tools=("read",),
+        system_prompt="p",
+        model_role="fastest",
+    )
+
+    answer = await subagents.run("q", typo)
+
+    assert "fast answered" in answer
+    assert big.requests == []
+
+
+@pytest.mark.parametrize(
+    ("declared", "expected"),
+    [("", ModelRole.FAST), ("fast", ModelRole.FAST), ("main", ModelRole.MAIN),
+     ("plan", ModelRole.PLAN), ("nonsense", ModelRole.FAST)],
+)
+def test_role_for_maps_every_declared_value(
+    tmp_path: Path, declared: str, expected: ModelRole
+) -> None:
+    subagents, _ = session_for(tmp_path, ScriptedModel([says("x")]))
+    kind = SubagentType(
+        name="k", description="d", tools=("read",), system_prompt="p", model_role=declared
+    )
+    assert subagents.role_for(kind) is expected
+
+
+async def test_the_child_is_billed_to_the_role_it_actually_ran_on(tmp_path: Path) -> None:
+    """Billing every child to `fast` would hide the one thing the split exists for."""
+    ledger = Ledger(tmp_path / "usage.db", clock=lambda: 1000.0)
+    fast = ScriptedModel([says("fast answered", tokens=10)], "fast")
+    big = ScriptedModel([says("main answered", tokens=10)], "big")
+    subagents, _ = session_for(tmp_path, fast, big=big, ledger=ledger)
+
+    await subagents.run("make test_x pass", FIXER)
+
+    breakdown = ledger.role_totals("s1")
+    assert set(breakdown) == {ModelRole.MAIN}, (
+        f"a child that ran on `main` must be billed to `main`, got {set(breakdown)}"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Decision 3, second half: standing permission is not escalation
+# --------------------------------------------------------------------------- #
+
+
+async def test_the_default_policy_still_refuses_every_gated_call(tmp_path: Path) -> None:
+    """Unchanged behaviour when nothing is injected: deny, with a reason to report."""
+    policy = SubagentPolicy(Budget(max_tokens=1000))
+    decision = await policy.approve(
+        ToolSpec(name="bash", description="d", danger_level=DangerLevel.DESTRUCTIVE,
+                 requires_approval=True),
+        use("bash", command="pytest -q"),
+        rendered="pytest -q",
+    )
+    assert decision.approved is False
+    assert "cannot ask the user" in decision.reason
+
+
+async def test_an_injected_policy_lets_a_child_act_on_standing_permission(
+    tmp_path: Path,
+) -> None:
+    """The `fixer` fix: a gated call the caller's policy allows actually runs.
+
+    This is the contradiction the injection exists to resolve — the builtin `fixer`
+    declares `bash` and, under the deny-everything default, could never run the test
+    it exists to fix. The injected policy still cannot *ask*; it can only act on
+    permission that already existed.
+    """
+    seen: list[str] = []
+
+    class Standing:
+        """Approves without asking anyone — what a real PolicyEngine does for an
+        allowlisted command, and nothing more."""
+
+        def __init__(self, budget: Budget) -> None:
+            self.budget = budget
+
+        async def approve(
+            self, spec: ToolSpec, use_: ToolUse, *, rendered: str
+        ) -> ApprovalDecision:
+            del spec, use_
+            seen.append(rendered)
+            return ApprovalDecision(approved=True, reason="allowlisted by the user")
+
+        def check_budget(self, budget: Budget) -> str | None:
+            return "token_budget" if budget.exhausted else None
+
+        def cancelled(self) -> bool:
+            return False
+
+    ctx = context(tmp_path)
+    base = build_registry(ctx)
+    # A file the model has not read: `write`'s own guard refuses to clobber one it
+    # has, and that guard is not what this test is about.
+    fast = ScriptedModel(
+        [says_and_calls("writing", "write", path="fixed.txt", content="after\n"),
+         says("done")]
+    )
+    router = router_with({"small": fast, "big": ScriptedModel([says("m")], "big")})
+    _, subagents = build_subagent_runner(router, base, policy_for=Standing)
+
+    writer = SubagentType(
+        name="writer", description="d", tools=("read", "write"), system_prompt="p"
+    )
+    await subagents.run("write the file", writer)
+
+    assert seen, "the injected policy was never consulted"
+    assert (tmp_path / "fixed.txt").read_bytes() == b"after\n"
+
+
+async def test_a_subagent_can_be_given_a_repo_map_the_main_client_does_not_carry(
+    tmp_path: Path,
+) -> None:
+    """The map belongs in the system prompt, which children never see.
+
+    A caller that puts the repo map in the *system* text — where it lands in the
+    provider's cached prefix — passes `repo_map=""`, and before this parameter existed
+    that silently left children with no map at all. An `explore` child that cannot see
+    the shape of the repo greps blind, so it is the caller most likely to need one.
+    """
+    fast = ScriptedModel([says("child")])
+    big = ScriptedModel([says("parent")])
+    ctx = context(tmp_path)
+    session = build_session(
+        router_with({"small": fast, "big": big}),
+        ctx,
+        base_tools=build_registry(ctx),
+        repo_map="",
+        subagent_repo_map="# repo map\nsrc/parser.py: parse()",
+    )
+
+    await session.subagents.run("find the parser", EXPLORE)
+
+    assert "src/parser.py" in fast.requests[0].prefix
+    main_request = session.main.build_request(system="you are ronin", messages=(), tools=())
+    assert "src/parser.py" not in main_request.prefix, (
+        "the main client's map lives in the system text, not its stable prefix"
+    )
+
+
+async def test_the_subagent_map_defaults_to_the_main_one(tmp_path: Path) -> None:
+    """Omitting it must not change behaviour for a caller that never thought about it."""
+    fast = ScriptedModel([says("child")])
+    ctx = context(tmp_path)
+    session = build_session(
+        router_with({"small": fast, "big": ScriptedModel([says("m")], "big")}),
+        ctx,
+        base_tools=build_registry(ctx),
+        repo_map="# shared map",
+    )
+    await session.subagents.run("q", EXPLORE)
+    assert "# shared map" in fast.requests[0].prefix

@@ -79,6 +79,12 @@ jobs:
       # README headline numbers (tests / packages / games) are generated from
       # the repo; fail the build if they drift from the committed README.
       # Strict typing + lint for the src/ronin contract tree (see pyproject).
+      # A test directory absent from mypy's `files` is a directory with no type
+      # checking at all, and nothing else reports that. This check runs before
+      # mypy so the failure names the real cause instead of showing zero errors.
+      - name: Type-check paths cover every test dir
+        run: uv run python scripts/sync_typecheck_paths.py --check
+
       - name: Lint (ruff)
         run: uv run ruff check src/ronin tests
 

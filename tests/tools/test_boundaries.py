@@ -18,8 +18,45 @@ import pytest
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "ronin"
 
-#: The one module allowed to know about every layer. It exists to introduce them.
-ORCHESTRATORS = frozenset({"ronin.session", "ronin.session_demo"})
+#: The modules allowed to know about every layer. They exist to introduce them:
+#: ``session`` is the orchestrator seat, ``cli`` is the application on top of it,
+#: and the two demos show the whole stack running.
+#:
+#: ``cli`` is stated as a *package* rather than enumerated module by module. The
+#: enumerated form was worse than useless: a new ``cli`` module was unconstrained
+#: until someone remembered to add it, and the only signal that they had not was a
+#: failure in an unrelated test. The rule is "the application layer may import
+#: anything", so that is what is written down.
+ORCHESTRATOR_MODULES = frozenset({"ronin.session", "ronin.session_demo"})
+ORCHESTRATOR_PACKAGES = ("ronin.cli",)
+
+
+
+def is_orchestrator(dotted: str) -> bool:
+    """Whether ``dotted`` is allowed to import across every layer."""
+    return dotted in ORCHESTRATOR_MODULES or any(
+        dotted == package or dotted.startswith(f"{package}.")
+        for package in ORCHESTRATOR_PACKAGES
+    )
+
+#: The layers above ``core`` and their prohibitions, as a table — this *is* the
+#: dependency graph from ``docs/ARCHITECTURE.md`` §3, in executable form.
+#:
+#: The leaf layers take a model, a subprocess runner or a summarizer as an
+#: injected callable rather than importing one, which is what lets each of them
+#: be tested with no provider, no network and no shell. An import here would not
+#: just be untidy: it would make that testability impossible to rely on.
+LAYER_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("context", ("ronin.providers", "ronin.tools", "ronin.agents", "ronin.mcp", "ronin.cli")),
+    ("safety", ("ronin.providers", "ronin.tools", "ronin.agents", "ronin.mcp", "ronin.cli")),
+    ("verify", ("ronin.providers", "ronin.tools", "ronin.agents", "ronin.mcp", "ronin.cli")),
+    ("persistence", ("ronin.providers", "ronin.tools", "ronin.agents", "ronin.mcp", "ronin.cli")),
+    ("ui", ("ronin.providers", "ronin.tools", "ronin.agents", "ronin.mcp", "ronin.cli")),
+    # These two sit above the tool layer: they produce Tools, so they may import
+    # it. They still may not know which model is calling them.
+    ("agents", ("ronin.providers", "ronin.cli")),
+    ("mcp", ("ronin.providers", "ronin.cli")),
+)
 
 
 def modules_under(package: str) -> Iterator[tuple[str, Path]]:
@@ -62,7 +99,7 @@ def violations(package: str, forbidden: tuple[str, ...]) -> list[str]:
     """Every ``module → forbidden import`` pair, excluding the orchestrators."""
     found: list[str] = []
     for dotted, path in modules_under(package):
-        if dotted in ORCHESTRATORS:
+        if is_orchestrator(dotted):
             continue
         for imported in imported_modules(path, dotted):
             for prefix in forbidden:
@@ -78,18 +115,46 @@ def violations(package: str, forbidden: tuple[str, ...]) -> list[str]:
 
 def test_the_tool_layer_knows_nothing_about_providers_or_the_loop() -> None:
     """A tool that knew which model was calling it would special-case for it."""
-    assert violations("tools", ("ronin.providers", "ronin.core.loop")) == []
+    assert violations("tools", ("ronin.providers", "ronin.core.loop", "ronin.cli")) == []
 
 
 def test_the_provider_layer_knows_nothing_about_tools() -> None:
     """An adapter that imports tools ends up executing them, which is how the
     provider layer quietly becomes a second agent loop."""
-    assert violations("providers", ("ronin.tools",)) == []
+    assert violations("providers", ("ronin.tools", "ronin.cli")) == []
 
 
 def test_the_core_contract_knows_nothing_about_providers_or_tools() -> None:
     """The loop takes both as injected protocols; importing either is the cycle."""
-    assert violations("core", ("ronin.providers", "ronin.tools")) == []
+    assert violations("core", ("ronin.providers", "ronin.tools", "ronin.cli")) == []
+
+
+@pytest.mark.parametrize(("package", "forbidden"), LAYER_RULES, ids=[r[0] for r in LAYER_RULES])
+def test_each_layer_imports_only_what_the_graph_allows(
+    package: str, forbidden: tuple[str, ...]
+) -> None:
+    """§3's table, enforced. A layer absent from disk vacuously passes."""
+    if not (SRC / package).is_dir():
+        pytest.skip(f"{package}/ not present")
+    assert violations(package, forbidden) == []
+
+
+def test_the_layer_rules_cover_every_package_that_exists() -> None:
+    """The table cannot silently stop covering a package someone adds.
+
+    Without this, a new ``src/ronin/foo/`` would be unconstrained and the suite
+    would still be green — the failure mode of every allowlist ever written.
+    """
+    on_disk = {
+        path.name
+        for path in SRC.iterdir()
+        if path.is_dir() and path.name != "__pycache__" and (path / "__init__.py").exists()
+    }
+    known = {rule[0] for rule in LAYER_RULES} | {"core", "providers", "tools", "cli"}
+    assert on_disk <= known, (
+        f"package(s) with no entry in LAYER_RULES: {sorted(on_disk - known)} — "
+        "add them to the table with their prohibitions, or the graph is a lie"
+    )
 
 
 def test_the_loop_imports_only_types_and_protocols() -> None:
@@ -111,7 +176,8 @@ def test_only_the_orchestrator_imports_all_three_layers() -> None:
         } - {""}
         if len(layers) == 3:
             multi.append(dotted)
-    assert set(multi) <= ORCHESTRATORS, f"unexpected cross-layer module(s): {multi}"
+    unexpected = [dotted for dotted in multi if not is_orchestrator(dotted)]
+    assert unexpected == [], f"unexpected cross-layer module(s): {unexpected}"
 
 
 def test_the_orchestrator_does_import_all_three() -> None:

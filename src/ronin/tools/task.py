@@ -163,6 +163,14 @@ class SubagentType:
     ``tools`` is a subset of the parent's registry by name. A subagent that can only
     read and search cannot damage anything, which is what makes spawning one a cheap
     decision rather than a risky one.
+
+    ``model_role`` is a *role name* (``"main"``/``"plan"``/``"fast"``), never a model
+    and never a client — the tool layer may not import ``providers``. Empty means
+    "whatever the orchestrator gives a subagent by default", which is the fast model.
+    It exists because the honest default is wrong for one case: a subagent that edits
+    code and reruns a test is not mechanical work, and running it on the cheap model
+    to save tokens spends more of them. Only a definition **on disk** may set it —
+    the model cannot pick its own tier by naming one in a ``task`` call.
     """
 
     name: str
@@ -170,6 +178,7 @@ class SubagentType:
     tools: tuple[str, ...]
     system_prompt: str
     max_iterations: int = 20
+    model_role: str = ""
 
 
 #: The two that pay for themselves immediately. Both are read-only, so the parent can
