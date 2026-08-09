@@ -402,6 +402,12 @@ def _avoid_splitting_pairs(
     A result kept in the tail whose call was folded is an orphan the provider
     rejects just as hard as the reverse, and ``unpaired_tool_uses`` cannot see it —
     it only looks for calls without results. This is the fix, not a repair.
+
+    A transcript that reuses a tool-use id (which ``ronin.core.types`` documents as
+    a real provider 400 in its own right) can drive the boundary all the way back to
+    the head, and compaction then folds nothing rather than mangling the pairs. The
+    caller sees ``compacted=False`` with ``still_over_trigger=True``, which is the
+    honest report: the input was already broken.
     """
     for _ in range(len(messages) + 1):
         middle_uses = {

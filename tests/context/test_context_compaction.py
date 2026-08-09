@@ -432,6 +432,15 @@ def test_repair_pairing_drops_an_orphan_result() -> None:
     assert repaired == []
 
 
+async def test_a_transcript_that_reuses_a_tool_id_folds_nothing_rather_than_mangling() -> None:
+    """Duplicate ids are already a provider 400; compaction refuses and reports it."""
+    duplicated = [*scripted_session(8), *scripted_session(4)[1:]]
+    result = await compact(duplicated, policy=TINY, summarizer=fake_summarizer)
+    assert not result.compacted
+    assert result.still_over_trigger
+    assert result.messages == tuple(duplicated)
+
+
 def test_repair_pairing_leaves_a_healthy_transcript_untouched() -> None:
     messages = scripted_session(4)
     repaired, dropped = repair_pairing(messages)
