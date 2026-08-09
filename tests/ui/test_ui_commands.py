@@ -127,7 +127,7 @@ def test_a_line_that_is_not_a_command_is_refused_not_guessed_at() -> None:
         ("/", False),
         ("/ help", False),
         ("hello", False),
-        ("/usr/bin/env", True),
+        ("/usr/bin/env", False),
         ("", False),
     ],
 )

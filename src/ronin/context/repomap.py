@@ -810,7 +810,9 @@ def _dotted_names(path: str) -> tuple[str, ...]:
     parts = list(Path(path).with_suffix("").parts)
     if parts and parts[-1] == "__init__":
         parts.pop()
-    while parts and parts[0] in _SOURCE_ROOTS:
+    # Only the *directory* prefix is strippable. Without the length guard,
+    # `lib.py` at the repo root loses its own name and becomes unresolvable.
+    while len(parts) > 1 and parts[0] in _SOURCE_ROOTS:
         parts.pop(0)
     if not parts:
         return ()
@@ -983,6 +985,17 @@ class RepoMap:
     def paths(self) -> tuple[str, ...]:
         return tuple(entry.path for entry in self.entries)
 
+    @property
+    def over_budget(self) -> bool:
+        """True only in the degenerate case: the header and marker alone overflow.
+
+        The map's own text is still inside the budget; what does not fit is the
+        explanation of what was cut. Returning an empty map instead would be both
+        over budget *and* useless, so the marker is treated as a floor — the same
+        rule :mod:`ronin.context.budget` applies to a clamp marker.
+        """
+        return self.token_estimate > self.budget_tokens
+
     def marker(self) -> str:
         """The explicit statement of what was dropped and why. ``""`` if nothing was."""
         if not self.dropped_count:
@@ -996,6 +1009,11 @@ class RepoMap:
             detail += (
                 f"; then {non_leaves} non-leaf file(s), also lowest-pagerank first, "
                 "because every leaf was already gone"
+            )
+        if self.over_budget:
+            detail += (
+                "; note: the header and this marker alone exceed the budget, so the "
+                "marker was not charged against it — the listing itself does fit"
             )
         return (
             f"[repo map truncated to fit {self.budget_tokens} tokens: "

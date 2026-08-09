@@ -230,9 +230,11 @@ def to_line(payload: Mapping[str, Any]) -> str:
 
 def exit_code_for(state: ViewState, approvals: Sequence[ApprovalRequest]) -> int:
     """The process exit code, as a pure function of what the stream said."""
-    if state.errors or state.turn_state is None:
+    if state.errors:
         return EXIT_ERROR
-    if state.turn_state in (TurnState.ERROR, TurnState.INTERRUPTED):
+    # Anything other than DONE is a failure, which covers ERROR, INTERRUPTED, and
+    # a stream that stopped mid-turn: a truncated stream must not exit 0.
+    if state.turn_state is not TurnState.DONE:
         return EXIT_ERROR
     if approvals:
         return EXIT_NEEDS_APPROVAL
@@ -260,7 +262,7 @@ def result_record(result: HeadlessResult) -> dict[str, Any]:
         "type": RESULT_TYPE,
         "exit_code": result.exit_code,
         "text": result.text,
-        "stop_reason": state.stop_reason or (NO_TURN_END if state.turn_state is None else ""),
+        "stop_reason": state.stop_reason or (NO_TURN_END if not state.finished else ""),
         "turns": state.turn_index + 1 if state.turn_state is not None else 0,
         "resets": state.resets,
         "cost_usd": state.cost_usd,
@@ -333,7 +335,7 @@ async def run_headless(
         err(DENIAL_NOTICE.format(name=request.name, rendered=request.rendered) + "\n")
     for error in current.errors:
         err(ERROR_NOTICE.format(kind=error.kind, message=error.message) + "\n")
-    if current.turn_state is None:
+    if not current.finished:
         err(NO_TURN_END + "\n")
     return result
 

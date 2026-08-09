@@ -324,7 +324,10 @@ def is_command(line: str) -> bool:
     stripped = line.strip()
     if not stripped.startswith(PREFIX) or len(stripped) == 1:
         return False
-    return bool(NAME_PATTERN.match(stripped[1:].split(maxsplit=1)[0].lower()))
+    rest = stripped[1:]
+    if rest[0].isspace():
+        return False
+    return bool(NAME_PATTERN.match(rest.split(maxsplit=1)[0].lower()))
 
 
 def suggest(name: str, known: Sequence[str]) -> str:

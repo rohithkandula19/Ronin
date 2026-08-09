@@ -32,7 +32,7 @@ from __future__ import annotations
 import importlib.util
 import time
 from collections.abc import AsyncIterator, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
 from ronin.core.types import ApprovalRequest, Event, Mode
@@ -131,7 +131,7 @@ class KeyController:
     """
 
     mode: Mode = Mode.ASK
-    escape: EscapeState = EscapeState()
+    escape: EscapeState = field(default_factory=EscapeState)
     clock: Callable[[], float] = time.monotonic
 
     def press_escape(self) -> EscapeAction:

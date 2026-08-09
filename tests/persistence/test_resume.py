@@ -5,6 +5,7 @@ import os
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
 from persistence_harness import (
     READ_RESULT,
     READ_USE,
@@ -45,7 +46,7 @@ from ronin.persistence.resume import (
     same_cwd,
     sessions_for_cwd,
 )
-from ronin.persistence.transcript import Transcript, sessions_dir
+from ronin.persistence.transcript import Transcript, TranscriptError, sessions_dir
 
 # --------------------------------------------------------------------------- #
 # StreamReset
@@ -261,8 +262,8 @@ def test_an_unanswered_tool_call_is_answered_with_an_interrupted_block() -> None
     assert block.content == INTERRUPTED_NO_RESULT
 
 
-def test_a_recorded_tool_end_answers_the_call_in_preference_to_the_stub() -> None:
-    """A crash *after* the tool returned still has the result in the log; throwing
+def test_a_crash_after_the_tool_returned_keeps_the_real_result() -> None:
+    """The result is in the log even though no ``TurnEnd`` checkpointed it; throwing
     it away would re-run a write the model already performed."""
     events = (
         *two_turn_session(),
@@ -275,10 +276,36 @@ def test_a_recorded_tool_end_answers_the_call_in_preference_to_the_stub() -> Non
     )
     result = replay(events)
     assert result.state.pairing_errors == ()
-    assert any("answered from the recorded ToolEnd" in note for note in result.repairs)
+    assert result.repairs == (), "the fold already answered it; nothing to repair"
     block = result.state.messages[-1].content_blocks[-1]
     assert isinstance(block, ToolResultBlock)
     assert (block.is_error, block.content) == (False, "wrote 2 lines")
+
+
+def test_a_checkpoint_with_an_unpaired_call_is_repaired_from_the_recorded_result() -> None:
+    """Defence for a checkpoint that promised a resumable state and was not one: the
+    recorded ``ToolEnd`` answers the call, in preference to an interrupted stub."""
+    use = ToolUse(id="t1", name="write", arguments={"path": "src/app.py"})
+    unpaired = AgentState(
+        messages=(
+            Message(role=Role.USER, content_blocks=(Text(text="fix it"),)),
+            Message(role=Role.ASSISTANT, content_blocks=(use,)),
+        ),
+    )
+    events = (
+        TurnStart(turn_index=0),
+        ToolStart(tool_use_id=use.id, name="write", arguments=use.arguments),
+        ToolEnd(
+            tool_use_id=use.id, name="write", result=ToolResult(ok=True, content="wrote 2")
+        ),
+        TurnEnd(turn_index=0, state=TurnState.INTERRUPTED, agent_state=unpaired),
+    )
+    result = replay(events)
+    assert result.state.pairing_errors == ()
+    assert any("answered from the recorded ToolEnd" in note for note in result.repairs)
+    block = result.state.messages[-1].content_blocks[-1]
+    assert isinstance(block, ToolResultBlock)
+    assert (block.is_error, block.content) == (False, "wrote 2")
 
 
 def test_a_clean_session_needs_no_repair() -> None:
@@ -370,15 +397,12 @@ def test_resuming_a_crashed_session_reports_the_torn_line_and_still_replays(
     assert replayed.state == resumed.state
 
 
-def test_resuming_a_session_that_was_never_written_is_an_empty_result(
-    tmp_path: Path,
-) -> None:
+def test_resuming_an_id_that_does_not_exist_fails_by_name(tmp_path: Path) -> None:
+    """A typo in ``--resume <id>`` must not open an empty session that looks resumed."""
     directory = sessions_dir(tmp_path)
     directory.mkdir(parents=True)
-    resumed = resume(directory, "never-existed")
-    assert resumed.events == ()
-    assert resumed.state == AgentState(messages=())
-    assert resumed.meta.session_id == "never-existed"
+    with pytest.raises(TranscriptError, match="never-existed"):
+        resume(directory, "never-existed")
 
 
 def test_the_replayed_state_keeps_todos_mode_and_checkpoint(tmp_path: Path) -> None:
