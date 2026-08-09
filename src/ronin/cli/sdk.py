@@ -34,13 +34,13 @@ anything. :meth:`Agent.reset` is the explicit way to start over.
 from __future__ import annotations
 
 import os
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
 
 from ..context.compaction import Summarizer
-from ..core.types import AgentState, Budget, Event, Mode
+from ..core.types import AgentState, ApprovalRequest, Budget, Event, Mode
 from ..providers.router import Router, load_config
 from ..ui.headless import exit_code_for
 from ..ui.reduce import ViewState, reduce_event
@@ -331,13 +331,6 @@ class Agent:
                 "this Agent is closed: its shells, MCP servers and transcript have "
                 "been released. Open a new one."
             )
-
-
-def _approval_requests(events: Sequence[Event]) -> tuple[Event, ...]:
-    """The approval requests in a stream, for the exit-code arithmetic."""
-    from ..core.types import ApprovalRequest
-
-    return tuple(event for event in events if isinstance(event, ApprovalRequest))
 
 
 __all__ = [
