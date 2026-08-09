@@ -76,7 +76,7 @@ from typing import Any
 
 from ..agents.hooks import HookEvent, HookReport, HookRunner, cap
 from ..context.budget import ClampMode, OutputBudget, clamp
-from ..context.filestate import FileStatus, FileStateTracker
+from ..context.filestate import FileStateTracker, FileStatus
 from ..core.protocols import ToolRegistry
 from ..core.types import ToolResult, ToolSpec, ToolUse
 from ..mcp.tools import is_namespaced
