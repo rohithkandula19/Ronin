@@ -40,8 +40,6 @@ from .trajectory import RecordedCall, Step, ToolSchema, Trajectory
 # than reimplemented — reimplementing it is precisely divergence D3.
 from ronin_dialect import (  # type: ignore[import-untyped]
     parse_tool_calls as _dialect_parse,
-)
-from ronin_dialect import (  # type: ignore[import-untyped]
     render_tool_call_message as _dialect_render,
 )
 

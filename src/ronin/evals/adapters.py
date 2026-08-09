@@ -357,7 +357,9 @@ async def sdk_agent_factory(
     sixty tasks is a lot of disk for data nothing reads, and an eval that reaches an
     MCP server is an eval measuring somebody else's uptime.
     """
-    from ..cli.sdk import Agent  # noqa: PLC0415 - see the docstring
+    # Lazy on purpose — see the docstring: the eval package must stay importable
+    # without the application layer.
+    from ..cli.sdk import Agent
 
     agent = await Agent.open(
         workspace,

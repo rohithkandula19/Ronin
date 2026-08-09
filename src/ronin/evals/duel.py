@@ -520,22 +520,17 @@ class ScoreRow:
 class Scoreboard:
     """The comparison, as a value. Pure function of a :class:`Duel`.
 
-    ``wins`` and ``losses`` are stated from **A's** point of view, and the invariant
-    checked in :meth:`__post_init__` — ``wins + losses + ties == len(rows)`` — is why
-    they are derived rather than passed in: a scoreboard whose columns do not add up
-    to the task count has silently dropped a task.
+    ``wins`` and ``losses`` are stated from **A's** point of view.
+
+    ``wins + losses + ties == tasks`` holds structurally rather than by assertion:
+    every column counts rows by a single :class:`Verdict`, and a row has exactly one.
+    They are derived properties, not fields, precisely so the three cannot be passed
+    in disagreeing with each other and with the row count.
     """
 
     seed: int
     duelists: tuple[str, str]
     rows: tuple[ScoreRow, ...] = ()
-
-    def __post_init__(self) -> None:
-        if self.wins + self.losses + self.ties != len(self.rows):
-            raise ValueError(
-                "scoreboard columns do not add up to the task count — every task is "
-                "exactly one of a win, a loss or a tie"
-            )
 
     @property
     def tasks(self) -> int:

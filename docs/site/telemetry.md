@@ -8,7 +8,7 @@ rather than believing it.
 
 The disclosure shown once, on first run, verbatim:
 
-> telemetry is OFF and nothing has been sent: `ronin telemetry on` opts in to aggregate task outcomes only — never prompts, code, paths, filenames, commands or identifiers — and `ronin telemetry show` prints every payload sent, `ronin telemetry off` stops it.
+> telemetry is OFF and nothing has been sent: `python -m ronin telemetry on` opts in to aggregate task outcomes only — never prompts, code, paths, filenames, commands or identifiers — `python -m ronin telemetry show` prints every payload sent, and `python -m ronin telemetry off` stops it.
 
 ## the entire payload
 
@@ -78,7 +78,7 @@ A consent file that cannot be read or parsed resolves to `refused` with the disc
 Every payload handed to the sender is appended, as the exact wire JSON, to `~/.ronin/telemetry-sent.jsonl`. Read the file, or print it:
 
 ```sh
-ronin telemetry show
+python -m ronin telemetry show
 ```
 
 The line is written *before* the send is attempted, so a crash mid-send still leaves a record. That means a logged line proves the payload was handed to the sender, not that it arrived — the log can over-report what left the machine, never under-report it.
@@ -86,8 +86,8 @@ The line is written *before* the send is attempted, so a crash mid-send still le
 ## turning it off, and the failure modes
 
 ```sh
-ronin telemetry off       # sticky; nothing re-prompts
-ronin telemetry status    # the current state and both file paths
+python -m ronin telemetry off      # sticky; nothing re-prompts
+python -m ronin telemetry status   # the current state and both file paths
 ```
 
 The module cannot slow or break a turn. It has no `httpx` import and opens no socket — the transport is a callable injected by the caller. A send is bounded by a timeout, and a sender that raises, hangs or returns nonsense produces a recorded failure and nothing else: telemetry that can break a session is worse than no telemetry.

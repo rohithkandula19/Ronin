@@ -136,4 +136,4 @@ This is why `test-writer` cannot touch `src/`. A prompt saying "only write tests
 
 The model normally names the type it wants: `task(subagent_type="explorer", ...)`. Selection by task description is only a fallback for a caller that has a description and no name, and it returns nothing rather than guessing below a floor — a wrong subagent (fresh context, wrong tools, confident answer) is worse than no subagent.
 
-`ronin doctor` lists the subagents a workspace actually loaded, which is the fastest way to find out that a file did not parse.
+`python -m ronin doctor` lists the subagents a workspace actually loaded, which is the fastest way to find out that a file did not parse.

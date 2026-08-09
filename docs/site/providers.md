@@ -164,7 +164,7 @@ Any of these may be set per model, and a partial override is merged against the 
 ## verifying a setup without spending anything
 
 ```sh
-ronin doctor
+python -m ronin doctor
 ```
 
 It checks that the configured role resolves to a defined model and that the named key variable is actually present in the environment. It does **not** call the provider: a diagnostic that hangs for thirty seconds is a diagnostic people stop running.

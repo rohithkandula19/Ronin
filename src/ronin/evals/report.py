@@ -622,12 +622,12 @@ def scoreboard(reports: Sequence[RunReport]) -> Scoreboard:
         return Scoreboard()
     labels = tuple(report.name for report in reports)
     by_run: list[dict[str, TaskRow]] = [
-        {row.task_id: row for row in report.rows} for report in reports
+        {entry.task_id: entry for entry in report.rows} for report in reports
     ]
     categories: dict[str, str] = {}
     for run in by_run:
-        for task_id, row in run.items():
-            categories.setdefault(task_id, row.category)
+        for task_id, entry in run.items():
+            categories.setdefault(task_id, entry.category)
 
     every = set().union(*(set(run) for run in by_run)) if by_run else set()
     shared = set(by_run[0]).intersection(*(set(run) for run in by_run[1:])) if by_run else set()

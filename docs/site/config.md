@@ -14,10 +14,10 @@ Two merge rules, and they are deliberately not the same:
   replaced the list, a project `settings.json` with one convenience rule would
   silently discard every builtin rule beneath it — including the tool-wide `ask` that
   is the shell's floor — and nothing would error. To defeat an earlier rule you write
-  a more specific one, which stays visible in `ronin doctor`.
+  a more specific one, which stays visible in `python -m ronin doctor`.
 
 One malformed layer does not stop the session. The layer is skipped, the problem is
-recorded, and `ronin doctor` names the file and the reason. An unknown key is an
+recorded, and `python -m ronin doctor` names the file and the reason. An unknown key is an
 error too: a silently ignored typo is a permission the user believes they granted.
 
 ## layers, lowest precedence first
@@ -30,7 +30,7 @@ error too: a silently ignored typo is a permission the user believes they grante
 | 4 | `local` | `<workspace>/.ronin/settings.local.json` |
 | 5 | `flags` | (this invocation only) |
 
-`.ronin/settings.local.json` is the only one that must stay out of git: it is the layer that holds machine-local overrides. The other files under `.ronin/` are meant to be committed and shared, which is why a blanket `.ronin/` line in `.gitignore` is a misconfiguration `ronin doctor` reports and offers a patch for.
+`.ronin/settings.local.json` is the only one that must stay out of git: it is the layer that holds machine-local overrides. The other files under `.ronin/` are meant to be committed and shared, which is why a blanket `.ronin/` line in `.gitignore` is a misconfiguration `python -m ronin doctor` reports and offers a patch for.
 
 ## settings keys
 
@@ -94,4 +94,4 @@ Derived from `ronin.cli.spine.Paths`. `<workspace>` is the git repository root w
 | telemetry consent | `~/.ronin/telemetry.json` |
 | telemetry audit log | `~/.ronin/telemetry-sent.jsonl` |
 
-`ronin doctor` prints all of these with their real values, plus which layer set each scalar. Prefer it to reading this table.
+`python -m ronin doctor` prints all of these with their real values, plus which layer set each scalar. Prefer it to reading this table.
