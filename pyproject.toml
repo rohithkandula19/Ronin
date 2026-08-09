@@ -132,6 +132,8 @@ module = [
     "test_transcript",
     "test_types",
     "test_ui_commands",
+    "test_ui_headless",
+    "test_ui_keys",
     "test_ui_reduce",
     "test_ui_render",
     "test_verify_spec",
