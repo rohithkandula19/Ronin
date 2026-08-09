@@ -764,10 +764,20 @@ class PolicyEngine:
             trace.append(f"rules: {resolution.explain()}")
 
         found = hazards(segments)
+        # An `ask` hazard is a request for one confirmation, and a human who approved
+        # this *exact* command with the hazard in front of them has given it. Without
+        # this, "yes, remember for this session" would be useless for everything that
+        # actually gets gated — the second `sed -i` would prompt again, and a gate that
+        # cannot learn is a gate people switch off. A `block` hazard is not a request
+        # and is never lifted; neither is the deny list or a taint escalation.
+        settled = self._approved_exactly(resolutions)
+        weighed = [h for h in found if h.severity is Severity.BLOCK or not settled]
         hazard_decision = most_restrictive(
-            [HAZARD_FLOOR[h.severity] for h in found], default=Decision.ALLOW
+            [HAZARD_FLOOR[h.severity] for h in weighed], default=Decision.ALLOW
         )
         trace.extend(f"hazard: {hazard}" for hazard in found)
+        if settled and len(weighed) != len(found):
+            trace.append("an exact rule approved this command, so its `ask` hazards are met")
 
         deny_hits = self._deny_hits(spec, use, segments)
         trace.extend(f"denylist: {hit.code.value} on `{hit.subject}`" for hit in deny_hits)
@@ -851,6 +861,20 @@ class PolicyEngine:
             ]
             return (whole, *explicit)
         return tuple(per_segment) or (whole,)
+
+    def _approved_exactly(self, resolutions: Sequence[Resolution]) -> bool:
+        """Whether an :class:`Exact` rule allowed this precise call.
+
+        Exact is the only matcher that can carry this weight: it approves one
+        byte-for-byte string and generalises to nothing, so "the human already said yes
+        to this" is a claim about the same command and not about a family of them.
+        """
+        return any(
+            resolution.decision is Decision.ALLOW
+            and resolution.rule is not None
+            and resolution.rule.matcher.specificity >= Exact.specificity
+            for resolution in resolutions
+        )
 
     def _segment_counts(self, segment: Segment) -> bool:
         """Whether a segment runs anything. ``FOO=bar`` on its own does not."""
