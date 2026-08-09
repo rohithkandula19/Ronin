@@ -163,7 +163,7 @@ async def demo_feedback(engine: PolicyEngine, asker: ScriptedAsker) -> None:
     command = "psql -h db.internal -c 'delete from sessions'"
     decision = await engine.approve(BASH, use(command), rendered=command)
     print(f"  the human was shown: {asker.shown[-1]!r}")
-    print(f"  they were told why:  {asker.reasons[-1][:90]!r}")
+    print(f"  they were told why:  {asker.reasons[-1][:150]}")
     print(f"\n  approved={decision.approved}  remember={decision.remember}")
     print("  what the model receives as its tool result:")
     print("  " + decision.reason.replace("\n", "\n  "))
@@ -221,6 +221,12 @@ async def demo_sandbox() -> None:
     print(f"  detect() on {sys.platform}: {backend.describe()}")
     print(f"  isolates={backend.isolates}")
     print(f"  default when nothing is configured: {NoSandbox().describe()}")
+    print("\n  And on a machine with none of the backends installed — the answer that")
+    print("  matters, because a fallback that pretended to isolate would open the gate")
+    print("  onto nothing:")
+    bare = detect(which=lambda name: None, platform="linux")
+    print(f"    {bare.describe()}")
+    print(f"    isolates={bare.isolates}")
     print("\n  Argv construction is pure, so it is testable without the binary present:")
     from .sandbox import BubblewrapSandbox
 
