@@ -102,7 +102,7 @@ class FakeServer:
         self.protocol_version = protocol_version
         self.dead = False
         self.connections = 0
-        self._tasks: list[asyncio.Task[None]] = []
+        self._open: list[tuple[asyncio.Task[None], StreamPair]] = []
 
     def open(self) -> StreamPair:
         """The client's end of a fresh connection. Already at EOF once killed."""
@@ -111,15 +111,22 @@ class FakeServer:
         if self.dead:
             far.writer.close()
             return near
-        self._tasks.append(asyncio.create_task(self._serve(far)))
+        self._open.append((asyncio.create_task(self._serve(far)), far))
         return near
 
     def kill(self) -> None:
-        """Stop answering, as a crashed subprocess would."""
+        """Die the way a crashed subprocess dies: EOF on every open pipe.
+
+        Cancelling the serve task alone would leave the client waiting for its
+        timeout, which is a *hang*, not a death — a different failure mode with a
+        different recovery, and testing one while claiming the other is how a
+        degradation path passes its tests and fails in production.
+        """
         self.dead = True
-        for task in self._tasks:
+        for task, far in self._open:
+            far.writer.close()
             task.cancel()
-        self._tasks.clear()
+        self._open.clear()
 
     async def _serve(self, streams: StreamPair) -> None:
         while not self.dead:
