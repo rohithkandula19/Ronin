@@ -407,7 +407,9 @@ class Denylist:
         if not expanded.startswith("/"):
             return None
         resolved = PurePosixPath(os.path.normpath(expanded))
-        if str(resolved) == "/":
+        # `normpath("//")` is `"//"` on POSIX — a path made only of separators is still
+        # the root, and `rm -rf //` is a real way people have destroyed a machine.
+        if set(str(resolved)) == {"/"}:
             return DenyCode.RM_ROOT
         if resolved == PurePosixPath(self.home):
             return DenyCode.RM_HOME
