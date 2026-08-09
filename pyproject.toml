@@ -95,6 +95,7 @@ python_version = "3.11"
 files = [
     "src/ronin",
     "tests/agents",
+    "tests/cli",
     "tests/context",
     "tests/core",
     "tests/mcp",
@@ -108,7 +109,7 @@ files = [
 strict = true
 warn_unreachable = true
 explicit_package_bases = true
-mypy_path = "src:tests/agents:tests/context:tests/core:tests/mcp:tests/persistence:tests/providers:tests/safety:tests/tools:tests/ui:tests/verify"
+mypy_path = "src:tests/agents:tests/cli:tests/context:tests/core:tests/mcp:tests/persistence:tests/providers:tests/safety:tests/tools:tests/ui:tests/verify"
 
 # pytest's @parametrize is an untyped decorator as far as mypy is concerned;
 # that is a property of pytest, not a hole in our typing. Enumerated rather
@@ -118,6 +119,7 @@ module = [
     "agents_harness",
     "context_harness",
     "fakes",
+    "gate_harness",
     "harness",
     "mcp_harness",
     "persistence_harness",
@@ -150,6 +152,10 @@ module = [
     "test_plan_mode",
     "test_registry",
     "test_resilience",
+    "test_ronin_cli_doctor",
+    "test_ronin_cli_gate",
+    "test_ronin_cli_wire",
+    "test_ronin_cli_wizard",
     "test_ronin_mcp_client",
     "test_ronin_mcp_config",
     "test_ronin_mcp_integration",
@@ -188,6 +194,7 @@ module = [
     "test_verify_spec",
     "ui_harness",
     "verify_harness",
+    "wire_harness",
 ]
 disallow_untyped_decorators = false
 
@@ -205,6 +212,7 @@ src = ["src", "tests"]
 include = [
     "src/ronin/**/*.py",
     "tests/agents/**/*.py",
+    "tests/cli/**/*.py",
     "tests/context/**/*.py",
     "tests/core/**/*.py",
     "tests/mcp/**/*.py",

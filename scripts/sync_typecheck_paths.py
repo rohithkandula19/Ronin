@@ -9,6 +9,16 @@ missing from ``files`` is a directory with **no type checking at all**, and noth
 reports that. The same goes for a test module missing from the override list —
 except there the symptom is a spurious error, which at least gets noticed.
 
+There is a second, nastier symptom worth knowing about, found while adding
+``tests/cli``: a directory missing from ruff's ``include`` makes
+``ruff check <that-directory>`` **pass vacuously**. Ruff filters a *directory*
+argument through ``include`` and then reports ``All checks passed!`` on the empty
+set — the only hint is a ``warning: No Python files found`` line above it. An
+explicitly named *file* bypasses ``include``, so ``ruff check dir/`` and
+``ruff check dir/mod.py`` disagree, and the reassuring one is the wrong one. This
+is why ``--check`` runs *before* ruff and mypy in ``ci.yml``: a stale list then
+fails with its own cause named, instead of a green lint that linted nothing.
+
 The override list has to name modules rather than directories because the test
 trees are deliberately *not* packages (making them packages breaks collection
 across the rest of the monorepo), so mypy sees ``test_files``, not
