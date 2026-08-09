@@ -138,28 +138,48 @@ def git_repo(root: Path) -> Path:
     return root
 
 
-def full_workspace(root: Path) -> Paths:
-    """A workspace with all seven config files present and a git marker.
+AGENT_DEFINITION = """\
+---
+name: sweeper
+description: Sweeps the repo for a symbol and reports where it is defined.
+tools: [read, grep, glob]
+model: fast
+---
+You are the sweeper. Report file:line references and nothing else.
+"""
 
-    Deliberately one of each: project settings, local settings, user settings, mcp.json,
-    hooks.json, an agent definition, a slash command — plus RONIN.md and a source file,
-    so the repo map and memory are non-empty too.
+
+def full_workspace(root: Path) -> Paths:
+    """A workspace with all seven config sources present, plus git, memory and source.
+
+    One of each: user settings, project settings, local settings, ``mcp.json``,
+    ``hooks.json``, an agent definition and a slash command — so a single ``Loaded`` can
+    be asserted against every loader at once, with provenance.
     """
     paths = workspace(root)
     git_repo(root)
     write(root, "RONIN.md", "# project\n\nRun the tests with `pytest -q`.\n")
     write(root, "pkg/thing.py", "def widen(value: int) -> int:\n    return value + 1\n")
     write(root, "pkg/other.py", "from pkg.thing import widen\n\nWIDE = widen(1)\n")
+    write(root, "pyproject.toml", '[tool.pytest.ini_options]\naddopts = "-q"\n')
+    write(
+        paths.home,
+        ".ronin/settings.json",
+        json.dumps({"protected_branches": ["release"]}) + "\n",
+    )
+    write(root, ".ronin/settings.json", json.dumps({"mode": "auto_edit"}) + "\n")
+    write(root, ".ronin/settings.local.json", json.dumps({"taint_min_span": 32}) + "\n")
     write(
         root,
-        ".ronin/settings.json",
+        ".ronin/hooks.json",
         json.dumps(
-            {
-                "mode": "auto_edit",
-                RULES := "rules": [],
-            }
-        ),
+            {"PreToolUse": [{"matcher": "bash", "hooks": [{"command": "true"}]}]}
+        )
+        + "\n",
     )
+    write(root, ".ronin/agents/sweeper.md", AGENT_DEFINITION)
+    write(root, ".ronin/commands/ship.md", "Ship $ARGUMENTS to staging.\n")
+    mcp_config(root, "docs")
     return paths
 
 

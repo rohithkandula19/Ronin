@@ -52,6 +52,7 @@ from ronin.cli.gate import (
 from ronin.context.budget import ClampMode, OutputBudget
 from ronin.context.filestate import FileStateTracker, FileStatus
 from ronin.core.loop import run_turn
+from ronin.core.protocols import ToolRegistry
 from ronin.core.types import (
     AgentState,
     Message,
@@ -99,6 +100,13 @@ def test_specs_and_get_are_the_inner_registrys_unchanged() -> None:
     assert gate.specs() == inner.specs()
     assert gate.get("read") == READ
     assert gate.get("nonexistent") is None
+
+
+def test_the_gate_is_indistinguishable_from_a_registry_to_the_loop() -> None:
+    gate, _ = build(RecordingRegistry())
+    # Three methods in, three methods out: `run_turn` is written against the protocol
+    # and must not be able to tell it is holding a gate.
+    assert isinstance(gate, ToolRegistry)
 
 
 # --------------------------------------------------------------------------- #
