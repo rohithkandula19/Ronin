@@ -305,11 +305,18 @@ class Denylist:
         """Every unconditional refusal in ``raw``, or an empty tuple."""
         if self.yolo:
             return ()
-        hits: list[DenyHit] = []
-        if FORK_BOMB.search(raw):
-            hits.append(DenyHit(code=DenyCode.FORK_BOMB, subject=raw.strip()))
-        hits.extend(self.check_segments(parse_command(raw)))
-        return tuple(hits)
+        return (*self.check_command_text(raw), *self.check_segments(parse_command(raw)))
+
+    def check_command_text(self, raw: str) -> tuple[DenyHit, ...]:
+        """The refusals that can only be seen in the raw text, not in the parse.
+
+        Exactly one so far. A shell function definition is the single shape where the
+        parser has nothing useful to say, and ``shell.py`` already matches it textually
+        — keeping the pattern identical is how the two modules stay consistent.
+        """
+        if self.yolo or not FORK_BOMB.search(raw):
+            return ()
+        return (DenyHit(code=DenyCode.FORK_BOMB, subject=raw.strip()),)
 
     def check_segments(self, segments: Sequence[Segment]) -> tuple[DenyHit, ...]:
         """The same check over an already-parsed command."""
@@ -471,13 +478,17 @@ class Denylist:
         self, segments: Sequence[Segment], index: int, segment: Segment
     ) -> Iterator[DenyHit]:
         interprets = segment.binary in SHELL_EXECUTORS or segment.binary in CODE_INTERPRETERS
-        if interprets and segment.connector == "|" and index:
-            if segments[index - 1].binary in FETCH_BINARIES:
-                yield DenyHit(
-                    code=DenyCode.FETCH_INTO_SHELL,
-                    subject=segment.raw,
-                    detail=f"input comes from `{segments[index - 1].raw}`",
-                )
+        if (
+            interprets
+            and segment.connector == "|"
+            and index
+            and segments[index - 1].binary in FETCH_BINARIES
+        ):
+            yield DenyHit(
+                code=DenyCode.FETCH_INTO_SHELL,
+                subject=segment.raw,
+                detail=f"input comes from `{segments[index - 1].raw}`",
+            )
         if segment.binary in EVAL_BINARIES:
             for child in segments:
                 if child.parent == index and child.binary in FETCH_BINARIES:

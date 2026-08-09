@@ -160,6 +160,12 @@ EVENT_TYPE_NAMES: Mapping[type, str] = {
 }
 
 
+def _flush_stdout() -> None:
+    """The default flusher. A named function rather than a lambda so the call site
+    stays typed under ``--strict``."""
+    sys.stdout.flush()
+
+
 def _jsonable(value: object) -> object:
     """Coerce a provider-supplied argument value into something ``json`` accepts."""
     if isinstance(value, str | bool | int | float) or value is None:
@@ -301,7 +307,7 @@ async def run_headless(
     """
     out = sys.stdout.write if write is None else write
     err = sys.stderr.write if write_error is None else write_error
-    do_flush = (lambda: sys.stdout.flush()) if flush is None else flush
+    do_flush = _flush_stdout if flush is None else flush
 
     current = ViewState() if state is None else state
     approvals: list[ApprovalRequest] = []

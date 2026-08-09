@@ -136,7 +136,7 @@ def script() -> tuple[Event, ...]:
     )
 
 
-async def error_script() -> tuple[Event, ...]:
+def error_script() -> tuple[Event, ...]:
     """A turn that fails. Exists so the demo can show exit code 1, not claim it."""
     return (
         TurnStart(turn_index=0),

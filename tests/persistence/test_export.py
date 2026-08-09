@@ -101,7 +101,7 @@ def test_markdown_marks_turn_boundaries_and_fences_tool_calls() -> None:
 def test_markdown_reports_a_reset_rather_than_showing_the_discarded_text() -> None:
     out = to_markdown(two_turn_session(), META)
     assert "DISCARD ME" not in out
-    assert "stream was reset 1×" in out
+    assert "stream was reset 1 time(s)" in out
 
 
 def test_markdown_says_when_a_tool_call_has_no_result() -> None:
@@ -200,7 +200,7 @@ def test_html_marks_an_error_result_and_a_missing_one() -> None:
 def test_html_shows_the_reset_and_not_the_discarded_prose() -> None:
     out = to_html(two_turn_session(), META)
     assert "DISCARD ME" not in out
-    assert "stream was reset 1×" in out
+    assert "stream was reset 1 time(s)" in out
 
 
 def test_html_carries_the_same_metadata_header_as_markdown() -> None:

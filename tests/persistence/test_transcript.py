@@ -290,11 +290,13 @@ def test_a_nan_in_metadata_is_refused_rather_than_written_as_invalid_json(
     poisoned = state.with_message(
         Message(role=Role.USER, metadata={"ratio": float("nan")})
     )
-    with Transcript.open(directory, SESSION) as transcript:
-        with pytest.raises(TranscriptError, match="TurnEnd"):
-            transcript.append(
-                TurnEnd(turn_index=0, state=TurnState.DONE, agent_state=poisoned)
-            )
+    with (
+        Transcript.open(directory, SESSION) as transcript,
+        pytest.raises(TranscriptError, match="TurnEnd"),
+    ):
+        transcript.append(
+            TurnEnd(turn_index=0, state=TurnState.DONE, agent_state=poisoned)
+        )
 
 
 # --------------------------------------------------------------------------- #

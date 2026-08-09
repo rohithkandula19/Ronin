@@ -1120,7 +1120,17 @@ def _assemble(
         considered=considered,
         parser_name=parser_name,
     )
-    return replace(draft, token_estimate=estimate_tokens(draft.render()))
+    # The marker's wording depends on ``over_budget``, which depends on the
+    # estimate, which depends on the marker. Two passes settle it (the note can
+    # only ever make the text longer, so it cannot oscillate); the third is slack.
+    estimate = estimate_tokens(draft.render())
+    for _ in range(3):
+        draft = replace(draft, token_estimate=estimate)
+        settled = estimate_tokens(draft.render())
+        if settled == estimate:
+            break
+        estimate = settled
+    return replace(draft, token_estimate=estimate)
 
 
 def _fit_budget(
@@ -1131,16 +1141,29 @@ def _fit_budget(
     Leaves first because a file nothing imports is the one whose absence costs the
     model least: it cannot be the thing everything else is built on. Terminates by
     construction — every pass removes one entry.
+
+    One special case, and it is the reason this is not a three-line loop. On a small
+    repo with a small budget the truncation marker can be a large fraction of the
+    budget, and then dropping files makes the *total* bigger, not smaller — the
+    strict loop would drop every file and still overflow, which is both useless and
+    over budget. So when even an empty map cannot fit, the marker stops being
+    charged against the budget and the listing is fitted without it. The map says so
+    (:attr:`RepoMap.over_budget` and the marker's own text).
     """
     kept = list(entries)
     dropped: list[FileEntry] = []
     order = sorted(
         entries, key=lambda e: (0 if e.is_leaf else 1, e.rank, e.path)
     )
+    floor = _assemble([], list(entries), budget_tokens, considered, parser_name)
+    marker_exempt = floor.token_estimate > budget_tokens
     cursor = 0
     while kept:
         candidate = _assemble(kept, dropped, budget_tokens, considered, parser_name)
-        if candidate.token_estimate <= budget_tokens:
+        cost = candidate.token_estimate
+        if marker_exempt:
+            cost -= estimate_tokens(candidate.marker())
+        if cost <= budget_tokens:
             break
         while cursor < len(order) and order[cursor] not in kept:
             cursor += 1

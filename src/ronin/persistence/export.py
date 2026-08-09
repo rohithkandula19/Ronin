@@ -149,7 +149,7 @@ def to_markdown(events: Sequence[Event], meta: SessionMeta) -> str:
         out.append("")
         if turn.resets:
             out.append(
-                f"> stream was reset {turn.resets}× — text before the last reset was "
+                f"> stream was reset {turn.resets} time(s) — text before the last reset was "
                 f"discarded, as the recording instructed."
             )
             out.append("")
@@ -250,7 +250,7 @@ def to_html(events: Sequence[Event], meta: SessionMeta) -> str:
         out.append(f"<h2>Turn {position} <span class=\"dim\">(index {turn.index})</span></h2>")
         if turn.resets:
             out.append(
-                f'<p class="dim">stream was reset {turn.resets}× — text before the '
+                f'<p class="dim">stream was reset {turn.resets} time(s) — text before the '
                 f"last reset was discarded, as the recording instructed.</p>"
             )
         if turn.thinking:

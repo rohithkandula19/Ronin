@@ -380,13 +380,18 @@ class TaintTracker:
             source = self._shingles.get(window)
             if source is None:
                 continue
-            return TaintHit(source=source, span=self._extend(text, index, source), argument=argument)
+            return TaintHit(
+                source=source, span=self._extend(text, index, source), argument=argument
+            )
         return None
 
     def _extend(self, text: str, index: int, source: str) -> str:
         """Grow the reported span to the full contiguous match, for a legible message."""
         end = index + self.min_span
-        while end < len(text) and self._shingles.get(text[end - self.min_span + 1 : end + 1]) == source:
+        while end < len(text):
+            window = text[end - self.min_span + 1 : end + 1]
+            if self._shingles.get(window) != source:
+                break
             end += 1
         return text[index:end]
 

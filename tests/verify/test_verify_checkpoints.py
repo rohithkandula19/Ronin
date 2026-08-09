@@ -79,10 +79,12 @@ async def test_the_users_index_and_status_are_untouched(tmp_path: Path) -> None:
     await _init_repo(tmp_path)
     real_index = tmp_path / ".git" / "index"
     real_head = tmp_path / ".git" / "HEAD"
+    # Snapshot *after* the baseline `git status`: status itself may rewrite the
+    # index's stat cache, and attributing that to us would make this test lie.
+    before_status = await run_command(["git", "status", "--porcelain"], cwd=tmp_path)
     before_index = real_index.read_bytes()
     before_mtime = real_index.stat().st_mtime_ns
     before_head = real_head.read_bytes()
-    before_status = await run_command(["git", "status", "--porcelain"], cwd=tmp_path)
 
     store = CheckpointStore(tmp_path)
     made = await store.checkpoint("mutating turn")
@@ -91,10 +93,10 @@ async def test_the_users_index_and_status_are_untouched(tmp_path: Path) -> None:
     await store.session_diff()
     await store.restore(made.checkpoint.id)
 
-    after_status = await run_command(["git", "status", "--porcelain"], cwd=tmp_path)
     assert real_index.read_bytes() == before_index
     assert real_index.stat().st_mtime_ns == before_mtime
     assert real_head.read_bytes() == before_head
+    after_status = await run_command(["git", "status", "--porcelain"], cwd=tmp_path)
     assert after_status.output == before_status.output
     # …and no branch, stash or reflog entry appeared either.
     branches = await run_command(["git", "branch", "--list"], cwd=tmp_path)
@@ -249,15 +251,16 @@ async def test_a_missing_git_binary_degrades_with_a_reason(tmp_path: Path) -> No
 
 async def test_a_failing_git_commit_is_reported_not_raised(tmp_path: Path) -> None:
     (tmp_path / ".git").mkdir()
-    (tmp_path / CheckpointStore(tmp_path).git_dir.name).mkdir(exist_ok=True)
-    runner = ScriptedRunner(rules=(("commit", 128, "fatal: unable to write new index file"),))
+    # The needle is padded: pytest names tmp dirs after the test, so a bare
+    # "commit" also matches the git-dir path in the `git init` argv.
+    runner = ScriptedRunner(rules=((" commit ", 128, "fatal: unable to write new index"),))
     store = CheckpointStore(tmp_path, run=runner)
 
     result = await store.checkpoint("turn")
 
     assert result.ok is False
     assert result.reason is CheckpointReason.GIT_FAILED
-    assert "unable to write new index file" in result.detail
+    assert "unable to write new index" in result.detail
 
 
 async def test_the_availability_probe_runs_once(tmp_path: Path) -> None:

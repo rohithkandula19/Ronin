@@ -505,7 +505,7 @@ class _Lexer:
         self.i = min(index + 1, len(self.text))
 
     def _brace(self) -> None:
-        inner, end = self._scan_balanced(self.i + 1, "{", "}")
+        _, end = self._scan_balanced(self.i + 1, "{", "}")
         raw = self.text[self.i : end]
         self._push(raw, raw)
         self.i = end

@@ -525,6 +525,7 @@ def builtin_rules() -> tuple[Rule, ...]:
     mutate the shipped policy in place — a mutable global allowlist is a security hole
     with a very short fuse.
     """
+
     def rule(pattern: str, decision: Decision, reason: str, *, unwaivable: bool = False) -> Rule:
         return Rule(
             tool="bash",
@@ -551,7 +552,7 @@ def builtin_rules() -> tuple[Rule, ...]:
             Decision.ALLOW,
             "read-only or recoverable git",
         ),
-        rule(rf"^git$", Decision.ALLOW, "bare `git` prints help"),
+        rule(r"^git$", Decision.ALLOW, "bare `git` prints help"),
         rule(
             rf"^({_alternation(CHEAP_MUTATION_BINARIES)})\b",
             Decision.ALLOW,
@@ -712,7 +713,8 @@ class PolicyEngine:
             return "token_budget"
         if budget.max_usd is not None and budget.spent_usd >= budget.max_usd:
             return "cost_budget"
-        if budget.max_wall_seconds is not None and budget.elapsed_seconds >= budget.max_wall_seconds:
+        wall = budget.max_wall_seconds
+        if wall is not None and budget.elapsed_seconds >= wall:
             return "wall_budget"
         return None
 

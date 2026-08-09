@@ -502,10 +502,28 @@ def test_entries_are_rendered_in_path_order_for_prompt_cache_stability(
     assert list(repo_map.paths) == sorted(repo_map.paths)
 
 
+#: Big enough that the truncation marker is a small part of the budget, which is
+#: the ordinary regime. ``TREE`` exercises the degenerate one.
+BIG_TREE = {
+    "core.py": "class Engine:\n    def run(self) -> None:\n        pass\n",
+    **{
+        f"leaf_{index}.py": (
+            "from core import Engine\n\n\n"
+            f"def handler_{index}(request: dict, *, timeout: float = 1.0) -> bytes:\n"
+            "    return b''\n\n\n"
+            f"def helper_{index}(value: int) -> str:\n"
+            "    return ''\n"
+        )
+        for index in range(12)
+    },
+}
+
+
 def test_the_map_fits_its_budget_and_names_what_it_dropped(tmp_path: Path) -> None:
-    plant(tmp_path, TREE)
-    repo_map = build_repo_map(tmp_path, budget_tokens=70)
-    assert repo_map.token_estimate <= 70
+    plant(tmp_path, BIG_TREE)
+    repo_map = build_repo_map(tmp_path, budget_tokens=200)
+    assert repo_map.token_estimate <= 200
+    assert not repo_map.over_budget
     assert repo_map.dropped_count > 0
     marker = repo_map.marker()
     assert f"{repo_map.dropped_count} of {repo_map.considered}" in marker
@@ -516,10 +534,38 @@ def test_the_map_fits_its_budget_and_names_what_it_dropped(tmp_path: Path) -> No
 def test_degradation_drops_leaves_before_the_file_everything_imports(
     tmp_path: Path,
 ) -> None:
+    plant(tmp_path, BIG_TREE)
+    repo_map = build_repo_map(tmp_path, budget_tokens=200)
+    assert "core.py" in repo_map.paths
+    assert all(path.startswith("leaf_") for path in repo_map.dropped_paths)
+    assert repo_map.dropped_leaves == repo_map.dropped_count
+
+
+def test_lower_budgets_drop_strictly_more(tmp_path: Path) -> None:
+    plant(tmp_path, BIG_TREE)
+    counts = [
+        build_repo_map(tmp_path, budget_tokens=budget).dropped_count
+        for budget in (900, 500, 300, 200)
+    ]
+    assert counts == sorted(counts)
+    assert counts[0] == 0 and counts[-1] > 0
+
+
+def test_a_budget_too_small_for_the_marker_still_lists_files_and_says_so(
+    tmp_path: Path,
+) -> None:
+    """The degenerate case: the explanation costs more than the budget allows.
+
+    Dropping every file would be over budget *and* useless, so the listing is fitted
+    without charging for the marker, and the map reports the overflow rather than
+    pretending it fit.
+    """
     plant(tmp_path, TREE)
-    repo_map = build_repo_map(tmp_path, budget_tokens=75)
+    repo_map = build_repo_map(tmp_path, budget_tokens=60)
+    assert repo_map.over_budget
+    assert repo_map.paths
     assert "src/core.py" in repo_map.paths
-    assert any(path.startswith("src/leaf_") for path in repo_map.dropped_paths)
+    assert "not charged against it" in repo_map.marker()
 
 
 def test_an_ample_budget_drops_nothing_and_emits_no_marker(tmp_path: Path) -> None:
