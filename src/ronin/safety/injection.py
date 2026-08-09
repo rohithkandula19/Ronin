@@ -133,6 +133,16 @@ class InjectionFinding:
 #: Shell verbs that make an adjacent blob of base64 interesting rather than incidental.
 _SHELL_VERBS = r"(?:sh|bash|zsh|eval|exec|curl|wget|python|node|powershell|cmd|system)"
 
+#: The things an injection asks for, and the verbs it asks with. Factored out so both
+#: word orders ("send the api key" / "the api key should be sent") use one list — the
+#: first version of this had two lists that drifted, and `AWS_SECRET_ACCESS_KEY` was
+#: caught in one direction only.
+_SECRETS = (
+    r"(?:api[_ -]?key|secret|token|password|credential|private key|\.env|id_rsa"
+    r"|AWS_[A-Z_]*|system prompt)"
+)
+_DISCLOSE = r"(?:send|show|print|reveal|output|include|share|paste|disclose|repeat|exfiltrate)"
+
 #: ``(kind, label, pattern)``. Written as alternations over what these attacks actually
 #: say rather than as one clever regex, because a named pattern is what makes the
 #: warning legible to the person reading it.
@@ -143,7 +153,7 @@ PATTERNS: tuple[tuple[InjectionKind, str, re.Pattern[str]], ...] = (
         re.compile(
             r"\b(ignore|disregard|forget|override|discard)\b[^.\n]{0,40}?\b"
             r"(previous|prior|earlier|above|all|any|system|initial)\b[^.\n]{0,20}?"
-            r"\b(instruction|prompt|direction|rule|guideline|context)",
+            r"\b(instruction|prompt|direction|rule|guideline|context)s?\b",
             re.IGNORECASE,
         ),
     ),
@@ -180,12 +190,8 @@ PATTERNS: tuple[tuple[InjectionKind, str, re.Pattern[str]], ...] = (
         InjectionKind.CREDENTIAL_REQUEST,
         "asks for secrets",
         re.compile(
-            r"\b(api[_ -]?key|secret|token|password|credential|private key|"
-            r"\.env|id_rsa|AWS_SECRET|system prompt)\b[^.\n]{0,50}?"
-            r"\b(send|show|print|reveal|output|include|share|paste|disclose|repeat)\b"
-            r"|\b(send|show|print|reveal|output|include|share|paste|disclose|repeat)\b"
-            r"[^.\n]{0,50}?\b(api[_ -]?key|secret|token|password|credential|private key|"
-            r"\.env|id_rsa|system prompt)\b",
+            rf"\b{_SECRETS}\b[^.\n]{{0,50}}?\b{_DISCLOSE}\b"
+            rf"|\b{_DISCLOSE}\b[^.\n]{{0,50}}?\b{_SECRETS}\b",
             re.IGNORECASE,
         ),
     ),
