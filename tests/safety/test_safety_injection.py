@@ -248,4 +248,4 @@ def test_a_dangerously_low_minimum_span_is_refused_at_construction() -> None:
 
 
 def test_the_default_minimum_span_is_longer_than_a_bare_identifier() -> None:
-    assert MIN_TAINT_SPAN > len("src/config.py")
+    assert len("src/config.py") < MIN_TAINT_SPAN

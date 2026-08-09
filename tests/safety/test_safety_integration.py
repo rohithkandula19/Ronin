@@ -19,7 +19,7 @@ from ronin.safety.denylist import Denylist
 from ronin.safety.injection import TaintTracker, wrap_and_scan
 from ronin.safety.policy import Answer, Decision, Outcome, PolicyEngine, Rule
 from ronin.safety.sandbox import NoSandbox, detect
-from ronin.safety.settings import LOCAL_SETTINGS, PROJECT_SETTINGS, USER_SETTINGS, load_settings
+from ronin.safety.settings import LOCAL_SETTINGS, USER_SETTINGS, load_settings
 
 FIXTURE = Path(__file__).parent / "fixtures" / "injected_page.html"
 
