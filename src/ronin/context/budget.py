@@ -39,6 +39,7 @@ def estimate_tokens(text: str) -> int:
     """``len(text) / 4``, rounded up. The one estimator the package shares."""
     return math.ceil(len(text) / CHARS_PER_TOKEN)
 
+
 #: The marker's length depends on the count it reports, and the count depends on
 #: how much room the marker leaves. Four passes is far more than the one or two a
 #: digit-count change needs; the loop exits early once the count stops moving.
@@ -99,9 +100,9 @@ class OutputBudget:
         """Whether ``text`` can be handed over untouched."""
         if len(text) > self.remaining_chars:
             return False
-        if self.remaining_lines is not None and _count_lines(text) > self.remaining_lines:
-            return False
-        return True
+        if self.remaining_lines is None:
+            return True
+        return _count_lines(text) <= self.remaining_lines
 
     def spend(self, text: str) -> OutputBudget:
         """The budget that remains after ``text`` is charged against it.
@@ -178,7 +179,9 @@ def _clamp_lines(text: str, lines: list[str], budget: OutputBudget) -> Clamped:
             break
         elided = settled
     if head_n == 0 and tail_n == 0:
-        return _marker_only(line_marker(len(lines)), elided_lines=len(lines), elided_chars=len(text))
+        return _marker_only(
+            line_marker(len(lines)), elided_lines=len(lines), elided_chars=len(text)
+        )
 
     head = "".join(lines[:head_n])
     tail = "".join(lines[len(lines) - tail_n :]) if tail_n else ""

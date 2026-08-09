@@ -199,9 +199,8 @@ def _compile_rule(line: str, *, base: str) -> IgnoreRule | None:
     if not stripped:
         return None
     negated = stripped.startswith("!")
-    if negated:
-        stripped = stripped[1:]
-    elif stripped.startswith("\\!"):
+    # A leading `!` negates; a leading `\!` is a literal one. Both lose one char.
+    if negated or stripped.startswith("\\!"):
         stripped = stripped[1:]
     dir_only = stripped.endswith("/")
     if dir_only:
@@ -598,7 +597,7 @@ def default_tree_sitter_loader(language: str) -> TSParser:
             ) from exc
     try:
         return cast(TSParser, get_parser(language))
-    except Exception as exc:  # noqa: BLE001 - the pack raises its own types
+    except Exception as exc:  # the grammar pack raises its own exception types
         raise ParserUnavailable(
             f"tree-sitter has no grammar for {language!r}: {exc}"
         ) from exc
@@ -1235,7 +1234,7 @@ def _scan_file(
             error = f"{parser.name} unavailable: {exc}"
         except SyntaxError as exc:
             error = f"syntax error at line {exc.lineno}: {exc.msg}"
-        except Exception as exc:  # noqa: BLE001 - a third-party parser may raise anything
+        except Exception as exc:  # a third-party parser may raise anything at all
             error = f"{parser.name} failed: {type(exc).__name__}: {exc}"
     return _Scanned(
         mtime_ns=mtime_ns,

@@ -12,11 +12,13 @@ from ronin.ui.render import (
     ANSI,
     APPROVAL_TRUNCATION,
     CR_GLYPH,
+    MARKUP,
     NO_CHANGES_NOTE,
     OVER_CAPACITY,
     PLAIN,
     TRAILING_NEWLINE_NOTE,
     Styles,
+    escape_markup,
     render_approval,
     render_diff,
     render_panels,
@@ -39,6 +41,47 @@ def test_a_typo_in_a_style_token_fails_loudly() -> None:
 
 def test_the_plain_style_map_is_the_identity() -> None:
     assert PLAIN.wrap("added", "+x") == "+x"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "plain text",
+        "[red]not a tag[/red]",
+        "items[0] = x",
+        "windows C:\\dir[1]",
+        "[unclosed",
+        "[/]",
+        "a backslash \\ alone",
+    ],
+)
+def test_markup_metacharacters_in_model_text_are_escaped_for_an_in_band_dialect(
+    raw: str,
+) -> None:
+    escaped = escape_markup(raw)
+    assert PLAIN.text(raw) == raw
+    assert MARKUP.text(raw) == escaped
+    assert escaped.count("\\[") == raw.count("[")
+
+
+def test_a_diff_that_looks_like_markup_survives_the_markup_dialect() -> None:
+    out = render_diff("old [red]x[/red]\n", "new [dim]y[/dim]\n", path="a.txt", styles=MARKUP)
+    assert "\\[red]" in out
+    assert "\\[dim]" in out
+    # our own tags are still there, unescaped, so colour still happens
+    assert "[green]" in out
+    assert "[red]-old" in out
+
+
+def test_an_approval_body_that_looks_like_markup_is_escaped_not_swallowed() -> None:
+    request = ApprovalRequest(
+        tool_use_id="t",
+        name="Bash",
+        danger_level=DangerLevel.DESTRUCTIVE,
+        rendered="rm -rf ./[cache]",
+    )
+    assert "\\[cache]" in render_approval(request, styles=MARKUP)
+    assert "./[cache]" in render_approval(request)
 
 
 def test_colour_comes_from_the_injected_map_not_from_the_renderer() -> None:

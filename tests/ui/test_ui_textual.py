@@ -94,6 +94,20 @@ async def test_text_appears_before_the_stream_ends() -> None:
         assert _text(app, TRANSCRIPT_ID) == "first chunk second chunk"
 
 
+async def test_model_text_that_looks_like_markup_is_shown_literally() -> None:
+    # Without escaping, Textual's Static would parse `[red]` as a tag and the words
+    # would vanish from the transcript.
+    async def tricky() -> AsyncIterator[Event]:
+        yield TurnStart(turn_index=0)
+        yield TextDelta(text="use items[0] and [red]this literal tag[/red]")
+        yield TurnEnd(turn_index=0, state=TurnState.DONE, stop_reason="no_tool_calls")
+
+    app = _build_app(Session(events=tricky()))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert _text(app, TRANSCRIPT_ID) == "use items[0] and [red]this literal tag[/red]"
+
+
 async def test_shift_tab_cycles_the_mode_and_repaints_the_status_line() -> None:
     seen: list[Mode] = []
     app = _build_app(Session(events=stream(()), on_mode_change=seen.append))

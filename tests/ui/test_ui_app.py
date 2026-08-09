@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import ast
 import inspect
+import os
+import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from ui_harness import APPROVAL, happy_turn, stream
@@ -47,7 +50,26 @@ def test_nothing_at_module_scope_imports_textual() -> None:
         elif isinstance(node, ast.ImportFrom):
             imported.add(node.module or "")
     assert not any(name.startswith("textual") for name in imported)
-    assert "textual" not in sys.modules
+
+
+def test_importing_the_package_does_not_drag_textual_in() -> None:
+    # In a fresh interpreter, because this one may have imported Textual for the
+    # pilot tests. Local subprocess, no network: `ronin.ui` must be importable and
+    # usable on an install that has no TUI extra at all.
+    source = str(Path(app_module.__file__).resolve().parents[2])
+    env = {**os.environ, "PYTHONPATH": source}
+    proof = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys, ronin.ui; print('textual' in sys.modules)",
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=True,
+    )
+    assert proof.stdout.strip() == "False"
 
 
 async def test_absence_of_the_extra_is_reported_as_a_fact_not_a_crash(

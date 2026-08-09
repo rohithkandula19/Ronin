@@ -134,7 +134,9 @@ def find_repo_root(start: Path) -> Path | None:
     return None
 
 
-def memory_paths(cwd: Path, *, home: Path | None = None, root: Path | None = None) -> tuple[Path, ...]:
+def memory_paths(
+    cwd: Path, *, home: Path | None = None, root: Path | None = None
+) -> tuple[Path, ...]:
     """Candidate memory files in precedence order: global, outermost → innermost.
 
     Stops at the ``.git`` boundary. Without that stop, a repo cloned into a home

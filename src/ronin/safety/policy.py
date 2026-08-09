@@ -941,8 +941,16 @@ class PolicyEngine:
         parts.extend(hazard.note for hazard in asked)
         if rule_decision is Decision.ASK and not parts:
             gating = [r for r in resolutions if r.decision is Decision.ASK]
-            if gating:
-                parts.append(gating[0].explain())
+            if gating and gating[0].rule is not None:
+                parts.append(
+                    f"not on the allowlist, so it needs one confirmation "
+                    f"({gating[0].rule.describe()})"
+                )
+            elif gating:
+                parts.append(
+                    "no rule covers this, and the ruleset default is to ask. Approving "
+                    "for the session or writing a rule will stop it asking again."
+                )
         return "; ".join(parts)
 
     # -- applying an answer -------------------------------------------------- #

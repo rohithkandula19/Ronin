@@ -567,7 +567,7 @@ async def _summarize(
     """``(summary, error)``. A failing summarizer yields the local digest, not a raise."""
     try:
         summary = await summarizer(build_summary_prompt(messages))
-    except Exception as exc:  # noqa: BLE001 - see the module docstring
+    except Exception as exc:  # any failure at all; see the module docstring
         return _fallback_summary(messages), f"{type(exc).__name__}: {exc}"
     if not summary.strip():
         return _fallback_summary(messages), "summarizer returned empty text"
