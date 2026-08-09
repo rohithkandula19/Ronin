@@ -21,7 +21,10 @@ own tests construct it by hand. Four of those joins are made here and nowhere el
   "``git reset --hard`` with nothing to restore from" is judged against reality rather
   than against the honest-but-pessimistic default;
 * ``Settings`` → ``settings.local.json``, so a remembered rule is written to the
-  gitignored layer and never to the layer a team shares.
+  gitignored layer and never to the layer a team shares;
+* the parent's rules → the *subagent's* policy, so a child can act on permission the
+  user already granted without being able to ask for more (see
+  :func:`subagent_policy_factory`).
 
 **Every degradation is a note, never a log line.** A workspace with an unparseable
 ``settings.local.json``, no tree-sitter, no git and no ``RONIN.md`` still loads and
@@ -532,8 +535,8 @@ async def build_runtime(
     The gate wraps the *session's* registry, so ``task`` and every MCP tool go through
     the same policy, hooks and output budget as ``bash``.
 
-    Nothing about a failed MCP server, an unavailable sandbox or a subagent with a
-    gated tool raises: each becomes a note on ``Runtime.loaded``.
+    Nothing about a failed MCP server or an unavailable sandbox raises: each becomes a
+    note on ``Runtime.loaded``.
     """
     paths = loaded.paths
     settings = loaded.settings
@@ -755,5 +758,6 @@ __all__ = [
     "build_runtime",
     "load_workspace",
     "rule_to_json",
+    "subagent_policy_factory",
     "system_prompt",
 ]

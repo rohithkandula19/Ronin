@@ -520,17 +520,18 @@ async def test_output_that_fits_is_passed_through_byte_for_byte() -> None:
 
 
 async def test_a_clamp_that_cuts_the_fence_puts_it_back() -> None:
-    # One enormous first line drives the head to zero, which is the case where the
-    # opening delimiter would otherwise be truncated away and untrusted content would
-    # reach the model outside the block the standing instruction talks about.
+    # A budget too small to keep the header line drives the head to zero, and the
+    # result is untrusted content with a dangling close marker and no open marker —
+    # content outside the block the standing instruction talks about.
     page = "x" * 400 + "\n" + "tail line\n" * 5
     inner = RecordingRegistry({"web_fetch": ToolResult(ok=True, content=page)})
-    gate, _ = build(inner, budget=OutputBudget(remaining_chars=120))
+    gate, _ = build(inner, budget=OutputBudget(remaining_chars=90))
 
     result = await gate.execute(use("web_fetch", url="https://x.test/p", prompt="?"))
 
     assert OPEN_MARKER in result.content
     assert CLOSE_MARKER in result.content
+    assert FENCE_REPAIR_NOTE in result.content
     assert gate.log[-1].clamp_mode is not ClampMode.NONE
 
 
@@ -583,12 +584,22 @@ async def test_a_read_records_the_file_before_anything_could_clamp_it(tmp_path: 
     )
 
 
-def test_the_record_renders_one_line_for_doctor() -> None:
-    inner = RecordingRegistry()
-    gate, _ = build(inner)
-    asyncio.get_event_loop_policy()  # no loop needed; the record is built by hand
-    record = gate.log
-    assert record == ()
+async def test_the_record_renders_one_line_naming_what_the_gate_did() -> None:
+    process = ScriptedHookProcess({"before": HookCompletion(exit_code=0, stdout="ok")})
+    inner = RecordingRegistry({"web_fetch": ToolResult(ok=True, content=FETCHED_PAGE)})
+    gate, _ = build(inner, hooks=runner(hook_spec("before"), process=process))
+
+    await gate.execute(use("web_fetch", url="https://widget.example/notes", prompt="?"))
+
+    line = gate.log[-1].line()
+    assert "web_fetch[call_1]" in line
+    assert "pre_hooks → execute → taint" in line
+    assert "registered" in line
+    assert "injection pattern(s) flagged" in line
+
+
+def test_an_empty_record_still_renders() -> None:
+    assert GateRecord(tool="read", tool_use_id="call_1").line() == "read[call_1]  refused"
 
 
 # --------------------------------------------------------------------------- #
@@ -658,8 +669,6 @@ def test_a_gate_and_engine_holding_different_trackers_is_refused_at_construction
 
 
 def test_a_gate_whose_engine_has_no_tracker_is_refused_at_construction() -> None:
-    from ronin.safety.policy import PolicyEngine, builtin_ruleset
-
     with pytest.raises(ValueError, match="PolicyEngine has none"):
         gated(
             RecordingRegistry(),
@@ -675,8 +684,6 @@ def test_the_gate_adopts_the_engines_tracker_when_it_was_given_none() -> None:
 
 
 async def test_without_a_tracker_the_gate_says_so_instead_of_pretending() -> None:
-    from ronin.safety.policy import PolicyEngine, builtin_ruleset
-
     inner = RecordingRegistry({"web_fetch": ToolResult(ok=True, content=FETCHED_PAGE)})
     gate = gated(inner, PolicyEngine(rules=builtin_ruleset()))
 
