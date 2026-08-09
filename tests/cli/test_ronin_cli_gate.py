@@ -133,7 +133,9 @@ async def test_a_pre_tool_use_hook_exiting_2_blocks_the_call_and_the_tool_never_
 
 
 async def test_a_hook_exiting_0_does_not_block_and_its_stdout_reaches_the_model() -> None:
-    process = ScriptedHookProcess({"brief": HookCompletion(exit_code=0, stdout="deps are pinned in uv.lock")})
+    process = ScriptedHookProcess(
+        {"brief": HookCompletion(exit_code=0, stdout="deps are pinned in uv.lock")}
+    )
     inner = RecordingRegistry({"read": ToolResult(ok=True, content="the file")})
     gate, _ = build(inner, hooks=runner(hook_spec("brief"), process=process))
 

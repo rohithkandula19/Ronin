@@ -381,13 +381,22 @@ class GatedRegistry:
             self._log.append(draft.freeze())
             raise
         except Exception as exc:  # the gate itself failed; still a value to the model
+            # Whether the tool ran decides what the model should do next, so the error
+            # says which. Telling it "nothing happened" after a write went through is
+            # how a retry turns one mutation into two.
+            ran = GateStage.EXECUTE in draft.stages
             result = ToolResult(
                 ok=False,
                 error=(
-                    f"the tool gate failed unexpectedly before {use.name!r} could be "
-                    f"completed ({type(exc).__name__}: {exc}). This is a bug in Ronin, "
-                    "not something you did wrong — tell the user, and try a different "
-                    "approach rather than repeating this call."
+                    f"the tool gate failed unexpectedly ({type(exc).__name__}: {exc}) "
+                    + (
+                        f"*after* {use.name} had already run, so its effect may have "
+                        "happened: check the current state before doing anything else."
+                        if ran
+                        else f"before {use.name} ran, so it had no effect."
+                    )
+                    + " This is a bug in Ronin, not something you did wrong — tell the "
+                    "user rather than repeating the call."
                 ),
             )
             draft.blocked_by = GateStage.GATE
