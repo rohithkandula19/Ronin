@@ -217,8 +217,9 @@ async def main() -> int:
         clamped = clamp(log, budget=OutputBudget(remaining_chars=400))
         print(clamped.text)
         print(f"  {len(log)} chars in, {len(clamped.text)} out, {clamped.elided_lines} lines elided")
-        untouched = clamp("short output\n", budget=OutputBudget(remaining_chars=400))
-        print(f"  under budget is byte-identical: {untouched.text == 'short output\\n'}")
+        short = "short output\n"
+        untouched = clamp(short, budget=OutputBudget(remaining_chars=400))
+        print(f"  under budget is byte-identical: {untouched.text == short}")
         blob = "x" * 5000
         single = clamp(blob, budget=OutputBudget(remaining_chars=200))
         print(f"  one enormous line falls back to chars: {single.marker}")

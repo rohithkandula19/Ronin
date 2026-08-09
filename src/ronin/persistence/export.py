@@ -168,10 +168,9 @@ def to_markdown(events: Sequence[Event], meta: SessionMeta) -> str:
             out.append("")
             approval = next((a for a in turn.approvals if a.tool_use_id == call.id), None)
             if approval is not None:
-                out.append(
-                    f"approval requested ({approval.danger_level.name.lower()}"
-                    f"{', ' + approval.reason if approval.reason else ''}):"
-                )
+                level = approval.danger_level.name.lower()
+                detail = f", {approval.reason}" if approval.reason not in ("", level) else ""
+                out.append(f"approval requested ({level}{detail}):")
                 out.append(_block(approval.rendered))
                 out.append("")
             result = answered.get(call.id)

@@ -363,7 +363,7 @@ class RemoteTool(Tool):
 
 def remote_tools(
     config: McpServerConfig,
-    descriptors: Sequence[Mapping[str, Any]],
+    descriptors: Sequence[object],
     invoke: RemoteInvoke,
 ) -> tuple[tuple[RemoteTool, ...], tuple[str, ...]]:
     """``(tools, skipped)`` for one server's ``tools/list`` reply.
@@ -371,6 +371,10 @@ def remote_tools(
     A descriptor that cannot be named legally is skipped with a reason rather than
     failing the server: one over-long tool name must not cost a session the other
     nineteen tools on that server.
+
+    ``descriptors`` is typed ``Sequence[object]`` on purpose: these entries came
+    off a wire a remote process controls, so "each one is a mapping" is a runtime
+    fact to check rather than a static one to assume.
     """
     tools: list[RemoteTool] = []
     skipped: list[str] = []

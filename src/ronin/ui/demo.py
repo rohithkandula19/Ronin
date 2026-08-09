@@ -49,7 +49,7 @@ from ronin.core.types import (
 )
 
 from .app import TEXTUAL_MISSING, Session, initial_state, panels_for, textual_available
-from .commands import load_registry, parse, render_help
+from .commands import ParseError, load_registry, parse, render_help
 from .headless import OutputFormat, run_headless
 from .reduce import ViewState, reduce_event, reduce_stream
 from .render import (
@@ -126,13 +126,31 @@ def script() -> tuple[Event, ...]:
             name="Edit",
             result=ToolResult(ok=False, error="DENIED: no human attached to approve this action"),
         ),
-        Error(message="one tool was denied", kind="approval", recoverable=True),
         TurnEnd(
             turn_index=0,
             state=TurnState.DONE,
             stop_reason="no_tool_calls",
             agent_state=FINAL_STATE,
         ),
+    )
+
+
+async def error_script() -> tuple[Event, ...]:
+    """A turn that fails. Exists so the demo can show exit code 1, not claim it."""
+    return (
+        TurnStart(turn_index=0),
+        TextDelta(text="starting"),
+        Error(message="provider returned 500 twice", kind="provider", recoverable=False),
+        TurnEnd(turn_index=0, state=TurnState.ERROR, stop_reason="protocol_error"),
+    )
+
+
+def clean_script() -> tuple[Event, ...]:
+    """A turn that just answers. Exit code 0."""
+    return (
+        TurnStart(turn_index=0),
+        TextDelta(text="two plus two is four.\n"),
+        TurnEnd(turn_index=0, state=TurnState.DONE, stop_reason="no_tool_calls"),
     )
 
 
@@ -202,9 +220,20 @@ async def main() -> int:
         print(line, end="")
     print(f"… {len(lines) - 5} more event lines …")
     print(lines[-1], end="")
-    print(f"\nexit code: {result.exit_code}  (2 = an approval was needed and denied)")
+    print(f"\nexit code: {result.exit_code}  (2 = an approval was needed and DENIED)")
     for notice in notices:
         print(f"stderr: {notice}", end="")
+
+    for name, script_events in (("errored", error_script()), ("clean", clean_script())):
+        sink: list[str] = []
+        other = await run_headless(
+            stream(script_events),
+            output_format=OutputFormat.TEXT,
+            write=sink.append,
+            write_error=lambda _text: None,
+        )
+        print(f"{name} stream, --output-format=text → exit {other.exit_code}, "
+              f"stdout {''.join(sink)!r}")
 
     section("8. slash commands, including one from .ronin/commands")
     with tempfile.TemporaryDirectory() as tmp:
@@ -226,12 +255,14 @@ async def main() -> int:
             "/review src/main.py",
         ):
             outcome = parse(line, registry=registry)
-            label = getattr(outcome, "display", None)
-            print(f"{line:<28} → {label if label else outcome}")
+            if isinstance(outcome, ParseError):
+                print(f"{line:<28} ✗ {outcome.display}")
+            else:
+                summary = outcome.body.strip() or f"builtin, argument={outcome.argument!r}"
+                print(f"{line:<28} ✓ {summary}")
 
     section("9. the TUI is a thin skin over the same functions")
     panels = panels_for(state)
-    print(f"panels rendered without a terminal: {sorted(vars(panels) or {})}" if False else "")
     print(f"transcript region: {len(panels.transcript)} chars of markup")
     print(f"status region:     {panels.status}")
     session = Session(events=stream(events), model="claude-sonnet", cwd=".", branch="ui-layer")

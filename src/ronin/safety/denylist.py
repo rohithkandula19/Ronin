@@ -521,6 +521,10 @@ class Denylist:
         self, word: str, base: Path, *, write: bool, subject: str = ""
     ) -> Iterator[DenyHit]:
         path = self.resolve(word, base)
+        if str(path).startswith("/dev/"):
+            # Devices are not files with a workspace: the block-device rule and the
+            # write-to-device hazard own them, and /dev/null must stay free.
+            return
         display = subject or word
         parts = path.parts
         name = path.name

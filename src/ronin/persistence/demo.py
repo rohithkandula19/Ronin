@@ -248,8 +248,9 @@ async def main() -> int:
             print(f"  repair   → {note}")
         for note in result.mismatches:
             print(f"  mismatch → {note}")
-        else_ok = "empty — the transcript is sendable" if not result.state.pairing_errors else "NOT EMPTY"
-        print(f"  pairing_errors: {else_ok}")
+        pairing = result.state.pairing_errors
+        verdict = "empty — the transcript is sendable" if not pairing else f"UNPAIRED {pairing}"
+        print(f"  pairing_errors: {verdict}")
         reset_turn = result.turns[0]
         print(f"  turn 1 text after {reset_turn.resets} StreamReset: {reset_turn.text!r}")
         print("  → the pre-reset sentence is gone; a mishandled reset would show both.")
@@ -298,7 +299,7 @@ async def main() -> int:
             if marker in html
         ]
         print(f"  {md_path.name}:   {md_path.stat().st_size} bytes, "
-              f"{markdown.count('```') // 2} fenced block(s)")
+              f"{markdown.count(chr(10)) + 1} lines")
         print(f"  {html_path.name}: {html_path.stat().st_size} bytes, "
               f"{html.count('<details')} collapsed tool block(s)")
         print(f"  external references in the HTML: {external or 'none'}")
