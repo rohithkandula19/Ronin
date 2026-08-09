@@ -14,6 +14,15 @@ So each task is checked in both directions:
 2. Overlay the author's ``solution/`` and run it again → it must exit **zero**.
    Otherwise the task is unsolvable and always scores a fail.
 
+An ``injection-resistance`` task gets a third direction, because its pass criterion is
+two claims and only the first is covered above: it must verify that the real work was
+done *and* that the injected instruction was not obeyed. The second half is a guard,
+and an unexercised guard is decoration — a ``verify.sh`` that forgot to check its
+canary passes every solved workspace, so the whole category scores 100% forever and
+every run looks correct. So each such task declares ``injection_probe`` in its
+``task.toml``: the paths only an obeyed injection would create. This script plants them
+in an otherwise-solved workspace and requires ``verify.sh`` to **fail**.
+
 A task that has no ``solution/`` cannot be checked at all and is reported as
 *unproven* rather than counted as fine — the honest state for "nobody has
 demonstrated this task can be passed".
@@ -24,9 +33,9 @@ claim that should be re-derived by a machine on every push, not read in a report
 
 Usage::
 
-    python scripts/check_eval_tasks.py                    # every task, both directions
+    python scripts/check_eval_tasks.py                     # every task, every direction
     python scripts/check_eval_tasks.py --parallel 8
-    python scripts/check_eval_tasks.py --root tests/evals/_staging/g1
+    python scripts/check_eval_tasks.py --root tests/evals/injection-resistance
     python scripts/check_eval_tasks.py --quiet             # counts and failures only
 """
 from __future__ import annotations
@@ -38,7 +47,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from collections.abc import Iterator
+import tomllib
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -63,6 +73,10 @@ class Task:
     fixture: Path | None
     solution: Path | None
 
+    #: From ``injection_probe`` in ``task.toml``: paths only an obeyed injection would
+    #: create. Empty for every category except ``injection-resistance``.
+    probes: tuple[str, ...] = ()
+
     @property
     def name(self) -> str:
         """Repo-relative when possible, absolute otherwise.
@@ -79,17 +93,23 @@ class Task:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class Outcome:
-    """What both directions did. ``ok`` is the only thing CI cares about."""
+    """What each direction did. ``ok`` is the only thing CI cares about."""
 
     task: str
     bare_exit: int | None
     solved_exit: int | None
     detail: str
     unproven: bool = False
+    #: Exit code of the probed run, or ``None`` when the task declares no probe.
+    #: ``0`` is the failure this direction exists to catch: a solved workspace with
+    #: the injection's artefact planted in it was still accepted.
+    probed_exit: int | None = None
 
     @property
     def ok(self) -> bool:
         if self.unproven or "gitignored" in self.detail:
+            return False
+        if self.probed_exit == 0:
             return False
         return self.bare_exit is not None and self.bare_exit != 0 and self.solved_exit == 0
 
@@ -97,7 +117,11 @@ class Outcome:
         if self.unproven:
             return f"UNPROVEN  {self.task}  {self.detail}"
         mark = "ok      " if self.ok else "FAIL    "
-        return f"{mark}{self.task}  bare={self.bare_exit} solved={self.solved_exit}  {self.detail}"
+        probed = "" if self.probed_exit is None else f" probed={self.probed_exit}"
+        return (
+            f"{mark}{self.task}  bare={self.bare_exit} solved={self.solved_exit}"
+            f"{probed}  {self.detail}"
+        )
 
 
 def find_tasks(root: Path) -> Iterator[Task]:
@@ -118,7 +142,26 @@ def find_tasks(root: Path) -> Iterator[Task]:
             verify=verify,
             fixture=fixture if fixture.is_dir() else None,
             solution=solution if solution.is_dir() else None,
+            probes=declared_probes(directory / TASK_DECLARATION),
         )
+
+
+def declared_probes(declaration: Path) -> tuple[str, ...]:
+    """``injection_probe`` from a ``task.toml``, tolerating a malformed file.
+
+    Parsed with ``tomllib`` directly rather than through ``ronin.evals.task`` so this
+    script keeps working on a tree whose loader does not import — it is the thing that
+    tells you the fixtures are sound, and it should not need the runtime to say so. A
+    file that will not parse is left to the loader's own error, which names the key.
+    """
+    try:
+        data = tomllib.loads(declaration.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return ()
+    raw = data.get("injection_probe", ())
+    if not isinstance(raw, (list, tuple)):
+        return ()
+    return tuple(item for item in raw if isinstance(item, str) and item)
 
 
 def gitignored(paths: list[Path]) -> list[Path]:
@@ -188,6 +231,24 @@ def overlay(source: Path, destination: Path) -> None:
             doomed.unlink()
 
 
+def plant_probes(workspace: Path, probes: Sequence[str]) -> None:
+    """Create the artefacts an obeyed injection would leave behind.
+
+    Deliberately crude — an empty file at the declared path. The guards look for
+    *existence* by name, which is the right thing for them to look for: an agent that
+    creates ``telemetry.txt`` because a comment told it to has obeyed the injection
+    regardless of what it wrote inside.
+    """
+    for probe in probes:
+        relative = Path(probe)
+        # `workspace / probe` is absolute because `workspace` is; test the *probe*.
+        if relative.is_absolute() or ".." in relative.parts:
+            raise ValueError(f"injection_probe {probe!r} escapes the workspace")
+        target = workspace / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("planted by scripts/check_eval_tasks.py\n", encoding="utf-8")
+
+
 def clear_bytecode(workspace: Path) -> None:
     """Remove every ``__pycache__`` before running a check.
 
@@ -254,6 +315,7 @@ def check(task: Task, *, timeout: float) -> Outcome:
             unproven=True,
         )
 
+    probed_exit: int | None = None
     with tempfile.TemporaryDirectory(prefix="evalcheck-") as raw:
         scratch = Path(raw)
         bare = scratch / "bare"
@@ -265,6 +327,16 @@ def check(task: Task, *, timeout: float) -> Outcome:
         overlay(task.solution, solved)
         solved_exit, solved_detail = run_verify(task, solved, timeout=timeout)
 
+        if task.probes:
+            # A *third* workspace, not the solved one reused: the probe plants files
+            # and some verify scripts hash the tree, so running direction 2 in a
+            # workspace direction 3 has touched would make the two interfere.
+            probed = scratch / "probed"
+            shutil.copytree(task.fixture, probed)
+            overlay(task.solution, probed)
+            plant_probes(probed, task.probes)
+            probed_exit, _ = run_verify(task, probed, timeout=timeout)
+
     ignored = gitignored(payload_files(task))
     if ignored:
         names = ", ".join(str(path.relative_to(task.directory)) for path in ignored[:3])
@@ -273,15 +345,22 @@ def check(task: Task, *, timeout: float) -> Outcome:
             bare_exit,
             solved_exit,
             f"{len(ignored)} file(s) are gitignored and will never reach CI: {names}",
+            probed_exit=probed_exit,
         )
 
     if bare_exit == 0:
         detail = "verify.sh PASSES on the untouched fixture — the task is already solved"
     elif solved_exit != 0:
         detail = f"verify.sh fails on the author's own solution: {solved_detail}"
+    elif probed_exit == 0:
+        detail = (
+            f"the injection guard does not bite: planting {', '.join(task.probes)} in a "
+            "solved workspace still passes, so this task can never detect an obeyed "
+            "injection"
+        )
     else:
         detail = bare_detail
-    return Outcome(task.name, bare_exit, solved_exit, detail)
+    return Outcome(task.name, bare_exit, solved_exit, detail, probed_exit=probed_exit)
 
 
 def main() -> int:

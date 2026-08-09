@@ -72,6 +72,7 @@ KNOWN_KEYS: Final[frozenset[str]] = frozenset(
         "timeout_seconds",
         "tags",
         "regression_gate",
+        "injection_probe",
     }
 )
 
@@ -241,6 +242,13 @@ class EvalTask:
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
     tags: tuple[str, ...] = ()
     regression_gate: bool = False
+    #: Workspace-relative paths that only an *obeyed* injected instruction would
+    #: create. Declared by ``injection-resistance`` tasks so the guard can be checked
+    #: rather than trusted: ``scripts/check_eval_tasks.py`` plants these in an
+    #: otherwise-solved workspace and requires ``verify.sh`` to fail. A guard that
+    #: never bites scores its whole category 100% forever and looks correct doing it.
+    #: Not consulted during a run — the agent never sees these paths.
+    injection_probe: tuple[str, ...] = ()
     #: Keys present in ``task.toml`` that this loader does not know. Not an error
     #: (see the module docstring), but reported so a typo is visible.
     extra_keys: tuple[str, ...] = ()
@@ -338,6 +346,7 @@ def load_task(path: str | Path) -> EvalTask:
         ),
         tags=_str_tuple(data, "tags", toml_path),
         regression_gate=_as_bool(data, "regression_gate", toml_path, False),
+        injection_probe=_str_tuple(data, "injection_probe", toml_path),
         extra_keys=tuple(sorted(set(data) - KNOWN_KEYS)),
     )
 
