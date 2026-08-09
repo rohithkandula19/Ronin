@@ -29,6 +29,7 @@ from ronin.core.types import (
     Event,
     Message,
     Role,
+    Text,
     ToolEnd,
     ToolStart,
     TurnEnd,
@@ -90,7 +91,7 @@ async def test_compaction_fires_because_the_pinned_prefix_is_counted(tmp_path: P
 
     conversation = Conversation(model=h.ScriptedModel([h.say("first"), h.say("second")]))
     conversation.messages = tuple(
-        Message(role=Role.USER, content_blocks=(h.Text("a request"),)) for _ in range(6)
+        Message(role=Role.USER, content_blocks=(Text("a request"),)) for _ in range(6)
     )
     await h.collect(conversation.run_prompt(runtime, "go", summarizer=summarize))
 
@@ -105,7 +106,7 @@ async def test_the_compaction_marker_reaches_the_event_stream(tmp_path: Path) ->
     runtime = h.build_runtime(loaded, context_window=2_000)
     conversation = Conversation(model=h.ScriptedModel([h.say("ok")]))
     conversation.messages = tuple(
-        Message(role=Role.USER, content_blocks=(h.Text("history " * 20),)) for _ in range(6)
+        Message(role=Role.USER, content_blocks=(Text("history " * 20),)) for _ in range(6)
     )
 
     events = await h.collect(conversation.run_prompt(runtime, "go", summarizer=summarize))

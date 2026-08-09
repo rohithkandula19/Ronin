@@ -24,11 +24,13 @@ from ronin.cli.stream import VERIFY_STEP, Conversation, run_prompt
 from ronin.cli.wire import build_runtime, load_workspace
 from ronin.core.protocols import FinalMessage, ModelChunk, TextChunk
 from ronin.core.types import (
+    DangerLevel,
     Message,
     Mode,
     Role,
     Text,
     ToolEnd,
+    ToolResult,
     ToolUse,
     unpaired_tool_uses,
 )
@@ -278,9 +280,9 @@ async def test_two_hundred_turns_of_compaction_still_recall_turn_threes_file(
         [
             h.FakeTool(
                 name="edit",
-                danger=h.DangerLevel.READ_ONLY,  # no checkpoints: this is a context test
-                result=h.ToolResult(ok=True, content="unused"),
-                handler=lambda arguments: h.ToolResult(
+                danger=DangerLevel.READ_ONLY,  # no checkpoints: this is a context test
+                result=ToolResult(ok=True, content="unused"),
+                handler=lambda arguments: ToolResult(
                     ok=True,
                     content=(
                         f"{marker(int(str(arguments['file_path'])[7:10]))} "
@@ -336,7 +338,7 @@ async def test_the_two_hundred_turn_session_says_it_is_over_its_own_trigger(
         [
             h.FakeTool(
                 name="edit",
-                handler=lambda arguments: h.ToolResult(
+                handler=lambda arguments: ToolResult(
                     ok=True, content=f"applied to {arguments['file_path']}\n" + "y" * 600
                 ),
             )

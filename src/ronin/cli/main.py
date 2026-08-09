@@ -103,7 +103,6 @@ class Command(StrEnum):
     DOCTOR = "doctor"
     EXPORT = "export"
     SESSIONS = "sessions"
-    HELP = "help"
     VERSION = "version"
 
 
@@ -663,6 +662,9 @@ async def _one_turn(
     """Stream one turn to the terminal, and report what it exited as."""
     state = ViewState()
     approvals: list[ApprovalRequest] = []
+    # Only this turn's notes: the list accumulates across the session, and reprinting
+    # turn one's degradation after every later turn trains the user to ignore it.
+    before = len(agent.conversation.notes)
     async for event in agent.stream(
         request,
         budget=options.budget,
@@ -674,7 +676,7 @@ async def _one_turn(
         if isinstance(event, ApprovalRequest):
             approvals.append(event)
     streams.out("\n")
-    for note in agent.conversation.notes:
+    for note in agent.conversation.notes[before:]:
         streams.err(f"note: {note}\n")
     return exit_code_for(state, approvals)
 

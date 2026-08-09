@@ -374,6 +374,11 @@ class Conversation:
             self.budget = budget
         if self._started_at is None:
             self._started_at = self.clock()
+        # Per *prompt*, not per conversation: without this a read-only follow-up to a
+        # mutating turn re-runs the whole verify pass on the previous turn's diff, and
+        # reports the previous turn's repair failure a second time.
+        self._mutated = False
+        self._turn_base = None
 
         self.messages = (*self.messages, Message(role=Role.USER, content_blocks=(Text(prompt),)))
 
@@ -708,11 +713,6 @@ class Conversation:
         """A unique id for one middleware step. Unique per conversation, not global."""
         self._step += 1
         return f"ronin-{kind}-{self._step}"
-
-    def render_notes(self) -> str:
-        """Every degradation this conversation hit, for ``/doctor`` and the CLI."""
-        return "\n".join(f"note: {note}" for note in self.notes)
-
 
 async def run_prompt(
     runtime: Runtime,

@@ -155,6 +155,7 @@ module = [
     "test_resilience",
     "test_ronin_cli_doctor",
     "test_ronin_cli_gate",
+    "test_ronin_cli_integration",
     "test_ronin_cli_main",
     "test_ronin_cli_sdk",
     "test_ronin_cli_spine",
