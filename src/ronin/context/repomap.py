@@ -988,12 +988,12 @@ class RepoMap:
 
     @property
     def over_budget(self) -> bool:
-        """True only in the degenerate case: the header and marker alone overflow.
+        """True when the truncation marker pushed the render past the budget.
 
-        The map's own text is still inside the budget; what does not fit is the
-        explanation of what was cut. Returning an empty map instead would be both
-        over budget *and* useless, so the marker is treated as a floor — the same
-        rule :mod:`ronin.context.budget` applies to a clamp marker.
+        The listing itself is inside the budget; what does not fit is the
+        explanation of what was cut. Dropping further files would show less and
+        still overflow, so the marker is treated as a floor — the same rule
+        :mod:`ronin.context.budget` applies to a clamp marker.
         """
         return self.token_estimate > self.budget_tokens
 
@@ -1013,8 +1013,9 @@ class RepoMap:
             )
         if self.over_budget:
             detail += (
-                "; note: the header and this marker alone exceed the budget, so the "
-                "marker was not charged against it — the listing itself does fit"
+                "; note: the listing above fits the budget but this marker does not, "
+                "so the marker was not charged against it — dropping more files would "
+                "have shown less while still overflowing"
             )
         return (
             f"[repo map truncated to fit {self.budget_tokens} tokens: "
