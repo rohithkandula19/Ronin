@@ -278,9 +278,9 @@ def _result_keys(messages: Sequence[Message]) -> tuple[tuple[str, bool], ...]:
 
 def _is_suffix(folded: Sequence[object], recorded: Sequence[object]) -> bool:
     """Whether the folded sequence is the tail of the recorded one (or equal)."""
-    return len(folded) <= len(recorded) and tuple(recorded[len(recorded) - len(folded):]) == tuple(
-        folded
-    )
+    if len(folded) > len(recorded):
+        return False
+    return tuple(recorded[len(recorded) - len(folded) :]) == tuple(folded)
 
 
 def _reconcile(folded: Sequence[Message], recorded: Sequence[Message]) -> tuple[str, ...]:

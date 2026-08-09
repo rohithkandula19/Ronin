@@ -101,7 +101,7 @@ def test_type_errors_in_one_file_stay_separate_failures() -> None:
     failures = parse_failures(MYPY_TWO_ERRORS)
     assert len(failures) == 2
     assert {failure.kind for failure in failures} == {FailureKind.TYPE}
-    assert all(failure.where == "src/pkg/thing.py" for failure in failures)
+    assert all(failure.where == "src/thing.py" for failure in failures)
 
 
 def test_a_lint_error_carries_its_rule_code() -> None:
@@ -217,7 +217,9 @@ async def test_a_changing_failure_uses_the_whole_cap_then_reports_exhausted() ->
 
 
 async def test_a_rising_failure_count_is_reported_as_a_regression() -> None:
-    script = _Script([PYTEST_ONE_FAILURE, PYTEST_OTHER_FAILURE, RUFF_ONE_ERROR, PYTEST_TWO_FAILURES])
+    script = _Script(
+        [PYTEST_ONE_FAILURE, PYTEST_OTHER_FAILURE, RUFF_ONE_ERROR, PYTEST_TWO_FAILURES]
+    )
 
     report = await repair_loop(verify=script.verify, fix=script.fix)
 
@@ -227,7 +229,9 @@ async def test_a_rising_failure_count_is_reported_as_a_regression() -> None:
 
 
 async def test_progress_is_named_per_attempt_in_both_directions() -> None:
-    script = _Script([PYTEST_TWO_FAILURES, PYTEST_ONE_FAILURE, PYTEST_TWO_FAILURES, MYPY_TWO_ERRORS])
+    script = _Script(
+        [PYTEST_TWO_FAILURES, PYTEST_ONE_FAILURE, PYTEST_TWO_FAILURES, MYPY_TWO_ERRORS]
+    )
 
     report = await repair_loop(verify=script.verify, fix=script.fix)
 

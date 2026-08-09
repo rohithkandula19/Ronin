@@ -92,6 +92,8 @@ class FakeMcpServer:
         inject: bytes = b"",
         die_after: int | None = None,
     ) -> None:
+        # `die_after` counts answered requests across every connection and fires
+        # once: "the server dropped the pipe mid-session and came back".
         self.name = name
         self.descriptors = [dict(entry) for entry in descriptors]
         self.handlers = dict(handlers or {})
@@ -101,6 +103,8 @@ class FakeMcpServer:
         self.inject = inject
         self.die_after = die_after
         self.dead = False
+        self.died_once = False
+        self.served = 0
         self.connections = 0
         self.requests: list[Request] = []
         self._open: list[tuple[asyncio.Task[None], StreamPair]] = []
@@ -136,7 +140,6 @@ class FakeMcpServer:
         if self.inject:
             streams.writer.write(self.inject)
             await streams.writer.drain()
-        served = 0
         while not self.dead:
             try:
                 frame = await read_frame(streams.reader)
@@ -151,8 +154,16 @@ class FakeMcpServer:
             self.requests.append(request)
             if request.is_notification:
                 continue
-            served += 1
-            if self.die_after is not None and served > self.die_after:
+            self.served += 1
+            if (
+                self.die_after is not None
+                and not self.died_once
+                and self.served > self.die_after
+            ):
+                # Dies exactly once, counting across connections, so a test can
+                # assert that a *successful* reconnect recovers the tool rather
+                # than dying again on the retry.
+                self.died_once = True
                 streams.writer.close()
                 return
             response = self._answer(request)

@@ -49,13 +49,22 @@ def write_call(call_id: str, path: str, content: str) -> ToolUse:
 
 
 def scripted_session(
-    turns: int, *, marked_turn: int = 3, marked_path: str = "src/turn3.py"
+    turns: int,
+    *,
+    marked_turn: int = 3,
+    marked_path: str = "src/turn3.py",
+    offset: int = 0,
 ) -> list[Message]:
     """A ``turns``-turn transcript: user request, tool call, tool result, repeat.
 
     ``marked_turn`` writes a distinctive sentinel into ``marked_path`` and nothing
     touches that file again — which is exactly the fact per-path retention has to
     preserve through every later compaction.
+
+    ``offset`` shifts the turn numbers, and with them the tool-use ids and paths.
+    Continuing a session must use it: ``ronin.core.types`` requires tool-call ids to
+    be unique across the whole transcript, and reusing ``call-1`` in a later batch
+    produces a transcript no provider would have handed back.
     """
     messages: list[Message] = [
         Message(
@@ -63,7 +72,8 @@ def scripted_session(
             content_blocks=(Text("system prompt + repo map + RONIN.md"),),
         )
     ]
-    for turn in range(1, turns + 1):
+    for index in range(1, turns + 1):
+        turn = index + offset
         marked = turn == marked_turn
         path = marked_path if marked else f"src/file{turn}.py"
         content = (

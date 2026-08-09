@@ -440,7 +440,7 @@ def _read_meta(directory: Path, session_id: str) -> SessionMeta | None:
     if sidecar.exists():
         try:
             return decode_meta(json.loads(sidecar.read_text(encoding="utf-8")))
-        except (OSError, ValueError, KeyError, TranscriptError):
+        except (OSError, TypeError, ValueError, KeyError, TranscriptError):
             pass  # fall through to the header, which cannot have been rewritten
     path = session_path(directory, session_id)
     if not path.exists():
@@ -454,7 +454,7 @@ def _read_meta(directory: Path, session_id: str) -> SessionMeta | None:
         return None
     try:
         return replace(decode_meta(json.loads(first)), stale=True)
-    except (ValueError, KeyError, TranscriptError):
+    except (TypeError, ValueError, KeyError, TranscriptError):
         return None
 
 
@@ -527,7 +527,7 @@ def read_events(path: Path) -> ReadResult:
                 header = decode_meta(record)
                 continue
             events.append(decode_event(record))
-        except (ValueError, TranscriptError) as exc:
+        except (TypeError, ValueError, KeyError, TranscriptError) as exc:
             if partial:
                 skipped.append(
                     f"line {number + 1}: incomplete final record dropped "

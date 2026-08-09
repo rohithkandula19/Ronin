@@ -10,7 +10,7 @@ import shutil
 from pathlib import Path
 
 import pytest
-from verify_harness import PYTEST_ONE_FAILURE, ScriptedRunner, make_python_project
+from verify_harness import PYTEST_ONE_FAILURE, make_python_project
 
 from ronin.core.types import Mode
 from ronin.verify.checkpoints import CheckpointStore, changed_paths_from_diff
@@ -58,7 +58,7 @@ class _Verifier:
 
     async def verify(self, changed: list[str]) -> FailureSnapshot:
         plan = plan_for_changes(self.spec, changed, root=self.root)
-        outcome = await run_plan(plan, run=ScriptedRunner() if False else self.run, cwd=self.root)
+        outcome = await run_plan(plan, run=self.run, cwd=self.root)
         self.tool_results.append(as_tool_result(outcome).ok)
         return FailureSnapshot.from_outcome(outcome)
 

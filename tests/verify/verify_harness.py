@@ -209,15 +209,15 @@ FAILED tests/pkg/test_thing.py::test_widget_floors - AssertionError: assert 2.5 
 """
 
 MYPY_TWO_ERRORS = """\
-src/pkg/thing.py:7: error: Incompatible return value type (got "int", expected "str")  [return-value]
-src/pkg/thing.py:19: error: Argument 1 to "widget" has incompatible type "str"; expected "float"  [arg-type]
+src/thing.py:7: error: Incompatible return value type (got "int", expected "str")  [return-value]
+src/thing.py:19: error: Argument 1 to "widget" has incompatible type "str"  [arg-type]
 Found 2 errors in 1 file (checked 3 source files)
 """
 
 #: The same two mypy errors after an unrelated edit shifted every line down.
 MYPY_TWO_ERRORS_SHIFTED = """\
-src/pkg/thing.py:23: error: Incompatible return value type (got "int", expected "str")  [return-value]
-src/pkg/thing.py:35: error: Argument 1 to "widget" has incompatible type "str"; expected "float"  [arg-type]
+src/thing.py:23: error: Incompatible return value type (got "int", expected "str")  [return-value]
+src/thing.py:35: error: Argument 1 to "widget" has incompatible type "str"  [arg-type]
 Found 2 errors in 1 file (checked 4 source files)
 """
 

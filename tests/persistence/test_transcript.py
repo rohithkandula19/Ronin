@@ -128,7 +128,12 @@ def test_fsync_happens_at_turn_boundaries_and_not_per_event(
     because nobody resumes from half a streamed sentence."""
     calls: list[int] = []
     real = os.fsync
-    monkeypatch.setattr(os, "fsync", lambda fd: calls.append(fd) or real(fd))
+
+    def counting_fsync(fd: int) -> None:
+        calls.append(fd)
+        real(fd)
+
+    monkeypatch.setattr(os, "fsync", counting_fsync)
 
     directory = sessions_dir(tmp_path)
     with Transcript.open(directory, SESSION) as transcript:
@@ -378,6 +383,20 @@ def test_a_corrupt_sidecar_falls_back_to_the_header(tmp_path: Path) -> None:
     directory = sessions_dir(tmp_path)
     write_session(directory, model="m-1")
     meta_path(directory, SESSION).write_text("{ this is not json", encoding="utf-8")
+    row = list_sessions(directory)[0]
+    assert row.stale is True and row.model == "m-1"
+
+
+def test_a_sidecar_with_a_null_counter_falls_back_instead_of_crashing_the_picker(
+    tmp_path: Path,
+) -> None:
+    """A hand-edited or half-migrated sidecar must not take the whole picker down."""
+    directory = sessions_dir(tmp_path)
+    write_session(directory, model="m-1")
+    sidecar = meta_path(directory, SESSION)
+    record = json.loads(sidecar.read_text(encoding="utf-8"))
+    record["turns"] = None
+    sidecar.write_text(json.dumps(record), encoding="utf-8")
     row = list_sessions(directory)[0]
     assert row.stale is True and row.model == "m-1"
 

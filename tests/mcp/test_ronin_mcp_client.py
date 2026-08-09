@@ -70,8 +70,11 @@ async def test_the_initialized_notification_is_sent_and_not_answered() -> None:
     fake = FakeMcpServer("docs", descriptors=[tool_descriptor("search")])
     client = client_for(fake)
     await client.connect()
+    # tools/list forces the ordering: the pipe is in-order, so a reply to it
+    # proves the notification ahead of it was consumed.
+    await client.list_tools()
     methods = [request.method for request in fake.requests]
-    assert methods == ["initialize", "notifications/initialized"]
+    assert methods == ["initialize", "notifications/initialized", "tools/list"]
     assert fake.requests[1].is_notification
     await client.close()
 
@@ -255,7 +258,7 @@ async def test_a_reconnect_that_works_recovers_the_tool() -> None:
         "docs",
         descriptors=[tool_descriptor("search")],
         handlers={"search": echo("after")},
-        die_after=3,
+        die_after=2,
     )
     client = client_for(fake, max_reconnects=1)
     await client.connect()
@@ -426,7 +429,7 @@ async def test_a_client_over_a_network_transport_handshakes_the_same_way() -> No
 
 async def test_calling_a_tool_on_a_client_that_never_connected_is_still_a_value() -> None:
     """`call_tool` is a tool boundary: it must not raise even when misused."""
-    client = client_for(FakeMcpServer("docs"))
+    client = client_for(FakeMcpServer("docs"), max_reconnects=0)
     result = await client.call_tool("search", {})
     assert not result.ok
     assert "not responding" in result.error
