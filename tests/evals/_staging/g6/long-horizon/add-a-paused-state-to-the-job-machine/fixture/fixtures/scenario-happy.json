@@ -1,0 +1,6 @@
+{
+  "name": "a job that just works",
+  "job": { "id": "job-1", "priority": "normal", "label": "nightly rollup" },
+  "events": ["start", "succeed"],
+  "showLegend": true
+}

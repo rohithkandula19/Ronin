@@ -33,7 +33,8 @@ Not a general failure taxonomy — four named classes, chosen because they are w
     without the first nuance produced 127 false positives against 33 real ones.
 
 Tool *names* are configurable because Ronin has shipped two registries: v1 named
-its file reader ``read_file`` and v2 names it ``read``. A miner with either name
+its file reader ``read_file`` and v2 names it ``read``; the project has since
+standardised on v2 everywhere, so only v2 names appear here. A miner with either name
 hardcoded goes quietly blind on half the corpus.
 """
 from __future__ import annotations
@@ -98,9 +99,9 @@ class ToolRoles:
 #: Both shipped registries. v1 (``training/config/tool_registry.json``) and v2
 #: (``src/ronin/tools/files.py``) name the same operations differently.
 DEFAULT_TOOL_ROLES = ToolRoles(
-    readers=frozenset({"read", "read_file"}),
+    readers=frozenset({"read"}),
     writers=frozenset({"edit", "edit_file", "multi_edit"}),
-    overwriters=frozenset({"write", "write_file"}),
+    overwriters=frozenset({"write"}),
 )
 
 

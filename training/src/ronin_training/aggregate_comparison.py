@@ -330,7 +330,7 @@ def render(
         add("`training/README.md`, and record the exact reproduction command (seed,")
         add("iters, corpus commit) in this report before opening the PR.")
     else:
-        add(f"**Keep v2 iter-150.** No v3/v3b checkpoint scored on the frozen set beats")
+        add("**Keep v2 iter-150.** No v3/v3b checkpoint scored on the frozen set beats")
         add(f"{baseline.passed}/{baseline.cases}. The v3 corpus expansion did not improve")
         add("frozen runtime-parity behavior. Likely failure modes to investigate (these")
         add("are hypotheses to test, not measured findings):")

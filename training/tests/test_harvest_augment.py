@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 
+from ronin_training.adapter.metrics import REGISTRY_PATH
 from ronin_training.harvest.augment import augment, plan_renaming
 from ronin_training.harvest.prompt import render_prefix
 from ronin_training.harvest.trajectory import (
@@ -21,7 +22,7 @@ from ronin_training.validators import load_registry, validate_example
 
 _TOOLS = (
     ToolSchema(
-        name="read_file",
+        name="read",
         description="Read a file.",
         parameters={
             "type": "object",
@@ -30,7 +31,7 @@ _TOOLS = (
         },
     ),
     ToolSchema(
-        name="edit_file",
+        name="edit",
         description="Replace an exact string in a file.",
         parameters={
             "type": "object",
@@ -60,13 +61,13 @@ def _run() -> Trajectory:
                 text="Reading src/gateway/dispatcher.py first.",
                 calls=(
                     RecordedCall(
-                        id="c0", name="read_file", arguments={"path": "src/gateway/dispatcher.py"}
+                        id="c0", name="read", arguments={"path": "src/gateway/dispatcher.py"}
                     ),
                 ),
                 results=(
                     RecordedResult(
                         call_id="c0",
-                        name="read_file",
+                        name="read",
                         ok=True,
                         content="connect_timeout = 5\n",
                     ),
@@ -78,7 +79,7 @@ def _run() -> Trajectory:
                 calls=(
                     RecordedCall(
                         id="c1",
-                        name="edit_file",
+                        name="edit",
                         arguments={
                             "path": "src/gateway/dispatcher.py",
                             "old_string": "connect_timeout = 5",
@@ -88,7 +89,7 @@ def _run() -> Trajectory:
                 ),
                 results=(
                     RecordedResult(
-                        call_id="c1", name="edit_file", ok=True, content="1 replacement"
+                        call_id="c1", name="edit", ok=True, content="1 replacement"
                     ),
                 ),
             ),
@@ -148,10 +149,10 @@ def test_augmentation_is_deterministic_in_its_seed():
 
 
 def test_tool_names_and_argument_keys_are_never_renamed():
-    """Renaming ``read_file`` or ``old_string`` would produce a call the registry
+    """Renaming ``read`` or ``old_string`` would produce a call the registry
     rejects — the worst possible outcome of an augmentation pass."""
     perturbed = augment(_run(), seed=9)
-    assert [c.name for _s, c in perturbed.calls()] == ["read_file", "edit_file"]
+    assert [c.name for _s, c in perturbed.calls()] == ["read", "edit"]
     assert set(perturbed.steps[1].calls[0].arguments) == {"path", "old_string", "new_string"}
 
 
@@ -182,8 +183,8 @@ def test_an_augmented_row_still_validates_against_the_real_tool_registry():
         "license": "project-owned",
         "messages": payload.as_row()["messages"],
     }
-    assert validate_example(row) == []
-    assert {"read_file", "edit_file"} <= set(load_registry())
+    assert validate_example(row, REGISTRY_PATH) == []
+    assert {"read", "edit"} <= set(load_registry(REGISTRY_PATH))
 
 
 def test_a_trajectory_with_nothing_renameable_survives_unchanged():

@@ -313,9 +313,13 @@ def test_check_call_accepts_a_valid_object_and_rejects_an_unknown_tool() -> None
 
 def test_the_real_registry_loads_and_covers_ronins_tools() -> None:
     schemas = load_tool_schemas()
-    assert "read_file" in schemas
-    assert "run_command" in schemas
-    assert check_call("read_file", {"path": "pyproject.toml"}, schemas=schemas).ok
+    assert "read" in schemas
+    assert "bash" in schemas
+    assert check_call("read", {"path": "pyproject.toml"}, schemas=schemas).ok
+    # And the v1 name is now *invalid*, which is the guard that matters: a metric that
+    # still accepted `read_file` would score a v1-dialect adapter as perfect.
+    stale = check_call("read_file", {"path": "pyproject.toml"}, schemas=schemas)
+    assert not stale.ok and "unknown tool" in stale.reason
 
 
 def test_a_missing_registry_file_names_itself(tmp_path: Path) -> None:

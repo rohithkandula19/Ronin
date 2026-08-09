@@ -25,7 +25,7 @@ from ronin_training.harvest.sources import (
 )
 from test_harvest_helpers import load_recorded, registry_tools, turn, write_transcript
 
-_TOOLS = registry_tools("read_file", "write_file")
+_TOOLS = registry_tools("read", "write")
 
 
 # --------------------------------------------------------------------------- #
@@ -79,8 +79,8 @@ def test_an_opted_in_session_is_read_scrubbed_and_labelled(tmp_path):
     events = turn(
         index=0,
         text="Mailing ada@example.com about it.",
-        calls=[("c0", "read_file", {"path": "a.py"})],
-        results=[("c0", "read_file", True, "contact: ada@example.com", "")],
+        calls=[("c0", "read", {"path": "a.py"})],
+        results=[("c0", "read", True, "contact: ada@example.com", "")],
     )
     path = write_transcript(tmp_path, "session-1", events)
     config = SessionHarvest(
@@ -147,14 +147,14 @@ def test_the_scrubber_can_be_the_projects_own_redactor(tmp_path):
 
 def test_a_recorded_transcript_folds_into_one_step_per_turn(tmp_path):
     events = [
-        *turn(index=0, text="first", calls=[("c0", "read_file", {"path": "a.py"})],
-              results=[("c0", "read_file", True, "A", "")]),
+        *turn(index=0, text="first", calls=[("c0", "read", {"path": "a.py"})],
+              results=[("c0", "read", True, "A", "")]),
         *turn(index=1, text="second"),
     ]
     traj = load_recorded(tmp_path, "run-2", events, task_id="t", prompt="p", tools=_TOOLS)
     assert [s.index for s in traj.steps] == [0, 1]
     assert traj.steps[0].text == "first"
-    assert traj.steps[0].calls[0].name == "read_file"
+    assert traj.steps[0].calls[0].name == "read"
     assert traj.steps[1].calls == ()
 
 
@@ -220,8 +220,8 @@ def test_load_runs_loads_a_whole_sweep(tmp_path):
         path = write_transcript(
             tmp_path,
             f"run-{i}",
-            turn(index=0, calls=[("c0", "read_file", {"path": "a.py"})],
-                 results=[("c0", "read_file", True, "A", "")]),
+            turn(index=0, calls=[("c0", "read", {"path": "a.py"})],
+                 results=[("c0", "read", True, "A", "")]),
         )
         manifests.append(
             RunManifest(
@@ -240,8 +240,8 @@ def test_the_default_reader_is_the_real_persistence_reader(tmp_path):
     path = write_transcript(
         tmp_path,
         "run-5",
-        turn(index=0, calls=[("c0", "read_file", {"path": "a.py"})],
-             results=[("c0", "read_file", True, "A", "")]),
+        turn(index=0, calls=[("c0", "read", {"path": "a.py"})],
+             results=[("c0", "read", True, "A", "")]),
     )
     traj = load_run(
         RunManifest(task_id="t", run_id="run-5", transcript=path, prompt="p", tools=_TOOLS)
@@ -340,6 +340,6 @@ def test_the_seam_accepts_openai_shaped_tool_dicts_too(tmp_path):
         RunRecord(task_id="t", prompt="p"),
         tmp_path / "r.jsonl",
         run_id="r",
-        tools=[{"name": "read_file", "description": "read a file", "parameters": {}}],
+        tools=[{"name": "read", "description": "read a file", "parameters": {}}],
     )
-    assert manifest.tools[0].name == "read_file"
+    assert manifest.tools[0].name == "read"

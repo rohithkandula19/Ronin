@@ -5,12 +5,10 @@ import json
 from pathlib import Path
 
 import pytest
-
 from ronin_training.forge import (
     BundleConfig,
     JobState,
     JobStateError,
-    TrainingJob,
     generate_bundle,
 )
 from ronin_training.provenance import (

@@ -24,7 +24,7 @@ from ronin_training.harvest import (
 from ronin_training.harvest.trajectory import DENIAL_PREFIX
 from test_harvest_helpers import load_recorded, registry_tools, turn
 
-_TOOLS = registry_tools("read_file", "write_file", "edit_file")
+_TOOLS = registry_tools("read", "write", "edit")
 _TASK = "bump-version"
 _PROMPT = "set VERSION to 2 in src/app/meta.py"
 _DENIAL = "leave the vendored tree alone"
@@ -35,8 +35,8 @@ def _clean_events(suffix: str) -> list[object]:
         *turn(
             index=0,
             text="Reading it first.",
-            calls=[("c0", "read_file", {"path": f"src/{suffix}/meta.py"})],
-            results=[("c0", "read_file", True, "VERSION = 1\n", "")],
+            calls=[("c0", "read", {"path": f"src/{suffix}/meta.py"})],
+            results=[("c0", "read", True, "VERSION = 1\n", "")],
         ),
         *turn(
             index=1,
@@ -44,7 +44,7 @@ def _clean_events(suffix: str) -> list[object]:
             calls=[
                 (
                     "c1",
-                    "edit_file",
+                    "edit",
                     {
                         "path": f"src/{suffix}/meta.py",
                         "old_string": "VERSION = 1",
@@ -52,7 +52,7 @@ def _clean_events(suffix: str) -> list[object]:
                     },
                 )
             ],
-            results=[("c1", "edit_file", True, "1 replacement", "")],
+            results=[("c1", "edit", True, "1 replacement", "")],
         ),
     ]
 
@@ -63,8 +63,8 @@ def _flail_events() -> list[object]:
         events.extend(
             turn(
                 index=i,
-                calls=[(f"f{i}", "read_file", {"path": f"src/app/probe{i}.py"})],
-                results=[(f"f{i}", "read_file", True, "# nothing here\n", "")],
+                calls=[(f"f{i}", "read", {"path": f"src/app/probe{i}.py"})],
+                results=[(f"f{i}", "read", True, "# nothing here\n", "")],
             )
         )
     return events
@@ -78,8 +78,8 @@ def _bad_events() -> list[object]:
             turn(
                 index=i,
                 text="Writing it." if i == 0 else "Trying that again.",
-                calls=[(f"b{i}", "write_file", dict(denied))],
-                results=[(f"b{i}", "write_file", False, "", f"{DENIAL_PREFIX}{_DENIAL}")],
+                calls=[(f"b{i}", "write", dict(denied))],
+                results=[(f"b{i}", "write", False, "", f"{DENIAL_PREFIX}{_DENIAL}")],
                 gated=[f"b{i}"],
             )
         )
@@ -88,11 +88,11 @@ def _bad_events() -> list[object]:
             index=3,
             text=(
                 "Let me re-read.\n<tool_call>\n"
-                '{"name": "read_file", "arguments": {path: }}\n'
+                '{"name": "read", "arguments": {path: }}\n'
                 "</tool_call>"
             ),
-            calls=[("b3", "edit_file", {"path": "src/app/meta.py", "old_string": "1"})],
-            results=[("b3", "edit_file", False, "", "new_string is required")],
+            calls=[("b3", "edit", {"path": "src/app/meta.py", "old_string": "1"})],
+            results=[("b3", "edit", False, "", "new_string is required")],
         )
     )
     return events
@@ -171,7 +171,7 @@ def test_the_whole_pipeline_writes_two_validated_files(tmp_path):
         assert row["messages"][-1]["role"] == "assistant"
         # Every row is trained under the run's whole toolset, not just the tools it used.
         assert [t["function"]["name"] for t in row["tools"]] == [
-            "read_file", "write_file", "edit_file"
+            "read", "write", "edit"
         ]
 
 

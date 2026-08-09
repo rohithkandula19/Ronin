@@ -32,7 +32,7 @@ def status_for(error: NotedeckError) -> int:
 
 
 def code_for(error: NotedeckError) -> str:
-    """``QuotaExceeded`` -> ``quota_exceeded``; the code clients switch on."""
+    """``PermissionDenied`` -> ``permission_denied``; the code clients switch on."""
     return _CAMEL.sub("_", type(error).__name__).lower()
 
 

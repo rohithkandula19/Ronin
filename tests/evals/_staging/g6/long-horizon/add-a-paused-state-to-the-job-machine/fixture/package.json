@@ -1,0 +1,15 @@
+{
+  "name": "flowdeck",
+  "version": "1.2.0",
+  "private": true,
+  "description": "job lifecycle state machine used by the scheduler and the ops board",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test",
+    "dot": "node bin/dot-export.js",
+    "simulate": "node bin/simulate.js fixtures/scenario-happy.json"
+  }
+}

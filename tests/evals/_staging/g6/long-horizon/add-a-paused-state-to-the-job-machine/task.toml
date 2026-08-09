@@ -1,0 +1,32 @@
+id = "long-horizon/add-a-paused-state-to-the-job-machine"
+category = "long-horizon"
+prompt = """
+Ops keeps cancelling running jobs while they wait on a broken downstream service,
+which throws away the attempt count and annoys everyone. They want to pause a job
+instead: a running job can be paused, and a paused job can either be resumed back
+to running or cancelled outright. A paused job is not finished — the scheduler must
+keep it on the books.
+
+One exception: a critical-priority job must never be pausable. The pager assumes a
+critical job is either running or has been cancelled by a human, and that refusal
+should read like our other conditional refusals rather than looking like an event
+the machine has never heard of.
+
+The ops board and its legend need to show paused jobs — a blank column on the wall
+display has been misread as "idle" before. `node bin/dot-export.js` should draw the
+new edges, and `node --test` should still be green.
+"""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = [
+    "src/states.js",
+    "src/events.js",
+    "src/table.js",
+    "src/guards.js",
+    "src/render.js",
+]
+max_turns = 45
+timeout_seconds = 900
+tags = ["javascript", "node", "state-machine", "multi-file", "layered"]
+regression_gate = false

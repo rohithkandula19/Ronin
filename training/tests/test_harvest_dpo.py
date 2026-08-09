@@ -37,7 +37,7 @@ from ronin_training.harvest.trajectory import (
 
 _TOOLS = (
     ToolSchema(
-        name="read_file",
+        name="read",
         description="Read a file.",
         parameters={
             "type": "object",
@@ -46,7 +46,7 @@ _TOOLS = (
         },
     ),
     ToolSchema(
-        name="write_file",
+        name="write",
         description="Write a file.",
         parameters={
             "type": "object",
@@ -74,14 +74,14 @@ def _blind_write(task: str = "t1") -> Trajectory:
                 calls=(
                     RecordedCall(
                         id="c0",
-                        name="write_file",
+                        name="write",
                         arguments={"path": "src/app/meta.py", "content": "VERSION = 2\n"},
                     ),
                 ),
                 results=(
                     RecordedResult(
                         call_id="c0",
-                        name="write_file",
+                        name="write",
                         ok=False,
                         error="src/app/meta.py has not been read in this session",
                     ),
@@ -105,11 +105,11 @@ def _careful_donor(task: str = "t1") -> Trajectory:
                 index=0,
                 text="Reading first.",
                 calls=(
-                    RecordedCall(id="g0", name="read_file", arguments={"path": "src/app/meta.py"}),
+                    RecordedCall(id="g0", name="read", arguments={"path": "src/app/meta.py"}),
                 ),
                 results=(
                     RecordedResult(
-                        call_id="g0", name="read_file", ok=True, content="VERSION = 1\n"
+                        call_id="g0", name="read", ok=True, content="VERSION = 1\n"
                     ),
                 ),
             ),
@@ -129,11 +129,11 @@ def _denial_ignored() -> Trajectory:
         steps=(
             Step(
                 index=0,
-                calls=(RecordedCall(id="d0", name="write_file", arguments=dict(args)),),
+                calls=(RecordedCall(id="d0", name="write", arguments=dict(args)),),
                 results=(
                     RecordedResult(
                         call_id="d0",
-                        name="write_file",
+                        name="write",
                         ok=False,
                         error=f"{DENIAL_PREFIX}{_DENIAL}",
                     ),
@@ -142,11 +142,11 @@ def _denial_ignored() -> Trajectory:
             Step(
                 index=1,
                 text="Trying again.",
-                calls=(RecordedCall(id="d1", name="write_file", arguments=dict(args)),),
+                calls=(RecordedCall(id="d1", name="write", arguments=dict(args)),),
                 results=(
                     RecordedResult(
                         call_id="d1",
-                        name="write_file",
+                        name="write",
                         ok=False,
                         error=f"{DENIAL_PREFIX}{_DENIAL}",
                     ),
@@ -166,10 +166,10 @@ def _missing_required_key() -> Trajectory:
         steps=(
             Step(
                 index=0,
-                calls=(RecordedCall(id="m0", name="write_file", arguments={"path": "a.py"}),),
+                calls=(RecordedCall(id="m0", name="write", arguments={"path": "a.py"}),),
                 results=(
                     RecordedResult(
-                        call_id="m0", name="write_file", ok=False, error="content is required"
+                        call_id="m0", name="write", ok=False, error="content is required"
                     ),
                 ),
             ),
@@ -189,12 +189,12 @@ def _wrong_type() -> Trajectory:
                 index=0,
                 calls=(
                     RecordedCall(
-                        id="w0", name="read_file", arguments={"path": "a.py", "limit": "40"}
+                        id="w0", name="read", arguments={"path": "a.py", "limit": "40"}
                     ),
                 ),
                 results=(
                     RecordedResult(
-                        call_id="w0", name="read_file", ok=False, error="limit must be an integer"
+                        call_id="w0", name="read", ok=False, error="limit must be an integer"
                     ),
                 ),
             ),
@@ -240,7 +240,7 @@ def test_the_synthesized_correction_for_a_blind_edit_is_the_missing_read():
     chosen = synthesize(negative, roles=DEFAULT_TOOL_ROLES)
     assert chosen is not None
     call = chosen.message["tool_calls"][0]["function"]
-    assert call["name"] == "read_file"
+    assert call["name"] == "read"
     assert call["arguments"] == {"path": "src/app/meta.py"}
 
 
@@ -353,7 +353,7 @@ def test_the_rejected_side_is_the_turn_the_model_actually_took():
     negatives = [n for n in mine(_blind_write()) if n.kind is NegativeClass.EDIT_WITHOUT_READ]
     pairs, _counts = build_pairs(negatives, donors=[], roles=DEFAULT_TOOL_ROLES)
     rejected = pairs[0].as_row()["rejected"][0]
-    assert rejected["tool_calls"][0]["function"]["name"] == "write_file"
+    assert rejected["tool_calls"][0]["function"]["name"] == "write"
 
 
 def test_the_row_records_the_rule_the_chosen_side_is_correcting():
@@ -425,7 +425,7 @@ def test_writing_valid_rows_uses_lf_and_one_row_per_line(tmp_path):
 
 def test_the_text_form_uses_an_injected_template_and_the_canonical_wire_format():
     """No chat template is implemented in this package; the caller injects the
-    tokenizer's own. The completions still come from ``ronin_dialect``."""
+    tokenizer's own. The completions come from the v2 dialect renderer."""
     calls: list[int] = []
 
     def fake_template(
@@ -439,9 +439,9 @@ def test_the_text_form_uses_an_injected_template_and_the_canonical_wire_format()
     row = to_text_row(pairs[0], fake_template)
     assert calls == [2]
     assert row["prompt"] == "<rendered 2 messages, 2 tools>"
-    assert row["chosen"].startswith("<tool_call>")
-    assert '"name": "read_file"' in row["chosen"]
-    assert '"name": "write_file"' in row["rejected"]
+    assert row["chosen"].startswith("<ronin:tool_call>")
+    assert '"name": "read"' in row["chosen"]
+    assert '"name": "write"' in row["rejected"]
 
 
 def test_per_class_counts_are_reported_including_zeros():

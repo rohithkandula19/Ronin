@@ -50,6 +50,7 @@ def test_report_carries_provenance_and_per_task_rows(tmp_path):
 
 def test_hf_provider_raises_cleanly_without_the_stack():
     import importlib.util
+
     import pytest
     from ronin_training.eval_runner import hf_provider
     if importlib.util.find_spec("transformers") is not None:

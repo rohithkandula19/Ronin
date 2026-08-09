@@ -24,7 +24,7 @@ from ronin_training.harvest.trajectory import (
 
 _TOOLS = (
     ToolSchema(
-        name="read_file",
+        name="read",
         description="Read a file.",
         parameters={"type": "object", "properties": {"path": {"type": "string"}}},
     ),
@@ -46,10 +46,10 @@ def _run(run_id: str, turns: int = 2, *, verified: bool = True, task: str = "t1"
                 text=f"step {i}",
                 calls=(
                     RecordedCall(
-                        id=f"c{i}", name="read_file", arguments={"path": f"src/{run_id}/f{i}.py"}
+                        id=f"c{i}", name="read", arguments={"path": f"src/{run_id}/f{i}.py"}
                     ),
                 ),
-                results=(RecordedResult(call_id=f"c{i}", name="read_file", ok=True, content="x"),),
+                results=(RecordedResult(call_id=f"c{i}", name="read", ok=True, content="x"),),
             )
             for i in range(turns)
         ),
@@ -159,7 +159,7 @@ def test_the_completion_is_the_turn_the_passing_run_actually_took():
     traj = _run("a", turns=2)
     examples, _counts, _ = extract([traj])
     call = examples[1].completion["tool_calls"][0]["function"]
-    assert call["name"] == "read_file"
+    assert call["name"] == "read"
     assert call["arguments"] == {"path": "src/a/f1.py"}
 
 

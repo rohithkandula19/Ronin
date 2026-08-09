@@ -86,3 +86,15 @@ csk_saas.db-journal
 ronin_image_*.png
 ronin_image_*.jpg
 ronin_video_*.mp4
+
+# Eval task fixtures are INPUTS, not build output. A repo-wide rule reaching inside one
+# deletes part of a test case: `*.log` silently ate a CI-log fixture and the three
+# `app.log` files a log-rotation task exists to rotate. Such a file passes for whoever
+# wrote it — it is on their disk — and fails forever in CI, with nothing in the run
+# pointing at why. `scripts/check_eval_tasks.py` now fails on it, and this stops it.
+!tests/evals/**/fixture/**
+!tests/evals/**/solution/**
+!tests/evals/**/broken/**
+# ...but bytecode is still build output, wherever it appears.
+tests/evals/**/__pycache__/
+tests/evals/**/*.pyc

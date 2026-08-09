@@ -18,7 +18,7 @@ def _run(run_id: str, turns: int, *, verified: bool = True, task: str = "t1") ->
         steps=tuple(
             Step(
                 index=i,
-                calls=(RecordedCall(id=f"c{i}", name="read_file", arguments={"path": f"f{i}.py"}),),
+                calls=(RecordedCall(id=f"c{i}", name="read", arguments={"path": f"f{i}.py"}),),
             )
             for i in range(turns)
         ),

@@ -49,7 +49,7 @@ from ronin.core.types import (
     ToolUse,
 )
 
-_TOOLS = registry_tools("read_file", "write_file", "edit_file")
+_TOOLS = registry_tools("read", "write", "edit")
 _DENIAL = "the user declined this action: leave the vendored tree alone"
 
 
@@ -61,7 +61,7 @@ _DENIAL = "the user declined this action: leave the vendored tree alone"
 def test_malformed_tool_json_is_mined_from_an_unparseable_block(tmp_path):
     events = turn(
         index=0,
-        text='Reading it.\n<tool_call>\n{"name": "read_file", "arguments": {path: }}\n</tool_call>',
+        text='Reading it.\n<tool_call>\n{"name": "read", "arguments": {path: }}\n</tool_call>',
     )
     traj = load_recorded(
         tmp_path, "run-malformed", events, task_id="t", prompt="read a.py", tools=_TOOLS
@@ -73,12 +73,12 @@ def test_malformed_tool_json_is_mined_from_an_unparseable_block(tmp_path):
 
 
 def test_malformed_tool_json_is_mined_from_a_wrong_typed_argument(tmp_path):
-    """``write_file`` declares ``content`` a string; an integer is a wrong type the
+    """``write`` declares ``content`` a string; an integer is a wrong type the
     real registry schema rejects."""
     events = turn(
         index=0,
-        calls=[("c0", "write_file", {"path": "a.py", "content": 5})],
-        results=[("c0", "write_file", False, "", "content must be a string")],
+        calls=[("c0", "write", {"path": "a.py", "content": 5})],
+        results=[("c0", "write", False, "", "content must be a string")],
     )
     traj = load_recorded(
         tmp_path, "run-typed", events, task_id="t", prompt="write a.py", tools=_TOOLS
@@ -92,8 +92,8 @@ def test_malformed_tool_json_is_mined_from_a_wrong_typed_argument(tmp_path):
 def test_malformed_tool_json_is_mined_from_a_missing_required_key(tmp_path):
     events = turn(
         index=0,
-        calls=[("c0", "write_file", {"path": "a.py"})],
-        results=[("c0", "write_file", False, "", "content is required")],
+        calls=[("c0", "write", {"path": "a.py"})],
+        results=[("c0", "write", False, "", "content is required")],
     )
     traj = load_recorded(
         tmp_path, "run-missing", events, task_id="t", prompt="write a.py", tools=_TOOLS
@@ -106,8 +106,8 @@ def test_malformed_tool_json_is_mined_from_a_missing_required_key(tmp_path):
 def test_a_schema_valid_call_is_not_mined_as_malformed(tmp_path):
     events = turn(
         index=0,
-        calls=[("c0", "read_file", {"path": "a.py"})],
-        results=[("c0", "read_file", True, "A = 1", "")],
+        calls=[("c0", "read", {"path": "a.py"})],
+        results=[("c0", "read", True, "A = 1", "")],
     )
     traj = load_recorded(
         tmp_path, "run-clean", events, task_id="t", prompt="read a.py", tools=_TOOLS
@@ -120,15 +120,15 @@ def test_ignoring_an_approval_denial_is_mined_from_a_recorded_gate_refusal(tmp_p
     events = [
         *turn(
             index=0,
-            calls=[("c0", "write_file", args)],
-            results=[("c0", "write_file", False, "", f"{DENIAL_PREFIX}{_DENIAL}")],
+            calls=[("c0", "write", args)],
+            results=[("c0", "write", False, "", f"{DENIAL_PREFIX}{_DENIAL}")],
             gated=["c0"],
         ),
         *turn(
             index=1,
             text="Trying that again.",
-            calls=[("c1", "write_file", dict(args))],
-            results=[("c1", "write_file", False, "", f"{DENIAL_PREFIX}{_DENIAL}")],
+            calls=[("c1", "write", dict(args))],
+            results=[("c1", "write", False, "", f"{DENIAL_PREFIX}{_DENIAL}")],
             gated=["c1"],
         ),
     ]
@@ -147,14 +147,14 @@ def test_adapting_after_a_denial_is_not_mined(tmp_path):
     events = [
         *turn(
             index=0,
-            calls=[("c0", "write_file", {"path": "vendor/x.py", "content": "1\n"})],
-            results=[("c0", "write_file", False, "", f"{DENIAL_PREFIX}{_DENIAL}")],
+            calls=[("c0", "write", {"path": "vendor/x.py", "content": "1\n"})],
+            results=[("c0", "write", False, "", f"{DENIAL_PREFIX}{_DENIAL}")],
             gated=["c0"],
         ),
         *turn(
             index=1,
-            calls=[("c1", "write_file", {"path": "src/x.py", "content": "1\n"})],
-            results=[("c1", "write_file", True, "wrote 1 file", "")],
+            calls=[("c1", "write", {"path": "src/x.py", "content": "1\n"})],
+            results=[("c1", "write", True, "wrote 1 file", "")],
             gated=["c1"],
         ),
     ]
@@ -170,8 +170,8 @@ def test_looping_is_mined_at_the_third_identical_action(tmp_path):
         events.extend(
             turn(
                 index=i,
-                calls=[(f"c{i}", "read_file", {"path": "a.py"})],
-                results=[(f"c{i}", "read_file", True, "A = 1", "")],
+                calls=[(f"c{i}", "read", {"path": "a.py"})],
+                results=[(f"c{i}", "read", True, "A = 1", "")],
             )
         )
     traj = load_recorded(
@@ -189,8 +189,8 @@ def test_two_identical_actions_are_not_yet_a_loop(tmp_path):
         events.extend(
             turn(
                 index=i,
-                calls=[(f"c{i}", "read_file", {"path": "a.py"})],
-                results=[(f"c{i}", "read_file", True, "A = 1", "")],
+                calls=[(f"c{i}", "read", {"path": "a.py"})],
+                results=[(f"c{i}", "read", True, "A = 1", "")],
             )
         )
     traj = load_recorded(
@@ -202,8 +202,8 @@ def test_two_identical_actions_are_not_yet_a_loop(tmp_path):
 def test_editing_without_reading_is_mined(tmp_path):
     events = turn(
         index=0,
-        calls=[("c0", "edit_file", {"path": "src/a.py", "old_string": "1", "new_string": "2"})],
-        results=[("c0", "edit_file", False, "", "src/a.py has not been read in this session")],
+        calls=[("c0", "edit", {"path": "src/a.py", "old_string": "1", "new_string": "2"})],
+        results=[("c0", "edit", False, "", "src/a.py has not been read in this session")],
     )
     traj = load_recorded(
         tmp_path, "run-blind", events, task_id="t", prompt="patch a.py", tools=_TOOLS
@@ -218,13 +218,13 @@ def test_reading_before_editing_is_not_mined(tmp_path):
     events = [
         *turn(
             index=0,
-            calls=[("c0", "read_file", {"path": "src/a.py"})],
-            results=[("c0", "read_file", True, "x = 1", "")],
+            calls=[("c0", "read", {"path": "src/a.py"})],
+            results=[("c0", "read", True, "x = 1", "")],
         ),
         *turn(
             index=1,
-            calls=[("c1", "edit_file", {"path": "src/a.py", "old_string": "1", "new_string": "2"})],
-            results=[("c1", "edit_file", True, "1 replacement", "")],
+            calls=[("c1", "edit", {"path": "src/a.py", "old_string": "1", "new_string": "2"})],
+            results=[("c1", "edit", True, "1 replacement", "")],
         ),
     ]
     traj = load_recorded(
@@ -240,17 +240,17 @@ def test_a_successful_write_counts_as_a_read_for_the_next_edit(tmp_path):
     events = [
         *turn(
             index=0,
-            calls=[("c0", "write_file", {"path": "src/new.py", "content": "x = 1\n"})],
-            results=[("c0", "write_file", True, "wrote 1 file", "")],
+            calls=[("c0", "write", {"path": "src/new.py", "content": "x = 1\n"})],
+            results=[("c0", "write", True, "wrote 1 file", "")],
             gated=["c0"],
         ),
         *turn(
             index=1,
             calls=[
-                ("c1", "edit_file",
+                ("c1", "edit",
                  {"path": "src/new.py", "old_string": "1", "new_string": "2"}),
             ],
-            results=[("c1", "edit_file", True, "1 replacement", "")],
+            results=[("c1", "edit", True, "1 replacement", "")],
         ),
     ]
     traj = load_recorded(
@@ -264,14 +264,14 @@ def test_a_denied_write_does_not_count_as_a_read(tmp_path):
     events = [
         *turn(
             index=0,
-            calls=[("c0", "write_file", {"path": "src/a.py", "content": "x\n"})],
-            results=[("c0", "write_file", False, "", f"{DENIAL_PREFIX}{_DENIAL}")],
+            calls=[("c0", "write", {"path": "src/a.py", "content": "x\n"})],
+            results=[("c0", "write", False, "", f"{DENIAL_PREFIX}{_DENIAL}")],
             gated=["c0"],
         ),
         *turn(
             index=1,
-            calls=[("c1", "edit_file", {"path": "src/a.py", "old_string": "1", "new_string": "2"})],
-            results=[("c1", "edit_file", False, "", "not read in this session")],
+            calls=[("c1", "edit", {"path": "src/a.py", "old_string": "1", "new_string": "2"})],
+            results=[("c1", "edit", False, "", "not read in this session")],
         ),
     ]
     traj = load_recorded(
@@ -285,13 +285,18 @@ def test_class_counts_shows_a_zero_class_as_zero():
     assert class_counts(mine(clean)) == {str(k): 0 for k in NegativeClass}
 
 
-def test_the_tool_names_are_configurable_because_two_registries_shipped(tmp_path):
-    """v1 spells the editor ``edit_file``, v2 spells it ``edit``. A miner configured for
-    only one goes silently blind on the other's transcripts."""
+def test_the_role_table_is_injectable_so_a_v1_transcript_is_still_minable(tmp_path):
+    """The default table is v2 only; the parameter is what keeps old data readable.
+
+    v1 spelled the editor ``edit_file``, v2 spells it ``edit``. The project standardised
+    on v2, so ``DEFAULT_TOOL_ROLES`` names only v2 tools — but the role table stays a
+    parameter, because a *recorded run* carries whatever toolset it was given and a
+    miner hardcoded to one generation goes silently blind on the other's transcripts.
+    """
     events = turn(
         index=0,
-        calls=[("c0", "edit_file", {"path": "src/a.py", "old_string": "1", "new_string": "2"})],
-        results=[("c0", "edit_file", True, "1 replacement", "")],
+        calls=[("c0", "edit", {"path": "src/a.py", "old_string": "1", "new_string": "2"})],
+        results=[("c0", "edit", True, "1 replacement", "")],
     )
     traj = load_recorded(tmp_path, "run-roles", events, task_id="t", prompt="p", tools=_TOOLS)
     v2_only = ToolRoles(
@@ -299,8 +304,16 @@ def test_the_tool_names_are_configurable_because_two_registries_shipped(tmp_path
         writers=frozenset({"edit", "multi_edit"}),
         overwriters=frozenset({"write"}),
     )
-    assert class_counts(mine(traj, roles=v2_only))["edit_without_read"] == 0
+    # The recorded call is v2 `edit`, so the v2 table sees the violation…
+    assert class_counts(mine(traj, roles=v2_only))["edit_without_read"] == 1
     assert class_counts(mine(traj, roles=DEFAULT_TOOL_ROLES))["edit_without_read"] == 1
+    # …and a table that only knows v1 names is blind to it, which is the whole point.
+    v1_only = ToolRoles(
+        readers=frozenset({"read_file"}),
+        writers=frozenset({"edit_file", "multi_edit"}),
+        overwriters=frozenset({"write_file"}),
+    )
+    assert class_counts(mine(traj, roles=v1_only))["edit_without_read"] == 0
 
 
 def test_creating_a_new_file_is_not_an_edit_without_read(tmp_path):
@@ -310,8 +323,8 @@ def test_creating_a_new_file_is_not_an_edit_without_read(tmp_path):
     Measured on the shipped corpus, the naive rule gave 127 false positives to 33 real."""
     events = turn(
         index=0,
-        calls=[("c0", "write_file", {"path": "src/brand_new.py", "content": "x = 1\n"})],
-        results=[("c0", "write_file", True, "wrote 1 file", "")],
+        calls=[("c0", "write", {"path": "src/brand_new.py", "content": "x = 1\n"})],
+        results=[("c0", "write", True, "wrote 1 file", "")],
     )
     traj = load_recorded(tmp_path, "run-create", events, task_id="t", prompt="p", tools=_TOOLS)
     assert class_counts(mine(traj))["edit_without_read"] == 0
@@ -322,11 +335,11 @@ def test_a_write_the_guard_refused_is_mined(tmp_path):
     one signal that distinguishes an overwrite from a creation."""
     events = turn(
         index=0,
-        calls=[("c0", "write_file", {"path": "src/existing.py", "content": "x = 1\n"})],
+        calls=[("c0", "write", {"path": "src/existing.py", "content": "x = 1\n"})],
         results=[
             (
                 "c0",
-                "write_file",
+                "write",
                 False,
                 "",
                 "src/existing.py already exists and has not been read in this session",
@@ -342,8 +355,8 @@ def test_an_edit_that_slipped_through_is_still_a_violation(tmp_path):
     enforce it still demonstrates the wrong behaviour and must still be mined."""
     events = turn(
         index=0,
-        calls=[("c0", "edit_file", {"path": "src/a.py", "old_string": "1", "new_string": "2"})],
-        results=[("c0", "edit_file", True, "1 replacement", "")],
+        calls=[("c0", "edit", {"path": "src/a.py", "old_string": "1", "new_string": "2"})],
+        results=[("c0", "edit", True, "1 replacement", "")],
     )
     traj = load_recorded(tmp_path, "run-slip", events, task_id="t", prompt="p", tools=_TOOLS)
     assert class_counts(mine(traj))["edit_without_read"] == 1
@@ -367,8 +380,8 @@ def test_an_edit_that_slipped_through_is_still_a_violation(tmp_path):
 def test_the_fingerprint_matches_the_loops_own_rule(arguments):
     """The training package restates ``ronin.core.loop.fingerprint`` because it must
     install without the agent tree. This is the test that keeps the copy honest."""
-    assert fingerprint("read_file", arguments) == loop_fingerprint(
-        ToolUse(id="x", name="read_file", arguments=arguments)
+    assert fingerprint("read", arguments) == loop_fingerprint(
+        ToolUse(id="x", name="read", arguments=arguments)
     )
 
 
@@ -426,7 +439,7 @@ async def test_the_denial_marker_is_the_one_the_real_loop_writes():
     ``DENIAL_PREFIX`` recognises the result. A marker guessed from reading the source
     would silently stop matching the day the loop rewords it; this will not."""
     spec = ToolSpec(
-        name="write_file",
+        name="write",
         description="write a file",
         json_schema={"type": "object", "properties": {"path": {"type": "string"}}},
         danger_level=DangerLevel.MUTATING,
@@ -436,7 +449,7 @@ async def test_the_denial_marker_is_the_one_the_real_loop_writes():
         role=Role.ASSISTANT,
         content_blocks=(
             Text(text="writing"),
-            ToolUse(id="c0", name="write_file", arguments={"path": "a.py"}),
+            ToolUse(id="c0", name="write", arguments={"path": "a.py"}),
         ),
     )
     denials: list[str] = []
@@ -455,14 +468,14 @@ async def test_the_denial_marker_is_the_one_the_real_loop_writes():
             break
     await turns.aclose()
     assert denials, "the scripted turn should have produced a refused call"
-    recorded = RecordedResult(call_id="c0", name="write_file", ok=False, error=denials[0])
+    recorded = RecordedResult(call_id="c0", name="write", ok=False, error=denials[0])
     assert recorded.denied
     assert recorded.denial_reason == "leave the vendored tree alone"
 
 
 def test_a_non_denial_failure_is_not_read_as_a_denial():
     result = RecordedResult(
-        call_id="c0", name="read_file", ok=False, error="a.py does not exist"
+        call_id="c0", name="read", ok=False, error="a.py does not exist"
     )
     assert not result.denied
     assert result.denial_reason == ""
@@ -479,7 +492,7 @@ def test_mining_is_ordered_by_step_so_a_report_reads_chronologically():
                 index=0,
                 calls=(
                     RecordedCall(
-                        id="a", name="edit_file",
+                        id="a", name="edit",
                         arguments={"path": "x.py", "old_string": "1", "new_string": "2"},
                     ),
                 ),
@@ -488,7 +501,7 @@ def test_mining_is_ordered_by_step_so_a_report_reads_chronologically():
                 index=1,
                 calls=(
                     RecordedCall(
-                        id="b", name="edit_file",
+                        id="b", name="edit",
                         arguments={"path": "y.py", "old_string": "1", "new_string": "2"},
                     ),
                 ),

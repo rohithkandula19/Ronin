@@ -27,7 +27,7 @@ from .sft import write_jsonl as write_examples
 from .trajectory import RecordedCall, RecordedResult, Step, ToolSchema, Trajectory
 
 _READ = ToolSchema(
-    name="read_file",
+    name="read",
     description="Read a file from the repository.",
     parameters={
         "type": "object",
@@ -36,7 +36,7 @@ _READ = ToolSchema(
     },
 )
 _WRITE = ToolSchema(
-    name="write_file",
+    name="write",
     description="Write a file, replacing its contents. Gated by approval.",
     parameters={
         "type": "object",
@@ -54,12 +54,12 @@ def _good_run(run_id: str, *, extra_turns: int = 0) -> Trajectory:
             index=0,
             calls=(
                 RecordedCall(
-                    id="c0", name="read_file", arguments={"path": "src/pipeline/loader.py"}
+                    id="c0", name="read", arguments={"path": "src/pipeline/loader.py"}
                 ),
             ),
             results=(
                 RecordedResult(
-                    call_id="c0", name="read_file", ok=True, content="RETRY_LIMIT = 3\n"
+                    call_id="c0", name="read", ok=True, content="RETRY_LIMIT = 3\n"
                 ),
             ),
         ),
@@ -69,13 +69,13 @@ def _good_run(run_id: str, *, extra_turns: int = 0) -> Trajectory:
             calls=(
                 RecordedCall(
                     id="c1",
-                    name="write_file",
+                    name="write",
                     arguments={"path": "src/pipeline/loader.py", "content": "RETRY_LIMIT = 5\n"},
                 ),
             ),
             results=(
                 RecordedResult(
-                    call_id="c1", name="write_file", ok=True, content="wrote 1 file"
+                    call_id="c1", name="write", ok=True, content="wrote 1 file"
                 ),
             ),
         ),
@@ -87,12 +87,12 @@ def _good_run(run_id: str, *, extra_turns: int = 0) -> Trajectory:
                 index=index,
                 calls=(
                     RecordedCall(
-                        id=f"x{i}", name="read_file", arguments={"path": f"src/pipeline/note{i}.py"}
+                        id=f"x{i}", name="read", arguments={"path": f"src/pipeline/note{i}.py"}
                     ),
                 ),
                 results=(
                     RecordedResult(
-                        call_id=f"x{i}", name="read_file", ok=True, content="# note\n"
+                        call_id=f"x{i}", name="read", ok=True, content="# note\n"
                     ),
                 ),
             )
@@ -127,13 +127,13 @@ def _failing_run() -> Trajectory:
                 calls=(
                     RecordedCall(
                         id="b0",
-                        name="write_file",
+                        name="write",
                         arguments={"path": "vendor/loader.py", "content": "RETRY_LIMIT = 5\n"},
                     ),
                 ),
                 results=(
                     RecordedResult(
-                        call_id="b0", name="write_file", ok=False, error=f"DENIED: {denial}"
+                        call_id="b0", name="write", ok=False, error=f"DENIED: {denial}"
                     ),
                 ),
             ),
@@ -143,13 +143,13 @@ def _failing_run() -> Trajectory:
                 calls=(
                     RecordedCall(
                         id="b1",
-                        name="write_file",
+                        name="write",
                         arguments={"path": "vendor/loader.py", "content": "RETRY_LIMIT = 5\n"},
                     ),
                 ),
                 results=(
                     RecordedResult(
-                        call_id="b1", name="write_file", ok=False, error=f"DENIED: {denial}"
+                        call_id="b1", name="write", ok=False, error=f"DENIED: {denial}"
                     ),
                 ),
             ),
@@ -159,13 +159,13 @@ def _failing_run() -> Trajectory:
                 calls=(
                     RecordedCall(
                         id="b2",
-                        name="write_file",
+                        name="write",
                         arguments={"path": "vendor/loader.py", "content": "RETRY_LIMIT = 5\n"},
                     ),
                 ),
                 results=(
                     RecordedResult(
-                        call_id="b2", name="write_file", ok=False, error=f"DENIED: {denial}"
+                        call_id="b2", name="write", ok=False, error=f"DENIED: {denial}"
                     ),
                 ),
             ),
@@ -174,20 +174,20 @@ def _failing_run() -> Trajectory:
                 index=3,
                 text=(
                     "Let me look again.\n<tool_call>\n"
-                    '{"name": "read_file", "arguments": {path: }}\n'
+                    '{"name": "read", "arguments": {path: }}\n'
                     "</tool_call>"
                 ),
                 calls=(
                     RecordedCall(
                         id="b3",
-                        name="read_file",
+                        name="read",
                         arguments={"path": "src/pipeline/loader.py", "limit": "40"},
                     ),
                 ),
                 results=(
                     RecordedResult(
                         call_id="b3",
-                        name="read_file",
+                        name="read",
                         ok=False,
                         error="limit must be an integer. Pass limit=40, not \"40\".",
                     ),

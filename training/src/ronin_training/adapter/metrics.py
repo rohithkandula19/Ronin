@@ -44,7 +44,11 @@ from .config import (
 
 #: Repo-relative location of the generated tool registry (the ground truth for
 #: what tools exist and what arguments they take).
-REGISTRY_PATH = Path(__file__).resolve().parents[3] / "config" / "tool_registry.json"
+#: The **v2** registry, generated from ``ronin.tools.registry.build_registry`` — the
+#: registry the adapter will actually drive. Deliberately not ``tool_registry.json``,
+#: which is the frozen v1 snapshot the already-published v1 corpus was written against;
+#: scoring a v2 adapter against v1 names would mark every correct call invalid.
+REGISTRY_PATH = Path(__file__).resolve().parents[3] / "config" / "tool_registry_v2.json"
 
 #: What to print where a rate has no measurement behind it.
 NOT_MEASURED = "—"

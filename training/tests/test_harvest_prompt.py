@@ -69,28 +69,37 @@ def test_a_rendered_target_parses_back_to_exactly_the_recorded_calls():
     step = Step(
         index=0,
         calls=(
-            RecordedCall(id="c0", name="read_file", arguments={"path": "src/app/loader.py"}),
-            RecordedCall(id="c1", name="read_file", arguments={"path": "src/app/store.py"}),
+            RecordedCall(id="c0", name="read", arguments={"path": "src/app/loader.py"}),
+            RecordedCall(id="c1", name="read", arguments={"path": "src/app/store.py"}),
         ),
     )
     text = assistant_target_text(step)
     assert parse_target_text(text) == (
-        ("read_file", {"path": "src/app/loader.py"}),
-        ("read_file", {"path": "src/app/store.py"}),
+        ("read", {"path": "src/app/loader.py"}),
+        ("read", {"path": "src/app/store.py"}),
     )
 
 
-def test_the_target_text_is_byte_identical_to_the_canonical_dialect_renderer():
+def test_the_target_text_is_the_v2_dialect_and_not_the_v1_renderer():
+    """Byte-identity with ``ronin_dialect`` used to be the contract. It is now the bug.
+
+    That renderer emits the bare v1 ``<tool_call>`` tag, which the v2 shim does not
+    parse at all — so a target matching it is a target the runtime silently ignores.
+    The parity that matters is with the runtime's own parser, asserted in
+    ``test_harvest_v2_dialect.py``.
+    """
     step = Step(
         index=0,
         calls=(
             RecordedCall(
-                id="c0", name="write_file", arguments={"path": "a.py", "content": "x"}
+                id="c0", name="write", arguments={"path": "a.py", "content": "x"}
             ),
         ),
     )
-    assert assistant_target_text(step) == ronin_dialect.render_tool_call_message(
-        [{"name": "write_file", "arguments": {"path": "a.py", "content": "x"}}]
+    rendered = assistant_target_text(step)
+    assert rendered.startswith("<ronin:tool_call>")
+    assert rendered != ronin_dialect.render_tool_call_message(
+        [{"name": "write", "arguments": {"path": "a.py", "content": "x"}}]
     )
 
 
@@ -98,7 +107,7 @@ def test_tool_call_arguments_are_json_objects_not_encoded_strings():
     """Divergence D2: a string-typed arguments value contradicts the instruction the
     chat template gives the model at inference."""
     step = Step(
-        index=0, calls=(RecordedCall(id="c0", name="read_file", arguments={"path": "a.py"}),)
+        index=0, calls=(RecordedCall(id="c0", name="read", arguments={"path": "a.py"}),)
     )
     message = assistant_message(step)
     arguments = message["tool_calls"][0]["function"]["arguments"]
@@ -111,13 +120,13 @@ def test_the_history_is_the_recorded_one_in_order():
         run_id="r",
         prompt="do the thing",
         system="you are ronin",
-        tools=(ToolSchema(name="read_file", description="read a file"),),
+        tools=(ToolSchema(name="read", description="read a file"),),
         steps=(
             Step(
                 index=0,
                 text="looking",
-                calls=(RecordedCall(id="c0", name="read_file", arguments={"path": "a.py"}),),
-                results=(RecordedResult(call_id="c0", name="read_file", ok=True, content="A = 1"),),
+                calls=(RecordedCall(id="c0", name="read", arguments={"path": "a.py"}),),
+                results=(RecordedResult(call_id="c0", name="read", ok=True, content="A = 1"),),
             ),
             Step(index=1, text="done"),
         ),
@@ -132,7 +141,7 @@ def test_the_history_is_the_recorded_one_in_order():
 def test_a_call_with_no_recorded_result_gets_no_invented_observation():
     step = Step(
         index=0,
-        calls=(RecordedCall(id="c0", name="read_file", arguments={"path": "a.py"}),),
+        calls=(RecordedCall(id="c0", name="read", arguments={"path": "a.py"}),),
         results=(),
     )
     assert tool_messages(step) == ()
@@ -141,10 +150,10 @@ def test_a_call_with_no_recorded_result_gets_no_invented_observation():
 def test_a_failed_call_shows_the_model_the_error_it_actually_saw():
     step = Step(
         index=0,
-        calls=(RecordedCall(id="c0", name="read_file", arguments={"path": "gone.py"}),),
+        calls=(RecordedCall(id="c0", name="read", arguments={"path": "gone.py"}),),
         results=(
             RecordedResult(
-                call_id="c0", name="read_file", ok=False, error="gone.py does not exist"
+                call_id="c0", name="read", ok=False, error="gone.py does not exist"
             ),
         ),
     )
@@ -169,7 +178,7 @@ def test_the_row_shape_is_the_pair_the_trainer_consumes():
         task_id="t",
         run_id="r",
         prompt="p",
-        tools=(ToolSchema(name="read_file", description="read a file"),),
+        tools=(ToolSchema(name="read", description="read a file"),),
         steps=(Step(index=0, text="hi"),),
         verified=True,
     )
@@ -181,4 +190,4 @@ def test_a_toolschema_without_a_description_is_refused():
     """The description is what the model uses to choose the tool; a row rendered
     without one trains a different prompt than inference sends."""
     with pytest.raises(ValueError, match="no description"):
-        ToolSchema(name="read_file", description="")
+        ToolSchema(name="read", description="")

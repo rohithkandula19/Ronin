@@ -16,6 +16,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from ronin_training.adapter.metrics import REGISTRY_PATH
 from ronin_training.harvest.sources import RunManifest, read_transcript_events
 from ronin_training.harvest.trajectory import ToolSchema, Trajectory
 from ronin_training.validators import load_registry
@@ -36,12 +37,12 @@ from ronin.persistence import Transcript, read_events
 
 
 def registry_tools(*names: str) -> tuple[ToolSchema, ...]:
-    """Real tool schemas from ``training/config/tool_registry.json``.
+    """Real tool schemas from the **v2** registry (``tool_registry_v2.json``).
 
     Real rather than invented: a miner tested against a made-up schema proves nothing
     about whether it can spot a call that violates a schema Ronin actually declares.
     """
-    registry = load_registry()
+    registry = load_registry(REGISTRY_PATH)
     return tuple(
         ToolSchema(
             name=registry[name]["name"],

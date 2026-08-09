@@ -6,7 +6,7 @@ doesn't have, would teach the model a protocol Ronin can't parse.
 from __future__ import annotations
 
 import json
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 
 import jsonschema
@@ -19,7 +19,7 @@ _REGISTRY = _ROOT / "config" / "tool_registry.json"
 _BANNED_LICENSES = {"proprietary_assistant_output", "claude_output", "gpt_output"}
 
 
-@lru_cache(maxsize=None)
+@cache
 def _schema(name: str) -> dict:
     return json.loads((_SCHEMAS / name).read_text(encoding="utf-8"))
 
@@ -31,9 +31,16 @@ def _public(obj: dict) -> dict:
     return {k: v for k, v in obj.items() if not k.startswith("_")}
 
 
-@lru_cache(maxsize=None)
-def load_registry() -> dict[str, dict]:
-    data = json.loads(_REGISTRY.read_text(encoding="utf-8"))
+@cache
+def load_registry(path: Path | None = None) -> dict[str, dict]:
+    """Tool declarations by name.
+
+    ``path`` defaults to the v1 snapshot this validator has always used, because the
+    already-published v1 corpus is validated against it. The v2 pipeline passes
+    ``adapter.metrics.REGISTRY_PATH`` instead — two files because they describe two
+    genuinely different runtimes, not because the registry drifted.
+    """
+    data = json.loads((path or _REGISTRY).read_text(encoding="utf-8"))
     return {t["name"]: t for t in data["tools"]}
 
 
@@ -56,8 +63,15 @@ def _validate_tool_call(name: str, args_json, reg: dict[str, dict]) -> list[str]
     return errs
 
 
-def validate_example(ex: dict) -> list[str]:
-    """Every reason this SFT row is not usable, or [] if it is."""
+def validate_example(ex: dict, registry_path: Path | None = None) -> list[str]:
+    """Every reason this SFT row is not usable, or [] if it is.
+
+    ``registry_path`` picks which tool vocabulary the row is checked against. It
+    defaults to the frozen v1 snapshot, because the already-published v1 corpus is
+    validated against it; the v2 harvest pipeline passes
+    ``adapter.metrics.REGISTRY_PATH``. Validating a v2 row against v1 names rejects
+    every correct call, which is exactly as confusing as it sounds.
+    """
     errs: list[str] = []
     try:
         jsonschema.validate(_public(ex), _schema("example.schema.json"))
@@ -65,7 +79,7 @@ def validate_example(ex: dict) -> list[str]:
         return [f"schema: {e.message}"]
     if ex.get("license") in _BANNED_LICENSES:
         errs.append("license: proprietary-assistant output is banned as an SFT target")
-    reg = load_registry()
+    reg = load_registry(registry_path)
     for msg in ex["messages"]:
         for call in msg.get("tool_calls") or []:
             fn = call.get("function", {})

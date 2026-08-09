@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -38,7 +39,7 @@ from typing import Any
 # than reimplemented — reimplementing it is precisely divergence D3. Imported as a
 # module because isort splits aliased `from` imports into one statement per name,
 # which would leave the second statement's narrow ignore reported as unused.
-import ronin_dialect  # type: ignore[import-untyped]
+import ronin_dialect  # type: ignore[import-untyped]  # noqa: F401  # parity test only
 
 from .trajectory import RecordedCall, Step, ToolSchema, Trajectory
 
@@ -46,6 +47,16 @@ SYSTEM_ROLE = "system"
 USER_ROLE = "user"
 ASSISTANT_ROLE = "assistant"
 TOOL_ROLE = "tool"
+
+
+#: The v2 dialect, copied from ``ronin.providers.shim`` rather than imported: the
+#: training package has to install on a bare Colab runtime where ``ronin`` is not on the
+#: path. A test asserts these are byte-identical to the shim's, so the copy cannot rot.
+OPEN_TAG = "<ronin:tool_call>"
+CLOSE_TAG = "</ronin:tool_call>"
+_CALL_BLOCK = re.compile(
+    re.escape(OPEN_TAG) + r"\s*(.*?)\s*" + re.escape(CLOSE_TAG), re.DOTALL
+)
 
 
 def tools_block(tools: Sequence[ToolSchema]) -> tuple[dict[str, Any], ...]:
@@ -86,29 +97,53 @@ def assistant_message(step: Step) -> dict[str, Any]:
     return message
 
 
-def assistant_target_text(step: Step) -> str:
-    """The same turn as the **wire text** the runtime parses, via ``ronin_dialect``.
+def render_call_block(name: str, arguments: Mapping[str, Any]) -> str:
+    """One call in the **v2** dialect: ``<ronin:tool_call>{…}</ronin:tool_call>``.
 
-    Used where a target has to be a string (a preference pair's rejected/chosen
-    side rendered for a text-format trainer) and by the round-trip test that proves
-    a rendered target parses back to exactly the calls the trajectory recorded.
+    The tags come from ``ronin.providers.shim``, which is the only parser the v2
+    runtime has, so this cannot drift from what will actually be executed.
+
+    Not ``ronin_dialect.render_tool_call_message``, which emits the bare v1
+    ``<tool_call>`` tag. That mismatch is the worst kind of training bug: an adapter
+    trained on the v1 tag emits calls the v2 shim does not recognise, so *every* call
+    fails, and it looks like the fine-tune did not take when in fact the corpus was
+    speaking the wrong language. The v2 tag is namespaced precisely because the bare
+    one collides with several base models' own chat templates.
+    """
+    payload = json.dumps({"name": name, "arguments": dict(arguments)}, sort_keys=True)
+    return f"{OPEN_TAG}{payload}{CLOSE_TAG}"
+
+
+def assistant_target_text(step: Step) -> str:
+    """The turn as the **wire text** the v2 runtime parses.
+
+    Used where a target has to be a string (a preference pair's rejected/chosen side
+    rendered for a text-format trainer) and by the round-trip test that proves a
+    rendered target parses back to exactly the calls the trajectory recorded.
     """
     if not step.calls:
         return step.text
-    payload = [{"name": c.name, "arguments": dict(c.arguments)} for c in step.calls]
-    blocks: str = ronin_dialect.render_tool_call_message(payload)
+    blocks = "\n".join(render_call_block(c.name, c.arguments) for c in step.calls)
     return f"{step.text}\n{blocks}" if step.text else blocks
 
 
 def parse_target_text(text: str) -> tuple[tuple[str, Mapping[str, Any]], ...]:
     """``(name, arguments)`` for every call the **runtime** would execute in ``text``.
 
-    Delegates to the canonical parser, so a test can assert that what we train as
-    the target is what the runtime would actually run — the exact link that was
-    never checked when tool syntax scored 0/4.
+    Matches the v2 shim's tags, so a test can assert that what we train as the target
+    is what the runtime would actually run — the exact link that was never checked when
+    tool syntax scored 0/4.
     """
-    _clean, calls = ronin_dialect.parse_tool_calls(text)
-    return tuple((c.name, dict(c.arguments)) for c in calls)
+    found: list[tuple[str, Mapping[str, Any]]] = []
+    for raw in _CALL_BLOCK.findall(text):
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict) and isinstance(payload.get("name"), str):
+            arguments = payload.get("arguments")
+            found.append((payload["name"], dict(arguments) if isinstance(arguments, dict) else {}))
+    return tuple(found)
 
 
 def tool_messages(step: Step) -> tuple[dict[str, Any], ...]:
