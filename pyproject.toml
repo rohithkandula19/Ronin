@@ -162,6 +162,7 @@ module = [
     "test_safety_denylist",
     "test_safety_injection",
     "test_safety_policy",
+    "test_safety_sandbox",
     "test_safety_settings",
     "test_safety_suites",
     "test_search",
