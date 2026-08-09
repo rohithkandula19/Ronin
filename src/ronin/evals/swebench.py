@@ -723,7 +723,7 @@ class SWEBenchHarness:
         workdir = self.workspace(task)
         try:
             attempt = await self.patch_runner(task, workdir)
-        except Exception as exc:  # noqa: BLE001 — one instance may not kill the run
+        except Exception as exc:  # one instance's failure may not kill the run
             return replace(base, error=f"patch runner failed: {exc!r}")
 
         counted = replace(
@@ -739,8 +739,10 @@ class SWEBenchHarness:
 
         try:
             evaluation = await self.evaluator(task, attempt.patch, workdir)
-        except Exception as exc:  # noqa: BLE001
-            return replace(counted, patch_generated=True, error=f"evaluator failed: {exc!r}")
+        except Exception as exc:  # same rule: an evaluator blow-up is this task's outcome
+            return replace(
+                counted, patch_generated=True, error=f"evaluator failed: {exc!r}"
+            )
 
         passed = frozenset(evaluation.passed_tests)
         return replace(
