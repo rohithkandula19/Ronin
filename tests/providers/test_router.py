@@ -13,8 +13,10 @@ import pytest
 
 from ronin.providers import (
     Capabilities,
+    FailoverClient,
     ModelSpec,
     ProviderError,
+    RetryingClient,
     Role,
     Router,
     RouterConfig,
@@ -116,13 +118,27 @@ def test_a_client_is_built_once_and_cached() -> None:
     assert router.client_for(Role.MAIN) is router.client_for(Role.MAIN)
 
 
-def test_two_roles_on_the_same_model_share_one_client() -> None:
+def inner_of(client: object) -> object:
+    """Unwrap the retry wrapper the router now interposes on every role."""
+    return client.inner if isinstance(client, RetryingClient) else client
+
+
+def test_every_role_is_wrapped_in_retry() -> None:
+    """Retry is not opt-in: a free-tier 429 is the normal case, not the exception."""
+    router = Router(config(), build=stub_factory)
+    for role in Role:
+        assert isinstance(router.client_for(role), RetryingClient)
+
+
+def test_two_roles_on_the_same_model_share_one_underlying_client() -> None:
+    """The wrappers differ so retry stats are per-role; the connection is reused."""
     cfg = RouterConfig(
         roles={Role.MAIN: "m", Role.FAST: "m"},
         models={"m": ModelSpec(name="m", provider="openai", model="gpt")},
     )
     router = Router(cfg, build=stub_factory)
-    assert router.client_for(Role.MAIN) is router.client_for(Role.FAST)
+    assert inner_of(router.client_for(Role.MAIN)) is inner_of(router.client_for(Role.FAST))
+    assert router.client_for(Role.MAIN) is not router.client_for(Role.FAST)
 
 
 def test_a_missing_role_falls_back_to_main_rather_than_crashing_mid_session() -> None:
@@ -132,7 +148,86 @@ def test_a_missing_role_falls_back_to_main_rather_than_crashing_mid_session() ->
     )
     router = Router(cfg, build=stub_factory)
     assert router.spec_for(Role.FAST).name == "m"
-    assert router.for_subagent() is router.client_for(Role.MAIN)
+    assert inner_of(router.for_subagent()) is inner_of(router.client_for(Role.MAIN))
+
+
+def test_a_role_with_fallbacks_becomes_a_failover_chain() -> None:
+    cfg = parse_config(
+        {
+            "roles": {"main": "primary"},
+            "fallbacks": {"main": ["backup"]},
+            "models": {
+                "primary": {"provider": "openai", "model": "a", "base_url": "openai"},
+                "backup": {"provider": "anthropic", "model": "b"},
+            },
+        }
+    )
+    router = Router(cfg, build=stub_factory)
+    assert isinstance(router.client_for(Role.MAIN), FailoverClient)
+    assert [spec.name for spec in cfg.chain_for(Role.MAIN)] == ["primary", "backup"]
+
+
+def test_a_single_backup_may_be_written_without_brackets() -> None:
+    cfg = parse_config(
+        {
+            "roles": {"main": "primary"},
+            "fallbacks": {"main": "backup"},
+            "models": {
+                "primary": {"provider": "anthropic", "model": "a"},
+                "backup": {"provider": "anthropic", "model": "b"},
+            },
+        }
+    )
+    assert cfg.fallbacks[Role.MAIN] == ("backup",)
+
+
+def test_a_role_cannot_list_its_own_model_as_a_fallback() -> None:
+    with pytest.raises(ValueError, match="lists its own model"):
+        parse_config(
+            {
+                "roles": {"main": "m"},
+                "fallbacks": {"main": ["m"]},
+                "models": {"m": {"provider": "anthropic", "model": "a"}},
+            }
+        )
+
+
+def test_a_fallback_for_an_unmapped_role_is_a_typo() -> None:
+    with pytest.raises(ValueError, match="a backup for nothing"):
+        parse_config(
+            {
+                "roles": {"main": "m"},
+                "fallbacks": {"plan": ["m"]},
+                "models": {"m": {"provider": "anthropic", "model": "a"}},
+            }
+        )
+
+
+def test_an_undefined_fallback_model_is_rejected() -> None:
+    with pytest.raises(ValueError, match="is not defined"):
+        parse_config(
+            {
+                "roles": {"main": "m"},
+                "fallbacks": {"main": ["ghost"]},
+                "models": {"m": {"provider": "anthropic", "model": "a"}},
+            }
+        )
+
+
+def test_the_retry_policy_is_read_from_config() -> None:
+    cfg = parse_config(
+        {
+            "roles": {"main": "m"},
+            "retry": {"max_attempts": 2, "base_delay": 0.5, "max_delay": 1.0},
+            "models": {"m": {"provider": "anthropic", "model": "a"}},
+        }
+    )
+    assert cfg.retry.max_attempts == 2
+    assert cfg.retry.wait_for(0) == 0.5
+
+
+def test_a_config_with_no_retry_section_gets_the_default_ladder() -> None:
+    assert config().retry.max_attempts == 6
 
 
 def test_there_are_exactly_three_roles() -> None:

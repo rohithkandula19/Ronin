@@ -17,6 +17,8 @@ The shape of this package, in the order you meet it:
   to models, models map to clients.
 * :mod:`~ronin.providers.assembly` and :mod:`~ronin.providers.accounting` — cache
   the prefix, then prove it worked and say what it cost.
+* :mod:`~ronin.providers.resilience` — retry a transient failure, fail over to
+  another provider, and never render an answer twice while doing either.
 * :mod:`~ronin.providers.bridge` — presents all of it as the seam
   ``ronin.core.loop`` already expects.
 
@@ -36,6 +38,14 @@ from .mlx_local import MLXClient
 from .normalize import NormalizedCalls, ToolCallAccumulator
 from .openai_compat import KNOWN_BASE_URLS, MoonshotClient, OpenAICompatClient
 from .registry import ADAPTERS, build_client, describe
+from .resilience import (
+    NO_RETRY,
+    FailoverClient,
+    FailoverStats,
+    RetryingClient,
+    RetryPolicy,
+    RetryStats,
+)
 from .router import ModelSpec, Role, Router, RouterConfig, load_config, parse_config
 from .shim import ShimClient, ShimStreamParser, build_shim_system, render_tool_specs
 from .types import (
@@ -57,11 +67,14 @@ __all__ = [
     "ADAPTERS",
     "CONSERVATIVE",
     "KNOWN_BASE_URLS",
+    "NO_RETRY",
     "AnthropicClient",
     "ArgsParse",
     "CacheStats",
     "Capabilities",
     "Completed",
+    "FailoverClient",
+    "FailoverStats",
     "FinishReason",
     "HttpTransport",
     "Ledger",
@@ -75,6 +88,9 @@ __all__ = [
     "NormalizedCalls",
     "OpenAICompatClient",
     "ProviderError",
+    "RetryPolicy",
+    "RetryStats",
+    "RetryingClient",
     "Role",
     "Router",
     "RouterConfig",
