@@ -133,10 +133,18 @@ async def test_a_mutating_turn_checkpoints_and_verifies_through_the_real_stack(
     import subprocess
 
     subprocess.run(["git", "init", "--quiet"], cwd=root, check=True)
+    # ``write`` refuses to overwrite a file it has not read this session — the guard
+    # that prevents most destructive edits — so the script reads first, exactly as a
+    # model has to. Writing *widget.py* rather than a new file is what gives the
+    # verify planner a test file to find: ``tests/test_widget.py`` exists, and a
+    # brand-new module with no test would correctly plan nothing.
     router, _provider = h.scripted_router(
         [
+            h.provider_calls("read", {"path": "src/widget.py"}, use_id="p0"),
             h.provider_calls(
-                "write", {"path": "src/new_helper.py", "content": "def helper():\n    return 1\n"}
+                "write",
+                {"path": "src/widget.py", "content": WIDGET + "\n\ndef helper():\n    return 1\n"},
+                use_id="p1",
             ),
             h.provider_says("added the helper."),
         ]
@@ -158,7 +166,7 @@ async def test_a_mutating_turn_checkpoints_and_verifies_through_the_real_stack(
     finally:
         await runtime.aclose()
 
-    assert (root / "src" / "new_helper.py").is_file()
+    assert "def helper()" in (root / "src" / "widget.py").read_text(encoding="utf-8")
     # A real shadow-git checkpoint, in .ronin/checkpoints, and the user's own index
     # untouched: `git status` still reports the new file as untracked.
     assert conversation.checkpoints, conversation.notes
@@ -170,15 +178,15 @@ async def test_a_mutating_turn_checkpoints_and_verifies_through_the_real_stack(
         text=True,
         check=True,
     )
-    assert "?? src/new_helper.py" in status.stdout
     # Nothing was staged in the user's own index. The shadow repo has its own.
     assert not [line for line in status.stdout.splitlines() if not line.startswith("??")]
 
-    # The changed path came from the diff, not from the model's account of itself.
+    # The changed path came from the diff, not from the model's account of itself,
+    # and the plan was scoped to the test that covers it.
     verify = [e for e in events if isinstance(e, ToolEnd) and e.name == VERIFY_STEP]
-    assert verify and verify[0].result.ok
+    assert verify and verify[0].result.ok, verify[0].result if verify else conversation.notes
     assert commands.runs == 1
-    assert any("src/new_helper.py" in " ".join(argv) for argv in commands.argv_log)
+    assert any("tests/test_widget.py" in " ".join(argv) for argv in commands.argv_log)
 
 
 # --------------------------------------------------------------------------- #

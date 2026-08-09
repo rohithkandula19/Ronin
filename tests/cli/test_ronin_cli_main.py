@@ -378,7 +378,9 @@ async def test_continue_picks_the_newest_session_in_this_directory(tmp_path: Pat
     capture = Captured()
     agent = agent_for(tmp_path, [h.say("continued")])
 
-    code = await run(["--no-wizard", "-c", "-p", "carry on", "--cwd", str(tmp_path)], agent, capture)
+    code = await run(
+        ["--no-wizard", "-c", "-p", "carry on", "--cwd", str(tmp_path)], agent, capture
+    )
 
     assert code == 0
     assert "resumed 20240102-000000-bbbbbb" in capture.stderr
@@ -388,7 +390,9 @@ async def test_continue_with_nothing_recorded_says_so(tmp_path: Path) -> None:
     capture = Captured()
     agent = agent_for(tmp_path, [])
 
-    code = await run(["--no-wizard", "-c", "-p", "carry on", "--cwd", str(tmp_path)], agent, capture)
+    code = await run(
+        ["--no-wizard", "-c", "-p", "carry on", "--cwd", str(tmp_path)], agent, capture
+    )
 
     assert code == EXIT_USAGE
     assert "no recorded session" in capture.stderr
