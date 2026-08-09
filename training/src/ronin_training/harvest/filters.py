@@ -67,8 +67,9 @@ class TaskBudget:
         A trajectory sitting exactly on 1.5x the median is *kept*: "within 1.5x"
         reads inclusive, and the boundary lands on an exact value often enough to
         matter (a median of 4 gives a budget of 6.0, and six-turn runs are common).
-        Turn counts are integers and medians of integers are whole or half, so
-        1.5x is always an exact binary float — the comparison has no rounding slop.
+        Turn counts are integers, so a median is whole or half and 1.5x of either
+        is a multiple of 0.25 — always an exact binary float. The comparison has no
+        rounding slop to worry about.
         """
         return turn_count <= self.budget
 

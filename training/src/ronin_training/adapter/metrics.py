@@ -32,7 +32,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 from typing import Any
 
@@ -388,7 +388,7 @@ def check_call(
     return VALID_CALL
 
 
-@lru_cache(maxsize=None)
+@cache
 def load_tool_schemas(path: str | None = None) -> Mapping[str, Mapping[str, Any]]:
     """``tool name → JSON schema`` from the generated registry.
 

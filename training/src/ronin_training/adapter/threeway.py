@@ -381,7 +381,7 @@ async def run_three_way(
             runs[name] = await runner()
         except asyncio.CancelledError:
             raise
-        except Exception as exc:  # noqa: BLE001 - recorded as a note, see docstring
+        except Exception as exc:  # recorded as a note on the column; see docstring
             runs[name] = TargetRun(
                 model=f"{name} (did not run)",
                 notes=(f"target failed to run: {type(exc).__name__}: {exc}",),
@@ -470,7 +470,7 @@ def _render_outcome(verdict: Verdict) -> list[str]:
                 "point of this evaluation is to stop guessing — including guessing "
                 "that the fine-tune worked.",
                 "",
-                "| metric | adapter − base |",
+                "| metric | adapter minus base |",
                 "|---|---|",
                 f"| tool-syntax validity | {_signed(verdict.syntax_delta)} |",
                 f"| recovery rate | {_signed(verdict.recovery_delta)} |",
@@ -484,7 +484,7 @@ def _render_outcome(verdict: Verdict) -> list[str]:
     elif verdict.outcome is Outcome.ADAPTER_WINS:
         lines.extend(
             [
-                "| metric | adapter − base |",
+                "| metric | adapter minus base |",
                 "|---|---|",
                 f"| tool-syntax validity | {_signed(verdict.syntax_delta)} |",
                 f"| recovery rate | {_signed(verdict.recovery_delta)} |",

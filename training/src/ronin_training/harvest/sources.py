@@ -128,7 +128,9 @@ def read_transcript_events(path: Path) -> Sequence[Any]:
     return read_events(path).events
 
 
-def steps_from_events(events: Iterable[Any], *, scrub: Callable[[str], str] | None = None) -> tuple[Step, ...]:
+def steps_from_events(
+    events: Iterable[Any], *, scrub: Callable[[str], str] | None = None
+) -> tuple[Step, ...]:
     """Fold a ``ronin.core.types.Event`` stream into assistant turns.
 
     Structural rather than isinstance-based: the events are matched by the attributes
@@ -188,11 +190,10 @@ def steps_from_events(events: Iterable[Any], *, scrub: Callable[[str], str] | No
                     error=clean(str(getattr(result, "error", "") or "")),
                 )
             )
-        elif name in {"TurnEnd", "TurnStart"}:
+        elif name == "TurnEnd":
             # One recorded turn per TurnEnd: the loop yields TurnStart/TurnEnd around
             # each model call, and a turn boundary is where an SFT example is cut.
-            if name == "TurnEnd":
-                flush()
+            flush()
     flush()
     return tuple(steps)
 

@@ -153,7 +153,7 @@ class PairCounts:
 # --------------------------------------------------------------------------- #
 
 
-def _donor_key(negative: Negative, roles: ToolRoles) -> tuple[str, str]:
+def _donor_key(negative: Negative) -> tuple[str, str]:
     """What a donor turn has to be, per class. ``("", "")`` means no key exists."""
     if negative.kind is NegativeClass.EDIT_WITHOUT_READ:
         return ("reads", str(negative.evidence.get("path", "")))
@@ -197,7 +197,7 @@ def find_donor(
     correct turn for a different situation, and pairing across tasks would teach the
     model to answer the question it was not asked.
     """
-    key = _donor_key(negative, roles)
+    key = _donor_key(negative)
     if not key[1]:
         return None
     for donor in donors:
@@ -415,7 +415,8 @@ def load_schema() -> Mapping[str, Any]:
 
 def validate_row(row: Mapping[str, Any]) -> list[str]:
     """Every reason ``row`` is not a usable DPO row, or ``[]`` if it is."""
-    import jsonschema
+    # No stubs for jsonschema, and types-jsonschema is not a dev dependency here.
+    import jsonschema  # type: ignore[import-untyped]
 
     validator = jsonschema.Draft7Validator(dict(load_schema()))
     errors = [
@@ -423,12 +424,15 @@ def validate_row(row: Mapping[str, Any]) -> list[str]:
         for err in validator.iter_errors(dict(row))
     ]
     meta = row.get("meta")
-    if isinstance(meta, Mapping) and meta.get("synthesized_chosen") is True:
-        if meta.get("donor_run_id"):
-            errors.append(
-                "meta: synthesized_chosen is true but a donor_run_id is named — the "
-                "row claims both origins for its chosen side"
-            )
+    if (
+        isinstance(meta, Mapping)
+        and meta.get("synthesized_chosen") is True
+        and meta.get("donor_run_id")
+    ):
+        errors.append(
+            "meta: synthesized_chosen is true but a donor_run_id is named — the "
+            "row claims both origins for its chosen side"
+        )
     return errors
 
 

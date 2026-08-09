@@ -135,10 +135,19 @@ python -m ronin -p "explain the retry ladder" --mode plan
 | `auto_edit` | file edits proceed without asking; shell and destructive calls still ask. |
 | `full` | ask for as little as the rules permit. |
 
-`--yolo` stops asking altogether. The unconditional deny list still applies, and every
-rule marked `always_ask` still asks — those are not waivable by a mode. Prefer a
-narrow allow rule in `.ronin/settings.json` to `--yolo`: the rule is attributable to a
-file, reviewable in a diff, and visible in `python -m ronin doctor`.
+`--yolo` is different in kind from a mode, and the CLI's own one-line help understates
+it. A mode can only *relax an `ask` that came from the rules* — it cannot touch a
+floor, so the deny list, structural command hazards, taint escalation and plan mode all
+survive `--mode full`. `--yolo` **waives the deny list itself**
+(`ronin.safety.denylist.Denylist.yolo` makes every check return no hits), which means
+`rm -rf /`, a fork bomb and reading private key material stop being refused. It is a
+decision to make once, loudly, about a throwaway container — not a convenience for a
+repository you care about.
+
+Prefer a narrow allow rule in `.ronin/settings.json`: a rule is attributable to a file,
+reviewable in a diff, and visible in `python -m ronin doctor`. Rules marked
+`always_ask` keep asking under every mode, which is the right tool for "let it run the
+test suite, keep asking before it touches the database".
 
 ## 7. budgets, so a runaway turn is bounded
 

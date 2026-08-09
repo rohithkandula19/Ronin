@@ -33,15 +33,14 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from .trajectory import RecordedCall, Step, ToolSchema, Trajectory
-
 # ronin_dialect is stdlib-only and ships no py.typed marker, so strict mypy cannot
 # see through it. Narrowly ignored and re-typed by the thin wrappers below rather
-# than reimplemented — reimplementing it is precisely divergence D3.
-from ronin_dialect import (  # type: ignore[import-untyped]
-    parse_tool_calls as _dialect_parse,
-    render_tool_call_message as _dialect_render,
-)
+# than reimplemented — reimplementing it is precisely divergence D3. Imported as a
+# module because isort splits aliased `from` imports into one statement per name,
+# which would leave the second statement's narrow ignore reported as unused.
+import ronin_dialect  # type: ignore[import-untyped]
+
+from .trajectory import RecordedCall, Step, ToolSchema, Trajectory
 
 SYSTEM_ROLE = "system"
 USER_ROLE = "user"
@@ -96,7 +95,8 @@ def assistant_target_text(step: Step) -> str:
     """
     if not step.calls:
         return step.text
-    blocks: str = _dialect_render([{"name": c.name, "arguments": dict(c.arguments)} for c in step.calls])
+    payload = [{"name": c.name, "arguments": dict(c.arguments)} for c in step.calls]
+    blocks: str = ronin_dialect.render_tool_call_message(payload)
     return f"{step.text}\n{blocks}" if step.text else blocks
 
 
@@ -107,7 +107,7 @@ def parse_target_text(text: str) -> tuple[tuple[str, Mapping[str, Any]], ...]:
     the target is what the runtime would actually run — the exact link that was
     never checked when tool syntax scored 0/4.
     """
-    _clean, calls = _dialect_parse(text)
+    _clean, calls = ronin_dialect.parse_tool_calls(text)
     return tuple((c.name, dict(c.arguments)) for c in calls)
 
 

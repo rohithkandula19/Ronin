@@ -22,7 +22,7 @@ misconfigured) from warnings (the run may not fit, or depends on a backend versi
 we cannot probe from here).
 
 The hyperparameters are the user's, not derived here. Where the user specified a
-range ("2–3 epochs") the config carries a concrete value and the validator enforces
+range ("2-3 epochs") the config carries a concrete value and the validator enforces
 the range, so a value drifting out of it is an error rather than a surprise.
 """
 from __future__ import annotations
@@ -816,7 +816,10 @@ def _mlx_projection_problems(
         if bad:
             problems.append(f"lora_parameters carries unknown key(s) {bad}")
     argv = cfg.to_mlx_argv(config_path="x.yaml")
-    flags = [token for token in argv if token.startswith("-")]
+    # Skip the interpreter prefix (`python -m mlx_lm.lora`): its `-m` belongs to
+    # Python, not to mlx-lm, and scanning it would flag every valid argv.
+    tail = argv[argv.index("mlx_lm.lora") + 1 :] if "mlx_lm.lora" in argv else argv
+    flags = [token for token in tail if token.startswith("-")]
     stray = sorted(flag for flag in flags if flag not in MLX_ARGV_FLAGS)
     if stray:
         problems.append(f"the mlx argv uses flag(s) mlx_lm.lora does not accept: {stray}")

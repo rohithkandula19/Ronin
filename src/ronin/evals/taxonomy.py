@@ -106,7 +106,8 @@ _FAILING_CHECK_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
     re.compile(r"^(?:FAILED|ERROR)\s+(\S+)", re.MULTILINE),  # pytest
     re.compile(r"^not ok \d+\s*-?\s*(.+)$", re.MULTILINE),  # TAP
     re.compile(r"^--- FAIL: (\S+)", re.MULTILINE),  # go test
-    re.compile(r"^(\S+) \.\.\. (?:FAIL|ERROR)$", re.MULTILINE),  # unittest
+    # unittest, both with and without the "(module.Class)" it prints in verbose mode.
+    re.compile(r"^(\S+)(?: \(\S+\))? \.\.\. (?:FAIL|ERROR)\s*$", re.MULTILINE),
 )
 
 

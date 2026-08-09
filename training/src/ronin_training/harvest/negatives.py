@@ -123,7 +123,9 @@ def _schema_errors(call: RecordedCall, trajectory: Trajectory) -> str:
     tool = trajectory.tool_named(call.name)
     if tool is None or not tool.parameters:
         return ""
-    import jsonschema
+    # jsonschema is a declared dependency of this package but ships no stubs and
+    # types-jsonschema is not in the root dev group; narrowed, not silenced.
+    import jsonschema  # type: ignore[import-untyped]
 
     try:
         jsonschema.validate(dict(call.arguments), dict(tool.parameters))

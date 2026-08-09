@@ -168,6 +168,23 @@ def full_registry(root: Path) -> ToolRegistry:
     )
 
 
+def cli_registry(root: Path) -> ToolRegistry:
+    """The tools a plain ``python -m ronin`` session gets, derived the same way it is.
+
+    ``ronin.cli.wire.build_runtime`` calls ``build_registry(ctx, shell=…)`` and nothing
+    else, then ``ronin.session.build_session`` adds ``task``. Mirroring that here rather
+    than hardcoding a list is what makes the "not in a plain session" column on
+    ``tools.md`` true after someone widens the wiring.
+    """
+    ctx = ToolContext(root=root, env={})
+    return build_registry(ctx, shell=ShellSession(shell=PersistentShell(cwd=root, env={})))
+
+
+#: Added by ``ronin.session.build_session`` after ``build_registry`` returns, because
+#: ``TaskTool`` needs a runner that needs a registry that contains ``TaskTool``.
+SESSION_ADDED_TOOLS: tuple[str, ...] = ("task",)
+
+
 # --------------------------------------------------------------------------- #
 # Rendering helpers
 # --------------------------------------------------------------------------- #
@@ -242,20 +259,39 @@ asks, and anything higher can be gated by a rule in `.ronin/settings.json`. See
 def render_tools() -> str:
     registry = full_registry(ROOT)
     specs = sorted(registry.specs(), key=lambda spec: spec.name)
+    in_cli = {spec.name for spec in cli_registry(ROOT).specs()} | set(SESSION_ADDED_TOOLS)
+    needs_injection = [spec.name for spec in specs if spec.name not in in_cli]
     body: list[str] = [
         f"{len(specs)} tools, listed alphabetically.",
         "",
         *_table(
-            ("tool", "danger level", "approval by default"),
+            ("tool", "danger level", "approval by default", "in a plain session?"),
             [
                 [
                     f"[`{spec.name}`](#{spec.name})",
                     spec.danger_level.name.lower(),
                     "yes" if spec.requires_approval else "no",
+                    "yes" if spec.name in in_cli else "no — needs injection",
                 ]
                 for spec in specs
             ],
         ),
+        "",
+        "The last column is the one that catches people out, so it is derived rather "
+        "than asserted: `ronin.cli.wire.build_runtime` calls `build_registry(ctx, "
+        "shell=…)` and nothing else, and `ronin.session.build_session` then adds "
+        + ", ".join(f"`{name}`" for name in SESSION_ADDED_TOOLS)
+        + ". That means "
+        + (
+            ", ".join(f"`{name}`" for name in needs_injection)
+            + " are **not** present in a `python -m ronin` session"
+            if needs_injection
+            else "every tool below is present in a `python -m ronin` session"
+        )
+        + ": they need a fetcher, an extractor or a searcher passed in, which the "
+        "programmatic entry point (`ronin.cli.sdk.Agent`) can do and the command line "
+        "currently cannot. Reaching the web from the CLI today means an MCP server; "
+        "see [config.md](config.md).",
         "",
     ]
     for spec in specs:
