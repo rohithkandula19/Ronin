@@ -40,22 +40,41 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from types import ModuleType
 from typing import TextIO
 
-from ..core.types import Budget, Event, Mode
+from ..core.types import (
+    ApprovalRequest,
+    Budget,
+    Error,
+    Event,
+    Mode,
+    TextDelta,
+    ToolEnd,
+    ToolStart,
+)
 from ..persistence import export as export_module
 from ..persistence.resume import ResumedSession, resume_latest, resume_session
 from ..persistence.transcript import list_sessions
+from ..providers.router import Router
+from ..providers.types import ProviderError
 from ..ui.app import TEXTUAL_MISSING, run_app, textual_available
 from ..ui.app import Session as AppSession
 from ..ui.commands import BUILTIN_REGISTRY, ParseError, is_command, render_help
 from ..ui.commands import parse as parse_command
-from ..ui.headless import EXIT_ERROR, EXIT_OK, OutputFormat, run_headless
-from ..ui.reduce import summarize_arguments, summarize_result
+from ..ui.headless import (
+    EXIT_ERROR,
+    EXIT_OK,
+    OutputFormat,
+    exit_code_for,
+    run_headless,
+)
+from ..ui.reduce import ViewState, reduce_event, summarize_arguments, summarize_result
+from .doctor import run_doctor
 from .sdk import Agent, load_router
-from .spine import Loaded, Paths
+from .spine import Paths
 from .stream import DEFAULT_MAX_ITERATIONS
+from .wire import load_workspace
+from .wizard import apply_plan, plan_first_run
 
 PROGRAM = "ronin"
 
@@ -174,16 +193,25 @@ class Streams:
         """The real streams. The only place this module touches ``sys``."""
         source = sys.stdin if stdin is None else stdin
 
+        def out(text: str) -> None:
+            sys.stdout.write(text)
+
+        def err(text: str) -> None:
+            sys.stderr.write(text)
+
         def ask(question: str) -> str:
             sys.stdout.write(question)
             sys.stdout.flush()
             return source.readline()
 
+        def flush() -> None:
+            sys.stdout.flush()
+
         return cls(
-            out=sys.stdout.write,
-            err=sys.stderr.write,
+            out=out,
+            err=err,
             ask=ask,
-            flush=sys.stdout.flush,
+            flush=flush,
             isatty=bool(getattr(source, "isatty", lambda: False)()),
         )
 
@@ -445,107 +473,48 @@ def _version() -> str:
         return "(not installed; running from a source tree)"
 
 
-def _load(
-    paths: Paths, options: Options, env: Mapping[str, str], streams: Streams
-) -> Loaded | None:
-    """Read the workspace, or explain why the loader is not there."""
-    wire = _module("wire")
-    if wire is None:
-        streams.err(
-            "ronin.cli.wire is missing, so no workspace can be loaded. This build is "
-            "incomplete.\n"
-        )
-        return None
-    loaded = wire.load_workspace(paths, flags=options.flags, environ=env)
-    if isinstance(loaded, Loaded):
-        return loaded
-    streams.err("ronin.cli.wire.load_workspace did not return a Loaded\n")
-    return None
+def _router_or_none(paths: Paths, env: Mapping[str, str]) -> Router | None:
+    """A router when one is configured. ``None`` is a legitimate answer for ``doctor``.
 
-
-def _module(name: str) -> ModuleType | None:
-    """Import a sibling module, or ``None``.
-
-    ``wire``, ``doctor`` and ``wizard`` are imported this way because this module is
-    usable — and testable — without them: ``export``, ``sessions``, ``--version``
-    and the whole parse surface need none of them, and a hard import would make an
-    incomplete build fail at ``import ronin.cli.main`` rather than at the one
-    command that needs the missing piece.
+    ``doctor``'s model check reports "no router configured" itself, and it is exactly
+    the diagnostic a first-run user needs — so refusing to run ``doctor`` because
+    there is no config would withhold the answer to the question they are asking.
     """
-    import importlib
-
     try:
-        return importlib.import_module(f".{name}", __package__)
-    except ImportError:
+        return load_router(paths, environ=env)
+    except (FileNotFoundError, ProviderError):
         return None
 
 
-def _doctor_report(loaded: Loaded) -> str:
-    """``ronin doctor``: the ``doctor`` module's report, or the workspace's own.
-
-    ``Loaded.render`` is documented as "/doctor's body", so the fallback is not a
-    stub — it is the same information, without the probes ``doctor`` adds.
-    """
-    module = _module("doctor")
-    for name in ("report", "render", "run"):
-        function = getattr(module, name, None)
-        if callable(function):
-            rendered = function(loaded)
-            if isinstance(rendered, str):
-                return rendered
-            return _render(rendered)
-    return loaded.render()
-
-
-def _render(value: object) -> str:
-    """Text for a value that may or may not know how to render itself."""
-    renderer = getattr(value, "render", None)
-    if callable(renderer):
-        rendered = renderer()
-        if isinstance(rendered, str):
-            return rendered
-    return str(value)
-
-
-async def _first_run(
-    paths: Paths, options: Options, env: Mapping[str, str], streams: Streams
-) -> None:
+def _first_run(paths: Paths, streams: Streams) -> None:
     """Show the plan, ask, then apply it. The asking lives here on purpose.
 
-    ``wizard`` owns the plan/apply split; this owns the question, because a module
-    that prompts is a module that cannot be tested without a terminal. A ``no``
-    answer is respected and the session continues with defaults — the wizard is a
-    convenience, not a gate.
+    ``wizard`` owns the plan/apply split (``plan_first_run`` touches nothing,
+    ``apply_plan`` writes); this owns the question, because a module that prompts is a
+    module that cannot be tested without a terminal. A ``no`` is respected and the
+    session continues on defaults — the wizard is a convenience, not a gate.
     """
-    wizard = _module("wizard")
-    if wizard is None:
+    plan = plan_first_run(paths)
+    if plan.empty:
         return
-    loaded = _load(paths, options, env, streams)
-    plan = getattr(wizard, "plan", None)
-    apply = getattr(wizard, "apply", None)
-    if not callable(plan) or not callable(apply):
-        return
-    proposal = plan(loaded) if loaded is not None else plan(paths)
     streams.out("first run in this workspace.\n")
-    streams.out(_render(proposal) + "\n")
+    streams.out(plan.render())
     answer = streams.ask(WIZARD_QUESTION).strip().lower()
     if answer not in ("", "y", "yes"):
-        streams.out("nothing written. run `ronin doctor` to see the defaults in use.\n")
+        streams.out("nothing written. `ronin doctor` shows the defaults in use.\n")
         return
-    streams.out(_render(apply(proposal)) + "\n")
+    written = apply_plan(plan)
+    if not written:
+        streams.out("nothing needed writing.\n")
+        return
+    for path in written:
+        streams.out(f"wrote {path}\n")
 
 
 async def _open_agent(
     options: Options, paths: Paths, env: Mapping[str, str], streams: Streams
 ) -> Agent | None:
     """Assemble the agent, turning every startup failure into a message and ``None``."""
-    if _module("wire") is None:
-        streams.err(
-            "ronin.cli.wire is missing, so a session cannot be assembled. This build "
-            "is incomplete; `ronin doctor`, `ronin export` and `ronin sessions` still "
-            "work.\n"
-        )
-        return None
     try:
         router = load_router(paths, environ=env)
     except FileNotFoundError as exc:
