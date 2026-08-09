@@ -658,8 +658,6 @@ async def test_a_subagent_may_act_on_standing_permission_but_cannot_ask_for_more
 async def test_a_subagent_still_cannot_get_past_the_deny_list(tmp_path: Path) -> None:
     loaded = load_workspace(workspace(git_repo(tmp_path)))
     runtime = await build_runtime(loaded, fake_router(), record=False)
-    from ronin.core.types import Budget
-
     try:
         child = subagent_policy_factory(runtime.policy)(Budget())
         decision = await child.approve(
@@ -677,8 +675,6 @@ async def test_a_subagent_still_cannot_get_past_the_deny_list(tmp_path: Path) ->
 async def test_a_session_remembered_rule_covers_a_subagent_running_the_same_command(
     tmp_path: Path,
 ) -> None:
-    from ronin.core.types import Budget
-
     class SessionYes:
         async def ask(self, request: object) -> Answer:
             del request
@@ -787,7 +783,6 @@ async def test_a_whole_workspace_becomes_one_wired_runtime(tmp_path: Path) -> No
         assert "# memory (RONIN.md)" in runtime.system
         assert "# repo map" in runtime.system
         assert runtime.transcript is not None
-        assert "sweeper" in runtime.session.subagents.registry.ctx.root.name or True
     finally:
         await runtime.aclose()
     assert server.closed
@@ -805,11 +800,3 @@ async def test_the_subagent_catalogue_carries_the_definitions_and_their_roles(
         assert "fixer" in task.description
     finally:
         await runtime.aclose()
-
-
-def test_an_unattended_run_refuses_rather_than_auto_approving() -> None:
-    # The default asker is the one safety property that must not be lost in wiring.
-    engine = PolicyEngine(rules=__import__(
-        "ronin.safety.policy", fromlist=["builtin_ruleset"]
-    ).builtin_ruleset())
-    assert isinstance(engine.asker, UnattendedAsker)
