@@ -71,6 +71,13 @@ SPECS: tuple[ToolSpec, ...] = (READ, WRITE, EDIT, BASH, WEB_FETCH, WEB_SEARCH, M
 #: What a scripted tool returns: a fixed result, or a callable that may also raise.
 Answerer = ToolResult | Callable[[ToolUse], ToolResult]
 
+#: The completion a hook that said nothing and exited cleanly reports. A module
+#: constant rather than an inline default: frozen or not, a call in a dataclass
+#: default is the shape that bites when the value is not frozen.
+OK = HookCompletion(exit_code=0)
+
+#: The refusal :class:`RecordingAsker` gives unless a test scripts something else.
+DECLINED = Answer(outcome=Outcome.NO, feedback="not this time")
 
 def use(name: str, *, call_id: str = "call_1", **arguments: Any) -> ToolUse:
     """A ``ToolUse``, with the id defaulted so tests only name what they care about."""
@@ -128,7 +135,7 @@ class ScriptedHookProcess:
     """
 
     completions: Mapping[str, HookCompletion] = field(default_factory=dict)
-    default: HookCompletion = HookCompletion(exit_code=0)
+    default: HookCompletion = OK
     crash: bool = False
     invocations: list[HookInvocation] = field(default_factory=list)
 
@@ -182,7 +189,7 @@ class RecordingAsker:
     is what the taint tests assert on.
     """
 
-    answer: Answer = Answer(outcome=Outcome.NO, feedback="not this time")
+    answer: Answer = DECLINED
     asked: list[ApprovalRequest] = field(default_factory=list)
 
     async def ask(self, request: ApprovalRequest) -> Answer:

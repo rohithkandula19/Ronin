@@ -19,12 +19,10 @@ import pytest
 from gate_harness import (
     BASH,
     COPIED_SPAN,
-    EDIT,
     FETCHED_PAGE,
     MCP_ISSUE,
     READ,
     SHORT_OVERLAP,
-    WRITE,
     RecordingAsker,
     RecordingRegistry,
     ScriptedHookProcess,
@@ -43,9 +41,9 @@ from gate_harness import (
 from ronin.agents.hooks import HookCompletion, HookEvent, HookRunner
 from ronin.cli.gate import (
     FENCE_REPAIR_NOTE,
+    GatedRegistry,
     GateRecord,
     GateStage,
-    GatedRegistry,
     gated,
     untrusted_source,
 )
