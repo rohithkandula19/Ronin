@@ -18,9 +18,10 @@ Two failure modes drive the design:
 """
 from __future__ import annotations
 
+import difflib
 import re
 import shlex
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -328,10 +329,8 @@ def is_command(line: str) -> bool:
 
 def suggest(name: str, known: Sequence[str]) -> str:
     """The closest known command name, or ``""`` when nothing is close."""
-    import difflib
-
     matches = difflib.get_close_matches(
-        name, list(known), n=SUGGESTION_COUNT, cutoff=SUGGESTION_COUNT and SUGGESTION_CUTOFF
+        name, list(known), n=SUGGESTION_COUNT, cutoff=SUGGESTION_CUTOFF
     )
     return matches[0] if matches else ""
 
@@ -355,7 +354,11 @@ def parse(line: str, *, registry: Registry = BUILTIN_REGISTRY) -> ParsedCommand 
     stripped = line.strip()
     if not stripped.startswith(PREFIX):
         return ParseError(f"not a slash command: {line!r} does not start with {PREFIX!r}")
-    head, _, rest = stripped[1:].partition(" ")
+    # split on any whitespace: a tab between the name and its argument is a typo,
+    # not a different command.
+    parts = stripped[1:].split(maxsplit=1)
+    head = parts[0] if parts else ""
+    rest = parts[1] if len(parts) > 1 else ""
     name = head.lower()
     if not name:
         return ParseError(f"{PREFIX!r} is not a command; type {PREFIX}help for the list")
@@ -415,19 +418,12 @@ def render_help(registry: Registry = BUILTIN_REGISTRY) -> str:
     return "\n".join(f"{usage.ljust(width)}  {summary}" for usage, summary in entries)
 
 
-HELP_TOPICS: Mapping[str, str] = {
-    "modes": "shift+tab cycles normal → auto-accept → plan.",
-    "keys": "esc interrupts; esc esc rewinds to an earlier turn.",
-}
-
-
 __all__ = [
     "ARGUMENTS_PLACEHOLDER",
     "BUILTIN_COMMANDS",
     "BUILTIN_REGISTRY",
     "DEFAULT_USER_SUMMARY",
     "ESCAPED_DOLLAR",
-    "HELP_TOPICS",
     "NAME_PATTERN",
     "PREFIX",
     "SUGGESTION_CUTOFF",
