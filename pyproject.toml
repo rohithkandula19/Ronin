@@ -140,6 +140,7 @@ module = [
     "test_ronin_mcp_tools",
     "test_ronin_mcp_transport",
     "test_router",
+    "test_safety_command",
     "test_search",
     "test_session",
     "test_shell",

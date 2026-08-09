@@ -194,6 +194,7 @@ class Segment:
     argv: tuple[str, ...]
     depth: int = 0
     connector: str = ""
+    terminator: str = ""
     origin: Origin = Origin.TOP
     parent: int | None = None
     binary_raw: str = ""
@@ -725,6 +726,7 @@ class _Group:
     redirects: list[_Redir] = field(default_factory=list)
     heredocs: list[_Here] = field(default_factory=list)
     connector: str = ""
+    terminator: str = ""
     start: int = 0
     end: int = 0
 
@@ -736,6 +738,7 @@ def _group_items(items: Sequence[_Item]) -> list[_Group]:
     for item in items:
         if isinstance(item, _Op):
             if started:
+                current.terminator = _CONNECTOR.get(item.text, item.text)
                 groups.append(current)
             current = _Group(connector=_CONNECTOR.get(item.text, item.text))
             started = False
@@ -791,6 +794,7 @@ def _parse_into(
             argv=argv,
             depth=depth,
             connector=group.connector,
+            terminator=group.terminator,
             origin=origin,
             parent=parent,
             binary_raw=binary_raw,
@@ -1032,7 +1036,7 @@ def _segment_hazards(
             Severity.ASK,
             "in-place edit with no backup; the edit tool shows a diff first",
         )
-    if segment.connector == "&":
+    if segment.terminator == "&":
         yield hazard(
             HazardCode.BACKGROUNDED,
             Severity.NOTE,

@@ -581,13 +581,15 @@ def default_tree_sitter_loader(language: str) -> TSParser:
     Lazy on purpose: nothing in a bare install may depend on this, and the import
     itself is what fails when the pack is missing.
     """
+    # The narrow ignores below are for an optional dependency that is absent by
+    # design: neither pack is installed in a bare checkout, so mypy cannot resolve
+    # either import and there are no stubs to type against.
     try:
-        # type: ignore[import-not-found] — optional dependency, absent by design
         from tree_sitter_language_pack import get_parser  # type: ignore[import-not-found]
     except ImportError:
         try:
-            # type: ignore[import-not-found] — the older pack, same API
-            from tree_sitter_languages import get_parser  # type: ignore[import-not-found,no-redef]
+            # The older pack, same `get_parser(language)` API.
+            from tree_sitter_languages import get_parser  # type: ignore[import-not-found]
         except ImportError as exc:
             raise ParserUnavailable(
                 "tree-sitter is not installed. Install "

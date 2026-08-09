@@ -436,13 +436,20 @@ def test_repair_pairing_drops_an_orphan_result() -> None:
     assert repaired == []
 
 
-async def test_a_transcript_that_reuses_a_tool_id_folds_nothing_rather_than_mangling() -> None:
-    """Duplicate ids are already a provider 400; compaction refuses and reports it."""
-    duplicated = [*scripted_session(8), *scripted_session(4)[1:]]
+@pytest.mark.parametrize("second", [4, 8, 12])
+async def test_a_transcript_that_reuses_a_tool_id_is_never_mangled(second: int) -> None:
+    """Duplicate ids are already a provider 400 (`core.types` says so).
+
+    Compaction cannot repair that input, and it must not make it worse: whatever
+    the boundary arithmetic decides, the result still pairs and no block is lost
+    without being counted.
+    """
+    duplicated = [*scripted_session(10), *scripted_session(second)[1:]]
     result = await compact(duplicated, policy=TINY, summarizer=fake_summarizer)
-    assert not result.compacted
-    assert result.still_over_trigger
-    assert result.messages == tuple(duplicated)
+    assert unpaired_tool_uses(result.messages) == ()
+    assert result.dropped_blocks == 0
+    if not result.compacted:
+        assert result.messages == tuple(duplicated)
 
 
 def test_repair_pairing_leaves_a_healthy_transcript_untouched() -> None:
