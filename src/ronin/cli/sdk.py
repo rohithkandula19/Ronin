@@ -46,6 +46,7 @@ from ..ui.headless import exit_code_for
 from ..ui.reduce import ViewState, reduce_event
 from .spine import Loaded, Note, Paths, Runtime
 from .stream import DEFAULT_MAX_ITERATIONS, Conversation, plan_runtime
+from .wire import build_runtime, load_workspace
 
 #: Where a router config is looked for, in order, relative to the two roots. A
 #: *list*, not a single path, because a workspace pinning its own models is the
@@ -177,16 +178,12 @@ class Agent:
         edit, rather than a prompt asking it not to. ``resume`` seeds the conversation
         from a state replayed by ``ronin.persistence.resume``.
 
-        ``wire`` is imported here rather than at module scope so importing this module
-        stays cheap and so the failure of a missing workspace loader names itself.
         """
-        from . import wire
-
         paths = Paths.discover(path, home=home)
         flags: dict[str, object] = {} if mode is None else {"mode": mode.value}
-        loaded = wire.load_workspace(paths, flags=flags, environ=environ)
+        loaded = load_workspace(paths, flags=flags, environ=environ)
         resolved = router if router is not None else load_router(paths, environ=environ)
-        runtime = await wire.build_runtime(
+        runtime = await build_runtime(
             loaded,
             resolved,
             session_id=session_id,

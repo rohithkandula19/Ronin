@@ -248,6 +248,10 @@ def build_parser() -> _Parser:
     """The whole argv surface, in one place so ``--help`` cannot drift from it."""
     parser = _Parser(
         prog=PROGRAM,
+        # ``-h`` is added by hand so ``--help`` becomes a *value* (the formatted
+        # text plus exit 0) instead of argparse printing to stdout and exiting the
+        # process, which is untestable and unhookable.
+        add_help=False,
         description="ronin — a masterless, terminal-native coding agent.",
         epilog=(
             "subcommands:\n"
@@ -259,6 +263,7 @@ def build_parser() -> _Parser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    parser.add_argument("-h", "--help", action="store_true", help="show this help")
     parser.add_argument("words", nargs="*", help="the prompt, as bare words")
     parser.add_argument("-p", "--print", dest="print_prompt", metavar="PROMPT",
                         help="run PROMPT without a terminal and exit")
@@ -319,6 +324,8 @@ def parse(argv: Sequence[str]) -> Options | Usage:
     except _StopParsing as stop:
         return stop.usage
 
+    if namespace.help:
+        return Usage(parser.format_help(), exit_code=EXIT_OK)
     if namespace.version:
         return Options(command=Command.VERSION)
 
@@ -436,10 +443,12 @@ async def dispatch(
         streams.out(report.render())
         return report.exit_code()
 
+    # Before the agent, and whether or not one was injected: the wizard is about the
+    # workspace, not about who supplied the session.
+    if options.wizard and not paths.ronin_dir.exists():
+        _first_run(paths, streams)
+
     if agent is None:
-        first_run = not paths.ronin_dir.exists()
-        if first_run and options.wizard:
-            _first_run(paths, streams)
         built = await _open_agent(options, paths, env, streams)
         if built is None:
             return EXIT_ERROR
