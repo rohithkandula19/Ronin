@@ -341,7 +341,11 @@ async def test_retained_results_are_capped_per_path_when_asked() -> None:
         Message(role=Role.SYSTEM, content_blocks=(Text("sys"),)),
         user("turn 1"),
         assistant("", write_call("c1", "big.py", "x")),
-        tool_results(ToolResultBlock(tool_use_id="c1", content="\n".join("line" for _ in range(500)))),
+        tool_results(
+            ToolResultBlock(
+                tool_use_id="c1", content="\n".join("line" for _ in range(500))
+            )
+        ),
         *scripted_session(5)[1:],
     ]
     policy = CompactionPolicy(context_window=400, max_retained_chars=200)
@@ -518,7 +522,9 @@ async def test_repeated_compaction_is_stable_rather_than_growing() -> None:
 async def test_a_session_touching_more_files_than_fit_reports_it_rather_than_looping() -> None:
     """The one case compaction cannot fix: retention alone exceeds the trigger."""
     result = await compact(
-        scripted_session(200), policy=CompactionPolicy(context_window=4000), summarizer=fake_summarizer
+        scripted_session(200),
+        policy=CompactionPolicy(context_window=4000),
+        summarizer=fake_summarizer,
     )
     assert result.compacted
     assert result.still_over_trigger

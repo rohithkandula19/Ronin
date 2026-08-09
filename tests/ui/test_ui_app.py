@@ -82,6 +82,18 @@ async def test_absence_of_the_extra_is_reported_as_a_fact_not_a_crash(
     assert TEXTUAL_MISSING in capsys.readouterr().out
 
 
+async def test_the_missing_extra_path_is_covered_whatever_is_installed(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The test above skips when Textual happens to be installed; this one pins the
+    # bare-install behaviour either way, because that is the path a first-time user
+    # hits and it must not be the untested one.
+    monkeypatch.setattr(app_module, "textual_available", lambda: False)
+    code = await run_app(Session(events=stream(())))
+    assert code == 1
+    assert TEXTUAL_MISSING in capsys.readouterr().out
+
+
 def test_the_missing_extra_message_says_what_still_works() -> None:
     assert "tui" in TEXTUAL_MISSING
     assert "--output-format=stream-json" in TEXTUAL_MISSING

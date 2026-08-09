@@ -166,9 +166,13 @@ async def main() -> int:
         rule("2. MEMORY — RONIN.md, global then outermost to innermost")
         memory = load_memory(root / "src", home=home, root=root)
         print(memory.render())
-        target = remember("run `uv run pytest tests/context -q` before pushing", cwd=root / "src", root=root)
-        again_path = remember("run `uv run pytest tests/context -q` before pushing", cwd=root / "src", root=root)
-        print(f"  remembered into {target.relative_to(root)} (idempotent: {target == again_path})")
+        rule_text = "run `uv run pytest tests/context -q` before pushing"
+        target = remember(rule_text, cwd=root / "src", root=root)
+        again_path = remember(rule_text, cwd=root / "src", root=root)
+        print(
+            f"  remembered into {target.relative_to(root)} "
+            f"(idempotent: {target == again_path})"
+        )
         print("  " + "\n  ".join(target.read_text(encoding="utf-8").splitlines()))
 
         rule("2b. AUTO-BOOTSTRAP — only commands with evidence in the tree")
@@ -179,7 +183,8 @@ async def main() -> int:
         transcript = scripted_session(200)
         policy = CompactionPolicy(context_window=8000)
         print(f"  before: {len(transcript)} messages, ~{transcript_tokens(transcript)} tokens")
-        print(f"  trigger at {policy.trigger_tokens} tokens: {should_compact(transcript, policy=policy)}")
+        fires = should_compact(transcript, policy=policy)
+        print(f"  trigger at {policy.trigger_tokens} tokens: {fires}")
         result = await compact(transcript, policy=policy, summarizer=fake_summarizer)
         print(f"  after:  {len(result.messages)} messages, ~{result.token_estimate_after} tokens")
         print(f"  marker: {result.marker}")
@@ -238,7 +243,10 @@ async def main() -> int:
         log = "".join(f"line {index:03d}: building target {index}\n" for index in range(200))
         clamped = clamp(log, budget=OutputBudget(remaining_chars=400))
         print(clamped.text)
-        print(f"  {len(log)} chars in, {len(clamped.text)} out, {clamped.elided_lines} lines elided")
+        print(
+            f"  {len(log)} chars in, {len(clamped.text)} out, "
+            f"{clamped.elided_lines} lines elided"
+        )
         short = "short output\n"
         untouched = clamp(short, budget=OutputBudget(remaining_chars=400))
         print(f"  under budget is byte-identical: {untouched.text == short}")

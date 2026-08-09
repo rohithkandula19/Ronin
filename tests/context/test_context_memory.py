@@ -106,7 +106,10 @@ def test_the_most_local_file_is_rendered_last_so_it_wins(tmp_path: Path) -> None
 
 
 def test_every_section_is_labelled_with_where_it_came_from(tmp_path: Path) -> None:
-    root = repo(tmp_path, {RONIN_FILENAME: "- root rule\n", "pkg/" + RONIN_FILENAME: "- pkg rule\n"})
+    root = repo(
+        tmp_path,
+        {RONIN_FILENAME: "- root rule\n", "pkg/" + RONIN_FILENAME: "- pkg rule\n"},
+    )
     memory = load_memory(root / "pkg", root=root)
     assert [file.path for file in memory.files] == [RONIN_FILENAME, f"pkg/{RONIN_FILENAME}"]
     rendered = memory.render()

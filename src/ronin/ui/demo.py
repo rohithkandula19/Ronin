@@ -270,7 +270,10 @@ async def main() -> int:
     print(f"initial state mode: {initial_state(session).mode.value}")
     await reduce_stream(session.events)  # drain, so the scripted iterator is closed
     print(f"textual installed here: {textual_available()}")
-    if not textual_available():
+    if textual_available():
+        print("`run_app(session)` would open the interactive TUI; this demo stays")
+        print("non-interactive on purpose, and tests/ui drives the real app headless.")
+    else:
         print(f"so `run_app` would say: {TEXTUAL_MISSING}")
     return 0
 
