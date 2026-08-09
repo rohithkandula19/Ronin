@@ -24,7 +24,8 @@ from ronin.core.types import FinishReason, Message, Role, Text
 from ronin.mcp.config import McpServerConfig
 from ronin.mcp.jsonrpc import JsonRpcError, Request, Response, TransportClosed
 from ronin.providers.base import ModelClient
-from ronin.providers.router import ModelSpec, Role as ModelRole, Router, RouterConfig
+from ronin.providers.router import ModelSpec, Router, RouterConfig
+from ronin.providers.router import Role as ModelRole
 from ronin.providers.types import Capabilities, Completed, ModelDelta, Usage
 from ronin.verify.checkpoints import CheckpointStore
 from ronin.verify.runner import CommandFailure, CommandOutcome
