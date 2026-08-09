@@ -65,6 +65,8 @@ from ..context.repomap import (
     RepoMap,
     build_repo_map,
 )
+from ..core.protocols import Policy
+from ..core.types import Budget
 from ..mcp.client import TransportProvider, connect_all, default_transport_provider
 from ..mcp.config import ConfigError, McpServerConfig, load_mcp_config
 from ..mcp.tools import extend_registry
@@ -579,8 +581,6 @@ async def build_runtime(
         closers.append(shell_session.close)
 
     base_tools = build_registry(ctx, shell=shell_session)
-    notes.extend(_subagent_gate_notes(loaded, base_tools))
-
     session = build_session(
         router,
         ctx,
@@ -591,6 +591,7 @@ async def build_runtime(
         # that subagents do not receive it — see this decision in the report.
         repo_map="",
         subagent_types=subagent_catalogue(loaded.agents),
+        subagent_policy=subagent_policy_factory(policy),
     )
 
     inner: ToolRegistry = session.registry
@@ -662,36 +663,49 @@ def _engine_sandbox(sandbox: Sandbox | Unavailable) -> Sandbox | None:
     return sandbox
 
 
-def _subagent_gate_notes(loaded: Loaded, base_tools: ToolRegistry) -> tuple[Note, ...]:
-    """Name every subagent that declares a tool its own policy will refuse.
+def subagent_policy_factory(parent: PolicyEngine) -> SubagentPolicyFactory:
+    """The policy a nested turn runs under: standing permission, but no new questions.
 
-    ``ronin.session.SubagentPolicy`` denies every call that requires approval, and the
-    shipped ``fixer`` declares ``bash`` — so the subagent whose entire purpose is to
-    rerun a failing test cannot run it. This cannot be repaired from here: ``bash`` is
-    ``DangerLevel.DESTRUCTIVE`` and ``ToolSpec`` refuses to let a destructive tool set
-    ``requires_approval=False``, and ``build_session`` hands children a subset of the
-    *same* registry the parent uses, so there is no seam for a differently-gated bash.
-    Dropping ``bash`` from the definition would be worse: the fixer's prompt promises
-    to rerun the test. So it is reported, loudly, and the fix belongs in
-    ``SubagentPolicy``.
+    ``ronin.session``'s default denies every gated call, which made the shipped
+    ``fixer`` — a subagent whose entire purpose is to edit code and rerun a failing
+    test — unable to run the test. This is the seam that fixes it, and the reasoning is
+    that **standing permission is not escalation**: a command the user has already
+    allowlisted needs no new question, and :class:`~ronin.safety.policy.UnattendedAsker`
+    turns everything that *would* need one into a refusal carrying feedback the child
+    can report upward.
+
+    Three deliberate choices, all of which are the difference between this and "the
+    child can do whatever it likes":
+
+    * **The parent's live ``effective_rules()``**, read at child construction rather
+      than snapshotted at build time — so a "yes, remember for this session" the user
+      gave two turns ago covers a child running the same command. That is safe because
+      :meth:`~ronin.safety.policy.PolicyEngine.remembered_rule` records an
+      :class:`~ronin.safety.policy.Exact` match on the byte-identical command and
+      generalises to nothing; the child inherits one approved string, not a family.
+    * **The same deny list, taint tracker and sandbox.** The unconditional floor is
+      unconditional for children too, and content the parent fetched is still untrusted
+      when a child quotes it.
+    * **``persist=None``.** A child may act on a standing rule and may never write one:
+      a permission nobody was asked about must not end up in a settings file.
+
+    The child gets a fresh engine, so its decisions land in the child's audit trail and
+    not the parent's — see the report.
     """
-    notes: list[Note] = []
-    for name, definition in sorted(loaded.agents.items()):
-        blocked = gated_tools(definition, base_tools)
-        if not blocked:
-            continue
-        notes.append(
-            Note(
-                subject=f"subagent {name!r}",
-                detail=(
-                    f"declares {', '.join(blocked)}, which need approval — and a "
-                    "subagent cannot ask the user, so every such call is refused "
-                    "mid-run. it will report what it found instead of doing it; run "
-                    "the step yourself, or remove the tool from the definition"
-                ),
-            )
+
+    def make(budget: Budget) -> Policy:
+        del budget  # PolicyEngine.check_budget is handed the live budget per call.
+        return PolicyEngine(
+            rules=parent.effective_rules(),
+            asker=UnattendedAsker(),
+            denylist=parent.denylist,
+            mode=parent.mode,
+            taint=parent.taint,
+            sandbox=parent.sandbox,
+            persist=None,
         )
-    return tuple(notes)
+
+    return make
 
 
 async def _connect_mcp(

@@ -40,8 +40,10 @@ from gate_harness import (
     use,
 )
 
-from ronin.agents.hooks import HookCompletion, HookEvent
+from ronin.agents.hooks import HookCompletion, HookEvent, HookRunner
 from ronin.cli.gate import (
+    FENCE_REPAIR_NOTE,
+    GateRecord,
     GateStage,
     GatedRegistry,
     gated,
@@ -62,13 +64,13 @@ from ronin.core.types import (
     TurnState,
 )
 from ronin.safety.injection import CLOSE_MARKER, OPEN_MARKER, TaintTracker
-from ronin.safety.policy import Decision
+from ronin.safety.policy import Decision, PolicyEngine, builtin_ruleset
 
 
 def build(
     inner: RecordingRegistry,
     *,
-    hooks: object = None,
+    hooks: HookRunner | None = None,
     files: FileStateTracker | None = None,
     budget: OutputBudget | None = None,
     asker: RecordingAsker | None = None,
@@ -78,7 +80,7 @@ def build(
     gate = gated(
         inner,
         engine(taint, asker=asker),
-        hooks=hooks,  # type: ignore[arg-type]  # HookRunner | None, kept loose for tests
+        hooks=hooks,
         files=files,
         taint=taint,
         budget=budget,
