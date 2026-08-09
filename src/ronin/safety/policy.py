@@ -816,11 +816,21 @@ class PolicyEngine:
         use: ToolUse,
         segments: Sequence[Segment],
     ) -> tuple[Resolution, ...]:
-        """One resolution per segment, plus the whole call when a rule matched it.
+        """One resolution per segment, and the whole call only for an exact match.
 
-        The whole-call resolution only contributes when it actually matched a rule. If
-        it contributed its *default* as well, a single-segment allow would be dragged
-        back to ``ask`` by the fallback and the allowlist would never fire.
+        Two failures shaped this, and both are worth stating because the obvious
+        implementations hit them:
+
+        *A regex may not be matched against the whole raw command.* ``^echo\\b`` matches
+        the string ``echo safe; rm -rf /``, so an allowlist evaluated against the raw
+        text would approve the very command this package exists to stop. Only per-segment
+        matching is trustworthy for patterns.
+
+        *But an* :class:`Exact` *rule on the whole command line must still work*, or
+        "yes, remember this command" could never cover a compound command — the
+        remembered rule would match the whole use while an unmatched segment dragged the
+        answer back to ``ask``. Exact is safe here precisely because it is exact: it
+        approves one byte-for-byte string and generalises to nothing.
         """
         whole = rules.resolve(MatchTarget(tool=spec.name, arguments=use.arguments))
         if not segments:
@@ -830,11 +840,16 @@ class PolicyEngine:
             for segment in segments
             if self._segment_counts(segment)
         ]
-        if whole.rule is not None:
-            # An exact rule on the whole command line speaks for the whole command, so
-            # unmatched segments no longer contribute their default — but an explicit
-            # per-segment rule still does, and most-restrictive still applies.
-            return (whole, *[r for r in per_segment if r.rule is not None])
+        exact = whole.rule is not None and whole.rule.matcher.specificity >= Exact.specificity
+        if exact:
+            # Unmatched segments stop contributing their default, but any segment with a
+            # rule of its own still speaks, and most-restrictive still applies.
+            explicit = [
+                resolution
+                for resolution in per_segment
+                if resolution.rule is not None and resolution.rule.matcher.specificity > 0
+            ]
+            return (whole, *explicit)
         return tuple(per_segment) or (whole,)
 
     def _segment_counts(self, segment: Segment) -> bool:
@@ -862,6 +877,13 @@ class PolicyEngine:
         """A permissive mode may turn ``ask`` into ``allow``, and nothing else."""
         if decision is not Decision.ASK:
             return decision
+        if not spec.requires_approval and spec.danger_level is DangerLevel.READ_ONLY:
+            # A tool that cannot change anything and declares it needs no approval is
+            # not worth a prompt in any mode. ``ToolSpec`` already refuses to let a
+            # destructive tool make that declaration, so this cannot be abused by a
+            # spec author. Without it, `read` with no rule configured would prompt, and
+            # a gate that prompts on a file read is a gate that gets switched off.
+            return Decision.ALLOW
         if self.mode is Mode.FULL:
             return Decision.ALLOW
         if self.mode is Mode.AUTO_EDIT and not spec.requires_approval:

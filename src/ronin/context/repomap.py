@@ -1140,41 +1140,45 @@ def _fit_budget(
     """Drop lowest-pagerank leaves, then lowest-pagerank non-leaves, until it fits.
 
     Leaves first because a file nothing imports is the one whose absence costs the
-    model least: it cannot be the thing everything else is built on. Terminates by
-    construction — every pass removes one entry.
+    model least: it cannot be the thing everything else is built on.
 
-    One special case, and it is the reason this is not a three-line loop. On a small
-    repo with a small budget the truncation marker can be a large fraction of the
-    budget, and then dropping files makes the *total* bigger, not smaller — the
-    strict loop would drop every file and still overflow, which is both useless and
-    over budget. So when even an empty map cannot fit, the marker stops being
-    charged against the budget and the listing is fitted without it. The map says so
-    (:attr:`RepoMap.over_budget` and the marker's own text).
+    Two candidates are considered at every drop count, and that is the whole
+    subtlety. On a small repo with a small budget the truncation marker is a large
+    fraction of the budget, so the total is *not* monotone in the number of files
+    dropped — dropping the first file can make the rendered map bigger, because it
+    adds the marker. A loop that only chased "total under budget" therefore emptied
+    the map at some budgets while a *smaller* budget kept two files, which is
+    indefensible. So:
+
+    * prefer the largest set of files whose **whole** render fits the budget;
+    * failing that (only the marker fits, or not even that), take the largest set
+      whose **listing** fits and let the marker overflow, exactly as
+      :mod:`ronin.context.budget` treats its own marker as a floor.
+
+    An empty map is never the right answer while one file's signatures would fit:
+    the tokens are better spent on the top-ranked file, and the marker says the
+    budget was exceeded.
     """
-    kept = list(entries)
-    dropped: list[FileEntry] = []
-    order = sorted(
-        entries, key=lambda e: (0 if e.is_leaf else 1, e.rank, e.path)
-    )
-    floor = _assemble([], list(entries), budget_tokens, considered, parser_name)
-    marker_exempt = floor.token_estimate > budget_tokens
-    cursor = 0
-    while kept:
+    order = sorted(entries, key=lambda e: (0 if e.is_leaf else 1, e.rank, e.path))
+    strict: tuple[list[FileEntry], list[FileEntry]] | None = None
+    listing: tuple[list[FileEntry], list[FileEntry]] | None = None
+    for count in range(len(order) + 1):
+        dropped = order[:count]
+        kept = [entry for entry in entries if entry not in dropped]
         candidate = _assemble(kept, dropped, budget_tokens, considered, parser_name)
-        cost = candidate.token_estimate
-        if marker_exempt:
-            cost -= estimate_tokens(candidate.marker())
-        if cost <= budget_tokens:
+        # Drop counts ascend, so the first candidate to satisfy a rule is the one
+        # with the most files under it.
+        if strict is None and kept and candidate.token_estimate <= budget_tokens:
+            strict = (kept, list(dropped))
+        listing_cost = candidate.token_estimate - estimate_tokens(candidate.marker())
+        if listing is None and listing_cost <= budget_tokens:
+            listing = (kept, list(dropped))
+        if strict is not None:
             break
-        while cursor < len(order) and order[cursor] not in kept:
-            cursor += 1
-        if cursor >= len(order):
-            break
-        victim = order[cursor]
-        kept.remove(victim)
-        dropped.append(victim)
-        cursor += 1
-    return kept, dropped
+    chosen = strict or listing
+    if chosen is None:
+        return [], list(order)
+    return chosen
 
 
 # --------------------------------------------------------------------------- #

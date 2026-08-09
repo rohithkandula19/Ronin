@@ -551,6 +551,30 @@ def test_lower_budgets_drop_strictly_more(tmp_path: Path) -> None:
     assert counts[0] == 0 and counts[-1] > 0
 
 
+def test_a_smaller_budget_never_keeps_more_files(tmp_path: Path) -> None:
+    """A regression: the total is not monotone in the number of files dropped.
+
+    Dropping the first file *adds* the marker, so on a small repo an earlier
+    implementation emptied the map at one budget while a smaller budget kept two
+    files. A smaller budget showing more of the repo is indefensible whatever the
+    arithmetic reason.
+    """
+    plant(tmp_path, TREE)
+    counts = [
+        len(build_repo_map(tmp_path, budget_tokens=budget).paths)
+        for budget in (2000, 300, 200, 150, 120, 110, 100, 90, 80, 70, 60, 30)
+    ]
+    assert counts == sorted(counts, reverse=True), counts
+
+
+def test_an_empty_map_is_not_returned_while_one_file_would_fit(tmp_path: Path) -> None:
+    plant(tmp_path, TREE)
+    for budget in (110, 100, 90):
+        repo_map = build_repo_map(tmp_path, budget_tokens=budget)
+        assert repo_map.paths, budget
+        assert "src/core.py" in repo_map.paths, budget
+
+
 def test_a_budget_too_small_for_the_marker_still_lists_files_and_says_so(
     tmp_path: Path,
 ) -> None:

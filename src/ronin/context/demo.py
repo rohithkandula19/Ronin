@@ -158,9 +158,10 @@ async def main() -> int:
             f"reused {touched.reused_files} — one changed mtime re-parses one file"
         )
 
-        tight = build_repo_map(root, budget_tokens=100, cache_dir=cache)
-        print(f"\n  with a 100-token budget:\n  {tight.marker()}")
+        tight = build_repo_map(root, budget_tokens=110, cache_dir=cache)
+        print(f"\n  with a 110-token budget, leaves go first:\n  {tight.marker()}")
         print(f"  kept: {list(tight.paths)}")
+        print(f"  over budget: {tight.over_budget} (only the marker overflows)")
 
         # -------------------------------------------------------------- memory
         rule("2. MEMORY — RONIN.md, global then outermost to innermost")
