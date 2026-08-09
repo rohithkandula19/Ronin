@@ -1,0 +1,746 @@
+"""Reading a workspace, then assembling a session out of it. The joins live here.
+
+Two functions, and the split between them is the whole design:
+
+:func:`load_workspace` **reads**. It opens files and returns a
+:class:`~ronin.cli.spine.Loaded`, and it may not open a socket, spawn a subprocess or
+construct a model client. That restriction is what makes ``/doctor`` and the first-run
+wizard possible: both want to report on a workspace, and neither should have to start
+a session to do it.
+
+:func:`build_runtime` **wires**. Every object below ``cli`` was built against an
+injected protocol so it could be tested alone, which means no test below this module
+can catch a *missing* join — a `TaintTracker` nobody constructs from the configured
+``taint_min_span`` escalates nothing and no unit test notices, because the tracker's
+own tests construct it by hand. Four of those joins are made here and nowhere else:
+
+* ``Settings.taint_min_span`` → the :class:`~ronin.safety.injection.TaintTracker` the
+  policy engine consults;
+* ``Settings.sandbox`` → :func:`ronin.safety.sandbox.detect` → ``PolicyEngine.sandbox``;
+* :class:`~ronin.verify.checkpoints.CheckpointStore` → ``Denylist.has_checkpoint``, so
+  "``git reset --hard`` with nothing to restore from" is judged against reality rather
+  than against the honest-but-pessimistic default;
+* ``Settings`` → ``settings.local.json``, so a remembered rule is written to the
+  gitignored layer and never to the layer a team shares.
+
+**Every degradation is a note, never a log line.** A workspace with an unparseable
+``settings.local.json``, no tree-sitter, no git and no ``RONIN.md`` still loads and
+still runs; it just does less, and the user has to be told exactly what less means.
+:func:`ronin.cli.spine.notes_from_settings`, :func:`~ronin.cli.spine.sandbox_note` and
+:func:`~ronin.cli.spine.sequence_note` turn the three commonest shapes into notes.
+
+One thing this module deliberately does **not** do: parse verify commands out of
+``RONIN.md``. :func:`ronin.verify.spec.detect_verify_spec` takes a ``declared``
+mapping and ``ronin.context.memory`` produces no such mapping from a RONIN.md — the
+nearest thing, ``discover_commands``, re-reads ``package.json`` / ``pyproject.toml`` /
+``Makefile`` / CI, which is the same evidence ``detect_verify_spec`` already reads for
+itself. Feeding it in as ``declared`` would relabel an inferred command as "declared
+explicitly in RONIN.md" and destroy the provenance both modules are built around, so
+``declared`` is left unset and the gap is reported as a note instead.
+"""
+from __future__ import annotations
+
+import json
+import shutil
+import sys
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from ..agents.definitions import (
+    BUILTIN_AGENTS,
+    AgentDefinition,
+    FrontmatterError,
+    gated_tools,
+    load_agents,
+    subagent_catalogue,
+)
+from ..agents.hooks import HookConfig, HookConfigError, HookRunner, load_hook_config
+from ..context.budget import OutputBudget
+from ..context.filestate import FileStateTracker
+from ..context.memory import Memory, load_memory
+from ..context.repomap import (
+    DEFAULT_BUDGET_TOKENS,
+    Parser,
+    RepoMap,
+    build_repo_map,
+)
+from ..mcp.client import TransportProvider, connect_all, default_transport_provider
+from ..mcp.config import ConfigError, McpServerConfig, load_mcp_config
+from ..mcp.tools import extend_registry
+from ..persistence.transcript import Transcript, new_session_id
+from ..providers.router import Role as ModelRole
+from ..providers.router import Router
+from ..safety.denylist import Denylist
+from ..safety.injection import TaintTracker
+from ..safety.policy import (
+    AnyUse,
+    Asker,
+    CommandRegex,
+    Exact,
+    PathGlob,
+    PolicyEngine,
+    Rule,
+    UnattendedAsker,
+)
+from ..safety.sandbox import NoSandbox, Sandbox, Unavailable, detect
+from ..safety.settings import Settings, load_settings
+from ..session import build_session
+from ..tools.base import MAX_RESULT_CHARS, ToolContext
+from ..tools.registry import ToolRegistry, build_registry
+from ..tools.shell import PersistentShell, ShellSession
+from ..ui.commands import Registry as CommandRegistry
+from ..ui.commands import load_registry
+from ..verify.checkpoints import CheckpointStore
+from ..verify.spec import VerifySpec, detect_verify_spec
+from .gate import gated
+from .spine import (
+    Closer,
+    Loaded,
+    Note,
+    Paths,
+    Runtime,
+    notes_from_settings,
+    sandbox_note,
+    sequence_note,
+)
+
+#: Context window assumed when the caller does not say. Deliberately smaller than the
+#: largest window any shipped provider offers: compacting earlier than necessary costs
+#: one summarization, while assuming a window the model does not have costs the turn.
+#: The real value belongs in the router config; this is the floor a bare run gets.
+DEFAULT_CONTEXT_WINDOW = 128_000
+
+#: Ceiling handed to the gate's :class:`~ronin.context.budget.OutputBudget`. The same
+#: number the tool layer caps a single result at, so the gate and the tools cannot
+#: disagree about how much output is too much.
+DEFAULT_OUTPUT_BUDGET_CHARS = MAX_RESULT_CHARS
+
+#: The system text a session starts from, before ``Loaded.system_suffix()`` appends
+#: RONIN.md and the repo map. Nothing in the tree shipped one, so this is written here;
+#: it is short on purpose — the tool descriptions already carry per-tool guidance, and
+#: a long system prompt competes with the user's code for the same window.
+BASE_SYSTEM_PROMPT = """\
+You are ronin, a coding agent working in a real repository on the user's machine.
+
+Work like an engineer who has to live with the result:
+
+- Read before you write. Open the file you are about to change, and the code that
+  calls it, before proposing an edit.
+- Make the smallest change that does the job, in the style of the code around it.
+  A patch that does not look like its neighbours will not be maintained.
+- Verify. After a change, run the project's own test/lint/typecheck commands and
+  report what they said. "It should work" is not a result.
+- When something is missing — a command, a file, a permission — say so plainly and
+  name what you would need. Do not invent a plausible substitute.
+- Never claim you ran something you did not run, and never report a number you did
+  not observe.
+
+The user sees your final message and nothing else, so it has to stand alone: what
+you changed, which files, what you verified, and anything you left undone.
+"""
+
+
+# --------------------------------------------------------------------------- #
+# Reading the workspace
+# --------------------------------------------------------------------------- #
+
+
+def load_workspace(
+    paths: Paths,
+    *,
+    flags: Mapping[str, Any] | None = None,
+    environ: Mapping[str, str] | None = None,
+    parser: Parser | None = None,
+    which: Callable[[str], str | None] = shutil.which,
+    platform: str = sys.platform,
+    repo_map_budget: int = DEFAULT_BUDGET_TOKENS,
+) -> Loaded:
+    """Read everything one run needs off disk. Never raises for a workspace's sake.
+
+    Nine loaders run, and each of them can fail without the session being unusable —
+    so each failure becomes a :class:`~ronin.cli.spine.Note` and the rest still load.
+    An empty directory is a legitimate workspace and produces a ``Loaded`` that says
+    what it has not got.
+
+    ``environ`` is the mapping ``${VAR}`` references in ``.ronin/mcp.json`` expand
+    against, and it defaults to *nothing* rather than to ``os.environ``: a process
+    environment read from inside a library is a hidden dependency, and an unset
+    variable here is a named config error rather than an empty token sent to a server.
+    """
+    settings = load_settings(
+        home=paths.home,
+        # The workspace root, not `paths.cwd`. `load_settings` derives the project and
+        # local layer paths from this argument, and `Paths.project_settings` derives
+        # them from `workspace_root` — passing cwd would make /doctor print one path
+        # while the loader read another.
+        cwd=paths.workspace_root,
+        flags=flags,
+    )
+    notes: list[Note] = list(notes_from_settings(settings))
+
+    if not (paths.workspace_root / ".git").exists():
+        notes.append(
+            Note(
+                subject="git",
+                detail=(
+                    f"{paths.workspace_root} is not a git repository, so checkpoints "
+                    "are off (/undo and /diff will not work) and the repo map has no "
+                    ".gitignore to respect. run `git init` to enable them"
+                ),
+            )
+        )
+
+    memory, memory_note = _load_memory(paths)
+    if memory_note is not None:
+        notes.append(memory_note)
+
+    repo_map, map_notes = _load_repo_map(paths, parser=parser, budget=repo_map_budget)
+    notes.extend(map_notes)
+
+    agents, agents_note = _load_agents(paths)
+    if agents_note is not None:
+        notes.append(agents_note)
+
+    hooks, hooks_note = _load_hooks(paths)
+    if hooks_note is not None:
+        notes.append(hooks_note)
+
+    verify = detect_verify_spec(paths.workspace_root)
+    verify_note = _verify_declaration_note(memory, verify)
+    if verify_note is not None:
+        notes.append(verify_note)
+
+    servers, mcp_note = _load_mcp(paths, environ=environ)
+    if mcp_note is not None:
+        notes.append(mcp_note)
+
+    commands, commands_note = _load_commands(paths)
+    if commands_note is not None:
+        notes.append(commands_note)
+
+    sandbox = _load_sandbox(settings, which=which, platform=platform)
+    note = sandbox_note(sandbox)
+    if note is not None:
+        notes.append(note)
+
+    return Loaded(
+        paths=paths,
+        settings=settings,
+        memory=memory,
+        repo_map=repo_map,
+        agents=agents,
+        hooks=hooks,
+        verify=verify,
+        mcp_servers=servers,
+        commands=commands,
+        sandbox=sandbox,
+        notes=tuple(notes),
+    )
+
+
+def _load_memory(paths: Paths) -> tuple[Memory, Note | None]:
+    """RONIN.md, walking up from where the user actually is.
+
+    ``cwd`` rather than the root: a monorepo package's RONIN.md must win over the
+    repo's, and that ordering is a property of where the user is standing.
+    """
+    memory = load_memory(paths.cwd, home=paths.home, root=paths.workspace_root)
+    if not memory.is_empty:
+        return memory, None
+    return memory, Note(
+        subject="memory",
+        detail=(
+            "no RONIN.md was found, so the model has no standing instructions about "
+            "this repo — it will guess at the test command and the conventions. run "
+            "the first-run wizard to draft one from what is already in the tree"
+        ),
+    )
+
+
+def _load_repo_map(
+    paths: Paths, *, parser: Parser | None, budget: int
+) -> tuple[RepoMap, tuple[Note, ...]]:
+    """The repo map, plus a note naming every file that contributed no signatures.
+
+    The per-file note is how "tree-sitter is not installed" becomes visible: the
+    stdlib Python parser always works, so a caller who asked for wider language
+    coverage and did not get it would otherwise just see a map with no Rust in it.
+    """
+    try:
+        repo_map = build_repo_map(
+            paths.workspace_root,
+            budget_tokens=budget,
+            parser=parser,
+            cache_dir=paths.cache_dir,
+        )
+    except (OSError, ValueError) as exc:
+        return RepoMap(budget_tokens=budget), (
+            Note(
+                subject="repo map",
+                detail=(
+                    f"could not be built ({exc}); the model starts with no map of the "
+                    "codebase and will have to search for everything"
+                ),
+            ),
+        )
+    failed = tuple(entry.path for entry in repo_map.entries if entry.parse_error)
+    note = sequence_note(
+        "repo map",
+        failed,
+        detail=(
+            "these files contributed no signatures, so the model cannot see what they "
+            "define without opening them"
+        ),
+    )
+    return repo_map, (note,) if note is not None else ()
+
+
+def _load_agents(paths: Paths) -> tuple[dict[str, AgentDefinition], Note | None]:
+    """Subagent definitions, falling back to the builtins when a file is malformed.
+
+    A malformed ``.ronin/agents/*.md`` raises out of ``load_agents`` on purpose — the
+    error names the file and the line. Here it degrades to the builtins, because one
+    bad file in a shared repo must not stop the session, and the note carries the
+    error verbatim so it is still fixable.
+    """
+    try:
+        return load_agents(paths.workspace_root), None
+    except (FrontmatterError, OSError) as exc:
+        return dict(BUILTIN_AGENTS), Note(
+            subject="subagents",
+            detail=(
+                f"{exc} — every file in {paths.agents_dir} was skipped and only the "
+                "built-in subagents are available"
+            ),
+        )
+
+
+def _load_hooks(paths: Paths) -> tuple[HookConfig, Note | None]:
+    try:
+        return load_hook_config(paths.hooks_config), None
+    except (HookConfigError, OSError) as exc:
+        return HookConfig(), Note(
+            subject="hooks",
+            detail=(
+                f"{exc} — no hooks will run this session, so any check they were "
+                "enforcing (formatting, a lint gate) is not being enforced"
+            ),
+        )
+
+
+def _load_mcp(
+    paths: Paths, *, environ: Mapping[str, str] | None
+) -> tuple[tuple[McpServerConfig, ...], Note | None]:
+    try:
+        return load_mcp_config(paths.workspace_root, environ=environ), None
+    except ConfigError as exc:
+        return (), Note(
+            subject="mcp config",
+            detail=(
+                f"{exc} — no MCP servers were loaded, so none of their tools exist "
+                "this session"
+            ),
+        )
+
+
+def _load_commands(paths: Paths) -> tuple[CommandRegistry, Note | None]:
+    try:
+        return load_registry(paths.workspace_root), None
+    except OSError as exc:
+        return CommandRegistry(), Note(
+            subject="slash commands",
+            detail=(
+                f"{paths.commands_dir} could not be read ({exc}); only the built-in "
+                "commands are available"
+            ),
+        )
+
+
+def _load_sandbox(
+    settings: Settings, *, which: Callable[[str], str | None], platform: str
+) -> Sandbox | Unavailable:
+    """Detect a backend **only when the settings asked for one**.
+
+    Sandbox mode is off by default, and probing for ``bwrap`` on a machine that never
+    asked to be sandboxed would put a ``PATH`` lookup in the load path and, worse,
+    make ``/doctor`` report a sandbox nobody enabled.
+    """
+    if not settings.sandbox:
+        return NoSandbox()
+    return detect(which=which, platform=platform)
+
+
+def _verify_declaration_note(memory: Memory, verify: VerifySpec) -> Note | None:
+    """Name the gap between "my RONIN.md says how to test this" and detection.
+
+    Only when the tree yielded nothing, because that is the one case where a user has
+    plausibly written the command down and reasonably expects it to be used. See this
+    module's docstring for why the two are not joined.
+    """
+    if verify.empty and not memory.is_empty:
+        return Note(
+            subject="verify",
+            detail=(
+                "no verify command could be detected from this tree, and a test "
+                "command written in prose in RONIN.md is not parsed into one — the "
+                "model will read it, but /verify has nothing to run. declare the "
+                "command in pyproject.toml, package.json, a Makefile or a justfile "
+                "to make it detectable"
+            ),
+        )
+    return None
+
+
+# --------------------------------------------------------------------------- #
+# Persisting a remembered rule
+# --------------------------------------------------------------------------- #
+
+
+def rule_to_json(rule: Rule) -> dict[str, Any]:
+    """One rule in the JSON form ``ronin.safety.settings.parse_rule`` reads back.
+
+    Round-trippable on purpose: a rule written to disk that the loader would reject is
+    a permission the user believes they granted and does not have.
+    """
+    matcher = rule.matcher
+    match: dict[str, Any]
+    if isinstance(matcher, Exact):
+        match = {"kind": "exact", "argument": matcher.argument, "value": matcher.value}
+    elif isinstance(matcher, PathGlob):
+        match = {"kind": "path", "pattern": matcher.pattern, "argument": matcher.argument}
+    elif isinstance(matcher, CommandRegex):
+        match = {"kind": "regex", "pattern": matcher.pattern}
+    else:
+        match = {"kind": "tool"}
+    body: dict[str, Any] = {
+        "tool": rule.tool,
+        "decision": rule.decision.value,
+        "match": match,
+    }
+    if rule.reason:
+        body["reason"] = rule.reason
+    if rule.unwaivable:
+        body["always_ask"] = True
+    return body
+
+
+@dataclass(slots=True)
+class LocalRuleWriter:
+    """Appends a remembered rule to ``.ronin/settings.local.json``.
+
+    Mutable because it accumulates the writes it could not perform; that is the state
+    it exists to hold.
+
+    Two decisions worth stating:
+
+    **The local layer, never the project layer.** ``settings.json`` is committed and
+    shared; a permission one developer granted at 2am must not arrive in a colleague's
+    checkout as policy. ``settings.local.json`` is gitignored, which is the whole
+    reason that layer exists.
+
+    **A file that does not parse is not overwritten.** Rewriting it would silently
+    discard every rule the user had already written. The rule is dropped from *disk*
+    instead — the policy engine has already added it to the session, so the approval
+    still holds for this run — and the reason is recorded in :attr:`failures` rather
+    than raised, because raising here would kill a turn in the middle of an approval.
+    """
+
+    path: Path
+    failures: list[str] = field(default_factory=list)
+
+    def __call__(self, rule: Rule) -> None:
+        try:
+            body = self._read()
+        except ValueError as exc:
+            self.failures.append(str(exc))
+            return
+        rules = body.get("rules", [])
+        if not isinstance(rules, list):
+            self.failures.append(
+                f"{self.path} has a 'rules' key that is not a list, so the remembered "
+                "rule was not written. it still applies for this session"
+            )
+            return
+        entry = rule_to_json(rule)
+        if entry in rules:
+            return
+        body["rules"] = [*rules, entry]
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(
+                json.dumps(body, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
+        except OSError as exc:
+            self.failures.append(
+                f"{self.path} could not be written ({exc}), so the remembered rule "
+                "applies for this session only"
+            )
+
+    def _read(self) -> dict[str, Any]:
+        try:
+            raw = self.path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return {}
+        except OSError as exc:
+            raise ValueError(
+                f"{self.path} could not be read ({exc}); the remembered rule was not "
+                "written and applies for this session only"
+            ) from exc
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"{self.path} is not valid JSON ({exc}); it was left untouched rather "
+                "than overwritten, so the rules already in it are not lost. the "
+                "remembered rule applies for this session only"
+            ) from exc
+        if not isinstance(data, dict):
+            raise ValueError(
+                f"{self.path} does not contain a JSON object; it was left untouched "
+                "and the remembered rule applies for this session only"
+            )
+        return data
+
+
+# --------------------------------------------------------------------------- #
+# Assembling the runtime
+# --------------------------------------------------------------------------- #
+
+
+async def build_runtime(
+    loaded: Loaded,
+    router: Router,
+    *,
+    session_id: str | None = None,
+    asker: Asker | None = None,
+    record: bool = True,
+    connect_mcp: bool = True,
+    context_window: int = DEFAULT_CONTEXT_WINDOW,
+    shell: ShellSession | None = None,
+    transport_provider: TransportProvider | None = None,
+) -> Runtime:
+    """Turn a :class:`~ronin.cli.spine.Loaded` into live, wired objects.
+
+    The ordering here is not arbitrary. ``build_registry`` is called **without**
+    ``task`` and ``build_session`` adds it, because ``TaskTool`` needs a runner, the
+    runner needs a registry to subset, and the registry contains ``TaskTool`` — see
+    :func:`ronin.session.build_session`. Doing it the other way round is a cycle.
+
+    The gate wraps the *session's* registry, so ``task`` and every MCP tool go through
+    the same policy, hooks and output budget as ``bash``.
+
+    Nothing about a failed MCP server, an unavailable sandbox or a subagent with a
+    gated tool raises: each becomes a note on ``Runtime.loaded``.
+    """
+    paths = loaded.paths
+    settings = loaded.settings
+    notes: list[Note] = []
+    closers: list[Closer] = []
+
+    sid = session_id or new_session_id()
+
+    checkpoints = CheckpointStore(paths.workspace_root)
+    denylist = Denylist(
+        workspace_root=paths.workspace_root,
+        home=paths.home,
+        # The live store, not the pessimistic default: `git reset --hard` is refused
+        # only while there is genuinely nothing to restore from. `session_base` is the
+        # first checkpoint of this session and is the one synchronous signal the store
+        # exposes, which is what `Denylist.has_checkpoint` needs.
+        has_checkpoint=lambda: checkpoints.session_base is not None,
+        protected_branches=settings.protected_branches,
+        yolo=settings.yolo,
+    )
+
+    # The join the safety package could not make for itself: the field is parsed by
+    # `load_settings` and this is the only place a tracker is constructed from it.
+    taint = TaintTracker(min_span=settings.taint_min_span)
+
+    engine_sandbox = _engine_sandbox(loaded.sandbox)
+    writer = LocalRuleWriter(paths.local_settings)
+    policy = PolicyEngine(
+        rules=settings.ruleset(),
+        asker=asker if asker is not None else UnattendedAsker(),
+        denylist=denylist,
+        mode=loaded.mode,
+        taint=taint,
+        sandbox=engine_sandbox,
+        persist=writer,
+    )
+
+    ctx = ToolContext(root=paths.workspace_root)
+    shell_session = shell if shell is not None else ShellSession(
+        shell=PersistentShell(cwd=paths.workspace_root, env=ctx.env)
+    )
+    if shell is None:
+        # Only close what we opened. A caller who injected a shell owns its lifetime,
+        # and closing someone else's shell kills their background jobs.
+        closers.append(shell_session.close)
+
+    base_tools = build_registry(ctx, shell=shell_session)
+    notes.extend(_subagent_gate_notes(loaded, base_tools))
+
+    session = build_session(
+        router,
+        ctx,
+        base_tools=base_tools,
+        session_id=sid,
+        # Empty on purpose: the map is in `Runtime.system` via `Loaded.system_suffix`,
+        # and passing it here as well would put it in the prompt twice. The cost is
+        # that subagents do not receive it — see this decision in the report.
+        repo_map="",
+        subagent_types=subagent_catalogue(loaded.agents),
+    )
+
+    inner: ToolRegistry = session.registry
+    if connect_mcp and loaded.mcp_servers:
+        inner, mcp_notes, mcp_closer = await _connect_mcp(
+            loaded.mcp_servers, inner, transport_provider
+        )
+        notes.extend(mcp_notes)
+        closers.append(mcp_closer)
+
+    files = FileStateTracker()
+    hooks = HookRunner(config=loaded.hooks, cwd=str(paths.workspace_root), env=ctx.env)
+    registry = gated(
+        inner,
+        policy,
+        hooks=hooks,
+        files=files,
+        taint=taint,
+        budget=OutputBudget(remaining_chars=DEFAULT_OUTPUT_BUDGET_CHARS),
+    )
+
+    transcript: Transcript | None = None
+    if record:
+        transcript = Transcript.open(
+            paths.sessions_dir,
+            sid,
+            model=router.spec_for(ModelRole.MAIN).model,
+            cwd=str(paths.cwd),
+        )
+
+    return Runtime(
+        loaded=loaded.with_notes(*notes),
+        session=session,
+        registry=registry,
+        policy=policy,
+        files=files,
+        taint=taint,
+        hooks=hooks,
+        checkpoints=checkpoints,
+        compaction=loaded.compaction_policy(context_window=context_window),
+        system=system_prompt(loaded),
+        transcript=transcript,
+        closers=tuple(closers),
+    )
+
+
+def system_prompt(loaded: Loaded, *, base: str = BASE_SYSTEM_PROMPT) -> str:
+    """The base prompt plus RONIN.md and the repo map, in that order.
+
+    Appended to the *system* text rather than injected as a user message so it lands
+    inside the provider's cached stable prefix — which is the reason the repo map is
+    rendered in a deterministic, path-ordered form in the first place.
+    """
+    suffix = loaded.system_suffix()
+    return f"{base.rstrip()}\n\n{suffix}" if suffix else base.rstrip() + "\n"
+
+
+def _engine_sandbox(sandbox: Sandbox | Unavailable) -> Sandbox | None:
+    """``PolicyEngine.sandbox`` takes a ``Sandbox``, so an ``Unavailable`` becomes ``None``.
+
+    ``Unavailable`` is not a ``Sandbox`` — it has ``isolates`` but no ``wrap`` and no
+    ``name`` — so passing it would be a type error that happens to work today because
+    the engine only reads ``isolates``. Rather than rely on that, an unavailable
+    backend becomes ``None``, which the engine already handles as "no sandbox". The
+    user is told by the note :func:`ronin.cli.spine.sandbox_note` produced at load.
+    """
+    if isinstance(sandbox, Unavailable):
+        return None
+    return sandbox
+
+
+def _subagent_gate_notes(loaded: Loaded, base_tools: ToolRegistry) -> tuple[Note, ...]:
+    """Name every subagent that declares a tool its own policy will refuse.
+
+    ``ronin.session.SubagentPolicy`` denies every call that requires approval, and the
+    shipped ``fixer`` declares ``bash`` — so the subagent whose entire purpose is to
+    rerun a failing test cannot run it. This cannot be repaired from here: ``bash`` is
+    ``DangerLevel.DESTRUCTIVE`` and ``ToolSpec`` refuses to let a destructive tool set
+    ``requires_approval=False``, and ``build_session`` hands children a subset of the
+    *same* registry the parent uses, so there is no seam for a differently-gated bash.
+    Dropping ``bash`` from the definition would be worse: the fixer's prompt promises
+    to rerun the test. So it is reported, loudly, and the fix belongs in
+    ``SubagentPolicy``.
+    """
+    notes: list[Note] = []
+    for name, definition in sorted(loaded.agents.items()):
+        blocked = gated_tools(definition, base_tools)
+        if not blocked:
+            continue
+        notes.append(
+            Note(
+                subject=f"subagent {name!r}",
+                detail=(
+                    f"declares {', '.join(blocked)}, which need approval — and a "
+                    "subagent cannot ask the user, so every such call is refused "
+                    "mid-run. it will report what it found instead of doing it; run "
+                    "the step yourself, or remove the tool from the definition"
+                ),
+            )
+        )
+    return tuple(notes)
+
+
+async def _connect_mcp(
+    servers: tuple[McpServerConfig, ...],
+    inner: ToolRegistry,
+    transport_provider: TransportProvider | None,
+) -> tuple[ToolRegistry, tuple[Note, ...], Closer]:
+    """Connect every configured server and fold its tools in. Never raises.
+
+    ``connect_all`` already refuses to let one bad server cost the session its local
+    tools; this adds the other half — a note per failure, so "no tools appeared" is
+    never a silent outcome — and registers the teardown as a closer.
+    """
+    provider = (
+        transport_provider
+        if transport_provider is not None
+        else default_transport_provider()
+    )
+    toolset = await connect_all(servers, provider)
+    notes: list[Note] = [
+        Note(
+            subject=f"mcp server {name!r}",
+            detail=(
+                f"{why} — its tools are absent, or present and answering with that "
+                "message; the session continues with the local tools"
+            ),
+        )
+        for name, why in sorted(toolset.failures.items())
+    ]
+    skipped = sequence_note(
+        "mcp tools",
+        toolset.skipped,
+        detail="could not be given a legal namespaced name and were dropped",
+    )
+    if skipped is not None:
+        notes.append(skipped)
+    if toolset.tools:
+        inner = extend_registry(inner, toolset.tools)
+    return inner, tuple(notes), toolset.aclose
+
+
+__all__ = [
+    "BASE_SYSTEM_PROMPT",
+    "DEFAULT_CONTEXT_WINDOW",
+    "DEFAULT_OUTPUT_BUDGET_CHARS",
+    "LocalRuleWriter",
+    "build_runtime",
+    "load_workspace",
+    "rule_to_json",
+    "system_prompt",
+]
