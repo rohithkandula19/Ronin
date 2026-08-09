@@ -8,6 +8,7 @@ diagnostic that fails on the normal case gets ``|| true``'d and then nobody read
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -34,7 +35,7 @@ from ronin.cli.doctor import (
     hidden_by,
     run_doctor,
 )
-from ronin.cli.wire import load_workspace
+from ronin.cli.wire import build_runtime, load_workspace
 from ronin.context.repomap import GitIgnore
 
 # The rule this repo shipped, and the one every project copies from a template.

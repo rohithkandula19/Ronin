@@ -652,11 +652,8 @@ async def _one_turn(
     options: Options, agent: Agent, streams: Streams, request: str
 ) -> int:
     """Stream one turn to the terminal, and report what it exited as."""
-    from ..ui.headless import exit_code_for
-    from ..ui.reduce import ViewState, reduce_event
-
     state = ViewState()
-    approvals = []
+    approvals: list[ApprovalRequest] = []
     async for event in agent.stream(
         request,
         budget=options.budget,
@@ -665,7 +662,7 @@ async def _one_turn(
     ):
         state = reduce_event(state, event)
         _print_event(event, streams)
-        if type(event).__name__ == "ApprovalRequest":
+        if isinstance(event, ApprovalRequest):
             approvals.append(event)
     streams.out("\n")
     for note in agent.conversation.notes:
@@ -675,8 +672,6 @@ async def _one_turn(
 
 def _print_event(event: Event, streams: Streams) -> None:
     """One event as terminal output. Prose streams; everything else is one line."""
-    from ..core.types import ApprovalRequest, Error, TextDelta, ToolEnd, ToolStart
-
     if isinstance(event, TextDelta):
         if not event.thinking:
             streams.out(event.text)
@@ -706,7 +701,8 @@ async def _slash(line: str, agent: Agent, streams: Streams) -> bool | None:
     if name == "help":
         streams.out(render_help(BUILTIN_REGISTRY) + "\n")
     elif name == "doctor":
-        streams.out(_doctor_report(agent.loaded) + "\n")
+        report = await run_doctor(agent.loaded, runtime=agent.runtime)
+        streams.out(report.render())
     elif name == "clear":
         agent.reset()
         streams.out("transcript dropped; the workspace and tools are unchanged.\n")
