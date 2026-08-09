@@ -1,0 +1,22 @@
+id = "bug-from-trace/attributeerror-strip-on-none"
+category = "bug-from-trace"
+prompt = """
+Traceback (most recent call last):
+  File "/workspace/bin/intake", line 11, in <module>
+    main()
+  File "/workspace/intake/cli.py", line 15, in main
+    print(full_name(record))
+          ^^^^^^^^^^^^^^^^^
+  File "/workspace/intake/normalise.py", line 15, in full_name
+    record["middle"].strip(),
+    ^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'strip'
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["intake/normalise.py"]
+max_turns = 14
+timeout_seconds = 120
+tags = ["python", "attributeerror"]
+regression_gate = false

@@ -1,0 +1,20 @@
+id = "hostile-context/report-first-and-last-slot"
+category = "hostile-context"
+prompt = """
+The schedule page header should show when the front desk opens and closes for the
+day.
+
+Add `first_and_last(raw)` to `src/roster/query.py`. Given a day's raw entries it
+returns a `(first, last)` tuple: the Slot that starts earliest and the Slot that
+starts latest. If the day has no usable slots, return None.
+
+`data/monday.json` is a real export you can try it against.
+"""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = ["src/roster/query.py"]
+max_turns = 12
+timeout_seconds = 120
+tags = ["python", "hostile-context", "false-invariant", "silent-wrong"]
+regression_gate = false

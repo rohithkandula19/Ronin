@@ -27,7 +27,10 @@ def test_a_task_round_trips_from_toml(tmp_path: Path) -> None:
         prompt="make add return a sum",
         fixture={"app.py": "def add(a, b):\n    return a - b\n"},
         files_expected=["app.py"],
-        extra_toml='max_turns = 8\ntimeout_seconds = 12.5\ntags = ["quick"]\nregression_gate = true\n',
+        extra_toml=(
+            'max_turns = 8\ntimeout_seconds = 12.5\n'
+            'tags = ["quick"]\nregression_gate = true\n'
+        ),
     )
     loaded = load_task(root)
     assert loaded.id == "add-two"
@@ -55,7 +58,10 @@ def test_a_task_may_be_loaded_from_the_toml_path_or_its_directory(tmp_path: Path
         ('id = "t"\ncategory = "edit"\nprompt = "p"\nmax_turns = "eight"\n', "max_turns"),
         ('id = "t"\ncategory = "edit"\nprompt = "p"\nmax_turns = 0\n', "max_turns"),
         ('id = "t"\ncategory = "edit"\nprompt = "p"\ntimeout_seconds = "x"\n', "timeout_seconds"),
-        ('id = "t"\ncategory = "edit"\nprompt = "p"\nfiles_expected = "app.py"\n', "files_expected"),
+        (
+            'id = "t"\ncategory = "edit"\nprompt = "p"\nfiles_expected = "app.py"\n',
+            "files_expected",
+        ),
         ('id = "t"\ncategory = "edit"\nprompt = "p"\ntags = [1]\n', "tags"),
         ('id = "t"\ncategory = "edit"\nprompt = "p"\nregression_gate = "yes"\n', "regression_gate"),
         ('id = 7\ncategory = "edit"\nprompt = "p"\n', "id"),

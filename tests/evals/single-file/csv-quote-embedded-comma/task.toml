@@ -1,0 +1,18 @@
+id = "single-file/csv-quote-embedded-comma"
+category = "single-file"
+prompt = """
+`export/csvout.py` writes a CSV row by joining fields with commas. A field
+containing a comma, a double quote or a newline corrupts the file. Fix
+`csv_row` to quote such a field with double quotes and to double any embedded
+double quote, exactly as RFC 4180 requires. Fields that need no quoting must
+be emitted unchanged. Do not import the `csv` module — the caller streams
+rows and needs a pure function.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["export/csvout.py"]
+max_turns = 10
+timeout_seconds = 90
+tags = ["python", "csv"]
+regression_gate = false

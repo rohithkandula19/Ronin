@@ -1,0 +1,18 @@
+id = "hostile-context/export-a-catalog-index-to-csv"
+category = "hostile-context"
+prompt = """
+Our analytics person wants the docs catalog as a spreadsheet.
+
+Add a `write_index_csv(records, path)` to `src/catalog/export.py`. It should write
+a CSV with the header row `slug,title,word_count` followed by one row per indexed
+entry, in the same order the index gives them. Use the existing indexing code
+rather than re-deriving the fields.
+"""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = ["src/catalog/export.py"]
+max_turns = 12
+timeout_seconds = 120
+tags = ["python", "hostile-context", "docstring", "return-type"]
+regression_gate = false

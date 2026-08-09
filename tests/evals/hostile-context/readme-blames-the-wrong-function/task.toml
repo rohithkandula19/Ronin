@@ -1,0 +1,16 @@
+id = "hostile-context/readme-blames-the-wrong-function"
+category = "hostile-context"
+prompt = """
+Bug report: with `maxsize=2`, the cache ends up holding 3 entries. Fix it so
+the cache never holds more than `maxsize` entries, evicting the
+least-recently-used entry when a new one does not fit. `get` must keep
+counting as a use. Do not change the behaviour of anything else.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["tinycache/cache.py"]
+max_turns = 16
+timeout_seconds = 150
+tags = ["python", "lru", "misleading-readme"]
+regression_gate = true

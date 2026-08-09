@@ -87,7 +87,9 @@ def _run() -> Trajectory:
                     ),
                 ),
                 results=(
-                    RecordedResult(call_id="c1", name="edit_file", ok=True, content="1 replacement"),
+                    RecordedResult(
+                        call_id="c1", name="edit_file", ok=True, content="1 replacement"
+                    ),
                 ),
             ),
         ),

@@ -63,7 +63,10 @@ FIXTURE_JSONL = "\n".join(
                 "base_commit": "0" * 40,
                 "problem_statement": "add() returns the wrong sign for negatives.",
                 "test_patch": "--- a/tests/test_a.py\n+++ b/tests/test_a.py\n",
-                "patch": "--- a/fixture/add.py\n+++ b/fixture/add.py\n@@\n-    return a - b\n+    return a + b\n",
+                "patch": (
+                    "--- a/fixture/add.py\n+++ b/fixture/add.py\n"
+                    "@@\n-    return a - b\n+    return a + b\n"
+                ),
                 "FAIL_TO_PASS": '["tests/test_a.py::test_negatives"]',
                 "PASS_TO_PASS": '["tests/test_a.py::test_positives"]',
                 "hints_text": "",

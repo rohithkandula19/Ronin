@@ -1,0 +1,18 @@
+id = "single-file/cap-the-uploader-retry-delay"
+category = "single-file"
+prompt = """
+Our health checker kills an upload worker that goes 15 seconds without progress,
+and the upload retry backoff is currently allowed to grow to half a minute, so
+long-tail retries get the worker shot instead of letting it finish.
+
+Make uploads wait at most 10 seconds between retries. Downloads are fine as they
+are - leave their timing exactly as it is.
+"""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = ["src/sync/retry.py"]
+max_turns = 10
+timeout_seconds = 120
+tags = ["python", "duplicate-code", "minimal-edit"]
+regression_gate = false

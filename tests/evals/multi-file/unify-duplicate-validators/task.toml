@@ -1,0 +1,18 @@
+id = "multi-file/unify-duplicate-validators"
+category = "multi-file"
+prompt = """
+`signup/web.py` and `signup/importer.py` each carry their own private copy of
+an address check, and they have drifted: one rejects an address with no dot in
+the domain and the other accepts it. Create `signup/validate.py` with a single
+`is_valid_address(text) -> bool` that requires exactly one `@`, a non-empty
+local part, and a domain containing a dot with non-empty labels either side of
+it. Make both modules use it and delete their private copies.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["signup/validate.py", "signup/web.py", "signup/importer.py"]
+max_turns = 16
+timeout_seconds = 150
+tags = ["python", "dedupe"]
+regression_gate = false

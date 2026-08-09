@@ -1,0 +1,13 @@
+id = "add-test/parametrize-the-slug-cases"
+category = "add-test"
+prompt = """tests/test_slug.py has exactly one hard-coded example for `slugify`, which tells us almost nothing: the fiddly part of that function is what it does with punctuation, with two separators in a row, and with junk at the beginning or end of a title.
+
+Rewrite that into a table-driven test so each case is reported separately in the pytest output, with at least three cases of the kinds above. Keep the existing test."""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = ["tests/test_slug.py"]
+max_turns = 10
+timeout_seconds = 180
+tags = ["python", "pytest", "parametrize"]
+regression_gate = false

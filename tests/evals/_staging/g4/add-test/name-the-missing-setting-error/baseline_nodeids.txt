@@ -1,0 +1,4 @@
+tests/test_settings.py::test_loads_a_complete_mapping
+tests/test_settings.py::test_retries_are_coerced_from_a_string
+tests/test_settings.py::test_settings_are_frozen
+tests/test_settings.py::test_timeout_falls_back_to_the_default

@@ -1,0 +1,5 @@
+order_id,cust,channel,amount_gross,qty,region,currency_code
+A-1001,C-77,Web,19.9,2,emea,usd
+A-1002,C-77,retail,5,1,eu, eur 
+A-1003,C-91,PARTNER,120.00,3,apac,GBP
+A-1004,C-12,web,7.25,1,,usd

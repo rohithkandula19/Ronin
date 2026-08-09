@@ -1,0 +1,6 @@
+order_id,cust,channel,amount_gross,qty,region,currency_code
+B-2001,C-40,fax,10.00,1,emea,usd
+B-2002,C-41,web,abc,1,emea,usd
+B-2003,C-42,web,10.00,two,emea,usd
+B-2004,C-43,web,10.00,1,emea,usd
+B-2004,C-43,web,10.00,1,emea,usd

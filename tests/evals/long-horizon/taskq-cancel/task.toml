@@ -1,0 +1,27 @@
+id = "long-horizon/taskq-cancel"
+category = "long-horizon"
+prompt = """
+There is no way to stop a queued job. Add cancellation. Read the package
+first — the change spans the model, the store, the scheduler and the CLI.
+
+Spec:
+
+* `State` gains `CANCELLED = "cancelled"`.
+* `Store.cancel(job_id)` puts the job in `CANCELLED` and returns it. Cancelling
+  an unknown id raises `UnknownJob`. Cancelling a job already in `DONE` raises
+  `ValueError`. Cancelling an already-cancelled job is a no-op that still
+  returns the job.
+* A cancelled job is never eligible, so `next_job` skips it and `run_one` never
+  runs it.
+* `bin/taskq cancel <id>` prints `cancelled <id>` and exits 0; for an unknown
+  id it prints `no such job: <id>` on stderr and exits 1.
+* `bin/taskq status` and `bin/taskq run` keep working unchanged.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["taskq/model.py", "taskq/store.py", "taskq/scheduler.py", "taskq/cli.py"]
+max_turns = 30
+timeout_seconds = 300
+tags = ["python", "layers"]
+regression_gate = false

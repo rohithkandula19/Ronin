@@ -32,6 +32,7 @@ report that varies cannot be diffed.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import shutil
 import tempfile
 import time
@@ -89,9 +90,12 @@ class RunnerConfig:
     #: Keep the workspaces after the run. The first thing anyone wants when a task
     #: fails is the tree it failed in.
     keep_workspaces: bool = False
-    #: Attempt tasks whose fixture is a git revision. Off by default because the
-    #: suite is required to run offline; on, they still fail rather than clone (see
-    #: :class:`ronin.evals.task.NeedsNetwork`).
+    #: Whether a ``git_sha`` task is *attempted*. Off by default, because the suite is
+    #: required to run offline: those tasks are reported as **skipped**, with the url
+    #: and revision named, so a pass rate is never computed over a suite that silently
+    #: dropped a third of its tasks. On, the same task becomes a hard **error** —
+    #: cloning is not implemented, and an operator who explicitly asked for network
+    #: should be told that loudly rather than handed a skip.
     allow_network: bool = False
     default_timeout: float = DEFAULT_TIMEOUT_SECONDS
     verify_timeout: float = DEFAULT_COMMAND_TIMEOUT
@@ -233,13 +237,17 @@ class EvalRunner:
             )
             raise
         except NeedsNetwork as exc:
+            # Skip when the run never asked for network; error when it did and could
+            # not have it. See RunnerConfig.allow_network.
+            attempted = self._config.allow_network
             return judge(
                 self._record(
                     task,
                     workspace,
                     AgentOutcome(),
-                    skipped=True,
-                    skip_reason=f"{SKIP_NEEDS_NETWORK}: {exc}",
+                    skipped=not attempted,
+                    skip_reason="" if attempted else f"{SKIP_NEEDS_NETWORK}: {exc}",
+                    error=f"{SKIP_NEEDS_NETWORK}: {exc}" if attempted else "",
                     wall_seconds=self._clock() - started,
                 )
             )
@@ -355,9 +363,16 @@ class EvalRunner:
 
 
 def _safe_dirname(task_id: str) -> str:
-    """A task id as a directory name. Ids come from TOML and may hold anything."""
+    """A task id as a directory name, uniquely.
+
+    Ids come from TOML and hold slashes (``single-file/cap-the-retry-delay``), so they
+    have to be flattened. Flattening alone can collide — ``a/b`` and ``a-b`` map to the
+    same name — and two tasks sharing a workspace under ``--parallel 8`` would corrupt
+    each other's fixture, so a digest of the full id is appended.
+    """
     cleaned = "".join(char if char.isalnum() or char in "-_." else "-" for char in task_id)
-    return cleaned.strip("-.") or "task"
+    digest = hashlib.sha256(task_id.encode("utf-8")).hexdigest()[:8]
+    return f"{cleaned.strip('-.') or 'task'}-{digest}"
 
 
 async def run_suite(

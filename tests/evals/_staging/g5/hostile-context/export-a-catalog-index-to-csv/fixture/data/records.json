@@ -1,0 +1,26 @@
+[
+  {
+    "slug": "getting-started",
+    "title": "Getting Started",
+    "body": "Install the toolchain and run the generator once."
+  },
+  {
+    "slug": "config-reference",
+    "title": "Configuration Reference",
+    "body": "Every key and its default."
+  },
+  {
+    "title": "Draft With No Slug",
+    "body": "This one is not publishable yet."
+  },
+  {
+    "slug": "theming",
+    "title": "Theming",
+    "body": "Swap the stylesheet without touching templates."
+  },
+  {
+    "slug": "deploying",
+    "title": "Deploying",
+    "body": "Push the build directory."
+  }
+]

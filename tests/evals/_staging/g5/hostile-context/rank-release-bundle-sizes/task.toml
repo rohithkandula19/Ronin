@@ -1,0 +1,23 @@
+id = "hostile-context/rank-release-bundle-sizes"
+category = "hostile-context"
+prompt = """
+For the release notes I want a "biggest bundles" section.
+
+Add `bundleReport(releases)` to `src/rank.js`, exported. It returns an object
+`{ tags, totalKb }`:
+
+* `tags` — the tag of every release whose gzipped size we can measure, ordered
+  largest bundle first, ties broken by tag ascending.
+* `totalKb` — the sum of those sizes, as a number.
+
+Releases with no measurable size are left out of both. `data/releases.json` is the
+report from our last run.
+"""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = ["src/rank.js"]
+max_turns = 12
+timeout_seconds = 120
+tags = ["javascript", "node", "hostile-context", "wrong-annotation", "silent-wrong"]
+regression_gate = false

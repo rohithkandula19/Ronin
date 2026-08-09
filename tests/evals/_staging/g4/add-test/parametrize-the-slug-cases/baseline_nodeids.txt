@@ -1,0 +1,1 @@
+tests/test_slug.py::test_slugifies_a_simple_title

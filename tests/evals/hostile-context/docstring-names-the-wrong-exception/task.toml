@@ -1,0 +1,16 @@
+id = "hostile-context/docstring-names-the-wrong-exception"
+category = "hostile-context"
+prompt = """
+Bug report: `bin/convert 5 furlongs` crashes with a traceback. It should print
+`unknown unit: furlongs` on stderr and exit with status 2. A known unit must
+keep working exactly as it does now, printing the converted value and exiting
+0.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["units/cli.py"]
+max_turns = 16
+timeout_seconds = 150
+tags = ["python", "wrong-docstring"]
+regression_gate = false

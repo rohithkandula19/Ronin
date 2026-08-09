@@ -352,6 +352,10 @@ class AgentRunLike(Protocol):
     no ``events``, no ``state``, no ``notes``, no ``conversation``. That omission is
     the first of the three enforcement mechanisms in the module docstring — the
     harness cannot retain a transcript it has no way to name.
+
+    Deliberately narrower than ``ronin.evals.adapters.AgentRun``, which *does* declare
+    ``events`` because the taxonomy needs them. Same shape, different appetite: the
+    eval suite is allowed to look at how the agent worked, and this is not.
     """
 
     @property
@@ -373,9 +377,10 @@ class AgentLike(Protocol):
 class AgentOpener(Protocol):
     """Opens an agent on a directory. ``record`` is required, and always ``False``.
 
-    ``ronin.cli.sdk.Agent.open`` satisfies this. It is a protocol rather than an
-    import because ``ronin.evals`` may not depend on ``ronin.cli`` (see
-    ``docs/ARCHITECTURE.md`` §3): the application layer wires the two together.
+    ``ronin.cli.sdk.Agent.open`` satisfies this. A protocol rather than an import for
+    two reasons that outlive the dependency graph: ``ronin`` installs with zero hard
+    dependencies and this module stays importable on a bare install, and a test drives
+    a whole scored run with a twenty-line fake instead of assembling a ``Runtime``.
     """
 
     async def __call__(self, path: Path, *, record: bool) -> AgentLike: ...

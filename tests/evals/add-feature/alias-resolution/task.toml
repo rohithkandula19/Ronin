@@ -1,0 +1,22 @@
+id = "add-feature/alias-resolution"
+category = "add-feature"
+prompt = """
+`commands/resolve.py` maps a command name to its handler name. Add alias
+support:
+
+* `ALIASES` maps an alias to the canonical name it stands for.
+* `resolve(name)` follows aliases, including a chain of them.
+* A cycle in `ALIASES` must raise `ValueError` whose message contains every
+  name in the cycle, rather than looping forever.
+* An unknown name still raises `KeyError` as it does today.
+
+Populate `ALIASES` with `co -> checkout`, `ci -> commit`, and `c -> ci`.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["commands/resolve.py"]
+max_turns = 16
+timeout_seconds = 150
+tags = ["python", "aliases"]
+regression_gate = false

@@ -357,8 +357,11 @@ async def test_workspaces_are_removed_unless_asked_for(tmp_path: Path) -> None:
     await run_suite(
         tasks, adapter, config=RunnerConfig(workspace_root=keep, keep_workspaces=True)
     )
-    assert (keep / "task-0" / "work" / "app.py").exists()
-    assert not (keep / "task-0" / "work" / "solution").exists()
+    kept_dirs = sorted(path.name for path in keep.iterdir())
+    assert len(kept_dirs) == 1 and kept_dirs[0].startswith("task-0-")
+    work = keep / kept_dirs[0] / "work"
+    assert (work / "app.py").exists()
+    assert not (work / "solution").exists()
 
 
 def test_selection_filters_without_a_runner() -> None:
@@ -385,7 +388,25 @@ async def test_a_task_with_no_verify_script_is_reported_unverifiable(tmp_path: P
     write_task(root, "no-gate", fixture={"app.py": BROKEN_APP})
     write_manifest(root, ["no-gate"])
     tasks = list(load_suite(root))
-    report = await run_suite(tasks, v2_adapter(scripted_factory([Step(tool="read", path="app.py")])))
+    adapter = v2_adapter(scripted_factory([Step(tool="read", path="app.py")]))
+    report = await run_suite(tasks, adapter)
     assert report.rows[0].status == "unverifiable"
     assert report.overall.unverifiable == 1
     assert "no verify.sh" in report.rows[0].detail
+
+
+async def test_asking_for_network_turns_the_skip_into_a_loud_error(tmp_path: Path) -> None:
+    """An operator who passed --allow-network is told cloning is unimplemented."""
+    root = tmp_path / "suite"
+    write_task(
+        root,
+        "swe-1",
+        category="repo",
+        extra_toml='git_sha = "deadbeef"\ngit_url = "https://example.invalid/r.git"\n',
+    )
+    write_manifest(root, ["swe-1"])
+    tasks = list(load_suite(root))
+    report = await run_suite(tasks, _never_called, config=RunnerConfig(allow_network=True))
+    assert report.rows[0].status == "error"
+    assert report.overall.skipped == 0
+    assert "does not clone" in report.rows[0].detail

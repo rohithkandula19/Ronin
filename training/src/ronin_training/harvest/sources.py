@@ -111,6 +111,63 @@ class RunManifest:
     extra: dict[str, Any] = field(default_factory=dict)
 
 
+def manifest_from_run_record(
+    record: Any,
+    transcript: Path,
+    *,
+    run_id: str,
+    tools: Sequence[Any] = (),
+    system: str = "",
+    model: str = "",
+    source: SourceKind = SourceKind.EVAL_SUITE,
+) -> RunManifest:
+    """A :class:`RunManifest` from an eval-suite ``RunRecord`` plus its transcript.
+
+    ``verified`` comes from ``record.verify_after.passed`` — the eval runner's real
+    ``verify.sh`` result. This is the only place the verify gate is sourced, and it is
+    read rather than computed: a harvester that re-ran verification could disagree with
+    the eval suite about whether a run passed, and then the corpus and the scoreboard
+    would be describing different runs.
+
+    Duck-typed rather than importing ``ronin.evals``: the training package must stay
+    importable without the agent tree, and this seam is one attribute read deep.
+
+    **The transcript is required and is not optional.** A ``RunRecord`` flattens the
+    run — its ``tool_calls`` carry no turn boundaries, no per-turn prose and no
+    argument mappings — so it can date, attribute and gate a trajectory but cannot
+    reconstruct one. Rendering an SFT prompt from it would mean inventing the turn
+    structure, so this function refuses to try.
+    """
+    verify = getattr(record, "verify_after", None)
+    passed = bool(getattr(verify, "passed", False))
+    tool_schemas = tuple(
+        item
+        if isinstance(item, ToolSchema)
+        else ToolSchema(
+            name=str(item["name"]),
+            description=str(item["description"]),
+            parameters=dict(item.get("parameters") or {}),
+        )
+        for item in tools
+    )
+    return RunManifest(
+        task_id=str(getattr(record, "task_id", "")),
+        run_id=run_id,
+        transcript=transcript,
+        verified=passed,
+        model=model,
+        prompt=str(getattr(record, "prompt", "")),
+        system=system,
+        tools=tool_schemas,
+        source=source,
+        extra={
+            "category": str(getattr(record, "category", "")),
+            "turns_used": int(getattr(record, "turns_used", 0) or 0),
+            "verify_detail": str(getattr(verify, "detail", "")),
+        },
+    )
+
+
 def read_transcript_events(path: Path) -> Sequence[Any]:
     """The default :data:`TranscriptReader`: ``ronin.persistence.read_events``.
 
@@ -308,6 +365,7 @@ __all__ = [
     "load_run",
     "load_runs",
     "load_sessions",
+    "manifest_from_run_record",
     "read_transcript_events",
     "steps_from_events",
 ]

@@ -119,9 +119,12 @@ jobs:
           # The closing `result` record carries the exit code, the final text, the turn
           # count and the spend. jq is preinstalled on ubuntu-latest.
           jq -r 'select(.type=="result")' .ronin/tmp/ronin.jsonl || true
-          echo "--- denied approvals (these are why an exit code of 2 happens) ---"
-          jq -r 'select(.type=="approval_request") | "\(.name): \(.rendered)"' \
+          echo "--- gated calls (requested an approval; may or may not have been refused) ---"
+          jq -r 'select(.type=="approval_request") | "\(.tool_use_id) \(.name): \(.rendered)"' \
             .ronin/tmp/ronin.jsonl || true
+          echo "--- calls actually REFUSED ---"
+          jq -r 'select(.type=="tool_end" and (.error | startswith("DENIED:")))
+                 | "\(.tool_use_id) \(.name): \(.error)"' .ronin/tmp/ronin.jsonl || true
 
       - name: upload the full event stream
         if: always()
@@ -134,19 +137,33 @@ jobs:
       - name: decide
         id: decide
         run: |
-          CODE=$(jq -r 'select(.type=="result") | .exit_code' .ronin/tmp/ronin.jsonl | tail -1)
+          STREAM=.ronin/tmp/ronin.jsonl
+          CODE=$(jq -r 'select(.type=="result") | .exit_code' "$STREAM" | tail -1)
           CODE="${CODE:-1}"
-          echo "ronin exit code: $CODE"
+          STOP=$(jq -r 'select(.type=="result") | .stop_reason' "$STREAM" | tail -1)
+          ERRORS=$(jq -r 'select(.type=="error") | .message' "$STREAM" | wc -l)
+          # In THIS build, exit code 2 is raised for every approval that was *requested*,
+          # even one a rule then allowed — `ronin.core.loop` yields ApprovalRequest before
+          # it consults the policy, and `ronin.ui.headless.exit_code_for` counts requests
+          # rather than refusals. So `--mode auto_edit` writing a file exits 2 on a clean
+          # run. The only honest signal is a tool_end whose error begins "DENIED:".
+          REFUSED=$(jq -r 'select(.type=="tool_end" and (.error | startswith("DENIED:")))
+                           | .tool_use_id' "$STREAM" | wc -l)
+          echo "exit=$CODE stop_reason=$STOP errors=$ERRORS refused=$REFUSED"
           # Scratch files are the harness's, not part of the fix.
           rm -rf .ronin/tmp .ronin/settings.local.json
           git checkout -- .ronin 2>/dev/null || true
-          if [ "$CODE" = "2" ]; then
-            echo "::error::ronin exited 2 — a tool call was gated and denied. Add an" \
-                 "allow rule for it in settings.json, or do this one by hand."
+          if [ "$REFUSED" -gt 0 ]; then
+            echo "::error::a tool call was refused. Add a narrow allow rule for it in" \
+                 "settings.json, or do this one by hand. The refusals are listed above."
             exit 1
           fi
-          if [ "$CODE" != "0" ]; then
-            echo "::error::ronin exited $CODE without finishing. See the uploaded stream."
+          # `no_tool_calls` is the clean finish: the model stopped asking for tools.
+          # `max_iterations`, `cost_budget`, `token_budget`, `stalled` and `interrupted`
+          # all mean it ran out of something rather than finished.
+          if [ "$ERRORS" -gt 0 ] || [ "$STOP" != "no_tool_calls" ]; then
+            echo "::error::the turn did not finish cleanly (stop_reason=$STOP," \
+                 "errors=$ERRORS). See the uploaded stream."
             exit 1
           fi
           # --porcelain, not `git diff`: a fix that adds a NEW file is invisible to

@@ -1,0 +1,17 @@
+id = "multi-file/extract-shared-chunk-limit"
+category = "multi-file"
+prompt = """
+The number 4096 is hard-coded in `chunked/reader.py`, `chunked/writer.py` and
+`chunked/copier.py`, and the three have to agree or the copier corrupts data.
+Add `CHUNK_BYTES = 4096` to `chunked/limits.py` and make all three modules use it
+instead of the literal. The literal `4096` must not appear in those three
+modules afterwards, and the effective chunk size must stay 4096.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["chunked/limits.py", "chunked/reader.py", "chunked/writer.py", "chunked/copier.py"]
+max_turns = 16
+timeout_seconds = 150
+tags = ["python", "constants"]
+regression_gate = false

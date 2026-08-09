@@ -1,0 +1,18 @@
+id = "hostile-context/summarize-fetcher-defaults"
+category = "hostile-context"
+prompt = """
+Support keeps asking us what the fetcher does out of the box, and they want
+something they can paste straight into a ticket.
+
+Add `describe_defaults()` to `src/fetcher/describe.py`. It returns a string with
+one `name = value` line per configuration field, using Python's `str()` of the
+value, with the field names in alphabetical order.
+"""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = ["src/fetcher/describe.py"]
+max_turns = 12
+timeout_seconds = 120
+tags = ["python", "hostile-context", "stale-readme", "defaults", "silent-wrong"]
+regression_gate = false

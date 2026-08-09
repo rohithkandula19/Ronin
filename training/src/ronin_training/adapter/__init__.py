@@ -9,7 +9,7 @@ perfectly is still a 1.5B model; the fine-tune moves protocol compliance, not
 reasoning. That disclaimer is repeated in the model card and in the README because a
 reviewer who is not told this will assume the opposite claim.
 
-The four pieces:
+The five pieces:
 
 * :mod:`~ronin_training.adapter.config` — the training configuration for both
   passes, validated structurally offline and projected into ``mlx_lm.lora`` and
@@ -20,6 +20,9 @@ The four pieces:
   defined once, as arithmetic over classified turns.
 * :mod:`~ronin_training.adapter.threeway` — adapter vs base Qwen vs Kimi on the same
   phase-11 suite, with "the adapter lost" as a first-class rendered outcome.
+* :mod:`~ronin_training.adapter.preflight` — the one command the free-training path
+  calls before a GPU-hour is spent: validate, split, assert no task leaked, print the
+  per-backend settings into the run's own log.
 
 **No number produced by this package exists unless a run produced it.** Rates are
 ``float | None`` and render as ``—`` when the denominator was zero. This environment
@@ -91,6 +94,8 @@ from .metrics import (
     recovery_rate,
     tool_syntax_validity,
 )
+from .preflight import Preflight, preflight
+from .preflight import render as render_preflight
 from .threeway import (
     ADAPTER,
     BASE,
@@ -151,6 +156,7 @@ __all__ = [
     "LoRASpec",
     "MetricsError",
     "Outcome",
+    "Preflight",
     "RecoveryScore",
     "Setback",
     "SuiteScore",
@@ -177,10 +183,12 @@ __all__ = [
     "load_config",
     "load_tool_schemas",
     "parse_config",
+    "preflight",
     "read_examples",
     "read_jsonl",
     "recovery_rate",
     "render_markdown",
+    "render_preflight",
     "run_three_way",
     "split_by_task",
     "suite_score_of",

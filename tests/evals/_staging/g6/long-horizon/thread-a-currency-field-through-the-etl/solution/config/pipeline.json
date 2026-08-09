@@ -1,0 +1,29 @@
+{
+  "input": {
+    "delimiter": ",",
+    "encoding": "utf-8"
+  },
+  "allowlists": {
+    "channels": [
+      "web",
+      "retail",
+      "partner"
+    ],
+    "currencies": [
+      "USD",
+      "EUR",
+      "GBP"
+    ],
+    "regions": [
+      "emea",
+      "apac",
+      "amer"
+    ]
+  },
+  "output": {
+    "path": "out/orders.jsonl"
+  },
+  "limits": {
+    "max_rejected_ratio": 0.25
+  }
+}

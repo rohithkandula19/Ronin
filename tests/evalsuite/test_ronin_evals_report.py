@@ -18,7 +18,14 @@ from ronin.evals.report import (
     scoreboard,
     scoreboard_markdown,
 )
-from ronin.evals.taxonomy import AgentOutcome, FailureClass, RunRecord, TaskResult, UsageRecord, judge
+from ronin.evals.taxonomy import (
+    AgentOutcome,
+    FailureClass,
+    RunRecord,
+    TaskResult,
+    UsageRecord,
+    judge,
+)
 
 
 def passing(task_id: str, category: str = "edit", **kwargs: object) -> TaskResult:
@@ -96,7 +103,13 @@ def test_a_distribution_over_nothing_is_empty_rather_than_zeros(
 
 
 def test_the_unclassified_count_is_reported_next_to_the_classes() -> None:
-    mystery = failing("mystery", tool_calls=[call("read")], edited_paths=["app.py"], files_expected=["app.py"], final_text="I fixed it.")
+    mystery = failing(
+        "mystery",
+        tool_calls=[call("read")],
+        edited_paths=["app.py"],
+        files_expected=["app.py"],
+        final_text="I fixed it.",
+    )
     known = failing(
         "known",
         tool_calls=[call("edit", ok=False, error="old_string appears 3 times in app.py")],
@@ -198,12 +211,14 @@ def test_captured_output_is_clamped_deterministically_with_a_marker() -> None:
     # Head and tail both survive, so a failure at the end of a log is still visible.
     assert row.verify_output.startswith("line 0")
     assert row.verify_output.rstrip().endswith("line 3999")
-    assert build_report([failing("a", verify_after=probe(1, huge))]).rows[0].verify_output == row.verify_output
+    again = build_report([failing("a", verify_after=probe(1, huge))])
+    assert again.rows[0].verify_output == row.verify_output
 
 
 def test_short_output_passes_through_byte_identical() -> None:
     text = "FAILED tests/test_a.py::test_x\n1 failed\n"
-    assert build_report([failing("a", verify_after=probe(1, text))]).rows[0].verify_output == text
+    report = build_report([failing("a", verify_after=probe(1, text))])
+    assert report.rows[0].verify_output == text
 
 
 # --------------------------------------------------------------------------- #
@@ -218,11 +233,8 @@ def test_markdown_prints_an_em_dash_where_a_number_does_not_exist() -> None:
 
 
 def test_markdown_quotes_the_evidence_for_every_failure() -> None:
-    markdown = report_markdown(
-        build_report(
-            [failing("a", tool_calls=[call("edit", ok=False, error="old_string appears 3 times in app.py")])]
-        )
-    )
+    ambiguous = call("edit", ok=False, error="old_string appears 3 times in app.py")
+    markdown = report_markdown(build_report([failing("a", tool_calls=[ambiguous])]))
     assert "## evidence" in markdown
     assert "edit_ambiguity" in markdown
     assert "old_string appears 3 times" in markdown

@@ -1,0 +1,22 @@
+id = "bug-from-trace/unboundlocal-header-on-empty"
+category = "bug-from-trace"
+prompt = """
+Traceback (most recent call last):
+  File "/workspace/bin/table", line 11, in <module>
+    main()
+  File "/workspace/tabular/cli.py", line 10, in main
+    print(render([]))
+          ^^^^^^^^^^
+  File "/workspace/tabular/render.py", line 14, in render
+    return "\\n".join([header] + lines)
+                      ^^^^^^
+UnboundLocalError: cannot access local variable 'header' where it is not associated with a value
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["tabular/render.py"]
+max_turns = 14
+timeout_seconds = 120
+tags = ["python", "unboundlocal"]
+regression_gate = false

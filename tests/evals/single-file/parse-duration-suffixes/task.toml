@@ -1,0 +1,17 @@
+id = "single-file/parse-duration-suffixes"
+category = "single-file"
+prompt = """
+`jobsched/duration.py` parses the timeout strings in our job specs. It handles a
+bare number of seconds and an `s` suffix, but `parse_duration("5m")` and
+`parse_duration("2h")` both raise. Add support for `m` (minutes) and `h`
+(hours), returning whole seconds as an int. A value with an unknown suffix
+must still raise `ValueError` with the offending text in the message.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["jobsched/duration.py"]
+max_turns = 10
+timeout_seconds = 90
+tags = ["python", "parsing"]
+regression_gate = false

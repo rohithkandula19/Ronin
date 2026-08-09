@@ -1,0 +1,13 @@
+id = "add-test/regress-the-lone-carriage-return"
+category = "add-test"
+prompt = """Issue #212: a document exported from an ancient editor used bare carriage returns as line endings (\r with no \n), and every line came out glued together in the diff view. The fix landed in docforge/textnorm.py, so the bug is gone — but nobody wrote a test, and I do not want it walking back in the next time somebody simplifies that module.
+
+Add a regression test to tests/test_textnorm.py. Cover the bytes path as well as the str one, since that is how the uploaded file is actually read."""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = ["tests/test_textnorm.py"]
+max_turns = 10
+timeout_seconds = 180
+tags = ["python", "pytest", "regression", "bytes"]
+regression_gate = false

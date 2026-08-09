@@ -163,6 +163,18 @@ def _as_str(value: object, key: str, path: Path, *, allow_empty: bool = False) -
     return value
 
 
+def _optional_str(data: Mapping[str, Any], key: str, path: Path) -> str | None:
+    """An optional string key, where an empty string means absent.
+
+    TOML cannot express null, so ``git_sha = ""`` is how a fixture says "this is not a
+    git task". Rejecting it would fail the whole suite over the format's limitation.
+    """
+    if key not in data:
+        return None
+    value = _as_str(data[key], key, path, allow_empty=True)
+    return value or None
+
+
 def _str_tuple(data: Mapping[str, Any], key: str, path: Path) -> tuple[str, ...]:
     raw = data.get(key, ())
     if isinstance(raw, str):
@@ -296,15 +308,12 @@ def load_task(path: str | Path) -> EvalTask:
     category = _as_str(_require(data, "category", toml_path), "category", toml_path)
     prompt = _as_str(_require(data, "prompt", toml_path), "prompt", toml_path)
 
-    fixture = data.get("fixture")
-    if fixture is not None:
-        fixture = _as_str(fixture, "fixture", toml_path)
-    git_sha = data.get("git_sha")
-    if git_sha is not None:
-        git_sha = _as_str(git_sha, "git_sha", toml_path)
-    git_url = data.get("git_url")
-    if git_url is not None:
-        git_url = _as_str(git_url, "git_url", toml_path)
+    # TOML has no null, so a fixture author writes `git_sha = ""` for "not a git task".
+    # Treating that as malformed would reject the whole suite over a spelling of
+    # absence the format forces on them.
+    fixture = _optional_str(data, "fixture", toml_path)
+    git_sha = _optional_str(data, "git_sha", toml_path)
+    git_url = _optional_str(data, "git_url", toml_path)
     if bool(git_sha) != bool(git_url):
         missing = "git_url" if git_sha else "git_sha"
         raise TaskError(

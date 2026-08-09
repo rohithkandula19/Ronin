@@ -1,0 +1,23 @@
+id = "add-feature/dry-run-mode"
+category = "add-feature"
+prompt = """
+`prune/plan.py`'s `prune(paths, remover)` deletes every path whose name ends
+in `.tmp` by calling `remover(path)`, and returns the list of removed paths.
+Add a keyword-only `dry_run: bool = False`:
+
+* When true, `remover` must not be called at all.
+* The return value is still the list of paths that *would* be removed, in the
+  same order.
+* When false, behaviour is unchanged.
+
+Also make `prune` return the paths sorted, so two runs over the same set
+produce the same list.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["prune/plan.py"]
+max_turns = 16
+timeout_seconds = 150
+tags = ["python", "safety"]
+regression_gate = false

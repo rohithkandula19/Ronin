@@ -1,0 +1,18 @@
+id = "single-file/env-parse-inline-comment"
+category = "single-file"
+prompt = """
+`conf/envfile.py` reads a `.env`-style file. It treats a `#` anywhere in a
+line as the start of a comment, so `TOKEN=abc#123` loses part of the value,
+and a quoted value containing `#` is mangled. Fix `parse_env` so a `#` only
+starts a comment when it is at the start of the line or preceded by
+whitespace, and so a value wrapped in single or double quotes is taken
+verbatim with the quotes removed and no comment stripping inside it.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["conf/envfile.py"]
+max_turns = 10
+timeout_seconds = 90
+tags = ["python", "parsing"]
+regression_gate = false

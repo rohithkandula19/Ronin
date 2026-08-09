@@ -1,0 +1,19 @@
+id = "add-feature/limit-option"
+category = "add-feature"
+prompt = """
+`bin/recent` prints every entry. Add a `--limit N` option:
+
+* `--limit N` prints only the first N entries, in the same order.
+* `--limit 0` prints nothing and exits 0.
+* A negative N, a non-integer N, or `--limit` with no value exits with status
+  2 and prints a message on stderr containing the word `limit`.
+* With no `--limit`, every entry is printed as before.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["recent/cli.py"]
+max_turns = 16
+timeout_seconds = 150
+tags = ["python", "cli"]
+regression_gate = true

@@ -1,0 +1,39 @@
+# Provider config for the CI failure fixer. Copy to .ronin/models.toml and edit.
+#
+# This file holds NO secrets and is meant to be committed: `api_key_env` names an
+# environment variable, and the workflow injects the value from a GitHub secret. A
+# config file with a key in it ends up in a git history forever.
+#
+# Prices are per million tokens and are YOURS to fill in from your provider's current
+# page. Ronin ships no price table: a hardcoded price goes stale silently and then every
+# cost figure in your job summary is wrong with no warning. The zeros below are not a
+# claim that these models are free — a model with no price set is recorded as *unpriced*
+# and flagged, which is the honest state until you fill them in.
+
+[roles]
+# The model that reads the log, forms the hypothesis and writes the fix.
+main = "fixer"
+# Subagents and history compaction are hard-wired to `fast`. Pointing it at your main
+# model is how one CI run costs ten times what it should for no benefit.
+fast = "fixer"
+
+[models.fixer]
+provider = "moonshot"
+model = "<the model id your account has>"
+api_key_env = "MOONSHOT_API_KEY"
+price_in = 0.0
+price_out = 0.0
+
+# An OpenAI-compatible alternative. `base_url` is filled in from the defaults table for
+# a known provider name; anything else must set it explicitly.
+# [models.fixer]
+# provider = "deepseek"
+# model = "<the model id>"
+# api_key_env = "DEEPSEEK_API_KEY"
+
+# A self-hosted runner with a local server needs no key at all, and no `http` extra
+# beyond what pip already installed.
+# [models.fixer]
+# provider = "vllm"                 # http://localhost:8000/v1
+# model = "<the served model name>"
+# native_tools = false              # most local builds have no tool-calling head

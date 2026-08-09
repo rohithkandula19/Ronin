@@ -83,7 +83,11 @@ def test_a_rendered_target_parses_back_to_exactly_the_recorded_calls():
 def test_the_target_text_is_byte_identical_to_the_canonical_dialect_renderer():
     step = Step(
         index=0,
-        calls=(RecordedCall(id="c0", name="write_file", arguments={"path": "a.py", "content": "x"}),),
+        calls=(
+            RecordedCall(
+                id="c0", name="write_file", arguments={"path": "a.py", "content": "x"}
+            ),
+        ),
     )
     assert assistant_target_text(step) == ronin_dialect.render_tool_call_message(
         [{"name": "write_file", "arguments": {"path": "a.py", "content": "x"}}]
@@ -93,7 +97,9 @@ def test_the_target_text_is_byte_identical_to_the_canonical_dialect_renderer():
 def test_tool_call_arguments_are_json_objects_not_encoded_strings():
     """Divergence D2: a string-typed arguments value contradicts the instruction the
     chat template gives the model at inference."""
-    step = Step(index=0, calls=(RecordedCall(id="c0", name="read_file", arguments={"path": "a.py"}),))
+    step = Step(
+        index=0, calls=(RecordedCall(id="c0", name="read_file", arguments={"path": "a.py"}),)
+    )
     message = assistant_message(step)
     arguments = message["tool_calls"][0]["function"]["arguments"]
     assert isinstance(arguments, dict)
@@ -137,7 +143,9 @@ def test_a_failed_call_shows_the_model_the_error_it_actually_saw():
         index=0,
         calls=(RecordedCall(id="c0", name="read_file", arguments={"path": "gone.py"}),),
         results=(
-            RecordedResult(call_id="c0", name="read_file", ok=False, error="gone.py does not exist"),
+            RecordedResult(
+                call_id="c0", name="read_file", ok=False, error="gone.py does not exist"
+            ),
         ),
     )
     assert tool_messages(step)[0]["content"] == "gone.py does not exist"

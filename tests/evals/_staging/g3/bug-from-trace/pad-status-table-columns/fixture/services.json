@@ -1,0 +1,5 @@
+[
+  {"service": "checkout-api", "region": "us-east-1", "state": "healthy"},
+  {"service": "ledger-worker", "region": "eu-west-1", "state": "degraded"},
+  {"service": "mailer", "region": "us-east-1", "state": "healthy"}
+]

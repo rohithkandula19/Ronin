@@ -192,7 +192,8 @@ def test_a_new_named_failure_alongside_the_original_one_broke_tests() -> None:
 
 def test_the_same_failure_before_and_after_is_not_a_regression() -> None:
     same = "FAILED tests/test_a.py::test_target"
-    assert classify_broke_tests(record(verify_before=probe(1, same), verify_after=probe(1, same))) is None
+    unchanged = record(verify_before=probe(1, same), verify_after=probe(1, same))
+    assert classify_broke_tests(unchanged) is None
 
 
 def test_a_task_that_now_passes_never_broke_tests() -> None:
@@ -210,7 +211,10 @@ def test_broke_tests_needs_a_baseline() -> None:
 @pytest.mark.parametrize(
     ("output", "expected"),
     [
-        ("FAILED tests/t.py::test_a\nFAILED tests/t.py::test_b", {"tests/t.py::test_a", "tests/t.py::test_b"}),
+        (
+            "FAILED tests/t.py::test_a\nFAILED tests/t.py::test_b",
+            {"tests/t.py::test_a", "tests/t.py::test_b"},
+        ),
         ("ERROR tests/t.py::test_c", {"tests/t.py::test_c"}),
         ("not ok 3 - the widget works", {"the widget works"}),
         ("--- FAIL: TestThing (0.00s)", {"TestThing"}),

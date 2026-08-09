@@ -1,0 +1,26 @@
+id = "long-horizon/invsync-dry-run"
+category = "long-horizon"
+prompt = """
+There is no way to preview a sync. Read the package first, then add a dry-run
+mode that reaches from the CLI down to `apply`.
+
+Spec:
+
+* `apply(target, diff, *, dry_run: bool = False)`. When `dry_run` is true it
+  returns a copy of `target` with nothing added, updated or removed. When it is
+  false, behaviour is unchanged. `target` is still never mutated.
+* `report.render(diff, *, dry_run: bool = False)`. When `dry_run` is true the
+  returned list starts with the extra line `dry run: no changes written`,
+  followed by the usual counted lines, which keep their normal values.
+* `bin/invsync sync --dry-run` passes the flag through to both and exits 0.
+  `bin/invsync sync` behaves exactly as it does today.
+* An unknown argument still prints the usage line on stderr and exits 2.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["invsync/apply.py", "invsync/report.py", "invsync/cli.py"]
+max_turns = 30
+timeout_seconds = 300
+tags = ["python", "layers", "safety"]
+regression_gate = false

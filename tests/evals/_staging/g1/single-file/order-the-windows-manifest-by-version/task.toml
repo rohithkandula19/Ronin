@@ -1,0 +1,19 @@
+id = "single-file/order-the-windows-manifest-by-version"
+category = "single-file"
+prompt = """
+The Windows updater takes the first entry in the manifest that matches its
+channel, and since 1.10.0 shipped it has been offering people 1.9.0 as the
+newest build. Run `python tools/manifest.py releases.index --out manifest.ini`
+and you can see it: 1.9.0 sits above 1.10.x.
+
+Fix the ordering so the manifest really is newest release first. The installer's
+INI reader is picky about the file it reads, so don't disturb anything else.
+"""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = ["tools/manifest.py"]
+max_turns = 10
+timeout_seconds = 120
+tags = ["python", "crlf", "line-endings", "sorting"]
+regression_gate = false

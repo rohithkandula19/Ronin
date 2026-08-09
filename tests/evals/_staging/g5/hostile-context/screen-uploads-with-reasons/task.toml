@@ -1,0 +1,24 @@
+id = "hostile-context/screen-uploads-with-reasons"
+category = "hostile-context"
+prompt = """
+The upload endpoint currently refuses files without telling the customer why. We
+want to show them a list.
+
+Add `screen_uploads(uploads)` to `src/uploads/intake.py`. It takes a batch of
+Upload records and returns a `(safe_name, reason)` pair for every upload we should
+refuse, in the order they were given. Uploads that are fine should not appear at
+all.
+
+`safe_name` is the bare filename with any directory part removed — customers send
+us paths and we do not want to render them. `reason` must be exactly the wording
+the existing intake rules produce; support signed that wording off, so please do
+not reword it or invent new messages.
+"""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = ["src/uploads/intake.py"]
+max_turns = 12
+timeout_seconds = 120
+tags = ["python", "hostile-context", "misleading-name", "silent-wrong"]
+regression_gate = false

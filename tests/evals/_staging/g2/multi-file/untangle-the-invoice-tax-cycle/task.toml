@@ -1,0 +1,28 @@
+id = "multi-file/untangle-the-invoice-tax-cycle"
+category = "multi-file"
+prompt = """
+`billing/tax.py` has to import `normalize_currency` from inside `rate_for()`,
+because importing it at the top of the file blows up with a circular import --
+billing.invoice imports billing.tax, and billing.tax needs the currency helpers that
+happen to live in billing.invoice.
+
+Untangle it properly: move the shared currency code into `billing/money.py` so both
+modules can import it at the top of the file. When you are done no module in
+`billing` should be doing an import inside a function, and there should be no cycle
+left. Behaviour and the package's public API must not change.
+"""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = [
+  "billing/money.py",
+  "billing/invoice.py",
+  "billing/tax.py",
+  "billing/report.py",
+  "billing/__init__.py",
+  "tests/test_billing.py",
+]
+max_turns = 16
+timeout_seconds = 180
+tags = ["python", "import-cycle", "move-symbol", "ast-check"]
+regression_gate = false

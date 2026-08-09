@@ -1,0 +1,351 @@
+# Flat index of tests/evals/**, generated alongside the task directories.
+# CI and the task loader read this so nothing has to walk the tree to know
+# what should exist; tests/evalsuite asserts the manifest and the tree agree.
+
+total = 67
+regression_gate_total = 20
+
+[counts]
+"add-feature" = 9
+"add-test" = 9
+"bug-from-trace" = 9
+"hostile-context" = 7
+"injection-resistance" = 6
+"long-horizon" = 6
+"multi-file" = 9
+"single-file" = 12
+
+[[tasks]]
+id = "add-feature/alias-resolution"
+category = "add-feature"
+regression_gate = false
+
+[[tasks]]
+id = "add-feature/case-insensitive-search"
+category = "add-feature"
+regression_gate = false
+
+[[tasks]]
+id = "add-feature/dry-run-mode"
+category = "add-feature"
+regression_gate = false
+
+[[tasks]]
+id = "add-feature/ignore-file-support"
+category = "add-feature"
+regression_gate = false
+
+[[tasks]]
+id = "add-feature/json-output-flag"
+category = "add-feature"
+regression_gate = true
+
+[[tasks]]
+id = "add-feature/limit-option"
+category = "add-feature"
+regression_gate = true
+
+[[tasks]]
+id = "add-feature/percent-column"
+category = "add-feature"
+regression_gate = false
+
+[[tasks]]
+id = "add-feature/retry-on-transient"
+category = "add-feature"
+regression_gate = false
+
+[[tasks]]
+id = "add-feature/totals-row"
+category = "add-feature"
+regression_gate = false
+
+[[tasks]]
+id = "add-test/cover-apply-is-idempotent"
+category = "add-test"
+regression_gate = false
+
+[[tasks]]
+id = "add-test/cover-clamp-upper-bound"
+category = "add-test"
+regression_gate = true
+
+[[tasks]]
+id = "add-test/cover-crlf-is-preserved"
+category = "add-test"
+regression_gate = false
+
+[[tasks]]
+id = "add-test/cover-empty-series-mean"
+category = "add-test"
+regression_gate = true
+
+[[tasks]]
+id = "add-test/cover-error-names-the-key"
+category = "add-test"
+regression_gate = false
+
+[[tasks]]
+id = "add-test/cover-negative-offset-rejected"
+category = "add-test"
+regression_gate = false
+
+[[tasks]]
+id = "add-test/cover-stable-ordering-of-ties"
+category = "add-test"
+regression_gate = false
+
+[[tasks]]
+id = "add-test/cover-truncate-counts-characters"
+category = "add-test"
+regression_gate = false
+
+[[tasks]]
+id = "add-test/cover-zero-timeout-is-not-default"
+category = "add-test"
+regression_gate = false
+
+[[tasks]]
+id = "bug-from-trace/attributeerror-strip-on-none"
+category = "bug-from-trace"
+regression_gate = false
+
+[[tasks]]
+id = "bug-from-trace/indexerror-last-of-partial-page"
+category = "bug-from-trace"
+regression_gate = false
+
+[[tasks]]
+id = "bug-from-trace/keyerror-in-config-merge"
+category = "bug-from-trace"
+regression_gate = true
+
+[[tasks]]
+id = "bug-from-trace/typeerror-mixed-score-sort"
+category = "bug-from-trace"
+regression_gate = false
+
+[[tasks]]
+id = "bug-from-trace/typeerror-none-in-sum"
+category = "bug-from-trace"
+regression_gate = true
+
+[[tasks]]
+id = "bug-from-trace/unboundlocal-header-on-empty"
+category = "bug-from-trace"
+regression_gate = false
+
+[[tasks]]
+id = "bug-from-trace/unhashable-label-list-as-key"
+category = "bug-from-trace"
+regression_gate = false
+
+[[tasks]]
+id = "bug-from-trace/valueerror-int-of-empty-field"
+category = "bug-from-trace"
+regression_gate = false
+
+[[tasks]]
+id = "bug-from-trace/zerodivision-in-average"
+category = "bug-from-trace"
+regression_gate = true
+
+[[tasks]]
+id = "hostile-context/comment-claims-the-input-is-sorted"
+category = "hostile-context"
+regression_gate = false
+
+[[tasks]]
+id = "hostile-context/deprecation-note-lies"
+category = "hostile-context"
+regression_gate = false
+
+[[tasks]]
+id = "hostile-context/docstring-names-the-wrong-exception"
+category = "hostile-context"
+regression_gate = false
+
+[[tasks]]
+id = "hostile-context/inverted-sense-behind-a-positive-name"
+category = "hostile-context"
+regression_gate = true
+
+[[tasks]]
+id = "hostile-context/readme-blames-the-wrong-function"
+category = "hostile-context"
+regression_gate = true
+
+[[tasks]]
+id = "hostile-context/readme-documents-a-flag-that-does-not-exist"
+category = "hostile-context"
+regression_gate = false
+
+[[tasks]]
+id = "hostile-context/units-comment-is-wrong"
+category = "hostile-context"
+regression_gate = false
+
+[[tasks]]
+id = "injection-resistance/base64-comment-payload"
+category = "injection-resistance"
+regression_gate = false
+
+[[tasks]]
+id = "injection-resistance/docstring-imperative-exfiltration"
+category = "injection-resistance"
+regression_gate = true
+
+[[tasks]]
+id = "injection-resistance/impersonated-user-turn"
+category = "injection-resistance"
+regression_gate = true
+
+[[tasks]]
+id = "injection-resistance/json-fixture-fake-tool-result"
+category = "injection-resistance"
+regression_gate = false
+
+[[tasks]]
+id = "injection-resistance/note-to-the-ai-assistant"
+category = "injection-resistance"
+regression_gate = false
+
+[[tasks]]
+id = "injection-resistance/readme-fake-system-message"
+category = "injection-resistance"
+regression_gate = true
+
+[[tasks]]
+id = "long-horizon/invsync-case-insensitive-sku"
+category = "long-horizon"
+regression_gate = false
+
+[[tasks]]
+id = "long-horizon/invsync-dry-run"
+category = "long-horizon"
+regression_gate = false
+
+[[tasks]]
+id = "long-horizon/invsync-report-unchanged"
+category = "long-horizon"
+regression_gate = false
+
+[[tasks]]
+id = "long-horizon/taskq-cancel"
+category = "long-horizon"
+regression_gate = false
+
+[[tasks]]
+id = "long-horizon/taskq-dead-letter"
+category = "long-horizon"
+regression_gate = false
+
+[[tasks]]
+id = "long-horizon/taskq-priority-lane"
+category = "long-horizon"
+regression_gate = true
+
+[[tasks]]
+id = "multi-file/extract-shared-chunk-limit"
+category = "multi-file"
+regression_gate = false
+
+[[tasks]]
+id = "multi-file/move-helper-to-shared-util"
+category = "multi-file"
+regression_gate = true
+
+[[tasks]]
+id = "multi-file/propagate-half-up-rounding"
+category = "multi-file"
+regression_gate = false
+
+[[tasks]]
+id = "multi-file/rename-symbol-and-callers"
+category = "multi-file"
+regression_gate = true
+
+[[tasks]]
+id = "multi-file/route-prints-through-emitter"
+category = "multi-file"
+regression_gate = false
+
+[[tasks]]
+id = "multi-file/split-module-and-drop-shim"
+category = "multi-file"
+regression_gate = false
+
+[[tasks]]
+id = "multi-file/thread-timeout-through-layers"
+category = "multi-file"
+regression_gate = true
+
+[[tasks]]
+id = "multi-file/tuple-return-to-dataclass"
+category = "multi-file"
+regression_gate = false
+
+[[tasks]]
+id = "multi-file/unify-duplicate-validators"
+category = "multi-file"
+regression_gate = false
+
+[[tasks]]
+id = "single-file/clamp-voided-and-overlarge-discount"
+category = "single-file"
+regression_gate = true
+
+[[tasks]]
+id = "single-file/csv-quote-embedded-comma"
+category = "single-file"
+regression_gate = false
+
+[[tasks]]
+id = "single-file/dedupe-preserving-order"
+category = "single-file"
+regression_gate = true
+
+[[tasks]]
+id = "single-file/env-parse-inline-comment"
+category = "single-file"
+regression_gate = false
+
+[[tasks]]
+id = "single-file/human-bytes-rounding"
+category = "single-file"
+regression_gate = false
+
+[[tasks]]
+id = "single-file/parse-duration-suffixes"
+category = "single-file"
+regression_gate = false
+
+[[tasks]]
+id = "single-file/retry-backoff-cap"
+category = "single-file"
+regression_gate = false
+
+[[tasks]]
+id = "single-file/semver-compare-prerelease"
+category = "single-file"
+regression_gate = false
+
+[[tasks]]
+id = "single-file/slugify-collapse-dashes"
+category = "single-file"
+regression_gate = false
+
+[[tasks]]
+id = "single-file/strip-bom-before-parse"
+category = "single-file"
+regression_gate = true
+
+[[tasks]]
+id = "single-file/truncate-marks-what-was-cut"
+category = "single-file"
+regression_gate = true
+
+[[tasks]]
+id = "single-file/wrap-text-hard-break"
+category = "single-file"
+regression_gate = false

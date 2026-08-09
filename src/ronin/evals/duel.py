@@ -1,59 +1,67 @@
 """``ronin duel`` — the same suite task, two models, the same seed, side by side.
 
-A single number per model tells you which model scored higher. It does not tell you
-*why*, and "why" is the only thing worth knowing before a fine-tune: if model A and
-model B both fail a task for the **same** taxonomy reason, the harness is wrong; if
-they fail it for **different** reasons, the models are. That column —
-:attr:`Scoreboard.both_failed_differently` — is what this module exists to produce.
-Everything else here is in service of making it trustworthy.
+A pass rate per model tells you which model scored higher. It does not tell you
+*why*, and "why" is the only thing worth knowing before a fine-tune: if A and B both
+fail a task for the **same** taxonomy reason, suspect the harness; if they fail it for
+**different** reasons, suspect the models. That column —
+:attr:`DuelScoreboard.both_failed_differently` — is what this module exists to
+produce. Everything else here serves making it trustworthy.
 
 **This is not the v1 duel, and deliberately not built on it.**
 ``packages/cli/src/ronin_cli/duel.py`` is an *adversarial diff review*: one model is
 handed the other's diff and asked to hunt for blockers, and its ``DuelVerdict``
 (``duelist``, ``blockers``, ``passed``, ``raw``) is a *model's opinion* parsed out of
-prose. This module is a *paired A/B run over the eval suite*: both models attempt the
-same task from the same start, and the judge is the suite's own gate — tests and
-files, not an opinion. Nothing in ``DuelVerdict`` survives the translation: there is
-no diff, no reviewer, no blocker list, and the outcome is per task rather than per
-change. Reusing it would mean either pretending a task failure is a "blocker" or
-importing ``ronin_cli`` (with its provider and ``ronin_agent_patterns`` dependencies)
-into a package that has none. They are two different features that share a name; see
-the report for the CLI naming this implies.
+prose with a regex. This module is a *paired A/B run over the eval suite*: both
+models attempt the same task from the same start, and the judge is the suite's own
+gate — ``verify.sh`` and the taxonomy, not an opinion. Nothing in ``DuelVerdict``
+survives the translation: there is no diff under review, no reviewer, no blocker list,
+and the outcome is per task rather than per change. Reusing it would mean either
+pretending a task failure is a "blocker" or importing ``ronin_cli`` — with its
+provider and ``ronin_agent_patterns`` dependencies — into a package that has none.
+They are two different features that happen to share a name.
 
-Three design points that carry the module:
+**The comparison table is not rewritten here.** :func:`ronin.evals.report.scoreboard`
+is already a pure N-run comparison over :class:`~ronin.evals.report.RunReport` values,
+and it already names regressions, fixes and the tasks a run is missing. A duel is one
+of its callers. This module adds only what a two-model comparison needs and that
+function cannot express: the seed, the transcript diff, and the both-failed-differently
+split. :func:`render_duel_scoreboard` delegates the shared table to
+:func:`~ronin.evals.report.scoreboard_markdown`.
 
-**The seed is explicit, and it is threaded into the model factory, not the runner.**
-:data:`DuelistFactory` takes ``(duelist, seed)`` and returns a
-:data:`RunAgent` with that seed baked in, which is the only place a seed can
-actually reach sampling. Per task, both sides get the *same* derived seed from
-:func:`task_seed` — derived with blake2b rather than :func:`hash`, because
-``hash(str)`` is salted per process and a seed that changes when you restart Python
-is not a seed.
+Three design points carry the rest:
+
+**The seed is explicit, and it reaches the model factory.** :data:`DuelistFactory` is
+``(duelist, seed) -> AgentFactory``, and the factory is where a model client is built,
+which is the only place a seed can actually influence sampling. Both sides get the
+same per-task seed from :func:`task_seed` — derived with blake2b rather than
+:func:`hash`, because ``hash(str)`` is salted per process and a seed that changes when
+you restart Python is not a seed.
 
 **Transcripts are compared through a canonical line form, not raw events.**
 :func:`transcript_lines` renumbers tool-call ids to ``call#1``, ``call#2`` … Raw
-``tool_use_id`` values are provider-generated and unique per call, so a raw
-comparison finds a divergence on the first tool call of every run — a diff that is
-100% noise. It also coalesces ``TextDelta`` runs into one line and honours
-``StreamReset`` the way ``ronin.persistence.export`` does, because the unit a human
-compares is "the model said X", not "the model emitted the token 'th'".
+``tool_use_id`` values are provider-generated and unique per call, so a raw comparison
+diverges on the first tool call of every run — a diff that is 100% noise. It also
+coalesces ``TextDelta`` runs into one line and honours ``StreamReset`` the way
+``ronin.persistence.export`` does, because the unit a human compares is "the model
+said X", not "the model emitted the token 'th'".
 
 **The scoreboard excludes wall-clock time.** Turns, tokens and cost are properties of
 the run and reproduce with the seed; wall time is a property of the machine and does
 not. Putting it in the scoreboard would make "same seed → byte-identical scoreboard"
-false on real hardware, which would quietly turn the determinism check into a flake.
-Wall time is in :func:`render_duel_markdown` instead, where it belongs.
+false on real hardware, quietly turning the determinism check into a flake. Wall time
+lives in :func:`render_duel_markdown`, which is for reading rather than comparing.
 """
 from __future__ import annotations
 
 import difflib
 import hashlib
 import json
-from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
+import time
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
-from typing import Final, Protocol
+from typing import Final
 
 from ..core.types import (
     ApprovalRequest,
@@ -65,6 +73,13 @@ from ..core.types import (
     TurnEnd,
     TurnStart,
 )
+from ..verify.runner import CommandRunner, run_command
+from .adapters import AgentFactory, OpenedAgent, RunAgent, usage_from_budget
+from .adapters import outcome_from_events as _outcome_from_events
+from .report import RunReport, Scoreboard, TaskRow, scoreboard, scoreboard_markdown
+from .runner import RunnerConfig, run_suite
+from .task import EvalTask
+from .taxonomy import AgentOutcome, FailureClass, UsageRecord
 
 #: How many aligned diff lines a transcript diff keeps. Beyond this the window is
 #: centred on the first divergence and both ends are marked — see
@@ -75,100 +90,27 @@ DEFAULT_MAX_DIFF_LINES: Final[int] = 200
 DIVERGENCE_CONTEXT: Final[int] = 3
 
 #: Per-line clamp for a canonical transcript line. A tool result can be 30k
-#: characters; a diff of two of them is unreadable and tells you nothing the first
-#: 160 characters did not.
+#: characters; a diff of two of them is unreadable and says nothing the first 160
+#: characters did not.
 MAX_LINE_CHARS: Final[int] = 160
+
+#: The one status string that counts as a win. Mirrors ``ronin.evals.report._status``:
+#: a pass is a green ``verify.sh`` and nothing else.
+PASS_STATUS: Final[str] = "pass"
+
+#: A skipped task is neither side's failure, so it is a tie and never appears in the
+#: both-failed columns. Counting a skip as a shared failure would put the harness in
+#: the dock for a task that never ran.
+SKIP_STATUS: Final[str] = "skip"
 
 _CLIP_MARKER: Final[str] = "…(+{cut} chars)"
 _HEAD_MARKER: Final[str] = "... {count} earlier diff line(s) omitted (limit={limit})"
 _TAIL_MARKER: Final[str] = "... {count} later diff line(s) omitted (limit={limit})"
 
-#: Marks a canonical line as assistant prose, so :class:`StreamReset` can retract it
-#: while leaving tool calls — which already had their effect — in place.
+#: Marks a canonical line as assistant prose, so a :class:`StreamReset` can retract it
+#: while leaving tool lines — which already had their effect — in place.
 _TEXT_KIND: Final[str] = "text"
 _EVENT_KIND: Final[str] = "event"
-
-
-class Side(StrEnum):
-    """Which corner of the duel. Used to key working directories apart.
-
-    A duel with the same model on both sides is legal and useful — it is how you
-    check that "same seed" means anything at all — so the two sides cannot be
-    distinguished by their model name and need an identity of their own.
-    """
-
-    A = "a"
-    B = "b"
-
-
-# --------------------------------------------------------------------------- #
-# The seams onto the eval suite
-# --------------------------------------------------------------------------- #
-
-
-class TaskLike(Protocol):
-    """The part of ``ronin.evals.task.EvalTask`` a duel needs.
-
-    Read-only properties rather than attributes, so a frozen dataclass satisfies it
-    (mypy treats a frozen field as read-only and rejects it against a settable
-    protocol member). Deliberately two members and not eight: every name guessed
-    here is a name that has to match agent B's ``EvalTask`` exactly, and the duel
-    genuinely only needs an identity and something to run.
-    """
-
-    @property
-    def id(self) -> str: ...
-
-    @property
-    def prompt(self) -> str: ...
-
-
-class RecordLike(Protocol):
-    """The part of ``ronin.evals.runner.RunRecord`` a duel reads.
-
-    These six names are the whole contract between this module and the runner. If the
-    runner spells one of them differently, rename it *here* — this protocol is the
-    single place the two meet, and nothing downstream of :class:`SideOutcome` knows
-    the runner exists.
-
-    ``taxonomy`` is typed ``Sequence[str]`` so a ``StrEnum`` classification tuple
-    satisfies it without this module importing the taxonomy.
-    """
-
-    @property
-    def passed(self) -> bool: ...
-
-    @property
-    def turns(self) -> int: ...
-
-    @property
-    def tokens(self) -> int: ...
-
-    @property
-    def cost_usd(self) -> float: ...
-
-    @property
-    def wall_seconds(self) -> float: ...
-
-    @property
-    def taxonomy(self) -> Sequence[str]: ...
-
-    @property
-    def events(self) -> Sequence[Event]: ...
-
-
-#: One side's runner: attempt a task in a directory and report what happened. Shaped
-#: to match the eval runner's own ``RunAgent`` — two positional arguments, no seed —
-#: because the seed belongs to the factory that built it, not to each call.
-RunAgent = Callable[[TaskLike, Path], Awaitable[RecordLike]]
-
-#: ``(duelist, seed) -> RunAgent``. The only place a seed can reach sampling is the
-#: thing that constructs the model client, so that is where it is threaded.
-DuelistFactory = Callable[[str, int], RunAgent]
-
-#: Where one side runs one task. Two sides must never share a directory: A's edits
-#: would be B's starting state, and the duel would measure order rather than models.
-WorkdirFactory = Callable[[TaskLike, Side], Path]
 
 
 def task_seed(seed: int, task_id: str) -> int:
@@ -207,14 +149,14 @@ def transcript_lines(
 ) -> tuple[str, ...]:
     """One canonical line per meaningful thing that happened. Pure.
 
-    Tool-call ids are renumbered ``call#1``, ``call#2`` … in first-seen order: the
-    real ids are provider-generated and unique to a run, so comparing them finds a
+    Tool-call ids are renumbered ``call#1``, ``call#2`` … in first-seen order: the real
+    ids are provider-generated and unique to a run, so comparing them finds a
     difference on the first tool call every time and the diff becomes noise.
 
     ``TextDelta`` runs are coalesced into a single line, and a :class:`StreamReset`
     retracts the prose of the current scope while leaving the tool lines alone —
-    matching ``StreamReset``'s documented rule, and for its stated reason: a tool
-    that already ran cannot be un-run by an event.
+    matching ``StreamReset``'s documented rule, and for its stated reason: a tool that
+    already ran cannot be un-run by an event.
     """
     lines: list[tuple[str, str]] = []
     buffer: list[str] = []
@@ -248,10 +190,12 @@ def transcript_lines(
             continue
         if isinstance(event, StreamReset):
             buffer = []
-            kept = [*lines[:anchor], *(pair for pair in lines[anchor:] if pair[0] != _TEXT_KIND)]
-            lines[:] = kept
-            reason = event.reason or "unstated"
-            lines.append((_EVENT_KIND, f"reset ({_clip(reason, max_line_chars)})"))
+            lines[:] = [
+                *lines[:anchor],
+                *(pair for pair in lines[anchor:] if pair[0] != _TEXT_KIND),
+            ]
+            reason = _clip(event.reason or "unstated", max_line_chars)
+            lines.append((_EVENT_KIND, f"reset ({reason})"))
             anchor = len(lines)
             continue
         if isinstance(event, TurnStart):
@@ -294,7 +238,7 @@ def transcript_lines(
 
 @dataclass(frozen=True, slots=True)
 class Divergence:
-    """The first place the two transcripts stop agreeing.
+    """The first place two transcripts stop agreeing.
 
     ``a_line`` / ``b_line`` are empty when that side had nothing at this point — an
     insertion or a deletion rather than a substitution.
@@ -314,19 +258,17 @@ class Divergence:
             return f"at line {self.position}, B did something A never did: {self.b_line}"
         if self.kind == "delete":
             return f"at line {self.position}, A did something B never did: {self.a_line}"
-        return (
-            f"at line {self.position}, A: {self.a_line} — but B: {self.b_line}"
-        )
+        return f"at line {self.position}, A: {self.a_line} — but B: {self.b_line}"
 
 
 @dataclass(frozen=True, slots=True)
 class TranscriptDiff:
     """Two canonical transcripts, aligned, with the first divergence called out.
 
-    ``lines`` are prefixed ``"  "`` (both), ``"A "`` (A only) or ``"B "`` (B only).
-    The truncation markers are inside ``lines`` so the block explains itself when
-    pasted somewhere without this class; ``omitted_head`` / ``omitted_tail`` are the
-    same facts as numbers, for tests.
+    ``lines`` are prefixed ``"  "`` (both), ``"A "`` (A only) or ``"B "`` (B only). The
+    truncation markers are inside ``lines`` so the block explains itself when pasted
+    somewhere without this class; ``omitted_head`` / ``omitted_tail`` are the same
+    facts as numbers, for tests.
     """
 
     lines: tuple[str, ...] = ()
@@ -352,8 +294,8 @@ def diff_transcripts(
     Truncation keeps a window *centred on the first divergence* rather than the head
     of the diff: the head of two runs of the same task is almost always identical, so
     head-truncation reliably throws away the only interesting part. Both ends are
-    marked with what they cut. :attr:`TranscriptDiff.first_divergence` is a field, not
-    a line, so it survives truncation regardless.
+    marked with what they cut, and :attr:`TranscriptDiff.first_divergence` is a field
+    rather than a line, so it survives truncation regardless.
     """
     left = transcript_lines(a_events)
     right = transcript_lines(b_events)
@@ -404,47 +346,133 @@ def _window(rendered: list[str], focus: int, limit: int) -> tuple[list[str], int
 
 
 # --------------------------------------------------------------------------- #
-# Outcomes, verdicts, scoreboard
+# Capturing the transcripts the eval runner does not keep
 # --------------------------------------------------------------------------- #
 
 
-@dataclass(frozen=True, slots=True)
-class SideOutcome:
-    """One side's result for one task, normalized off the runner's record.
+@dataclass(slots=True)
+class TranscriptRecorder:
+    """Per-task event streams, collected during a side's run.
 
-    The event stream is *not* here. It is consumed by :func:`diff_transcripts` and
-    dropped, so a duel result is a comparison rather than two transcripts — which is
-    what makes a scoreboard byte-comparable at all.
+    Mutable because accumulating is the point: the adapter fills it in as tasks
+    complete and the duel reads it afterwards. It exists because
+    ``ronin.evals.adapters.v2_adapter`` deliberately *folds* the event stream into an
+    :class:`~ronin.evals.taxonomy.AgentOutcome` and discards it — which is right for
+    the taxonomy and wrong for a duel, whose whole added value is showing a human
+    where the two runs parted company.
+
+    Scoped to one side of one duel and dropped with it, so this is not a transcript
+    store and nothing persists it.
     """
 
-    duelist: str
-    passed: bool = False
-    turns: int = 0
-    tokens: int = 0
-    cost_usd: float = 0.0
-    wall_seconds: float = 0.0
-    taxonomy: tuple[str, ...] = ()
+    streams: dict[str, tuple[Event, ...]] = field(default_factory=dict)
 
-    @classmethod
-    def from_record(cls, record: RecordLike, *, duelist: str) -> SideOutcome:
-        """Normalize a runner record. Taxonomy classes are sorted and de-duplicated
-        so two runs that classified the same failure in a different order compare
-        equal — order there is an artefact of the classifier, not a finding."""
-        return cls(
-            duelist=duelist,
-            passed=record.passed,
-            turns=record.turns,
-            tokens=record.tokens,
-            cost_usd=record.cost_usd,
-            wall_seconds=record.wall_seconds,
-            taxonomy=tuple(sorted({str(name) for name in record.taxonomy})),
+    def record(self, task_id: str, events: Sequence[Event]) -> None:
+        self.streams[task_id] = tuple(events)
+
+    def stream_for(self, task_id: str) -> tuple[Event, ...]:
+        """The stream for ``task_id``, or empty — a task that never ran has no events."""
+        return self.streams.get(task_id, ())
+
+
+def recording_v2_adapter(
+    open_agent: AgentFactory,
+    recorder: TranscriptRecorder,
+    *,
+    usage_for: Callable[[EvalTask, OpenedAgent], UsageRecord] | None = None,
+) -> RunAgent:
+    """``ronin.evals.adapters.v2_adapter``, but the event stream is kept as well as folded.
+
+    Deliberately a near-copy rather than a wrapper: the events exist only inside
+    ``v2_adapter``'s body, so there is nothing for a wrapper to intercept. The two
+    must not drift, which is why the folding itself is delegated to
+    ``adapters.outcome_from_events`` and ``adapters.usage_from_budget`` — the only
+    behaviour added here is the :meth:`TranscriptRecorder.record` call.
+
+    A task whose agent raised records an empty stream rather than no entry, so the
+    diff says "this side did nothing" instead of silently comparing against absence.
+    """
+
+    async def run(task: EvalTask, workspace: Path) -> AgentOutcome:
+        opened = await open_agent(task, workspace)
+        try:
+            result = await opened.agent.run(task.prompt, max_iterations=task.max_turns)
+        except Exception as exc:
+            # An adapter failure is a result, not an exception: one task that cannot
+            # open a model must not end the duel over the others.
+            recorder.record(task.id, ())
+            return AgentOutcome(error=f"{type(exc).__name__}: {exc}")
+        finally:
+            await opened.agent.aclose()
+
+        recorder.record(task.id, result.events)
+        usage = (
+            usage_for(task, opened)
+            if usage_for is not None
+            else usage_from_budget(
+                opened.agent.state.budget,
+                requests=sum(1 for event in result.events if isinstance(event, TurnStart)),
+            )
         )
+        return _outcome_from_events(
+            result.events,
+            workspace=workspace,
+            final_text=result.text,
+            registered_tools=opened.registered_tools,
+            usage=usage,
+        )
+
+    return run
+
+
+#: ``(duelist, seed) -> AgentFactory``. The factory is where a model client is built,
+#: which is the only place a seed can influence sampling — so that is where it goes.
+#: A duelist that has no event stream (the v1 shell-out adapter) cannot be duelled:
+#: there would be no transcript to diff, and a duel without that is just two runs.
+DuelistFactory = Callable[[str, int], AgentFactory]
+
+#: Runs one side: tasks, the agent to drive them with, and the label the report is
+#: headed with. Injected so a test drives a whole duel without a runner config.
+SuiteRunner = Callable[[Sequence[EvalTask], RunAgent, str], Awaitable[RunReport]]
+
+
+def suite_runner(
+    *,
+    config: RunnerConfig | None = None,
+    command_runner: CommandRunner = run_command,
+    clock: Callable[[], float] = time.monotonic,
+) -> SuiteRunner:
+    """A :data:`SuiteRunner` over :func:`ronin.evals.runner.run_suite`.
+
+    The duelist's name is written into both ``label`` and ``model`` on the config, so
+    the scoreboard column headings and the report's model field agree — a duelist *is*
+    a model spec, and two names for it would eventually disagree.
+    """
+    base = RunnerConfig() if config is None else config
+
+    async def run(tasks: Sequence[EvalTask], agent: RunAgent, label: str) -> RunReport:
+        return await run_suite(
+            tasks,
+            agent,
+            config=replace(base, label=label, model=label),
+            command_runner=command_runner,
+            clock=clock,
+        )
+
+    return run
+
+
+# --------------------------------------------------------------------------- #
+# Pairing two reports
+# --------------------------------------------------------------------------- #
 
 
 class Verdict(StrEnum):
-    """Who won one task. A tie is a tie whether both passed or both failed —
-    the *interesting* split within a tie is :attr:`TaskDuel.both_failed_differently`,
-    not the win column."""
+    """Who won one task.
+
+    A tie is a tie whether both passed or both failed; the interesting split *within*
+    a tie is :attr:`TaskDuel.both_failed_differently`, not the win column.
+    """
 
     A_WINS = "a_wins"
     B_WINS = "b_wins"
@@ -453,84 +481,211 @@ class Verdict(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class TaskDuel:
-    """One task, both sides, and the diff between how they got there."""
+    """One task, both sides' report rows, and the diff between how they got there."""
 
     task_id: str
-    a: SideOutcome
-    b: SideOutcome
+    a: TaskRow
+    b: TaskRow
     diff: TranscriptDiff = TranscriptDiff()
 
     @property
     def verdict(self) -> Verdict:
-        if self.a.passed and not self.b.passed:
+        a_passed = self.a.status == PASS_STATUS
+        b_passed = self.b.status == PASS_STATUS
+        if a_passed and not b_passed:
             return Verdict.A_WINS
-        if self.b.passed and not self.a.passed:
+        if b_passed and not a_passed:
             return Verdict.B_WINS
         return Verdict.TIE
 
     @property
     def both_failed(self) -> bool:
-        return not self.a.passed and not self.b.passed
+        """Neither side passed, and neither was skipped — a skip is nobody's failure."""
+        return all(
+            row.status not in (PASS_STATUS, SKIP_STATUS) for row in (self.a, self.b)
+        )
 
     @property
     def both_failed_differently(self) -> bool:
         """Both sides failed, and the taxonomy disagrees about why.
 
-        This is the column that answers "harness or model?". Two models failing the
-        same task for the same reason is evidence about the *task*; two models failing
-        it for different reasons is evidence about the models.
+        The column that answers "harness or model?". Two models failing one task the
+        same way is evidence about the *task*; failing it differently is evidence
+        about the models.
         """
-        return self.both_failed and set(self.a.taxonomy) != set(self.b.taxonomy)
+        return self.both_failed and _classes(self.a) != _classes(self.b)
 
     @property
     def both_failed_alike(self) -> bool:
-        return self.both_failed and set(self.a.taxonomy) == set(self.b.taxonomy)
+        return self.both_failed and _classes(self.a) == _classes(self.b)
+
+
+def _classes(row: TaskRow) -> frozenset[FailureClass]:
+    """A row's taxonomy as a set. Order is the classifier's ranking, not a finding, so
+    comparing tuples here would report noise in the one column that must not have any."""
+    return frozenset(row.classes)
 
 
 @dataclass(frozen=True, slots=True)
 class Duel:
-    """A finished duel: the seed it ran under, the two duelists, and every task."""
+    """Two finished runs of the same tasks, paired.
+
+    ``tasks`` holds only the tasks present in **both** reports. A task one side never
+    attempted is named in ``incomparable`` instead of being scored against nothing —
+    the same rule ``ronin.evals.report.scoreboard`` applies, and for the same reason: a
+    comparison over a shifting task set is not a comparison.
+    """
 
     seed: int
     duelists: tuple[str, str]
+    reports: tuple[RunReport, RunReport]
     tasks: tuple[TaskDuel, ...] = ()
+    incomparable: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         ids = [task.task_id for task in self.tasks]
         if len(set(ids)) != len(ids):
             raise ValueError(
-                "a duel cannot contain two results for the same task id — the "
-                "scoreboard is keyed by task, and duplicates would double-count"
+                "a duel cannot hold two results for one task id — the scoreboard is "
+                "keyed by task, and duplicates would double-count"
             )
 
 
+def pair_reports(
+    a: RunReport,
+    b: RunReport,
+    *,
+    seed: int,
+    duelists: tuple[str, str] | None = None,
+    a_transcripts: Mapping[str, Sequence[Event]] | None = None,
+    b_transcripts: Mapping[str, Sequence[Event]] | None = None,
+    max_diff_lines: int = DEFAULT_MAX_DIFF_LINES,
+) -> Duel:
+    """Pair two reports into a :class:`Duel`. Pure over the report objects.
+
+    Separated from :func:`run_duel` so a duel can be assembled from two reports that
+    were produced hours apart, by a CLI, or by replaying recorded runs — none of which
+    should have to go through a runner.
+    """
+    names = duelists if duelists is not None else (a.name, b.name)
+    a_rows = {row.task_id: row for row in a.rows}
+    b_rows = {row.task_id: row for row in b.rows}
+    shared = sorted(a_rows.keys() & b_rows.keys())
+    left = {} if a_transcripts is None else a_transcripts
+    right = {} if b_transcripts is None else b_transcripts
+    return Duel(
+        seed=seed,
+        duelists=names,
+        reports=(a, b),
+        tasks=tuple(
+            TaskDuel(
+                task_id=task_id,
+                a=a_rows[task_id],
+                b=b_rows[task_id],
+                diff=diff_transcripts(
+                    left.get(task_id, ()), right.get(task_id, ()), max_lines=max_diff_lines
+                ),
+            )
+            for task_id in shared
+        ),
+        incomparable=tuple(sorted((a_rows.keys() | b_rows.keys()) - set(shared))),
+    )
+
+
+async def run_duel(
+    tasks: Sequence[EvalTask],
+    *,
+    factory: DuelistFactory,
+    suite: SuiteRunner,
+    duelists: tuple[str, str],
+    seed: int,
+    max_diff_lines: int = DEFAULT_MAX_DIFF_LINES,
+) -> Duel:
+    """Run the suite twice — once per duelist, at the same per-task seeds — and pair it.
+
+    A side is one whole suite run, and the two run one after the other rather than
+    concurrently. Interleaving them would make the wall-clock column measure
+    contention between the sides rather than the work, and wall time is the column a
+    reader instinctively trusts. Sequencing is cheap; an untrustworthy column is not.
+    """
+    a_name, b_name = duelists
+    a_recorder = TranscriptRecorder()
+    b_recorder = TranscriptRecorder()
+    a_report = await suite(
+        tasks, recording_v2_adapter(_seeded(factory, a_name, seed), a_recorder), a_name
+    )
+    b_report = await suite(
+        tasks, recording_v2_adapter(_seeded(factory, b_name, seed), b_recorder), b_name
+    )
+    return pair_reports(
+        a_report,
+        b_report,
+        seed=seed,
+        duelists=duelists,
+        a_transcripts=a_recorder.streams,
+        b_transcripts=b_recorder.streams,
+        max_diff_lines=max_diff_lines,
+    )
+
+
+def _seeded(factory: DuelistFactory, duelist: str, seed: int) -> AgentFactory:
+    """An :data:`~ronin.evals.adapters.AgentFactory` seeded per task.
+
+    The factory is consulted once per task rather than once per side, so each task's
+    sampling stream is independent while both sides see the identical seed for it.
+    """
+
+    async def open_agent(task: EvalTask, workspace: Path) -> OpenedAgent:
+        return await factory(duelist, task_seed(seed, task.id))(task, workspace)
+
+    return open_agent
+
+
+# --------------------------------------------------------------------------- #
+# The scoreboard
+# --------------------------------------------------------------------------- #
+
+
 @dataclass(frozen=True, slots=True)
-class ScoreRow:
-    """One scoreboard row. Everything here reproduces from the seed."""
+class DuelRow:
+    """One scoreboard row. Every field here reproduces from the seed."""
 
     task_id: str
+    category: str
     verdict: Verdict
-    a: SideOutcome
-    b: SideOutcome
+    a_status: str
+    b_status: str
+    a_turns: int
+    b_turns: int
+    a_tokens: str
+    b_tokens: str
+    a_cost: str
+    b_cost: str
+    a_classes: tuple[FailureClass, ...] = ()
+    b_classes: tuple[FailureClass, ...] = ()
     diverged_at: int = -1
     both_failed_differently: bool = False
 
 
 @dataclass(frozen=True, slots=True)
-class Scoreboard:
-    """The comparison, as a value. Pure function of a :class:`Duel`.
+class DuelScoreboard:
+    """The duel comparison, as a value.
+
+    ``shared`` is whatever :func:`ronin.evals.report.scoreboard` made of the two
+    reports — the pass rates, the per-task status table, the regressions and the fixes
+    — held rather than re-derived, so there is exactly one implementation of "compare
+    two runs" in the package.
 
     ``wins`` and ``losses`` are stated from **A's** point of view.
-
     ``wins + losses + ties == tasks`` holds structurally rather than by assertion:
-    every column counts rows by a single :class:`Verdict`, and a row has exactly one.
-    They are derived properties, not fields, precisely so the three cannot be passed
-    in disagreeing with each other and with the row count.
+    each column counts rows by a single :class:`Verdict` and a row has exactly one.
     """
 
     seed: int
     duelists: tuple[str, str]
-    rows: tuple[ScoreRow, ...] = ()
+    shared: Scoreboard
+    rows: tuple[DuelRow, ...] = ()
+    incomparable: tuple[str, ...] = ()
 
     @property
     def tasks(self) -> int:
@@ -550,82 +705,53 @@ class Scoreboard:
 
     @property
     def both_failed_differently(self) -> tuple[str, ...]:
-        """Task ids where both sides failed for different taxonomy reasons."""
+        """Task ids both sides failed, for different taxonomy reasons."""
         return tuple(row.task_id for row in self.rows if row.both_failed_differently)
 
     @property
     def both_failed_alike(self) -> tuple[str, ...]:
-        """Task ids where both sides failed the same way — suspect the harness."""
+        """Task ids both sides failed the same way — suspect the task or the harness."""
         return tuple(
             row.task_id
             for row in self.rows
-            if row.verdict is Verdict.TIE
-            and not row.a.passed
-            and not row.b.passed
-            and not row.both_failed_differently
+            if not row.both_failed_differently
+            and row.a_status not in (PASS_STATUS, SKIP_STATUS)
+            and row.b_status not in (PASS_STATUS, SKIP_STATUS)
         )
 
 
-def scoreboard(duel: Duel) -> Scoreboard:
+def duel_scoreboard(duel: Duel) -> DuelScoreboard:
     """Fold a duel into its scoreboard. Pure, total, and the only summary function."""
-    rows = tuple(
-        ScoreRow(
-            task_id=task.task_id,
-            verdict=task.verdict,
-            a=task.a,
-            b=task.b,
-            diverged_at=(
-                -1 if task.diff.first_divergence is None else task.diff.first_divergence.position
-            ),
-            both_failed_differently=task.both_failed_differently,
-        )
-        for task in duel.tasks
-    )
-    return Scoreboard(seed=duel.seed, duelists=duel.duelists, rows=rows)
-
-
-# --------------------------------------------------------------------------- #
-# Running
-# --------------------------------------------------------------------------- #
-
-
-async def run_duel(
-    tasks: Sequence[TaskLike],
-    *,
-    factory: DuelistFactory,
-    duelists: tuple[str, str],
-    seed: int,
-    workdir: WorkdirFactory,
-    max_diff_lines: int = DEFAULT_MAX_DIFF_LINES,
-) -> Duel:
-    """Run every task on both sides at the same per-task seed, and pair the results.
-
-    Sequential, and A before B for every task. Running the two sides concurrently
-    would be faster and would make the wall-clock column measure contention between
-    the sides rather than the work — and wall time is the one column a reader
-    instinctively trusts. Sequencing is cheap; an untrustworthy column is not.
-
-    A fresh :data:`RunAgent` is built per (side, task) so the per-task seed from
-    :func:`task_seed` actually reaches the model client, rather than one long-lived
-    client drifting through the task list.
-    """
-    a_name, b_name = duelists
-    results: list[TaskDuel] = []
-    for task in tasks:
-        derived = task_seed(seed, task.id)
-        a_record = await factory(a_name, derived)(task, workdir(task, Side.A))
-        b_record = await factory(b_name, derived)(task, workdir(task, Side.B))
-        results.append(
-            TaskDuel(
-                task_id=task.id,
-                a=SideOutcome.from_record(a_record, duelist=a_name),
-                b=SideOutcome.from_record(b_record, duelist=b_name),
-                diff=diff_transcripts(
-                    a_record.events, b_record.events, max_lines=max_diff_lines
+    return DuelScoreboard(
+        seed=duel.seed,
+        duelists=duel.duelists,
+        shared=scoreboard(list(duel.reports)),
+        rows=tuple(
+            DuelRow(
+                task_id=task.task_id,
+                category=task.a.category,
+                verdict=task.verdict,
+                a_status=task.a.status,
+                b_status=task.b.status,
+                a_turns=task.a.turns,
+                b_turns=task.b.turns,
+                a_tokens=task.a.tokens,
+                b_tokens=task.b.tokens,
+                a_cost=task.a.cost,
+                b_cost=task.b.cost,
+                a_classes=task.a.classes,
+                b_classes=task.b.classes,
+                diverged_at=(
+                    -1
+                    if task.diff.first_divergence is None
+                    else task.diff.first_divergence.position
                 ),
+                both_failed_differently=task.both_failed_differently,
             )
-        )
-    return Duel(seed=seed, duelists=duelists, tasks=tuple(results))
+            for task in duel.tasks
+        ),
+        incomparable=duel.incomparable,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -637,51 +763,57 @@ def _cell(value: str) -> str:
     return value.replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ")
 
 
-def _pass(passed: bool) -> str:
-    return "pass" if passed else "fail"
+def _classes_cell(classes: Sequence[FailureClass]) -> str:
+    return _cell(", ".join(sorted(str(name) for name in classes)) or "—")
 
 
-def render_scoreboard(board: Scoreboard) -> str:
-    """The scoreboard as Markdown. Pure, and byte-identical for identical inputs.
+def render_duel_scoreboard(board: DuelScoreboard) -> str:
+    """The duel scoreboard as Markdown. Pure, and byte-identical for identical inputs.
 
-    Carries no wall-clock time and no timestamp — see the module docstring. That
-    omission is what makes "two duels at the same seed produce the same scoreboard" a
-    checkable claim rather than a hope.
+    The shared comparison table comes from
+    :func:`ronin.evals.report.scoreboard_markdown`; everything below it is what a
+    two-model duel needs and that renderer cannot express. No wall-clock time and no
+    timestamp appear anywhere here — that omission is what makes "two duels at the
+    same seed produce the same scoreboard" a checkable claim rather than a hope.
     """
     a_name, b_name = board.duelists
     lines = [
-        f"## duel — {a_name} vs {b_name} (seed {board.seed})",
+        f"# duel — {a_name} vs {b_name} (seed {board.seed})",
         "",
         f"tasks {board.tasks} · {a_name} wins {board.wins} · {b_name} wins "
         f"{board.losses} · ties {board.ties}",
         "",
-        f"| Task | {a_name} | {b_name} | verdict | turns (a/b) | tokens (a/b) "
+        scoreboard_markdown(board.shared).rstrip("\n"),
+        "",
+        "## per task",
+        "",
+        f"| id | {a_name} | {b_name} | verdict | turns (a/b) | tokens (a/b) "
         "| cost (a/b) | diverged | taxonomy a | taxonomy b |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for row in board.rows:
         diverged = "same" if row.diverged_at < 0 else f"line {row.diverged_at}"
         lines.append(
-            f"| `{_cell(row.task_id)}` | {_pass(row.a.passed)} | {_pass(row.b.passed)} "
-            f"| {row.verdict.value} "
-            f"| {row.a.turns}/{row.b.turns} | {row.a.tokens}/{row.b.tokens} "
-            f"| ${row.a.cost_usd:.4f}/${row.b.cost_usd:.4f} | {diverged} "
-            f"| {_cell(', '.join(row.a.taxonomy) or '—')} "
-            f"| {_cell(', '.join(row.b.taxonomy) or '—')} |"
+            f"| `{_cell(row.task_id)}` | {row.a_status} | {row.b_status} "
+            f"| {row.verdict.value} | {row.a_turns}/{row.b_turns} "
+            f"| {_cell(row.a_tokens)}/{_cell(row.b_tokens)} "
+            f"| {_cell(row.a_cost)}/{_cell(row.b_cost)} | {diverged} "
+            f"| {_classes_cell(row.a_classes)} | {_classes_cell(row.b_classes)} |"
         )
 
-    lines += ["", "### both failed, for different reasons", ""]
+    lines += ["", "## both failed, for different reasons", ""]
     if board.both_failed_differently:
-        lines.append(
-            "These are the tasks that tell you about the *models*: both sides failed, "
-            "and the taxonomy disagrees about why."
-        )
-        lines.append("")
+        lines += [
+            "The tasks that tell you about the *models*: both sides failed, and the "
+            "taxonomy disagrees about why.",
+            "",
+        ]
+        rows = {row.task_id: row for row in board.rows}
         for task_id in board.both_failed_differently:
-            row = next(r for r in board.rows if r.task_id == task_id)
+            row = rows[task_id]
             lines.append(
-                f"- `{task_id}`: {a_name} {', '.join(row.a.taxonomy) or '(unclassified)'} "
-                f"· {b_name} {', '.join(row.b.taxonomy) or '(unclassified)'}"
+                f"- `{task_id}`: {a_name} {_classes_cell(row.a_classes)} · "
+                f"{b_name} {_classes_cell(row.b_classes)}"
             )
     else:
         lines.append("None — no task was failed by both sides for different reasons.")
@@ -689,13 +821,24 @@ def render_scoreboard(board: Scoreboard) -> str:
     if board.both_failed_alike:
         lines += [
             "",
-            "### both failed, the same way",
+            "## both failed, the same way",
             "",
             "Both sides hit the same taxonomy class here, which points at the task or "
             "the harness rather than at either model:",
             "",
         ]
         lines.extend(f"- `{task_id}`" for task_id in board.both_failed_alike)
+
+    if board.incomparable:
+        lines += [
+            "",
+            "## not run by both sides",
+            "",
+            "Excluded from every count above, because a comparison over a shifting "
+            "task set is not a comparison:",
+            "",
+        ]
+        lines.extend(f"- `{task_id}`" for task_id in board.incomparable)
 
     return "\n".join(lines) + "\n"
 
@@ -716,18 +859,17 @@ def render_transcript_diff(diff: TranscriptDiff, *, duelists: tuple[str, str]) -
 def render_duel_markdown(duel: Duel) -> str:
     """The full report: the scoreboard, then per task the wall clock and the diff.
 
-    Wall-clock time lives here rather than in :func:`render_scoreboard` because this
-    document is for reading and that one is for comparing.
+    Wall-clock time lives here rather than in :func:`render_duel_scoreboard` because
+    this document is for reading and that one is for comparing.
     """
-    board = scoreboard(duel)
-    parts = [render_scoreboard(board), ""]
+    parts = [render_duel_scoreboard(duel_scoreboard(duel)), ""]
     a_name, b_name = duel.duelists
     for task in duel.tasks:
         parts += [
-            f"### `{task.task_id}` — {task.verdict.value}",
+            f"## `{task.task_id}` — {task.verdict.value}",
             "",
-            f"{a_name}: {_pass(task.a.passed)}, {task.a.wall_seconds:.2f}s · "
-            f"{b_name}: {_pass(task.b.passed)}, {task.b.wall_seconds:.2f}s",
+            f"{a_name}: {task.a.status}, {task.a.wall_seconds:.2f}s · "
+            f"{b_name}: {task.b.status}, {task.b.wall_seconds:.2f}s",
             "",
             render_transcript_diff(task.diff, duelists=duel.duelists),
         ]
@@ -738,26 +880,27 @@ __all__ = [
     "DEFAULT_MAX_DIFF_LINES",
     "DIVERGENCE_CONTEXT",
     "MAX_LINE_CHARS",
+    "PASS_STATUS",
+    "SKIP_STATUS",
     "Divergence",
     "Duel",
+    "DuelRow",
+    "DuelScoreboard",
     "DuelistFactory",
-    "RecordLike",
-    "RunAgent",
-    "ScoreRow",
-    "Scoreboard",
-    "Side",
-    "SideOutcome",
+    "SuiteRunner",
     "TaskDuel",
-    "TaskLike",
     "TranscriptDiff",
+    "TranscriptRecorder",
     "Verdict",
-    "WorkdirFactory",
     "diff_transcripts",
+    "duel_scoreboard",
+    "pair_reports",
+    "recording_v2_adapter",
     "render_duel_markdown",
-    "render_scoreboard",
+    "render_duel_scoreboard",
     "render_transcript_diff",
     "run_duel",
-    "scoreboard",
+    "suite_runner",
     "task_seed",
     "transcript_lines",
 ]

@@ -1,0 +1,29 @@
+id = "bug-from-trace/group-changelog-sections"
+category = "bug-from-trace"
+prompt = """
+Traceback (most recent call last):
+  File "make_changelog.py", line 25, in <module>
+    sys.exit(main(sys.argv))
+             ^^^^^^^^^^^^^^
+  File "make_changelog.py", line 20, in main
+    print(build_changelog(Path("entries.json"), Path("chg.toml")), end="")
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "chg/pipeline.py", line 31, in build_changelog
+    return render_release(version, entries, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "chg/render.py", line 43, in render_release
+    for section, bucket in group_entries(entries, config).items():
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "chg/render.py", line 20, in group_entries
+    order = config["section_order"]
+            ~~~~~~^^^^^^^^^^^^^^^^^
+KeyError: 'section_order'
+"""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = ["chg/config.py"]
+max_turns = 12
+timeout_seconds = 120
+tags = ["python", "keyerror", "localization", "config"]
+regression_gate = false

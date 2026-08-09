@@ -1,0 +1,8 @@
+{
+  "exported_at": "2023-12-31",
+  "source": "billing-export-v2",
+  "orders": [
+    { "id": "Z-0007", "currency": "USD", "total": "11.00", "notes": "archived" },
+    { "id": "Z-0008", "currency": "EUR", "total": "5.00", "notes": "archived" }
+  ]
+}

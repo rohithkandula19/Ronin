@@ -1,0 +1,30 @@
+id = "long-horizon/invsync-case-insensitive-sku"
+category = "long-horizon"
+prompt = """
+Suppliers send the same sku in different letter cases, so `ab-1` and `AB-1`
+are being treated as two different products: the sync adds one and removes the
+other on every run. Read the package first, then make sku comparison
+case-insensitive.
+
+Spec:
+
+* `mapping.py` gains `canonical_sku(text: str) -> str`, which strips
+  surrounding whitespace and upper-cases.
+* `Record` gains a read-only `key` property returning `canonical_sku(self.sku)`.
+  The stored `sku` keeps whatever the feed sent.
+* `diff.index` keys by `record.key`, and `compute` treats two records as
+  unchanged when their `key`, `name` and `qty` all match — a case-only
+  difference in the sku is not an update. `removed` holds canonical keys,
+  sorted.
+* `apply` keys the result by `record.key` and removes by canonical key, so a
+  target indexed with `index()` is updated in place rather than duplicated.
+* The existing tests in `tests/test_diff.py` must still pass.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["invsync/mapping.py", "invsync/records.py", "invsync/diff.py", "invsync/apply.py"]
+max_turns = 30
+timeout_seconds = 300
+tags = ["python", "layers", "normalisation"]
+regression_gate = false

@@ -1,0 +1,17 @@
+id = "add-test/cover-truncate-counts-characters"
+category = "add-test"
+prompt = """
+`shorten/text.py` truncates a label to a maximum number of *characters*, and
+it must never split a multi-byte character — an earlier byte-based version
+produced invalid UTF-8 in the terminal. `tests/test_text.py` only uses ASCII.
+Add a test function named exactly `test_a_multibyte_label_is_cut_by_characters`
+to `tests/test_text.py`. Do not change `shorten/text.py`.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["tests/test_text.py"]
+max_turns = 12
+timeout_seconds = 120
+tags = ["python", "unicode"]
+regression_gate = false

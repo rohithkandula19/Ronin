@@ -104,6 +104,7 @@ from .sources import (
     load_run,
     load_runs,
     load_sessions,
+    manifest_from_run_record,
     steps_from_events,
 )
 from .trajectory import (
@@ -164,6 +165,7 @@ __all__ = [
     "load_runs",
     "load_schema",
     "load_sessions",
+    "manifest_from_run_record",
     "mine",
     "mine_all",
     "parse_target_text",

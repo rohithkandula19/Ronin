@@ -451,12 +451,15 @@ def parse_config(data: Mapping[str, Any]) -> AdapterConfig:
     targets = lora_raw.get("target_modules", list(REQUIRED_TARGETS))
     if isinstance(targets, str) or not isinstance(targets, Sequence):
         raise ConfigError("lora.target_modules must be a list of module names")
+    # `slots=True` turns class attributes into member descriptors, so the defaults
+    # have to be read off an instance rather than off the class.
+    lora_defaults = LoRASpec()
     lora = LoRASpec(
-        rank=int(lora_raw.get("rank", LoRASpec.rank)),
-        alpha=int(lora_raw.get("alpha", LoRASpec.alpha)),
-        dropout=float(lora_raw.get("dropout", LoRASpec.dropout)),
+        rank=int(lora_raw.get("rank", lora_defaults.rank)),
+        alpha=int(lora_raw.get("alpha", lora_defaults.alpha)),
+        dropout=float(lora_raw.get("dropout", lora_defaults.dropout)),
         target_modules=tuple(str(name) for name in targets),
-        num_layers=int(lora_raw.get("num_layers", LoRASpec.num_layers)),
+        num_layers=int(lora_raw.get("num_layers", lora_defaults.num_layers)),
     )
 
     train_raw = _table(data, "train")
@@ -481,7 +484,7 @@ def parse_config(data: Mapping[str, Any]) -> AdapterConfig:
     if "dpo" in data and data["dpo"] is not None:
         dpo_raw = _table(data, "dpo")
         _reject_unknown("dpo", dpo_raw, _DPO_KEYS)
-        dpo = DPOSpec(beta=float(dpo_raw.get("beta", DPOSpec.beta)))
+        dpo = DPOSpec(beta=float(dpo_raw.get("beta", DPOSpec().beta)))
 
     holdout_raw = _table(data, "holdout")
     _reject_unknown("holdout", holdout_raw, _HOLDOUT_KEYS)
@@ -492,13 +495,14 @@ def parse_config(data: Mapping[str, Any]) -> AdapterConfig:
         seed=int(holdout_raw.get("seed", hd.seed)),
     )
 
+    top_defaults = AdapterConfig(pass_=pass_)
     return AdapterConfig(
         pass_=pass_,
         base_model=str(data.get("base_model", BASE_MODEL)),
         base_model_mlx=str(data.get("base_model_mlx", BASE_MODEL_MLX)),
         base_model_licence=str(data.get("base_model_licence", BASE_MODEL_LICENCE)),
-        data_dir=str(data.get("data_dir", AdapterConfig.data_dir)),
-        adapter_out=str(data.get("adapter_out", AdapterConfig.adapter_out)),
+        data_dir=str(data.get("data_dir", top_defaults.data_dir)),
+        adapter_out=str(data.get("adapter_out", top_defaults.adapter_out)),
         resume_adapter=str(data.get("resume_adapter", "")),
         lora=lora,
         train=train,

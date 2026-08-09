@@ -1,0 +1,18 @@
+id = "multi-file/tuple-return-to-dataclass"
+category = "multi-file"
+prompt = """
+`stats/summary.py`'s `summarise` returns a bare 3-tuple, and both callers
+unpack it positionally, which is why `stats/report.py` and `stats/alerts.py`
+disagree about the order. Introduce a frozen dataclass `Summary` in
+`stats/summary.py` with fields `count`, `total` and `mean` (in that order),
+return it from `summarise`, and update both callers to use the attribute
+names. `summarise` must keep returning `mean == 0.0` for an empty input.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["stats/summary.py", "stats/report.py", "stats/alerts.py"]
+max_turns = 16
+timeout_seconds = 150
+tags = ["python", "dataclass"]
+regression_gate = false

@@ -1,0 +1,22 @@
+id = "bug-from-trace/keyerror-in-config-merge"
+category = "bug-from-trace"
+prompt = """
+Traceback (most recent call last):
+  File "/workspace/bin/mergecfg", line 11, in <module>
+    main()
+  File "/workspace/cfgmerge/cli.py", line 14, in main
+    print(json.dumps(merge(DEFAULTS, SITE), sort_keys=True))
+                     ^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/cfgmerge/merge.py", line 12, in merge
+    if isinstance(base[key], dict):
+                  ~~~~^^^^^
+KeyError: 'region'
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["cfgmerge/merge.py"]
+max_turns = 14
+timeout_seconds = 120
+tags = ["python", "keyerror"]
+regression_gate = true
