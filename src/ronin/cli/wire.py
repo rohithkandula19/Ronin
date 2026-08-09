@@ -52,7 +52,6 @@ from ..agents.definitions import (
     BUILTIN_AGENTS,
     AgentDefinition,
     FrontmatterError,
-    gated_tools,
     load_agents,
     subagent_catalogue,
 )
@@ -86,7 +85,7 @@ from ..safety.policy import (
 )
 from ..safety.sandbox import NoSandbox, Sandbox, Unavailable, detect
 from ..safety.settings import Settings, load_settings
-from ..session import build_session
+from ..session import SubagentPolicyFactory, build_session
 from ..tools.base import MAX_RESULT_CHARS, ToolContext
 from ..tools.registry import ToolRegistry, build_registry
 from ..tools.shell import PersistentShell, ShellSession

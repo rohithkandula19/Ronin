@@ -66,7 +66,6 @@ import contextlib
 import time
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, field, replace
-from pathlib import Path
 
 from ..context.compaction import CompactionResult, Summarizer, maybe_compact
 from ..core.loop import StalledError, run_turn
@@ -78,7 +77,6 @@ from ..core.types import (
     Error,
     Event,
     Message,
-    Mode,
     Role,
     Text,
     ToolEnd,
@@ -745,15 +743,6 @@ async def run_prompt(
         yield event
 
 
-def mode_of(runtime: Runtime) -> Mode:
-    """The mode a turn will run in. One reader, so the ladder cannot drift."""
-    return runtime.loaded.mode
-
-
-def workspace_root(runtime: Runtime) -> Path:
-    return runtime.loaded.paths.workspace_root
-
-
 __all__ = [
     "CHECKPOINT_STEP",
     "COMPACT_STEP",
@@ -762,9 +751,7 @@ __all__ = [
     "VERIFY_STEP",
     "CompactionPairingError",
     "Conversation",
-    "mode_of",
     "plan_runtime",
     "run_prompt",
     "summarizer_for",
-    "workspace_root",
 ]
