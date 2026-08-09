@@ -76,7 +76,7 @@ def test_a_command_regex_is_unanchored_unless_written_anchored() -> None:
 
 
 def test_an_invalid_regex_fails_where_the_rule_is_written() -> None:
-    with pytest.raises(Exception, match="unterminated|error"):
+    with pytest.raises(Exception, match=r"unterminated|error"):
         CommandRegex(pattern="([")
 
 
@@ -203,7 +203,8 @@ def test_the_later_of_two_identical_rules_is_the_one_reported() -> None:
 
 
 def test_most_restrictive_is_total_and_defaults_when_empty() -> None:
-    assert most_restrictive([Decision.ALLOW, Decision.DENY, Decision.ASK], default=Decision.ALLOW) is Decision.DENY
+    every = [Decision.ALLOW, Decision.DENY, Decision.ASK]
+    assert most_restrictive(every, default=Decision.ALLOW) is Decision.DENY
     assert most_restrictive([], default=Decision.ASK) is Decision.ASK
 
 

@@ -193,7 +193,7 @@ def test_a_heredoc_body_is_not_lexed_as_commands_for_a_non_shell() -> None:
     """`cat <<EOF` writes text. Treating the body as commands would deny a file write."""
     segments = parse_command("cat > notes.txt <<EOF\nrm -rf /\nEOF")
     assert [segment.binary for segment in segments] == ["cat"]
-    assert segments[0].heredocs == ["rm -rf /"] or segments[0].heredocs == ("rm -rf /",)
+    assert segments[0].heredocs == ("rm -rf /",), "the body is kept, but as data"
 
 
 def test_a_here_string_is_data_not_a_heredoc() -> None:
@@ -297,7 +297,7 @@ def test_a_fully_quoted_binary_is_not_called_obfuscation() -> None:
 
 def test_a_hazard_names_the_segment_it_came_from() -> None:
     found = hazards(parse_command("echo ok; sudo rm -rf build"))
-    sudo = [hazard for hazard in found if hazard.code is HazardCode.SUDO][0]
+    sudo = next(hazard for hazard in found if hazard.code is HazardCode.SUDO)
     assert sudo.segment == "sudo rm -rf build"
 
 

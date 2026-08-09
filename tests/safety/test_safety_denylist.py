@@ -146,11 +146,12 @@ def test_the_checkpoint_predicate_is_injected_not_discovered() -> None:
     """No git repo is opened: safety may not import the tool layer, and a filesystem
     probe inside a policy check would make every test need a repo."""
     calls: list[int] = []
-    guard = Denylist(
-        workspace_root=WORKSPACE,
-        home=HOME,
-        has_checkpoint=lambda: bool(calls.append(1)) or True,
-    )
+
+    def has_checkpoint() -> bool:
+        calls.append(1)
+        return True
+
+    guard = Denylist(workspace_root=WORKSPACE, home=HOME, has_checkpoint=has_checkpoint)
     assert guard.check_command("git reset --hard HEAD~1") == ()
     assert calls == [1]
 
