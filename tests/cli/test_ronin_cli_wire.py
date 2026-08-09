@@ -29,8 +29,17 @@ from wire_harness import (
     write,
 )
 
+from ronin.cli.wire import (
+    BASE_SYSTEM_PROMPT,
+    LocalRuleWriter,
+    build_runtime,
+    load_workspace,
+    rule_to_json,
+    subagent_policy_factory,
+    system_prompt,
+)
 from ronin.context.repomap import ParserUnavailable, Signature
-from ronin.core.types import DangerLevel, Mode, ToolSpec, ToolUse
+from ronin.core.types import Budget, DangerLevel, Mode, ToolSpec, ToolUse
 from ronin.mcp.config import TransportKind
 from ronin.persistence.transcript import TranscriptError
 from ronin.safety.injection import TaintTracker
@@ -41,20 +50,11 @@ from ronin.safety.policy import (
     Outcome,
     PolicyEngine,
     Rule,
-    UnattendedAsker,
 )
 from ronin.safety.sandbox import BubblewrapSandbox, NoSandbox, Unavailable
 from ronin.safety.settings import parse_rule
 from ronin.session import SubagentPolicy
-from ronin.cli.wire import (
-    BASE_SYSTEM_PROMPT,
-    LocalRuleWriter,
-    build_runtime,
-    load_workspace,
-    rule_to_json,
-    subagent_policy_factory,
-    system_prompt,
-)
+from ronin.tools.shell import PersistentShell, ShellSession
 
 
 def subjects(loaded: object) -> tuple[str, ...]:
@@ -423,9 +423,11 @@ async def test_the_denylist_asks_the_real_checkpoint_store_about_reset_hard(
         assert denylist is not None
         assert denylist.has_checkpoint() is False
         assert denylist.check_command("git reset --hard HEAD~1")
-        # The same command stops being unconditional the moment there is a checkpoint,
-        # which is a question about the store rather than about the command text.
-        runtime.checkpoints._session_base = "deadbeef"  # noqa: SLF001
+        # The same command stops being unconditional the moment there is a checkpoint.
+        # Reaching into the store's private field rather than taking a real checkpoint
+        # keeps this test off `git`; what is being asserted is that the denylist asks
+        # *this store* rather than carrying a constant.
+        runtime.checkpoints._session_base = "deadbeef"
         assert denylist.has_checkpoint() is True
         assert denylist.check_command("git reset --hard HEAD~1") == ()
     finally:
@@ -596,8 +598,6 @@ async def test_aclose_closes_the_transcript_even_when_a_closer_raises(
 
 
 async def test_an_injected_shell_is_not_closed_by_the_runtime(tmp_path: Path) -> None:
-    from ronin.tools.shell import PersistentShell, ShellSession
-
     loaded = load_workspace(workspace(git_repo(tmp_path)))
     injected = ShellSession(shell=PersistentShell(cwd=tmp_path, env={}))
 
@@ -633,10 +633,7 @@ async def test_a_subagent_may_act_on_standing_permission_but_cannot_ask_for_more
     loaded = load_workspace(workspace(git_repo(tmp_path)))
     runtime = await build_runtime(loaded, fake_router(), record=False)
     try:
-        child = subagent_policy_factory(runtime.policy)(loaded.settings.ruleset().rules
-                                                        and __import__("ronin.core.types",
-                                                                       fromlist=["Budget"])
-                                                        .Budget())
+        child = subagent_policy_factory(runtime.policy)(Budget())
         allowed = await child.approve(
             bash_spec(),
             ToolUse(id="c1", name="bash", arguments={"command": "pytest -q"}),
