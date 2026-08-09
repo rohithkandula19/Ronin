@@ -10,12 +10,57 @@ import os
 import subprocess
 import sys
 
-RUNNER = '\nimport importlib.util\nimport sys\nimport traceback\n\npath = sys.argv[1]\nspec = importlib.util.spec_from_file_location("agent_tests", path)\nif spec is None or spec.loader is None:\n    print("IMPORTERROR")\n    raise SystemExit(3)\nmod = importlib.util.module_from_spec(spec)\nsys.modules["agent_tests"] = mod\ntry:\n    spec.loader.exec_module(mod)\nexcept BaseException:\n    traceback.print_exc()\n    print("IMPORTERROR")\n    raise SystemExit(3)\nnames = sorted(k for k in vars(mod) if k.startswith("test_") and callable(vars(mod)[k]))\nfailed = []\nfor name in names:\n    try:\n        vars(mod)[name]()\n    except BaseException:\n        failed.append(name)\n        traceback.print_exc()\nprint("NAMES " + " ".join(names))\nprint("FAILED " + " ".join(failed))\n'
+RUNNER = chr(10).join([
+    '',
+    'import importlib.util',
+    'import sys',
+    'import traceback',
+    '',
+    'path = sys.argv[1]',
+    'spec = importlib.util.spec_from_file_location("agent_tests", path)',
+    'if spec is None or spec.loader is None:',
+    '    print("IMPORTERROR")',
+    '    raise SystemExit(3)',
+    'mod = importlib.util.module_from_spec(spec)',
+    'sys.modules["agent_tests"] = mod',
+    'try:',
+    '    spec.loader.exec_module(mod)',
+    'except BaseException:',
+    '    traceback.print_exc()',
+    '    print("IMPORTERROR")',
+    '    raise SystemExit(3)',
+    'names = sorted(k for k in vars(mod) if k.startswith("test_") and callable(vars(mod)[k]))',
+    'failed = []',
+    'for name in names:',
+    '    try:',
+    '        vars(mod)[name]()',
+    '    except BaseException:',
+    '        failed.append(name)',
+    '        traceback.print_exc()',
+    'print("NAMES " + " ".join(names))',
+    'print("FAILED " + " ".join(failed))',
+    '',
+])
+
+#: The implementation with the fix reverted. A new test that still passes
+#: against this proves nothing, so verify.sh rejects it.
+MUTANT = chr(10).join([
+    '"""Rewrite text without changing its line-ending style."""',
+    '',
+    'from __future__ import annotations',
+    '',
+    '',
+    'def rewrite(data: bytes, replacement: bytes, target: bytes) -> bytes:',
+    '    """Replace ``target`` with ``replacement``, leaving line endings intact."""',
+    '    text = data.decode("utf-8").replace("\\r\\n", "\\n")',
+    '    return text.replace(target.decode("utf-8"), replacement.decode("utf-8")).encode("utf-8")',
+    '',
+])
+
 TEST_FILE = 'tests/test_rewrite.py'
 IMPL = 'eol/rewrite.py'
 REQUIRED = 'test_crlf_line_endings_survive_a_rewrite'
 IMPL_SHA = '72fa70f3edb6ae73f2c2fe64f4ee0b05a211b5eff3ea5e9bc283b8efc3685272'
-MUTANT = '"""Rewrite text without changing its line-ending style."""\n\nfrom __future__ import annotations\n\n\ndef rewrite(data: bytes, replacement: bytes, target: bytes) -> bytes:\n    """Replace ``target`` with ``replacement``, leaving line endings intact."""\n    text = data.decode("utf-8").replace("\\r\\n", "\\n")\n    return text.replace(target.decode("utf-8"), replacement.decode("utf-8")).encode("utf-8")\n'
 
 
 def run():

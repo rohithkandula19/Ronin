@@ -10,12 +10,58 @@ import os
 import subprocess
 import sys
 
-RUNNER = '\nimport importlib.util\nimport sys\nimport traceback\n\npath = sys.argv[1]\nspec = importlib.util.spec_from_file_location("agent_tests", path)\nif spec is None or spec.loader is None:\n    print("IMPORTERROR")\n    raise SystemExit(3)\nmod = importlib.util.module_from_spec(spec)\nsys.modules["agent_tests"] = mod\ntry:\n    spec.loader.exec_module(mod)\nexcept BaseException:\n    traceback.print_exc()\n    print("IMPORTERROR")\n    raise SystemExit(3)\nnames = sorted(k for k in vars(mod) if k.startswith("test_") and callable(vars(mod)[k]))\nfailed = []\nfor name in names:\n    try:\n        vars(mod)[name]()\n    except BaseException:\n        failed.append(name)\n        traceback.print_exc()\nprint("NAMES " + " ".join(names))\nprint("FAILED " + " ".join(failed))\n'
+RUNNER = chr(10).join([
+    '',
+    'import importlib.util',
+    'import sys',
+    'import traceback',
+    '',
+    'path = sys.argv[1]',
+    'spec = importlib.util.spec_from_file_location("agent_tests", path)',
+    'if spec is None or spec.loader is None:',
+    '    print("IMPORTERROR")',
+    '    raise SystemExit(3)',
+    'mod = importlib.util.module_from_spec(spec)',
+    'sys.modules["agent_tests"] = mod',
+    'try:',
+    '    spec.loader.exec_module(mod)',
+    'except BaseException:',
+    '    traceback.print_exc()',
+    '    print("IMPORTERROR")',
+    '    raise SystemExit(3)',
+    'names = sorted(k for k in vars(mod) if k.startswith("test_") and callable(vars(mod)[k]))',
+    'failed = []',
+    'for name in names:',
+    '    try:',
+    '        vars(mod)[name]()',
+    '    except BaseException:',
+    '        failed.append(name)',
+    '        traceback.print_exc()',
+    'print("NAMES " + " ".join(names))',
+    'print("FAILED " + " ".join(failed))',
+    '',
+])
+
+#: The implementation with the fix reverted. A new test that still passes
+#: against this proves nothing, so verify.sh rejects it.
+MUTANT = chr(10).join([
+    '"""Prepend a licence header, at most once."""',
+    '',
+    'from __future__ import annotations',
+    '',
+    'HEADER = "# SPDX-License-Identifier: MIT\\n"',
+    '',
+    '',
+    'def apply(text: str) -> str:',
+    '    """Ensure ``text`` starts with ``HEADER``. Idempotent by design."""',
+    '    return HEADER + text',
+    '',
+])
+
 TEST_FILE = 'tests/test_apply.py'
 IMPL = 'header/apply.py'
 REQUIRED = 'test_applying_the_header_twice_changes_nothing'
 IMPL_SHA = 'b578fb3fc30ee42a0fe0ff9a1b7eced47c5d14ee4169d2e22b75ff3073f8f129'
-MUTANT = '"""Prepend a licence header, at most once."""\n\nfrom __future__ import annotations\n\nHEADER = "# SPDX-License-Identifier: MIT\\n"\n\n\ndef apply(text: str) -> str:\n    """Ensure ``text`` starts with ``HEADER``. Idempotent by design."""\n    return HEADER + text\n'
 
 
 def run():

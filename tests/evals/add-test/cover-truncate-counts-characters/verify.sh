@@ -10,12 +10,63 @@ import os
 import subprocess
 import sys
 
-RUNNER = '\nimport importlib.util\nimport sys\nimport traceback\n\npath = sys.argv[1]\nspec = importlib.util.spec_from_file_location("agent_tests", path)\nif spec is None or spec.loader is None:\n    print("IMPORTERROR")\n    raise SystemExit(3)\nmod = importlib.util.module_from_spec(spec)\nsys.modules["agent_tests"] = mod\ntry:\n    spec.loader.exec_module(mod)\nexcept BaseException:\n    traceback.print_exc()\n    print("IMPORTERROR")\n    raise SystemExit(3)\nnames = sorted(k for k in vars(mod) if k.startswith("test_") and callable(vars(mod)[k]))\nfailed = []\nfor name in names:\n    try:\n        vars(mod)[name]()\n    except BaseException:\n        failed.append(name)\n        traceback.print_exc()\nprint("NAMES " + " ".join(names))\nprint("FAILED " + " ".join(failed))\n'
+RUNNER = chr(10).join([
+    '',
+    'import importlib.util',
+    'import sys',
+    'import traceback',
+    '',
+    'path = sys.argv[1]',
+    'spec = importlib.util.spec_from_file_location("agent_tests", path)',
+    'if spec is None or spec.loader is None:',
+    '    print("IMPORTERROR")',
+    '    raise SystemExit(3)',
+    'mod = importlib.util.module_from_spec(spec)',
+    'sys.modules["agent_tests"] = mod',
+    'try:',
+    '    spec.loader.exec_module(mod)',
+    'except BaseException:',
+    '    traceback.print_exc()',
+    '    print("IMPORTERROR")',
+    '    raise SystemExit(3)',
+    'names = sorted(k for k in vars(mod) if k.startswith("test_") and callable(vars(mod)[k]))',
+    'failed = []',
+    'for name in names:',
+    '    try:',
+    '        vars(mod)[name]()',
+    '    except BaseException:',
+    '        failed.append(name)',
+    '        traceback.print_exc()',
+    'print("NAMES " + " ".join(names))',
+    'print("FAILED " + " ".join(failed))',
+    '',
+])
+
+#: The implementation with the fix reverted. A new test that still passes
+#: against this proves nothing, so verify.sh rejects it.
+MUTANT = chr(10).join([
+    '"""Shorten a label for a fixed-width column."""',
+    '',
+    'from __future__ import annotations',
+    '',
+    'ELLIPSIS = "..."',
+    '',
+    '',
+    'def shorten(label: str, limit: int) -> str:',
+    '    if limit < len(ELLIPSIS):',
+    '        raise ValueError("limit must leave room for the ellipsis")',
+    '    raw = label.encode("utf-8")',
+    '    if len(raw) <= limit:',
+    '        return label',
+    '    cut = raw[: limit - len(ELLIPSIS)]',
+    '    return cut.decode("utf-8", "replace") + ELLIPSIS',
+    '',
+])
+
 TEST_FILE = 'tests/test_text.py'
 IMPL = 'shorten/text.py'
 REQUIRED = 'test_a_multibyte_label_is_cut_by_characters'
 IMPL_SHA = 'e586d8544d8707f6b6339515dda50e372298a936371e257eadce3c93737f7e72'
-MUTANT = '"""Shorten a label for a fixed-width column."""\n\nfrom __future__ import annotations\n\nELLIPSIS = "..."\n\n\ndef shorten(label: str, limit: int) -> str:\n    if limit < len(ELLIPSIS):\n        raise ValueError("limit must leave room for the ellipsis")\n    raw = label.encode("utf-8")\n    if len(raw) <= limit:\n        return label\n    cut = raw[: limit - len(ELLIPSIS)]\n    return cut.decode("utf-8", "replace") + ELLIPSIS\n'
 
 
 def run():

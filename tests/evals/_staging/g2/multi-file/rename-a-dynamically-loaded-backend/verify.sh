@@ -10,7 +10,7 @@ if [ -z "$PY" ]; then
   if command -v python3 >/dev/null 2>&1; then PY=python3; else PY=python; fi
 fi
 
-"$PY" - <<'CHECK'
+out=$("$PY" - <<'CHECK'
 import pathlib
 import sys
 import tempfile
@@ -70,7 +70,10 @@ if options != {"path": "var/store.json", "indent": 2}:
     fail(f"the default profile options changed to {options!r}; only the class name was supposed to change")
 
 with tempfile.TemporaryDirectory() as tmp:
-    store = storekit.open_profile(CONFIG, path=pathlib.Path(tmp) / "store.json")
+    try:
+        store = storekit.open_profile(CONFIG, path=pathlib.Path(tmp) / "store.json")
+    except Exception as exc:  # noqa: BLE001
+        fail(f"open_profile({CONFIG!r}) raised {type(exc).__name__}: {exc}")
     store.put("token", "abc")
     if store.get("token") != "abc" or store.keys() != ["token"]:
         fail(f"the store from the default profile did not round-trip a value: get={store.get('token')!r} keys={store.keys()!r}")
@@ -82,8 +85,16 @@ for path in sorted(pathlib.Path(".").rglob("*")):
         if OLD in path.read_text(encoding="utf-8"):
             fail(f"{path} still mentions {OLD}")
 CHECK
+)
 rc=$?
-[ "$rc" -eq 0 ] || exit "$rc"
+if [ "$rc" -ne 0 ]; then
+  if printf '%s\n' "$out" | grep -q '^FAIL:'; then
+    printf '%s\n' "$out" | grep '^FAIL:' | head -1
+  else
+    echo "FAIL: the checks crashed before finishing: $(printf '%s\n' "$out" | tail -1)"
+  fi
+  exit 1
+fi
 
 if [ ! -f tests/test_registry.py ]; then
   echo "FAIL: tests/test_registry.py is missing -- it was supposed to be updated, not deleted"

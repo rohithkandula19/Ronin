@@ -1,0 +1,31 @@
+id = "long-horizon/enforce-a-quota-rule-in-the-right-layer"
+category = "long-horizon"
+prompt = """
+Support has asked for a cap on notes: a single user may hold at most 5 un-archived
+notes. Archived ones should not count against it, so archiving something frees a
+slot again. The cap is per user, not across the whole deployment.
+
+Put the number in `config/app.json` alongside the other limits, as
+`limits.max_active_notes_per_user`, so it can be raised without a release.
+
+Over the API the refused attempt should come back as HTTP 429 with the error code
+`quota_exceeded` — the client team is already writing against that. The cap has to
+hold for anything that creates a note, not only for requests that arrive through
+the routes; the seeder and the (half-finished) importer never go near them.
+
+Leave the existing tests and `scripts/seed.py` working.
+"""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = [
+    "config/app.json",
+    "notedeck/config.py",
+    "notedeck/errors.py",
+    "notedeck/services/notes.py",
+    "notedeck/web/error_map.py",
+]
+max_turns = 50
+timeout_seconds = 900
+tags = ["python", "layering", "multi-file", "web", "rules"]
+regression_gate = false

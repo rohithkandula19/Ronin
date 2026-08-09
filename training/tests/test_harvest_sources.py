@@ -295,9 +295,9 @@ def test_the_pure_pipeline_modules_never_import_the_agent_tree_at_all():
 def test_a_manifest_is_built_from_the_eval_suites_real_run_record(tmp_path):
     """Against agent B's actual ``RunRecord``, so the verify gate is read from the
     eval runner's own ``verify.sh`` result rather than recomputed here."""
-    from ronin.evals.taxonomy import AgentOutcome, RunRecord, VerifyProbe
-
     from ronin_training.harvest.sources import manifest_from_run_record
+
+    from ronin.evals.taxonomy import AgentOutcome, RunRecord, VerifyProbe
 
     record = RunRecord(
         task_id="bump-version",
@@ -318,9 +318,9 @@ def test_a_manifest_is_built_from_the_eval_suites_real_run_record(tmp_path):
 
 
 def test_a_run_whose_verify_failed_or_never_ran_is_not_marked_verified(tmp_path):
-    from ronin.evals.taxonomy import RunRecord, VerifyProbe
-
     from ronin_training.harvest.sources import manifest_from_run_record
+
+    from ronin.evals.taxonomy import RunRecord, VerifyProbe
 
     failed = RunRecord(task_id="t", prompt="p", verify_after=VerifyProbe(ran=True, exit_code=1))
     absent = RunRecord(task_id="t", prompt="p")
@@ -332,9 +332,9 @@ def test_a_run_whose_verify_failed_or_never_ran_is_not_marked_verified(tmp_path)
 def test_the_seam_accepts_openai_shaped_tool_dicts_too(tmp_path):
     """The runner records ``registered_tools`` as names only, so a caller supplies the
     schemas from whichever registry the run used — either shape."""
-    from ronin.evals.taxonomy import RunRecord
-
     from ronin_training.harvest.sources import manifest_from_run_record
+
+    from ronin.evals.taxonomy import RunRecord
 
     manifest = manifest_from_run_record(
         RunRecord(task_id="t", prompt="p"),

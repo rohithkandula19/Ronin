@@ -235,10 +235,37 @@ def test_a_well_formed_call_in_the_ronin_dialect_validates() -> None:
     assert check_raw_call(text, schemas=SCHEMAS) == VALID_CALL
 
 
-def test_the_bare_v1_tool_call_tag_is_not_recognised_as_an_attempt() -> None:
-    """The dialect distinction, asserted: v1's ``<tool_call>`` is not this dialect."""
+def test_the_v1_tool_call_tag_is_an_attempt_and_a_loudly_named_failure() -> None:
+    """The dialect divergence must be a zero, not an unmeasured dash.
+
+    ``packages/dialect`` (the v1 ronin-code-1.5b corpus) emits a bare ``<tool_call>``;
+    ``src/ronin``'s format shim parses only ``<ronin:tool_call>``. A model trained on
+    the wrong one makes calls the runtime never executes. If that counted as "no call
+    attempted" it would drop out of the denominator and the whole run would report
+    ``—`` instead of 0.000 — the difference between "we did not measure" and "it is
+    completely broken".
+    """
     text = '<tool_call>{"name": "read_file", "arguments": {"path": "a"}}</tool_call>'
-    assert not attempted_call(text)
+    assert attempted_call(text)
+    check = check_raw_call(text, schemas=SCHEMAS)
+    assert not check.ok
+    assert "emitted the v1 <tool_call> dialect" in check.reason
+    assert "data bug, not a training one" in check.reason
+    score = tool_syntax_validity(
+        [TurnRecord(task_id="t", call=check, fingerprint="read_file:{}")]
+    )
+    assert score.rate == 0.0
+    assert score.attempts == 1
+
+
+def test_the_two_dialect_tags_cannot_be_confused_by_substring() -> None:
+    """``<ronin:tool_call>`` must not be seen as containing ``<tool_call>``."""
+    from ronin_training.adapter.config import V1_DIALECT_OPEN_TAG
+
+    assert V1_DIALECT_OPEN_TAG not in DIALECT_OPEN_TAG
+    assert V1_DIALECT_OPEN_TAG not in DIALECT_CLOSE_TAG
+    good = _call("read_file", {"path": "a.py"})
+    assert check_raw_call(good, schemas=SCHEMAS).ok
 
 
 @pytest.mark.parametrize(

@@ -97,6 +97,47 @@ def test_a_dpo_preflight_reads_preference_rows_and_reports_beta(tmp_path: Path) 
     assert "resume=training/adapters/ronin-adapter-qwen1.5b/sft" in text
 
 
+def test_the_preflight_accepts_the_harvest_pipelines_own_row_shape(tmp_path: Path) -> None:
+    """End-to-end reconciliation: rows exactly as ``ronin_training.harvest`` writes them.
+
+    ``SftExample.as_record()`` emits ``{"messages", "tools", "meta"}`` with the task id
+    inside ``meta``. If this half only looked at top-level keys, every real harvested
+    row would be rejected — so the shape is asserted here rather than assumed.
+    """
+    rows = [
+        {
+            "messages": [
+                {"role": "system", "content": "you are ronin"},
+                {"role": "user", "content": "read a.py"},
+            ],
+            "tools": [],
+            "meta": {
+                "task_id": f"harvested-{task:02d}",
+                "run_id": f"run-{task}",
+                "model": "kimi",
+                "source": "eval_suite",
+                "turn_index": index,
+                "augmented": False,
+                "augment_seed": -1,
+                "negative_class": "",
+                "synthesized_chosen": False,
+            },
+        }
+        for task in range(15)
+        for index in range(3)
+    ]
+    path = tmp_path / "harvested.jsonl"
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    result = preflight(
+        config_path=SFT_PATH, rows_path=path, out_dir=tmp_path / "split"
+    )
+    assert result.ok, render(result)
+    assert result.split is not None
+    assert result.split.holdout_tasks
+    assert all(task.startswith("harvested-") for task in result.split.holdout_tasks)
+    assert result.split.leaked_tasks == ()
+
+
 def test_a_row_with_no_task_identity_fails_the_preflight(tmp_path: Path) -> None:
     rows = tmp_path / "rows.jsonl"
     rows.write_text(json.dumps({"messages": []}) + "\n", encoding="utf-8")

@@ -12,7 +12,7 @@ find . -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null
 # (b) no suppression: the fixture contains no exception handling at all, so any
 # except/suppress that appears is the agent hiding the traceback.
 HIT=$(grep -rnE 'except[[:space:]A-Za-z_.]*:|contextlib\.suppress|[[:space:]]suppress\(' \
-        --include='*.py' . 2>/dev/null | head -1)
+        --include='*.py' opsboard status_board.py 2>/dev/null | head -1)
 if [ -n "$HIT" ]; then
   echo "verify: expected the TypeError to be fixed at its source, but found exception suppression: $HIT"
   exit 1

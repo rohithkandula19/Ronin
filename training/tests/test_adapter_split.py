@@ -145,10 +145,50 @@ def test_a_split_whose_bookkeeping_disagrees_with_its_rows_is_rejected() -> None
 # ------------------------------------------------------------- the input contract
 
 
-@pytest.mark.parametrize("key", TASK_ID_KEYS)
-def test_any_of_the_accepted_task_keys_is_read(key: str) -> None:
+@pytest.mark.parametrize("key", [k for k in TASK_ID_KEYS if "." not in k])
+def test_any_of_the_accepted_flat_task_keys_is_read(key: str) -> None:
     """The harvest pipeline picks one of these; this half must not care which."""
     assert task_id_of({key: "recover-after-denial", "messages": []}) == "recover-after-denial"
+
+
+def test_the_task_id_is_read_out_of_the_harvest_pipelines_meta_block() -> None:
+    """The shape ``ronin_training.harvest`` actually writes: task id nested in ``meta``.
+
+    A flat-key-only lookup would reject every real harvested row, so this is the one
+    reconciliation between the two halves of the phase that has to be asserted.
+    """
+    row = {
+        "messages": [{"role": "user", "content": "go"}],
+        "tools": [],
+        "meta": {
+            "task_id": "gate-denial-recovery",
+            "run_id": "r1",
+            "turn_index": 0,
+        },
+    }
+    assert task_id_of(row) == "gate-denial-recovery"
+    examples = examples_from_rows([row], kind="sft")
+    assert examples[0].task_id == "gate-denial-recovery"
+
+
+def test_a_preference_row_in_the_harvest_pipelines_shape_is_read() -> None:
+    row = {
+        "prompt": [{"role": "user", "content": "go"}],
+        "chosen": [{"role": "assistant", "content": "ok"}],
+        "rejected": [{"role": "assistant", "content": "no"}],
+        "meta": {"task_id": "malformed-json", "run_id": "r1"},
+    }
+    assert examples_from_rows([row], kind="dpo")[0].task_id == "malformed-json"
+
+
+def test_a_flat_task_id_still_wins_over_a_missing_meta_block() -> None:
+    assert task_id_of({"task_id": "flat", "messages": []}) == "flat"
+    assert task_id_of({"meta": {}, "task_id": "flat", "messages": []}) == "flat"
+
+
+def test_a_non_mapping_meta_does_not_crash_the_lookup() -> None:
+    with pytest.raises(DatasetError, match="no task identity"):
+        task_id_of({"meta": "not a mapping", "messages": []})
 
 
 def test_a_row_with_no_task_identity_is_rejected_naming_the_keys() -> None:

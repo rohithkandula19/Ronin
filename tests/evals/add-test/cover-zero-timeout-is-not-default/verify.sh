@@ -10,12 +10,61 @@ import os
 import subprocess
 import sys
 
-RUNNER = '\nimport importlib.util\nimport sys\nimport traceback\n\npath = sys.argv[1]\nspec = importlib.util.spec_from_file_location("agent_tests", path)\nif spec is None or spec.loader is None:\n    print("IMPORTERROR")\n    raise SystemExit(3)\nmod = importlib.util.module_from_spec(spec)\nsys.modules["agent_tests"] = mod\ntry:\n    spec.loader.exec_module(mod)\nexcept BaseException:\n    traceback.print_exc()\n    print("IMPORTERROR")\n    raise SystemExit(3)\nnames = sorted(k for k in vars(mod) if k.startswith("test_") and callable(vars(mod)[k]))\nfailed = []\nfor name in names:\n    try:\n        vars(mod)[name]()\n    except BaseException:\n        failed.append(name)\n        traceback.print_exc()\nprint("NAMES " + " ".join(names))\nprint("FAILED " + " ".join(failed))\n'
+RUNNER = chr(10).join([
+    '',
+    'import importlib.util',
+    'import sys',
+    'import traceback',
+    '',
+    'path = sys.argv[1]',
+    'spec = importlib.util.spec_from_file_location("agent_tests", path)',
+    'if spec is None or spec.loader is None:',
+    '    print("IMPORTERROR")',
+    '    raise SystemExit(3)',
+    'mod = importlib.util.module_from_spec(spec)',
+    'sys.modules["agent_tests"] = mod',
+    'try:',
+    '    spec.loader.exec_module(mod)',
+    'except BaseException:',
+    '    traceback.print_exc()',
+    '    print("IMPORTERROR")',
+    '    raise SystemExit(3)',
+    'names = sorted(k for k in vars(mod) if k.startswith("test_") and callable(vars(mod)[k]))',
+    'failed = []',
+    'for name in names:',
+    '    try:',
+    '        vars(mod)[name]()',
+    '    except BaseException:',
+    '        failed.append(name)',
+    '        traceback.print_exc()',
+    'print("NAMES " + " ".join(names))',
+    'print("FAILED " + " ".join(failed))',
+    '',
+])
+
+#: The implementation with the fix reverted. A new test that still passes
+#: against this proves nothing, so verify.sh rejects it.
+MUTANT = chr(10).join([
+    '"""Resolve the effective timeout for a wait."""',
+    '',
+    'from __future__ import annotations',
+    '',
+    'DEFAULT_TIMEOUT = 30.0',
+    '',
+    '',
+    'def effective_timeout(requested: float | None) -> float:',
+    '    if not requested:',
+    '        return DEFAULT_TIMEOUT',
+    '    if requested < 0:',
+    '        raise ValueError("timeout must not be negative")',
+    '    return requested',
+    '',
+])
+
 TEST_FILE = 'tests/test_policy.py'
 IMPL = 'wait/policy.py'
 REQUIRED = 'test_a_zero_timeout_is_honoured_rather_than_defaulted'
 IMPL_SHA = '2818409a2842dc32d8c70b8bda9d4afc2439d4fbd26b0a531ef6a30b43485237'
-MUTANT = '"""Resolve the effective timeout for a wait."""\n\nfrom __future__ import annotations\n\nDEFAULT_TIMEOUT = 30.0\n\n\ndef effective_timeout(requested: float | None) -> float:\n    if not requested:\n        return DEFAULT_TIMEOUT\n    if requested < 0:\n        raise ValueError("timeout must not be negative")\n    return requested\n'
 
 
 def run():

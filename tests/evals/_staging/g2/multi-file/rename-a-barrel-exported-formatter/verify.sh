@@ -11,7 +11,7 @@ if ! command -v node >/dev/null 2>&1; then
   exit 1
 fi
 
-node <<'JS'
+out=$(node <<'JS'
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
@@ -123,8 +123,16 @@ while (stack.length) {
   }
 }
 JS
+)
 rc=$?
-[ "$rc" -eq 0 ] || exit "$rc"
+if [ "$rc" -ne 0 ]; then
+  if printf '%s\n' "$out" | grep -q '^FAIL:'; then
+    printf '%s\n' "$out" | grep '^FAIL:' | head -1
+  else
+    echo "FAIL: the checks crashed before finishing: $(printf '%s\n' "$out" | tail -1)"
+  fi
+  exit 1
+fi
 
 if [ ! -f test/format.test.js ]; then
   echo "FAIL: test/format.test.js is missing -- it was supposed to be updated, not deleted"

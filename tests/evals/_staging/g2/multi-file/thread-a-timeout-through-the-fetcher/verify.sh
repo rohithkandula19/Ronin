@@ -11,7 +11,7 @@ if [ -z "$PY" ]; then
   if command -v python3 >/dev/null 2>&1; then PY=python3; else PY=python; fi
 fi
 
-"$PY" - <<'CHECK'
+out=$("$PY" - <<'CHECK'
 import inspect
 import sys
 
@@ -75,13 +75,21 @@ if seen != [0.5, 5.0]:
     fail(f"the transport recorded timeouts {seen!r}, expected [0.5, 5.0]")
 
 t = fake()
-if Client(t).get("/slow").status != 200:
+try:
+    plain = Client(t).get("/slow")
+except TypeError as exc:
+    fail(f"client.get('/slow') with no timeout raised TypeError: {exc}")
+if plain.status != 200:
     fail("a plain client.get('/slow') should still use the 10s default and succeed")
 if t.log[-1]["timeout"] != 10.0:
     fail(f"with no timeout given the transport saw {t.log[-1]['timeout']!r}, expected the 10.0 default")
 t = fake()
-if Client(t).post("/things", timeout=2.5).status != 200:
-    fail("client.post does not accept a timeout")
+try:
+    posted = Client(t).post("/things", timeout=2.5)
+except TypeError as exc:
+    fail(f"client.post('/things', timeout=2.5) raised TypeError: {exc}")
+if posted.status != 200:
+    fail("client.post with a timeout no longer reaches the transport")
 if t.log[-1]["timeout"] != 2.5:
     fail(f"client.post passed {t.log[-1]['timeout']!r} to the transport instead of 2.5")
 
@@ -108,8 +116,16 @@ if result.status != 504:
 if [entry["timeout"] for entry in inner.log] != [0.25, 0.25]:
     fail(f"get_with_retry passed {[e['timeout'] for e in inner.log]!r} across its attempts, expected [0.25, 0.25]")
 CHECK
+)
 rc=$?
-[ "$rc" -eq 0 ] || exit "$rc"
+if [ "$rc" -ne 0 ]; then
+  if printf '%s\n' "$out" | grep -q '^FAIL:'; then
+    printf '%s\n' "$out" | grep '^FAIL:' | head -1
+  else
+    echo "FAIL: the checks crashed before finishing: $(printf '%s\n' "$out" | tail -1)"
+  fi
+  exit 1
+fi
 
 if [ ! -f tests/test_client.py ]; then
   echo "FAIL: tests/test_client.py is missing -- it was supposed to be updated, not deleted"

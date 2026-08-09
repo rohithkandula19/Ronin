@@ -11,7 +11,7 @@ if [ -z "$PY" ]; then
   if command -v python3 >/dev/null 2>&1; then PY=python3; else PY=python; fi
 fi
 
-"$PY" - <<'CHECK'
+out=$("$PY" - <<'CHECK'
 import ast
 import pathlib
 import sys
@@ -72,11 +72,18 @@ if slugify("The Quick Brown Fox") != "quick-brown-fox":
     fail(f"slugify('The Quick Brown Fox') returned {slugify('The Quick Brown Fox')!r}")
 
 render = load("textkit.render")
-card = render.render_card("The  Quick   Brown Fox", "a  b   c", width=5)
+try:
+    card = render.render_card("The  Quick   Brown Fox", "a  b   c", width=5)
+except Exception as exc:  # noqa: BLE001
+    fail(f"textkit.render.render_card raised {type(exc).__name__}: {exc}")
 if card != {"slug": "quick-brown-fox", "title": "The Quick Brown Fox", "teaser": "a b c"}:
     fail(f"textkit.render.render_card returned {card!r}")
-if render.render_anchor("one two three four five") != "#one-two-three-four":
-    fail(f"textkit.render.render_anchor returned {render.render_anchor('one two three four five')!r}")
+try:
+    anchor = render.render_anchor("one two three four five")
+except Exception as exc:  # noqa: BLE001
+    fail(f"textkit.render.render_anchor raised {type(exc).__name__}: {exc}")
+if anchor != "#one-two-three-four":
+    fail(f"textkit.render.render_anchor returned {anchor!r}")
 
 index_mod = load("textkit.index")
 try:
@@ -92,8 +99,16 @@ except Exception as exc:  # noqa: BLE001
 if got != "Unicode Café":
     fail(f"textkit.index.lookup returned {got!r}")
 CHECK
+)
 rc=$?
-[ "$rc" -eq 0 ] || exit "$rc"
+if [ "$rc" -ne 0 ]; then
+  if printf '%s\n' "$out" | grep -q '^FAIL:'; then
+    printf '%s\n' "$out" | grep '^FAIL:' | head -1
+  else
+    echo "FAIL: the checks crashed before finishing: $(printf '%s\n' "$out" | tail -1)"
+  fi
+  exit 1
+fi
 
 if [ ! -f tests/test_slug.py ]; then
   echo "FAIL: tests/test_slug.py is missing -- it was supposed to be updated, not deleted"

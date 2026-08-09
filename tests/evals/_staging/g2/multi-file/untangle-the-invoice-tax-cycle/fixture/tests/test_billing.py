@@ -1,7 +1,7 @@
 import unittest
 
 from billing import Invoice, Line
-from billing.invoice import normalize_currency, to_minor_units
+from billing.invoice import CURRENCY_SCALE, normalize_currency, to_minor_units
 from billing.report import format_minor, render
 from billing.tax import rate_for, tax_for_line
 
@@ -22,6 +22,10 @@ class CurrencyTests(unittest.TestCase):
     def test_an_unknown_currency_is_rejected(self):
         with self.assertRaises(ValueError):
             normalize_currency("XTS")
+
+    def test_yen_has_no_minor_unit(self):
+        self.assertEqual(CURRENCY_SCALE["JPY"], 1)
+        self.assertEqual(CURRENCY_SCALE["USD"], 100)
 
     def test_minor_units_respect_the_scale(self):
         self.assertEqual(to_minor_units(19.99, "USD"), 1999)

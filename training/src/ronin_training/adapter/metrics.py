@@ -36,7 +36,11 @@ from functools import cache
 from pathlib import Path
 from typing import Any
 
-from .config import DIALECT_CLOSE_TAG, DIALECT_OPEN_TAG
+from .config import (
+    DIALECT_CLOSE_TAG,
+    DIALECT_OPEN_TAG,
+    V1_DIALECT_OPEN_TAG,
+)
 
 #: Repo-relative location of the generated tool registry (the ground truth for
 #: what tools exist and what arguments they take).
@@ -300,8 +304,15 @@ def find_call_blocks(text: str) -> tuple[str, ...]:
 
 
 def attempted_call(text: str) -> bool:
-    """Whether ``text`` tried to call a tool, well-formed or not."""
-    return DIALECT_OPEN_TAG in text
+    """Whether ``text`` tried to call a tool, well-formed or not.
+
+    A **v1** ``<tool_call>`` block counts as an attempt even though the v2 runtime
+    will never execute it. Treating it as "no call attempted" would drop the turn out
+    of the denominator, and a model emitting the wrong dialect throughout would score
+    an unmeasured ``—`` instead of a very loud zero. The two tags cannot be confused
+    by substring: ``<ronin:tool_call>`` does not contain ``<tool_call>``.
+    """
+    return DIALECT_OPEN_TAG in text or V1_DIALECT_OPEN_TAG in text
 
 
 def check_raw_call(text: str, *, schemas: Mapping[str, Mapping[str, Any]]) -> CallCheck:
@@ -316,6 +327,18 @@ def check_raw_call(text: str, *, schemas: Mapping[str, Mapping[str, Any]]) -> Ca
         raise MetricsError(
             "check_raw_call was given text with no tool-call attempt; use "
             "attempted_call() first so a silent turn is not scored as a bad call"
+        )
+    if DIALECT_OPEN_TAG not in text:
+        # Only the v1 tag is present. This is the single highest-severity outcome the
+        # metric can report and it must not look like anything else: the corpus and
+        # the runtime disagree about the dialect, so every call fails for one reason.
+        return CallCheck(
+            ok=False,
+            reason=(
+                f"emitted the v1 {V1_DIALECT_OPEN_TAG} dialect; Ronin's format shim "
+                f"parses {DIALECT_OPEN_TAG} and only that — the training corpus and "
+                "the runtime disagree, which is a data bug, not a training one"
+            ),
         )
     blocks = find_call_blocks(text)
     if not blocks:

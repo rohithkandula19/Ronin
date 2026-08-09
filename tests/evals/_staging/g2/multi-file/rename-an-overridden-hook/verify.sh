@@ -11,7 +11,7 @@ if [ -z "$PY" ]; then
   if command -v python3 >/dev/null 2>&1; then PY=python3; else PY=python; fi
 fi
 
-"$PY" - <<'CHECK'
+out=$("$PY" - <<'CHECK'
 import pathlib
 import sys
 
@@ -72,8 +72,16 @@ for path in sorted(pathlib.Path(".").rglob("*.py")):
     if OLD in path.read_text(encoding="utf-8"):
         fail(f"{path} still mentions {OLD}")
 CHECK
+)
 rc=$?
-[ "$rc" -eq 0 ] || exit "$rc"
+if [ "$rc" -ne 0 ]; then
+  if printf '%s\n' "$out" | grep -q '^FAIL:'; then
+    printf '%s\n' "$out" | grep '^FAIL:' | head -1
+  else
+    echo "FAIL: the checks crashed before finishing: $(printf '%s\n' "$out" | tail -1)"
+  fi
+  exit 1
+fi
 
 if [ ! -f tests/test_registry.py ]; then
   echo "FAIL: tests/test_registry.py is missing -- it was supposed to be updated, not deleted"

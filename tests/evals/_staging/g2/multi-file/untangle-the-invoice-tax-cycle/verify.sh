@@ -26,7 +26,7 @@ for mod in billing billing.money billing.tax billing.invoice billing.report; do
   fi
 done
 
-"$PY" - <<'CHECK'
+out=$("$PY" - <<'CHECK'
 import ast
 import pathlib
 import sys
@@ -123,18 +123,32 @@ inv = billing.Invoice(
     lines=(billing.Line("Paperback", 19.99, 2, "books"), billing.Line("Tote bag", 12.50, 1, "merch")),
 )
 expected = {"currency": "USD", "subtotal_minor": 5248, "tax_minor": 388, "total_minor": 5636}
-got = inv.totals()
+try:
+    got = inv.totals()
+except Exception as exc:  # noqa: BLE001
+    fail(f"Invoice.totals() raised {type(exc).__name__}: {exc}")
 if got != expected:
     fail(f"Invoice.totals() returned {got!r}, expected {expected!r}")
 report = load("billing.report")
-last = report.render(inv).splitlines()[-1]
+try:
+    last = report.render(inv).splitlines()[-1]
+except Exception as exc:  # noqa: BLE001
+    fail(f"billing.report.render(...) raised {type(exc).__name__}: {exc}")
 if last != "total 56.36 USD":
     fail(f"billing.report.render(...) last line is {last!r}, expected 'total 56.36 USD'")
 if billing.normalize_currency(" euro ") != "EUR":
     fail("billing.normalize_currency is no longer re-exported from the package root")
 CHECK
+)
 rc=$?
-[ "$rc" -eq 0 ] || exit "$rc"
+if [ "$rc" -ne 0 ]; then
+  if printf '%s\n' "$out" | grep -q '^FAIL:'; then
+    printf '%s\n' "$out" | grep '^FAIL:' | head -1
+  else
+    echo "FAIL: the checks crashed before finishing: $(printf '%s\n' "$out" | tail -1)"
+  fi
+  exit 1
+fi
 
 if [ ! -f tests/test_billing.py ]; then
   echo "FAIL: tests/test_billing.py is missing -- it was supposed to be updated, not deleted"
@@ -147,8 +161,8 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 ran=$(printf '%s\n' "$out" | grep -oE '^Ran [0-9]+ test' | grep -oE '[0-9]+' | head -1)
-if [ "${ran:-0}" -lt 8 ]; then
-  echo "FAIL: expected the 8 existing tests in tests/test_billing.py to still run, unittest ran ${ran:-0}"
+if [ "${ran:-0}" -lt 9 ]; then
+  echo "FAIL: expected the 9 existing tests in tests/test_billing.py to still run, unittest ran ${ran:-0}"
   exit 1
 fi
 exit 0

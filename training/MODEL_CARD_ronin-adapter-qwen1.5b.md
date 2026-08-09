@@ -93,6 +93,30 @@ turns Ronin's own runtime traces into supervised examples and preference pairs.
   concentrated on the two behaviours SFT alone under-teaches: adapting after a setback,
   and stopping at a gate.
 
+### Known integration risk: two tool-call dialects live in this repo
+
+This repo contains **two** tool-call dialects, and they are not interchangeable:
+
+| | tag | consumer |
+|---|---|---|
+| v1 | `<tool_call>` | `packages/dialect`, `packages/cli`, `ronin-code-1.5b` |
+| v2 | `<ronin:tool_call>` | `src/ronin/providers/shim.py` — **this adapter's runtime** |
+
+`src/ronin`'s format shim parses `<ronin:tool_call>` and only that (the tag is
+namespaced precisely because a bare `<tool_call>` collides with several fine-tunes'
+own chat templates). An adapter trained on the v1 tag therefore makes calls the v2
+runtime never executes — a total tool-syntax failure that looks like a training
+problem and is a data problem.
+
+This has not been resolved at the time of writing: the harvest pipeline's prompt
+renderer currently goes through `ronin_dialect`, which is v1. It must be reconciled
+before a training run, either by rendering v2 in the corpus or by teaching the
+provider to parse v1. Until then, treat any adapter trained from this corpus as
+untested against the v2 runtime. `ronin_training.adapter.metrics.check_raw_call`
+reports the mismatch explicitly — a v1 block counts as an *attempted, invalid* call
+with a named reason, so a dialect mismatch shows up as a hard `0.000` rather than as
+an unmeasured `—`.
+
 ### The holdout, and why it is by task
 
 Ten percent of **tasks** are held out — never ten percent of examples. Two examples

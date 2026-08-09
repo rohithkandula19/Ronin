@@ -345,6 +345,7 @@ async def sdk_agent_factory(
     router: object,
     mode: object | None = None,
     connect_mcp: bool = False,
+    record: bool = False,
 ) -> OpenedAgent:
     """Open a real ``ronin.cli.sdk.Agent`` on ``workspace``.
 
@@ -356,6 +357,18 @@ async def sdk_agent_factory(
     ``record=False`` and ``connect_mcp=False`` by default: a transcript per task times
     sixty tasks is a lot of disk for data nothing reads, and an eval that reaches an
     MCP server is an eval measuring somebody else's uptime.
+
+    Something now reads it. The phase-12 harvest pipeline turns successful eval
+    trajectories into training examples, and its only input is
+    ``.ronin/sessions/<id>.jsonl`` — which exists only when ``record=True``. With the
+    flag hardcoded off, that pipeline was complete, tested, and yielded **zero rows**;
+    the measured yield was 0 SFT examples and 0 preference pairs, for want of one
+    boolean.
+
+    So it is a parameter, still defaulting to off. Opt-in rather than flipped, because
+    the default is right for the common case: most eval runs are measurements nobody
+    intends to learn from, and silently writing a transcript per task would be a
+    surprise on disk. A harvest run asks for it.
     """
     # Lazy on purpose — see the docstring: the eval package must stay importable
     # without the application layer.
@@ -365,7 +378,7 @@ async def sdk_agent_factory(
         workspace,
         router=router,  # type: ignore[arg-type]
         mode=mode,  # type: ignore[arg-type]
-        record=False,
+        record=record,
         connect_mcp=connect_mcp,
     )
     names = tuple(sorted(spec.name for spec in agent.runtime.registry.specs()))

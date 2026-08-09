@@ -10,12 +10,57 @@ import os
 import subprocess
 import sys
 
-RUNNER = '\nimport importlib.util\nimport sys\nimport traceback\n\npath = sys.argv[1]\nspec = importlib.util.spec_from_file_location("agent_tests", path)\nif spec is None or spec.loader is None:\n    print("IMPORTERROR")\n    raise SystemExit(3)\nmod = importlib.util.module_from_spec(spec)\nsys.modules["agent_tests"] = mod\ntry:\n    spec.loader.exec_module(mod)\nexcept BaseException:\n    traceback.print_exc()\n    print("IMPORTERROR")\n    raise SystemExit(3)\nnames = sorted(k for k in vars(mod) if k.startswith("test_") and callable(vars(mod)[k]))\nfailed = []\nfor name in names:\n    try:\n        vars(mod)[name]()\n    except BaseException:\n        failed.append(name)\n        traceback.print_exc()\nprint("NAMES " + " ".join(names))\nprint("FAILED " + " ".join(failed))\n'
+RUNNER = chr(10).join([
+    '',
+    'import importlib.util',
+    'import sys',
+    'import traceback',
+    '',
+    'path = sys.argv[1]',
+    'spec = importlib.util.spec_from_file_location("agent_tests", path)',
+    'if spec is None or spec.loader is None:',
+    '    print("IMPORTERROR")',
+    '    raise SystemExit(3)',
+    'mod = importlib.util.module_from_spec(spec)',
+    'sys.modules["agent_tests"] = mod',
+    'try:',
+    '    spec.loader.exec_module(mod)',
+    'except BaseException:',
+    '    traceback.print_exc()',
+    '    print("IMPORTERROR")',
+    '    raise SystemExit(3)',
+    'names = sorted(k for k in vars(mod) if k.startswith("test_") and callable(vars(mod)[k]))',
+    'failed = []',
+    'for name in names:',
+    '    try:',
+    '        vars(mod)[name]()',
+    '    except BaseException:',
+    '        failed.append(name)',
+    '        traceback.print_exc()',
+    'print("NAMES " + " ".join(names))',
+    'print("FAILED " + " ".join(failed))',
+    '',
+])
+
+#: The implementation with the fix reverted. A new test that still passes
+#: against this proves nothing, so verify.sh rejects it.
+MUTANT = chr(10).join([
+    '"""Take a window out of a list."""',
+    '',
+    'from __future__ import annotations',
+    '',
+    '',
+    'def window(items: list[str], offset: int, size: int) -> list[str]:',
+    '    if size < 0:',
+    '        raise ValueError("size must not be negative, got %d" % size)',
+    '    return items[offset : offset + size]',
+    '',
+])
+
 TEST_FILE = 'tests/test_window.py'
 IMPL = 'slice_/window.py'
 REQUIRED = 'test_a_negative_offset_is_rejected'
 IMPL_SHA = '13a357e869c2417a7df262194e6ccd44b6dd97c9d4420156aae2fb4b5493e567'
-MUTANT = '"""Take a window out of a list."""\n\nfrom __future__ import annotations\n\n\ndef window(items: list[str], offset: int, size: int) -> list[str]:\n    if size < 0:\n        raise ValueError("size must not be negative, got %d" % size)\n    return items[offset : offset + size]\n'
 
 
 def run():

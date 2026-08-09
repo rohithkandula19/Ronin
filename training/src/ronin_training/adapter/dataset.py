@@ -32,10 +32,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-#: Keys a harvested row may use to name its task, in priority order. The harvest
-#: pipeline picks one; accepting several means the two halves of this phase can be
-#: written in parallel and reconciled without a rewrite.
-TASK_ID_KEYS: tuple[str, ...] = ("task_id", "task", "family", "scenario")
+#: Keys a harvested row may use to name its task, in priority order. A dotted key is
+#: a nested path: ``ronin_training.harvest`` writes the task id inside its ``meta``
+#: block (``{"messages": …, "tools": …, "meta": {"task_id": …}}``), which is why
+#: ``meta.task_id`` is first and why this is a path lookup rather than a key lookup.
+#: Accepting several lets the two halves of this phase be written in parallel.
+TASK_ID_KEYS: tuple[str, ...] = (
+    "meta.task_id",
+    "task_id",
+    "task",
+    "family",
+    "scenario",
+)
 
 #: Fields an SFT row must have to be trainable at all.
 SFT_REQUIRED: tuple[str, ...] = ("messages",)
@@ -65,10 +73,20 @@ class Example:
             raise DatasetError("Example.task_id must be non-empty")
 
 
+def _lookup(row: Mapping[str, Any], path: str) -> object:
+    """Follow a dotted path through nested mappings. Missing at any level is ``None``."""
+    current: object = row
+    for part in path.split("."):
+        if not isinstance(current, Mapping):
+            return None
+        current = current.get(part)
+    return current
+
+
 def task_id_of(row: Mapping[str, Any], *, keys: Sequence[str] = TASK_ID_KEYS) -> str:
     """The task identity of ``row``, or a :class:`DatasetError` naming what was missing."""
     for key in keys:
-        value = row.get(key)
+        value = _lookup(row, key)
         if isinstance(value, str) and value.strip():
             return value.strip()
     raise DatasetError(
@@ -109,7 +127,11 @@ def examples_from_rows(
             task = task_id_of(row, keys=keys)
         except DatasetError as exc:
             raise DatasetError(f"row {index}: {exc}") from exc
-        example_id = str(row.get("id") or row.get("example_id") or f"{task}#{index}")
+        # Zero-padded so the fallback ids sort in the order the file listed them;
+        # `task#10` sorts before `task#2` and would reorder the written split.
+        example_id = str(
+            row.get("id") or row.get("example_id") or f"{task}#{index:08d}"
+        )
         out.append(Example(task_id=task, example_id=example_id, row=row))
     return tuple(out)
 

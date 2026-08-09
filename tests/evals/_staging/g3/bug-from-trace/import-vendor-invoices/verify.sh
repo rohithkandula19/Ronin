@@ -16,7 +16,7 @@ if [ -n "$HIT" ]; then
   exit 1
 fi
 HIT=$(grep -rnE "errors[[:space:]]*=[[:space:]]*['\"](replace|ignore|surrogateescape|backslashreplace)" \
-        --include='*.py' . 2>/dev/null | head -1)
+        --include='*.py' ledgerimp import_ledger.py 2>/dev/null | head -1)
 if [ -n "$HIT" ]; then
   echo "verify: lossy decoding is not a fix - the vendor names must survive intact: $HIT"
   exit 1

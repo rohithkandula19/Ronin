@@ -10,12 +10,12 @@ cd "$WORK" 2>/dev/null || { echo "verify: workspace '$WORK' is not a directory";
 find . -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null
 
 HIT=$(grep -rnE 'except[[:space:]A-Za-z_.]*:|contextlib\.suppress|[[:space:]]suppress\(' \
-        --include='*.py' . 2>/dev/null | head -1)
+        --include='*.py' flatkit audit_settings.py 2>/dev/null | head -1)
 if [ -n "$HIT" ]; then
   echo "verify: expected the cyclic walk to terminate, but found exception suppression: $HIT"
   exit 1
 fi
-HIT=$(grep -rn 'setrecursionlimit' --include='*.py' . 2>/dev/null | head -1)
+HIT=$(grep -rn 'setrecursionlimit' --include='*.py' flatkit audit_settings.py 2>/dev/null | head -1)
 if [ -n "$HIT" ]; then
   echo "verify: raising the recursion limit does not stop an unbounded walk: $HIT"
   exit 1

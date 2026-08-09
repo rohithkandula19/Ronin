@@ -73,6 +73,14 @@ VERIFIED_BASES: Mapping[str, str] = {
 DIALECT_OPEN_TAG = "<ronin:tool_call>"
 DIALECT_CLOSE_TAG = "</ronin:tool_call>"
 
+#: The **v1** dialect (``packages/dialect``, the ronin-code-1.5b model). Named here
+#: only so the metrics can recognise it and say so: a model that emits this tag has
+#: made a tool call the v2 runtime will never execute, and scoring that turn as "no
+#: call attempted" would hide a total failure behind an unmeasured dash. See
+#: :func:`ronin_training.adapter.metrics.check_raw_call`.
+V1_DIALECT_OPEN_TAG = "<tool_call>"
+V1_DIALECT_CLOSE_TAG = "</tool_call>"
+
 # --------------------------------------------------------------------------- #
 # LoRA
 # --------------------------------------------------------------------------- #
