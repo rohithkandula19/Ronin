@@ -21,20 +21,23 @@ SRC = Path(__file__).resolve().parents[2] / "src" / "ronin"
 #: The modules allowed to know about every layer. They exist to introduce them:
 #: ``session`` is the orchestrator seat, ``cli`` is the application on top of it,
 #: and the two demos show the whole stack running.
-ORCHESTRATORS = frozenset(
-    {
-        "ronin.session",
-        "ronin.session_demo",
-        "ronin.cli",
-        "ronin.cli.app",
-        "ronin.cli.main",
-        "ronin.cli.wire",
-        "ronin.cli.sdk",
-        "ronin.cli.demo",
-        "ronin.cli.doctor",
-        "ronin.cli.commands",
-    }
-)
+#:
+#: ``cli`` is stated as a *package* rather than enumerated module by module. The
+#: enumerated form was worse than useless: a new ``cli`` module was unconstrained
+#: until someone remembered to add it, and the only signal that they had not was a
+#: failure in an unrelated test. The rule is "the application layer may import
+#: anything", so that is what is written down.
+ORCHESTRATOR_MODULES = frozenset({"ronin.session", "ronin.session_demo"})
+ORCHESTRATOR_PACKAGES = ("ronin.cli",)
+
+
+
+def is_orchestrator(dotted: str) -> bool:
+    """Whether ``dotted`` is allowed to import across every layer."""
+    return dotted in ORCHESTRATOR_MODULES or any(
+        dotted == package or dotted.startswith(f"{package}.")
+        for package in ORCHESTRATOR_PACKAGES
+    )
 
 #: The layers above ``core`` and their prohibitions, as a table — this *is* the
 #: dependency graph from ``docs/ARCHITECTURE.md`` §3, in executable form.
@@ -96,7 +99,7 @@ def violations(package: str, forbidden: tuple[str, ...]) -> list[str]:
     """Every ``module → forbidden import`` pair, excluding the orchestrators."""
     found: list[str] = []
     for dotted, path in modules_under(package):
-        if dotted in ORCHESTRATORS:
+        if is_orchestrator(dotted):
             continue
         for imported in imported_modules(path, dotted):
             for prefix in forbidden:
@@ -112,18 +115,18 @@ def violations(package: str, forbidden: tuple[str, ...]) -> list[str]:
 
 def test_the_tool_layer_knows_nothing_about_providers_or_the_loop() -> None:
     """A tool that knew which model was calling it would special-case for it."""
-    assert violations("tools", ("ronin.providers", "ronin.core.loop")) == []
+    assert violations("tools", ("ronin.providers", "ronin.core.loop", "ronin.cli")) == []
 
 
 def test_the_provider_layer_knows_nothing_about_tools() -> None:
     """An adapter that imports tools ends up executing them, which is how the
     provider layer quietly becomes a second agent loop."""
-    assert violations("providers", ("ronin.tools",)) == []
+    assert violations("providers", ("ronin.tools", "ronin.cli")) == []
 
 
 def test_the_core_contract_knows_nothing_about_providers_or_tools() -> None:
     """The loop takes both as injected protocols; importing either is the cycle."""
-    assert violations("core", ("ronin.providers", "ronin.tools")) == []
+    assert violations("core", ("ronin.providers", "ronin.tools", "ronin.cli")) == []
 
 
 @pytest.mark.parametrize(("package", "forbidden"), LAYER_RULES, ids=[r[0] for r in LAYER_RULES])
@@ -173,7 +176,8 @@ def test_only_the_orchestrator_imports_all_three_layers() -> None:
         } - {""}
         if len(layers) == 3:
             multi.append(dotted)
-    assert set(multi) <= ORCHESTRATORS, f"unexpected cross-layer module(s): {multi}"
+    unexpected = [dotted for dotted in multi if not is_orchestrator(dotted)]
+    assert unexpected == [], f"unexpected cross-layer module(s): {unexpected}"
 
 
 def test_the_orchestrator_does_import_all_three() -> None:
