@@ -60,8 +60,25 @@ htmlcov/
 # SaaS / CLI runtime artifacts
 csk_saas.db
 csk_saas.db-journal
-# ronin local config — holds plaintext API keys; NEVER commit it
-.ronin/
+# ronin workspace config. Default-deny with an explicit allowlist, because the
+# directory holds both plaintext API keys (config.toml) and the four files a team
+# is *supposed* to share. The old blanket `.ronin/` ignored all of it — and since
+# git does not descend into an ignored directory, no negation inside could rescue
+# anything — so the committed project settings, subagents, slash commands and MCP
+# server list were silently untrackable.
+#
+# `.ronin/*` (not `.ronin/`) matches only direct children and lets git descend, so
+# the negations below work. Anything not named here stays ignored: a new file some
+# code drops in this directory is secret until someone decides otherwise.
+.ronin/*
+!.ronin/settings.json
+!.ronin/mcp.json
+!.ronin/hooks.json
+!.ronin/agents/
+!.ronin/commands/
+# ...but never the local layer, even though its parent is now walkable.
+.ronin/settings.local.json
+.ronin/*.local.json
 # legacy (pre-rename) — still ignored for older checkouts.
 # NB: git does not support trailing comments on pattern lines.
 .csk/
