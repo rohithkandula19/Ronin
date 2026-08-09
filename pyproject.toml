@@ -67,7 +67,7 @@ dev = [
 
 [tool.mypy]
 python_version = "3.11"
-files = ["src/ronin", "tests/core", "tests/providers"]
+files = ["src/ronin", "tests/core", "tests/providers", "tests/tools"]
 strict = true
 warn_unreachable = true
 # Without __init__.py files mypy would name these modules `test_types` rather
@@ -76,7 +76,7 @@ explicit_package_bases = true
 # tests/core is on the path so the shared `fakes` module resolves for mypy the
 # same way pytest resolves it (test dirs stay non-packages on purpose — making
 # them packages breaks collection across the rest of the monorepo).
-mypy_path = "src:tests/core:tests/providers"
+mypy_path = "src:tests/core:tests/providers:tests/tools"
 # The legacy packages/* tree is not strict-clean yet; this gate covers the new
 # contract only, and widens as code moves into src/ronin.
 # pytest's @parametrize is an untyped decorator as far as mypy is concerned;
@@ -95,7 +95,15 @@ module = [
     "test_assembly",
     "test_accounting",
     "test_bridge",
+    "test_resilience",
     "replay",
+    "test_files",
+    "test_search",
+    "test_shell",
+    "test_task",
+    "test_net",
+    "test_registry",
+    "harness",
 ]
 disallow_untyped_decorators = false
 
@@ -110,7 +118,12 @@ ignore_missing_imports = true
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
-include = ["src/ronin/**/*.py", "tests/core/**/*.py", "tests/providers/**/*.py"]
+include = [
+    "src/ronin/**/*.py",
+    "tests/core/**/*.py",
+    "tests/providers/**/*.py",
+    "tests/tools/**/*.py",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]

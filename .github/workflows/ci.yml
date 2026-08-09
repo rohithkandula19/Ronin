@@ -80,7 +80,7 @@ jobs:
       # the repo; fail the build if they drift from the committed README.
       # Strict typing + lint for the src/ronin contract tree (see pyproject).
       - name: Lint (ruff)
-        run: uv run ruff check src/ronin tests/core tests/providers
+        run: uv run ruff check src/ronin tests
 
       - name: Typecheck (mypy --strict)
         run: uv run mypy

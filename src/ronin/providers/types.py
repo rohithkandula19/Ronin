@@ -306,7 +306,18 @@ class ProviderError(RuntimeError):
     something to show the model and the second is something to show the user.
     """
 
-    def __init__(self, message: str, *, provider: str = "", retryable: bool = False) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        provider: str = "",
+        retryable: bool = False,
+        retry_after: str = "",
+    ) -> None:
         super().__init__(message)
         self.provider = provider
         self.retryable = retryable
+        #: The server's ``Retry-After`` header, verbatim and unparsed. A server
+        #: knows its own rate-limit window better than our backoff ladder does, so
+        #: the retry policy prefers this when it is a number it can read.
+        self.retry_after = retry_after

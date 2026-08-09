@@ -32,14 +32,20 @@ from __future__ import annotations
 
 import os
 import tomllib
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 from .base import ModelClient, Transport
+from .resilience import FailoverClient, RetryingClient, RetryPolicy, Sleeper
 from .types import Capabilities, ProviderError
+
+
+def _default_retry() -> RetryPolicy:
+    """The ladder a config gets when it says nothing about retrying."""
+    return RetryPolicy()
 
 
 class Role(StrEnum):
@@ -103,6 +109,13 @@ class RouterConfig:
 
     roles: Mapping[Role, str]
     models: Mapping[str, ModelSpec]
+    #: Ordered backups per role. A role with fallbacks gets a ``FailoverClient``;
+    #: a role without gets its single client, unwrapped. Opt-in on purpose —
+    #: failing over silently to a different model is a surprise unless asked for.
+    fallbacks: Mapping[Role, tuple[str, ...]] = field(default_factory=dict)
+    #: How patiently to retry a transient failure. One policy for every role: a
+    #: per-model ladder is more knobs than anyone has a reason to turn.
+    retry: RetryPolicy = field(default_factory=lambda: _default_retry())
 
     def __post_init__(self) -> None:
         if Role.MAIN not in self.roles:
@@ -113,6 +126,30 @@ class RouterConfig:
                     f"role {role.value!r} points at model {model_name!r}, "
                     f"which is not defined (defined: {sorted(self.models)})"
                 )
+        for role, names in self.fallbacks.items():
+            if role not in self.roles:
+                raise ValueError(
+                    f"fallbacks are declared for role {role.value!r}, which is not "
+                    "mapped to a model — a backup for nothing is a typo"
+                )
+            for name in names:
+                if name not in self.models:
+                    raise ValueError(
+                        f"fallback {name!r} for role {role.value!r} is not defined "
+                        f"(defined: {sorted(self.models)})"
+                    )
+            if self.roles[role] in names:
+                raise ValueError(
+                    f"role {role.value!r} lists its own model {self.roles[role]!r} as "
+                    "a fallback — retrying the same endpoint is what the retry ladder "
+                    "is for, and failover is for a *different* one"
+                )
+
+    def chain_for(self, role: Role) -> tuple[ModelSpec, ...]:
+        """The primary spec for ``role`` followed by its fallbacks, in order."""
+        primary = self.spec_for(role)
+        names = self.fallbacks.get(role, ())
+        return (primary, *(self.models[name] for name in names))
 
     def spec_for(self, role: Role) -> ModelSpec:
         """The spec for ``role``, falling back to ``main``.
@@ -164,7 +201,38 @@ def parse_config(data: Mapping[str, Any]) -> RouterConfig:
             ) from exc
         roles[role] = str(value)
 
-    return RouterConfig(roles=roles, models=models)
+    raw_fallbacks = data.get("fallbacks")
+    fallbacks: dict[Role, tuple[str, ...]] = {}
+    if isinstance(raw_fallbacks, Mapping):
+        for key, value in raw_fallbacks.items():
+            try:
+                role = Role(str(key))
+            except ValueError as exc:
+                raise ProviderError(
+                    f"unknown role {key!r} in [fallbacks] — roles are "
+                    f"{[r.value for r in Role]}"
+                ) from exc
+            if isinstance(value, str):
+                # A single backup written without brackets is what people type.
+                fallbacks[role] = (value,)
+            elif isinstance(value, Sequence):
+                fallbacks[role] = tuple(str(item) for item in value)
+            else:
+                raise ProviderError(
+                    f"fallbacks for role {key!r} must be a model name or a list of them"
+                )
+
+    raw_retry = data.get("retry")
+    retry = _default_retry()
+    if isinstance(raw_retry, Mapping):
+        retry = RetryPolicy(
+            max_attempts=int(raw_retry.get("max_attempts", retry.max_attempts)),
+            base_delay=float(raw_retry.get("base_delay", retry.base_delay)),
+            max_delay=float(raw_retry.get("max_delay", retry.max_delay)),
+            max_retry_after=float(raw_retry.get("max_retry_after", retry.max_retry_after)),
+        )
+
+    return RouterConfig(roles=roles, models=models, fallbacks=fallbacks, retry=retry)
 
 
 def _parse_model(name: str, entry: Mapping[str, Any]) -> ModelSpec:
@@ -239,14 +307,21 @@ class Router:
         transport: Transport | None = None,
         env: Mapping[str, str] | None = None,
         build: ClientFactory | None = None,
+        sleep: Sleeper | None = None,
     ) -> None:
         self._config = config
         self._transport = transport
         self._env = env
         self._clients: dict[str, ModelClient] = {}
+        # Keyed by role rather than by model name: two roles on the same primary
+        # may have different fallback chains, so the wrapped client differs even
+        # when the inner one is shared.
+        self._chains: dict[Role, ModelClient] = {}
         # Injected for tests; the default is the real factory. Imported lazily to
         # keep the module import graph acyclic (registry imports router's types).
         self._build: ClientFactory | None = build
+        # Injected so a six-attempt ladder is testable in milliseconds.
+        self._sleep = sleep
 
     @property
     def config(self) -> RouterConfig:
@@ -256,8 +331,33 @@ class Router:
         return self._config.spec_for(role)
 
     def client_for(self, role: Role) -> ModelClient:
-        """The client for ``role``. Built on first use, then cached."""
-        spec = self._config.spec_for(role)
+        """The client for ``role``: retried, and failed over when configured.
+
+        Every client is wrapped in :class:`~ronin.providers.resilience.RetryingClient`
+        — retry is not opt-in, because a free-tier 429 is the normal case and a turn
+        that dies on one is a turn the user has to restart by hand. Failover *is*
+        opt-in, because silently answering from a different model is a surprise
+        unless it was asked for.
+        """
+        cached = self._chains.get(role)
+        if cached is not None:
+            return cached
+
+        chain = self._config.chain_for(role)
+        members = [
+            RetryingClient(self._build_one(spec), policy=self._config.retry, sleep=self._sleep)
+            for spec in chain
+        ]
+        client: ModelClient
+        if len(members) == 1:
+            client = members[0]
+        else:
+            client = FailoverClient(members, labels=[spec.name for spec in chain])
+        self._chains[role] = client
+        return client
+
+    def _build_one(self, spec: ModelSpec) -> ModelClient:
+        """Build (or reuse) the raw client for one spec, before any wrapping."""
         cached = self._clients.get(spec.name)
         if cached is not None:
             return cached

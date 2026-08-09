@@ -177,6 +177,7 @@ class HttpTransport:
                 raise ProviderError(
                     f"{url} returned {resp.status_code}: {detail[:500]}",
                     retryable=resp.status_code in _RETRYABLE_STATUSES,
+                    retry_after=resp.headers.get("retry-after", ""),
                 )
             async for chunk in resp.aiter_bytes():
                 yield chunk
