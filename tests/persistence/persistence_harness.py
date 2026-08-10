@@ -16,6 +16,7 @@ from ronin.core.types import (
     AgentState,
     ApprovalRequest,
     Budget,
+    Compaction,
     DangerLevel,
     Error,
     Event,
@@ -35,6 +36,7 @@ from ronin.core.types import (
     TurnEnd,
     TurnStart,
     TurnState,
+    VerifyResult,
 )
 
 SIGNATURE = "sig/opaque+42==\nsecond line\ttab é ✓"
@@ -78,6 +80,21 @@ def sample_event(event_type: type) -> Event:
             state=TurnState.INTERRUPTED,
             stop_reason="interrupted",
             agent_state=full_state(),
+        ),
+        Compaction: Compaction(
+            folded_messages=17,
+            token_estimate_before=9400,
+            token_estimate_after=1800,
+            reason="window",
+            summarizer_failed=True,
+        ),
+        VerifyResult: VerifyResult(
+            ran=True,
+            passed=False,
+            checks_passed=2,
+            checks_failed=1,
+            summary="pytest: 1 failed",
+            repaired=True,
         ),
         Error: Error(message="model stream ended", kind="protocol", recoverable=True),
     }

@@ -32,6 +32,7 @@ from typing import Any
 
 from ronin.core.types import (
     ApprovalRequest,
+    Compaction,
     Error,
     Event,
     Mode,
@@ -44,6 +45,7 @@ from ronin.core.types import (
     TurnEnd,
     TurnStart,
     TurnState,
+    VerifyResult,
 )
 
 # --------------------------------------------------------------------------- #
@@ -353,6 +355,16 @@ def reduce_event(state: ViewState, event: Event) -> ViewState:
             mode=agent.mode if agent is not None else state.mode,
             cwd=agent.cwd if agent is not None else state.cwd,
         )
+    if isinstance(event, (Compaction, VerifyResult)):
+        # Explicitly ignored, not forgotten. `ViewState` has no field for either yet,
+        # and inventing one here would be UI design smuggled into a type change — the
+        # renderers would then have to guess how to show a field nobody specified.
+        # `ui/headless.py` already emits both losslessly as JSON, so nothing is lost
+        # for scripts and tests; what is missing is a *TUI* surface, and adding one is
+        # a deliberate change with a mock to review. Falling through instead would put
+        # a Compaction in `state.errors`, which is typed `tuple[Error, ...]` — mypy
+        # caught exactly that, which is why this branch exists.
+        return state
     return replace(state, errors=(*state.errors, event))
 
 

@@ -25,12 +25,14 @@ from duel_harness import (
 
 from ronin.core.types import (
     Budget,
+    Compaction,
     Error,
     StreamReset,
     TextDelta,
     TurnEnd,
     TurnStart,
     TurnState,
+    VerifyResult,
 )
 from ronin.evals.adapters import OpenedAgent
 from ronin.evals.duel import (
@@ -621,3 +623,33 @@ async def test_a_duel_where_both_sides_fail_differently_surfaces_that_from_real_
     )
     assert board.both_failed_differently == ("t1",)
     assert "both failed, for different reasons" in render_duel_scoreboard(board)
+
+
+def test_a_compaction_line_reports_both_token_estimates() -> None:
+    """A duel comparing two models is exactly where "it compacted" without
+    "by how much" misleads — the ratio is the only honest measure."""
+    (line,) = transcript_lines(
+        (Compaction(folded_messages=9, token_estimate_before=8000, token_estimate_after=1200),)
+    )
+    assert "folded 9 msg" in line
+    assert "8000→1200" in line
+
+
+def test_a_failed_summarizer_is_named_in_the_compaction_line() -> None:
+    (line,) = transcript_lines((Compaction(folded_messages=2, summarizer_failed=True),))
+    assert "summarizer failed" in line
+
+
+def test_verify_skipped_reads_differently_from_verify_failed() -> None:
+    (skipped,) = transcript_lines((VerifyResult(ran=False, summary="no test command"),))
+    (failed,) = transcript_lines((VerifyResult(ran=True, passed=False, checks_failed=3),))
+    assert "skipped" in skipped and "no test command" in skipped
+    assert "failed" in failed and "3 failed" in failed
+    assert skipped != failed
+
+
+def test_a_repaired_pass_says_so() -> None:
+    (line,) = transcript_lines(
+        (VerifyResult(ran=True, passed=True, checks_passed=5, repaired=True),)
+    )
+    assert "passed" in line and "repaired" in line

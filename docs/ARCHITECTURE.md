@@ -163,11 +163,15 @@ StreamReset(reason="")                       # discard rendered text; re-streame
 ToolStart(tool_use_id, name, arguments={})
 ToolEnd(tool_use_id, name, result: ToolResult)
 ApprovalRequest(tool_use_id, name, danger_level, rendered, reason="")
+Compaction(folded_messages, token_estimate_before=0, token_estimate_after=0,
+           reason="", summarizer_failed=False)
+VerifyResult(ran, passed=False, checks_passed=0, checks_failed=0,
+             summary="", repaired=False)
 TurnEnd(turn_index, state, stop_reason="")
 Error(message, kind="unknown", recoverable=False)
 
 Event = (TurnStart | TextDelta | StreamReset | ToolStart | ToolEnd
-         | ApprovalRequest | TurnEnd | Error)
+         | ApprovalRequest | Compaction | VerifyResult | TurnEnd | Error)
 ```
 
 - `TextDelta.thinking` marks reasoning **in the event**, so a renderer never has
@@ -179,6 +183,24 @@ Event = (TurnStart | TextDelta | StreamReset | ToolStart | ToolEnd
   rendered text in the event closes that class.)
 - `TurnEnd.state` must be `DONE`, `ERROR`, or `INTERRUPTED`. A turn cannot end
   mid-flight.
+- **`Compaction` and `VerifyResult` carry plain scalars, not the richer result
+  types from `context/` and `verify/`.** Referencing
+  `ronin.context.compaction.CompactionResult` here would make `core` import
+  `context` and invert §3's dependency rule — the one that lets this contract be
+  tested with no provider, no shell and no context engine. A consumer that needs
+  more than the numbers reads the result object from the layer that produced it.
+- `Compaction` carries **both** token estimates because the ratio is the only
+  honest measure of whether compaction bought anything; a single "after" number
+  cannot express it. `token_estimate_after > token_estimate_before` is rejected —
+  a summarizer that grew the transcript is a bug, not a nuance to render.
+- **`VerifyResult.ran` is separate from `passed`.** An unverifiable change (no test
+  command, no language rules) is neither pass nor fail, and collapsing the two
+  would report a missing test suite as a broken change. `repaired` says the loop
+  fixed something; `passed` says it is now correct. They are independent.
+- Neither event is surfaced by the TUI yet: `ViewState` has no field for them, and
+  `ui/reduce.py` ignores them **explicitly**, with the reason in a comment.
+  `ui/headless.py` emits both losslessly as JSON, so scripts lose nothing. Adding a
+  TUI surface is a deliberate change, not a gap to fill silently.
 
 ---
 

@@ -661,6 +661,75 @@ _TURN_END_STATES: frozenset[TurnState] = frozenset(
 
 
 @dataclass(frozen=True, slots=True)
+class Compaction:
+    """The transcript was compacted mid-turn.
+
+    Deliberately **plain scalars, not a wrapper around**
+    ``ronin.context.compaction.CompactionResult``. That type is richer and lives one
+    layer up; referencing it here would make ``core`` import ``context`` and invert the
+    dependency rule that lets the contract be tested with no provider, no shell and no
+    context engine. So the event carries the four numbers a consumer needs to render or
+    audit what happened, and the caller reads the full result if it wants more.
+
+    ``folded_messages`` is the count removed, not retained — a consumer showing "20
+    messages summarized" must not have to subtract to get there. Before/after token
+    estimates are both carried because the ratio is the only honest measure of whether
+    compaction bought anything, and a single "after" number cannot express it.
+    """
+
+    folded_messages: int
+    token_estimate_before: int = 0
+    token_estimate_after: int = 0
+    reason: str = ""
+    summarizer_failed: bool = False
+
+    def __post_init__(self) -> None:
+        if self.folded_messages < 0:
+            raise ValueError("Compaction.folded_messages must be >= 0")
+        if self.token_estimate_before < 0 or self.token_estimate_after < 0:
+            raise ValueError("Compaction token estimates must be >= 0")
+        # Compaction that grew the transcript is a bug in the summarizer, not a
+        # nuance to render. Equal is legal: a no-op compaction is a real outcome.
+        if self.token_estimate_before and self.token_estimate_after > self.token_estimate_before:
+            raise ValueError(
+                "Compaction.token_estimate_after cannot exceed token_estimate_before "
+                f"({self.token_estimate_after} > {self.token_estimate_before})"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class VerifyResult:
+    """The outcome of a verification pass, as the loop saw it.
+
+    ``passed=False`` is a *normal* event, not an error: the loop's whole reason for
+    verifying is that the model saying "done" is not evidence. An unverifiable change
+    (no test command, no language rules) is neither pass nor fail, which is why
+    ``ran`` exists — collapsing "did not verify" into ``passed=False`` would report a
+    missing test suite as a broken change.
+
+    Like :class:`Compaction`, plain scalars rather than ``ronin.verify``'s own richer
+    outcome type, for the same dependency reason.
+    """
+
+    ran: bool
+    passed: bool = False
+    checks_passed: int = 0
+    checks_failed: int = 0
+    summary: str = ""
+    repaired: bool = False
+
+    def __post_init__(self) -> None:
+        if self.checks_passed < 0 or self.checks_failed < 0:
+            raise ValueError("VerifyResult check counts must be >= 0")
+        if not self.ran and (self.passed or self.checks_passed or self.checks_failed):
+            raise ValueError("VerifyResult.ran=False cannot carry results")
+        if self.ran and self.passed and self.checks_failed:
+            raise ValueError(
+                f"VerifyResult cannot be passed=True with {self.checks_failed} failed check(s)"
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class Error:
     """A failure surfaced to consumers. ``recoverable`` decides resumability."""
 
@@ -675,7 +744,16 @@ class Error:
 
 #: The closed set of events the loop emits. Consumers switch on exactly these.
 Event = (
-    TurnStart | TextDelta | StreamReset | ToolStart | ToolEnd | ApprovalRequest | TurnEnd | Error
+    TurnStart
+    | TextDelta
+    | StreamReset
+    | ToolStart
+    | ToolEnd
+    | ApprovalRequest
+    | Compaction
+    | VerifyResult
+    | TurnEnd
+    | Error
 )
 
 EVENT_TYPES: tuple[type, ...] = (
@@ -685,6 +763,8 @@ EVENT_TYPES: tuple[type, ...] = (
     ToolStart,
     ToolEnd,
     ApprovalRequest,
+    Compaction,
+    VerifyResult,
     TurnEnd,
     Error,
 )
@@ -704,6 +784,7 @@ __all__ = [
     "ApprovalDecision",
     "ApprovalRequest",
     "Budget",
+    "Compaction",
     "ContentBlock",
     "DangerLevel",
     "Error",
@@ -727,6 +808,7 @@ __all__ = [
     "TurnEnd",
     "TurnStart",
     "TurnState",
+    "VerifyResult",
     "assert_transition",
     "can_transition",
     "is_event",
