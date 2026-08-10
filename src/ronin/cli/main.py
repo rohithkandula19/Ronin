@@ -57,6 +57,7 @@ from ..persistence.resume import ResumedSession, resume_latest, resume_session
 from ..persistence.transcript import list_sessions
 from ..providers.router import Router
 from ..providers.types import ProviderError
+from ..telemetry import DISCLOSURE
 from ..ui.app import TEXTUAL_MISSING, run_app, textual_available
 from ..ui.app import Session as AppSession
 from ..ui.commands import BUILTIN_REGISTRY, ParseError, is_command, render_help
@@ -75,6 +76,8 @@ from .doctor import run_doctor
 from .sdk import Agent, load_router
 from .spine import Paths
 from .stream import DEFAULT_MAX_ITERATIONS
+from .telemetry_cmd import TelemetryOptions, Verb
+from .telemetry_cmd import run as run_telemetry
 from .wire import load_workspace
 from .wizard import apply_plan, plan_first_run
 
@@ -108,6 +111,7 @@ class Command(StrEnum):
     VERSION = "version"
     EVAL = "eval"
     DUEL = "duel"
+    TELEMETRY = "telemetry"
 
 
 class ExportFormat(StrEnum):
@@ -163,6 +167,8 @@ class Options:
     #: Whether ``--suite`` was passed. Distinguishes "the user chose this path" from
     #: "nobody said, so use the workspace default", which a bare ``Path()`` cannot.
     suite_given: bool = False
+    #: Present for ``telemetry`` only, same rule as ``bench``.
+    telemetry: TelemetryOptions | None = None
 
     @property
     def flags(self) -> dict[str, object]:
@@ -273,6 +279,9 @@ def build_parser() -> _Parser:
             "  eval [--dry-run]           run the task suite in tests/evals and "
             "report\n"
             "  duel --model A --model B   run the same tasks against two models\n"
+            "  telemetry [status|on|off|show]\n"
+            "                             opt-in aggregate task outcomes; off by "
+            "default\n"
             "\n"
             "eval/duel flags: --suite PATH, --model NAME (repeat for duel), "
             "--parallel N,\n"
@@ -375,7 +384,7 @@ def parse(argv: Sequence[str]) -> Options | Usage:
     command = Command.RUN
     if tokens and tokens[0] in {Command.DOCTOR.value, Command.EXPORT.value,
                                 Command.SESSIONS.value, Command.EVAL.value,
-                                Command.DUEL.value}:
+                                Command.DUEL.value, Command.TELEMETRY.value}:
         command = Command(tokens.pop(0))
 
     parser = build_parser()
@@ -394,6 +403,8 @@ def parse(argv: Sequence[str]) -> Options | Usage:
         return _export_options(namespace, words)
     if command in (Command.EVAL, Command.DUEL):
         return _bench_options(namespace, command, words)
+    if command is Command.TELEMETRY:
+        return _telemetry_options(namespace, words)
 
     prompt = namespace.print_prompt if namespace.print_prompt is not None else words
     headless = namespace.print_prompt is not None
@@ -533,6 +544,31 @@ def _bench_options(
     )
 
 
+def _telemetry_options(namespace: argparse.Namespace, words: str) -> Options | Usage:
+    """``telemetry [status|on|off|show]``. Bare ``telemetry`` means ``status``.
+
+    Defaulting to ``status`` rather than to ``on`` is not a style choice: a verb that
+    turns data collection on when the user typed only the noun is a dark pattern.
+    """
+    verb_word = words or Verb.STATUS.value
+    if verb_word not in {member.value for member in Verb}:
+        return Usage(
+            f"{PROGRAM}: error: unknown telemetry verb {verb_word!r} — expected one of "
+            f"{', '.join(member.value for member in Verb)}"
+        )
+    return Options(
+        command=Command.TELEMETRY,
+        cwd=Path(namespace.cwd),
+        telemetry=TelemetryOptions(
+            verb=Verb(verb_word),
+            # Replaced in `dispatch` from the discovered Paths, so a test can point the
+            # whole thing at a tmp_path without touching a real home directory.
+            home=Path(),
+            limit=max(0, int(namespace.limit or 0)),
+        ),
+    )
+
+
 def _budget(namespace: argparse.Namespace) -> Budget | None:
     """A budget only when a ceiling was actually asked for.
 
@@ -581,6 +617,8 @@ async def dispatch(
     paths = Paths.discover(options.cwd)
     if options.command in (Command.EVAL, Command.DUEL):
         return await _bench(options, paths, env, streams)
+    if options.command is Command.TELEMETRY:
+        return _telemetry(options, paths, streams)
 
     if options.command is Command.DOCTOR:
         report = await run_doctor(
@@ -648,6 +686,48 @@ async def _bench(
     if out:
         streams.out(out)
     return code
+
+
+def _telemetry(options: Options, paths: Paths, streams: Streams) -> int:
+    """``telemetry``: resolve ``home`` from the discovered paths, then run the verb.
+
+    Before the wizard, like ``eval``: someone checking what a tool collects about them
+    should not have their repository written to as a side effect of asking.
+    """
+    settings = options.telemetry
+    if settings is None:  # pragma: no cover - parse always supplies one here
+        streams.err(f"{PROGRAM}: internal error: telemetry without options\n")
+        return EXIT_ERROR
+    code, out, err = run_telemetry(replace(settings, home=paths.home))
+    if err:
+        streams.err(err)
+    if out:
+        streams.out(out)
+    return code
+
+
+def _disclose_telemetry_once(paths: Paths, streams: Streams) -> None:
+    """Print the one-line disclosure on first run, to **stderr**, then never again.
+
+    stderr rather than stdout because stdout is the agent's answer and may be piped
+    into something that parses it; a privacy notice appearing inside a JSON payload
+    would be both useless and a bug.
+
+    Only when consent is ``UNASKED``. It is not a prompt — nothing blocks and nothing
+    is enabled — because a first run that interrogates you before doing the thing you
+    asked for is worse than one line you can read afterwards. Telemetry stays off
+    until somebody types ``ronin telemetry on``.
+    """
+    from ..telemetry import Consent, ConsentStore, default_consent_path
+
+    store = ConsentStore(default_consent_path(paths.home))
+    record = store.read()
+    if record.state is not Consent.UNASKED or record.disclosed:
+        return
+    streams.err(DISCLOSURE + "\n")
+    # Marked after printing: if the write fails the user sees the line again next
+    # time, which is the harmless direction to fail in.
+    store.mark_disclosed()
 
 
 def _version() -> str:
@@ -990,6 +1070,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         if parsed.message:
             writer(parsed.message if parsed.message.endswith("\n") else parsed.message + "\n")
         return parsed.exit_code
+    # The one-time telemetry notice lives here rather than in `dispatch`, and that is
+    # not a style choice. `Paths.discover()` defaults `home` to `Path.home()`, so a
+    # disclosure written from `dispatch` writes to the *real* home directory of whoever
+    # is running — including a test suite. It did: the first run of the suite created
+    # ~/.ronin/telemetry.json on the developer's machine, and then whichever test ran
+    # first consumed the once-only notice, making a later assertion order-dependent.
+    #
+    # `main` is the process entry point and the only place that legitimately resolves a
+    # real home, so the notice belongs here. Every test that calls `dispatch` stays
+    # hermetic, and `_disclose_telemetry_once` is still unit-tested directly with an
+    # injected `Paths`.
+    if parsed.command is Command.RUN:
+        _disclose_telemetry_once(Paths.discover(parsed.cwd), streams)
     try:
         return asyncio.run(dispatch(parsed, streams=streams))
     except KeyboardInterrupt:

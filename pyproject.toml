@@ -174,6 +174,7 @@ module = [
     "test_ronin_cli_sdk",
     "test_ronin_cli_spine",
     "test_ronin_cli_stream",
+    "test_ronin_cli_telemetry",
     "test_ronin_cli_wire",
     "test_ronin_cli_wizard",
     "test_ronin_evals_duel",

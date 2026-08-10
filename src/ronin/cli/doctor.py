@@ -222,7 +222,80 @@ async def run_doctor(
     checks.append(await _checkpoint_check(store))
     checks.extend(_mcp_checks(loaded, which))
     checks.append(_gitignore_check(loaded))
+    checks.append(_telemetry_check(loaded))
     return DoctorReport(loaded=loaded, checks=tuple(checks))
+
+
+def _telemetry_check(loaded: Loaded) -> Check:
+    """What consent state this machine is in, and where the evidence lives.
+
+    Always reported, never a failure. Telemetry being off is the correct default and a
+    diagnostic that nagged about it would be pressure dressed as advice — so ``OK``
+    covers granted *and* refused, and the only thing that raises a warning is a consent
+    file that could not be read, because then the user's actual choice is not being
+    honoured and they cannot tell.
+    """
+    from ..telemetry import Consent, ConsentStore, default_consent_path, default_log_path
+
+    home = loaded.paths.home
+    record = ConsentStore(default_consent_path(home)).read()
+    log_path = default_log_path(home)
+    sent = 0
+    if log_path.exists():
+        try:
+            sent = sum(
+                1 for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()
+            )
+        except OSError:
+            sent = -1
+
+    if record.problem:
+        return Check(
+            name="telemetry",
+            status=CheckStatus.WARN,
+            detail=(
+                f"the consent file at {default_consent_path(home)} could not be read "
+                f"({record.problem}), so nothing is sent — but your recorded choice is "
+                "not the one being applied"
+            ),
+            remedy="`ronin telemetry off` or `ronin telemetry on` rewrites it cleanly",
+        )
+
+    if record.state is Consent.GRANTED:
+        audited = "nothing logged yet" if sent == 0 else f"{sent} payload(s) logged"
+        if sent < 0:
+            audited = f"the log at {log_path} exists but could not be read"
+        # Whether anything is actually transmitted is a separate question from consent,
+        # and this build answers no: no sender is wired, so `record()` returns
+        # no_sender. Reporting "on" alone would overstate what is happening.
+        from ..telemetry import for_home
+
+        wired = for_home(home).sender is not None
+        state = (
+            "on — aggregate task outcomes only, never prompts or code"
+            if wired
+            else "consent granted, but this build has no endpoint wired, so nothing is "
+            "transmitted"
+        )
+        return Check(
+            name="telemetry",
+            status=CheckStatus.OK,
+            detail=f"{state}. {audited}; `ronin telemetry show` prints them verbatim",
+        )
+    if record.state is Consent.REFUSED:
+        return Check(
+            name="telemetry",
+            status=CheckStatus.OK,
+            detail="off — you declined, and nothing is sent",
+        )
+    return Check(
+        name="telemetry",
+        status=CheckStatus.OK,
+        detail=(
+            "off — never asked, and off is the default. `ronin telemetry on` opts in; "
+            "`ronin telemetry status` explains what it would send"
+        ),
+    )
 
 
 def _settings_checks(loaded: Loaded) -> tuple[Check, ...]:

@@ -5,14 +5,14 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-v1.0.0-blue)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-8098%20passing-brightgreen.svg)](#-whats-under-the-hood)
+[![Tests](https://img.shields.io/badge/tests-8141%20passing-brightgreen.svg)](#-whats-under-the-hood)
 [![Providers](https://img.shields.io/badge/providers-Claude%20·%20Gemini%20·%20Cerebras%20·%20Groq%20·%20OpenRouter%20·%20Ollama%20·%20OpenAI-d4a373)](#-supported-providers)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 **Why not just Claude Code?**
 
 - **Works offline / air-gapped** — `ronin --offline` forces a local brain and strips every network tool; nothing leaves your machine. `ronin util local` runs a fully local open model with **zero API keys**.
-- **No telemetry, ever** — no analytics, no phoning home. `ronin util privacy` audits exactly what's stored locally.
+- **No telemetry unless you turn it on** — off by default, and off is the state you stay in if you ignore this line. `ronin util privacy` audits what's stored locally; `ronin telemetry status` says whether anything is being sent and `ronin telemetry show` prints every payload that ever left, verbatim. See [Telemetry](#telemetry--off-by-default-auditable-when-on).
 - **Any provider, no lock-in** — the same agent runs on Claude, Gemini, Cerebras, Groq, OpenRouter, OpenAI, or Ollama. Free tiers work; no credit card required.
 - **A destructive-command floor** — `rm -rf`, force-pushes, and friends are hard-blocked below the approval layer, with a drift guard so config edits can't silently weaken it.
 - **Evidence-gated engineering missions** — turn a GitHub or GitLab issue into a bounded, auditable issue-to-PR workflow with disposable Docker candidates, independent gates, and explicit human approval before staging.
@@ -397,6 +397,109 @@ Plus, on the coding agent itself:
 - **🖥️ Background processes**: `run_background` a dev server / test-watcher, tail its logs, and keep working ("watch-and-fix"); **⏪ checkpoint & rewind** snapshots the whole workspace and rolls it back; **👁️ vision-in-the-loop** screenshots a UI and analyzes it so the agent can self-correct.
 - **🛡️ Built for free models**: tool calls survive near-miss argument names (auto-remapped), oversized tool results are capped, context compacts earlier off-Anthropic, clarifying questions (`ask_user`) head off wrong guesses, and per-provider keys mean switching providers never clobbers a key.
 
+## How ronin compares — including where it loses
+
+Written to be useful rather than flattering. A comparison table with no losing rows is
+an advertisement, and a reader who finds the missing row themselves stops trusting the
+winning ones too.
+
+| | ronin | Claude Code | Cursor | Aider |
+|---|---|---|---|---|
+| Any provider, no lock-in | ✅ 15 adapters | ❌ Anthropic only | ~ its own routing | ✅ |
+| Runs fully offline, $0, no key | ✅ | ❌ | ❌ | ~ needs a local server |
+| Hard destructive-command floor below approvals | ✅ | ~ approvals only | ~ | ❌ |
+| Own eval suite, published, integrity-gated | ✅ 118 tasks | ❌ not public | ❌ | ❌ |
+| Failure taxonomy that blames model vs harness | ✅ | ❌ | ❌ | ❌ |
+| **Model quality on hard tasks** | ❌ **whatever you bring; the 1.5B local model is much weaker** | ✅ frontier | ✅ frontier | ~ |
+| **IDE integration** | ❌ **terminal-first; the VS Code story is thin** | ~ | ✅ **best in class** | ❌ |
+| **Polish and onboarding** | ❌ **more surface than a new user can hold** | ✅ | ✅ | ✅ **simplest** |
+| **Users, and therefore bug reports** | ❌ **effectively none yet** | ✅ | ✅ | ✅ |
+| **Autocomplete / inline suggestions** | ❌ **none** | ❌ | ✅ | ❌ |
+| Terminal-native, no editor required | ✅ | ✅ | ❌ | ✅ |
+| MCP servers | ✅ | ✅ | ✅ | ❌ |
+
+The bolded rows are the honest answer to "why would I not use this". If you want the
+strongest available model with the least setup, use Claude Code. If you want inline
+completion in an editor, use Cursor. If you want the smallest thing that edits files
+well, use Aider. ronin is for the case where **provider independence, an audited safety
+floor, or running with no key at all** matters more than those.
+
+## Measured, not asserted
+
+Most agent projects describe their quality. This one ships the thing that would catch it
+lying: **118 eval tasks** under [`tests/evals/`](tests/evals/README.md), each a fixture
+repo, a prompt, and a `verify.sh` that exits 0 on success.
+
+```bash
+ronin eval --dry-run --regression-gate     # what would run: no model, no key, no network
+ronin eval --model kimi-k2 --parallel 8 --json run.json --markdown run.md
+ronin duel --model kimi-k2 --model ronin-qwen-local --seed 7
+```
+
+Every task is checked in **three directions** on every push, because a `verify.sh` that
+passes on the untouched fixture inflates every score derived from the suite forever and
+nothing about the run looks wrong:
+
+1. bare fixture → must **fail** (else the task is already solved);
+2. plus the author's reference solution → must **pass** (else it is unsolvable);
+3. `injection-resistance` only: solution plus the planted artefact → must **fail**,
+   proving the guard actually bites.
+
+Failures are classified into six classes, each labelled *model* or *harness* — because
+"it failed" does not tell you which half to fix. `UNCLASSIFIED` is in the enum on
+purpose: it is the taxonomy's own error bar.
+
+**There are no scores in this repository.** Nothing has been run against a real model
+yet, so nothing is reported. When numbers appear they will name the model, the commit,
+and the seed — and if the fine-tuned adapter loses to its own base model, that result
+gets published too.
+
+### The $0 lane
+
+```bash
+cp examples/models.local.toml .ronin/models.toml
+ronin eval --model ronin-qwen-local --regression-gate
+```
+
+Local weights, no API key, no network at inference. `RONIN_ADAPTER=<checkpoint>` serves a
+fine-tune; a checkpoint with a config but no weights is **refused at startup** rather
+than falling back to the base model, because that fallback produces a number which reads
+as the fine-tune's score and is not one.
+
+The adapter teaches **ronin-native behaviour** — tool syntax, gate handling, recovery,
+planning. It does **not** add coding knowledge, and 1.5B is not a substitute for a
+frontier model on hard tasks. That is the same admission as the bolded row above.
+
+## Telemetry — off by default, auditable when on
+
+Nothing is sent unless you run `ronin telemetry on`. Ignoring the subject leaves it off.
+
+```bash
+ronin telemetry status   # what state you are in, and where the files are
+ronin telemetry on       # prints exactly what will and will not be sent, then opts in
+ronin telemetry show     # every payload ever sent, verbatim, from a local log
+ronin telemetry off      # stop; the local log is kept for you to delete
+```
+
+**No endpoint is wired in this build.** Consent is stored and honoured, but there is
+nowhere for a payload to go: `record()` returns `no_sender` without opening a socket, and
+`ronin telemetry status` says so rather than claiming outcomes are being sent. The schema
+below is what *would* be sent, and it is documented now so the surface is reviewable
+before it is live rather than after.
+
+**Would be sent, per completed task:** outcome, task category, failure class, OS name,
+Python version, ronin version, whether an approval was denied, and turn count and
+duration as *coarse buckets* rather than exact numbers — so a payload cannot fingerprint
+one session.
+
+**Never sent:** prompts, code, file contents, file names, paths, shell commands, repo or
+branch names, git remotes, usernames, hostnames, IP addresses, or API keys.
+
+Every payload would be appended to a local log *before* being sent, and `ronin telemetry
+show` prints that log unmodified. The point is that you can **audit rather than trust** — a
+privacy claim whose only evidence is a paragraph in a README is asking for credit it has
+not earned, and this paragraph is no exception.
+
 ## Install
 
 ```bash
@@ -685,7 +788,7 @@ ronin is MIT-licensed and meant to be picked up by other people. A few notes if 
 | `cli` | The `ronin` binary: coding agent, mission control, MCP client, web tools, subagents, evaluation, media, and the **31-game arcade** (`ronin play`) |
 | `deployment-templates` | Docker Compose, Modal, Vercel, and Railway |
 
-**8,098 tests** across packages and the demo/API apps passed in the current regression suite. A `FakeProvider` makes them deterministic, offline, and free: no API calls in CI.
+**8,141 tests** across packages and the demo/API apps passed in the current regression suite. A `FakeProvider` makes them deterministic, offline, and free: no API calls in CI.
 
 ## Use the modules without the CLI
 

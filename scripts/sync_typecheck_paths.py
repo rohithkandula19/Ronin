@@ -93,6 +93,14 @@ def assert_no_collisions() -> None:
     ``tests/agents/test_hooks.py`` collided with ``packages/cli/tests/test_hooks.py``
     and the suite went red again — the narrow check had reported "up to date" and
     bought false confidence. So the scope here is every root pytest collects.
+
+    ``conftest.py`` is exempt, and that is not a loophole. pytest imports conftest files
+    itself, by path, under module names it derives from that path — they never go through
+    the bare-basename ``sys.path`` mechanism this function exists to police. Several
+    conftests per repository is the intended pytest layout, not a hazard: this repo runs
+    ``tests/conftest.py`` and ``packages/agent-patterns/tests/conftest.py`` in the same
+    session with 3,000+ tests passing. Flagging them would make the check cry wolf about
+    the one file people are *supposed* to add.
     """
     seen: dict[str, str] = {}
     collisions: list[str] = []
@@ -105,6 +113,8 @@ def assert_no_collisions() -> None:
                 continue
             if path.is_relative_to(ROOT / "tests" / "evals"):
                 continue  # eval fixtures; pytest never imports them (see EXCLUDED_TEST_DIRS)
+            if path.name == "conftest.py":
+                continue  # imported by path, not by basename — see the docstring
             if (path.parent / "__init__.py").exists():
                 continue  # a real package; its modules are namespaced
             relative = str(path.relative_to(ROOT))
