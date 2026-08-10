@@ -80,6 +80,22 @@ All notable changes to this project will be documented here. Format follows [Kee
   than absolute, since the opt-in path now exists.
 
 ### Fixed
+- **A checkpoint could stage files into the user's own git index.** `verify.checkpoints`
+  promises the user's index is never touched, and ran every command with `--git-dir` and
+  `--work-tree` pointed at a shadow repo — but neither flag overrides `GIT_INDEX_FILE`,
+  which names the index file outright. Under any parent that exports it (a git hook, or
+  ronin invoked from inside a `git commit`), every `git add` in the checkpoint store wrote
+  the real repo's index instead. Reproduced before fixing: one checkpoint turned
+  `?? brand_new.py` into `A  brand_new.py` in `git status` and grew `.git/index` from 137
+  to 217 bytes. The store now materializes its environment on every invocation, dropping
+  the five `GIT_*` location variables and pinning `GIT_INDEX_FILE` to the shadow index,
+  whether or not a caller injected an `env` — previously the pin only happened when one
+  did, and the default path was the unprotected one. `GIT_WORK_TREE` and `GIT_COMMON_DIR`
+  additionally made `init` fail, silently costing the session its checkpoints; both are
+  now neutralized too.
+  - `checkpoint()` raised `ValueError` out of the store when `git rev-parse HEAD` exited 0
+    with empty stdout, on a mutating turn. It returns a failed `CheckpointResult` like
+    every other failure in the class.
 - **Exit code 2 meant "asked", not "refused".** `core.loop` emits `ApprovalRequest`
   before calling `policy.approve`, so counting requests made *every* `--mode auto_edit`
   run that wrote a file exit 2 on a clean run and list the successful write under
