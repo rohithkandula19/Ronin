@@ -80,6 +80,26 @@ All notable changes to this project will be documented here. Format follows [Kee
   than absolute, since the opt-in path now exists.
 
 ### Fixed
+- **Fetched web pages reached a model as instructions, not data.** `web_fetch` converts a
+  page to markdown and hands it to the fast model with the caller's prompt — and it handed
+  it over **bare**, so page text and the caller's own instructions arrived in one
+  undifferentiated string. Anyone able to edit a page (or a README, or a CI log) could put
+  text in front of a model that was mid-task with file-editing tools available. The
+  markdown is now fenced by `safety.injection.wrap_and_scan` before the extractor sees it,
+  so it arrives attributed to its URL, inside markers the content cannot forge its way out
+  of, under a standing instruction that content between the markers is data. Injection
+  patterns are flagged in the header above the content — quoted, never removed, because a
+  user cannot judge a source whose attempt they never saw — and the count is reported back
+  to the caller so the decision to keep trusting that source is theirs.
+  - The wrapper is injected, like the fetcher/extractor/clock, but **defaults to the real
+    one**: a security property that holds only when the wiring opts in is not a security
+    property. `build_registry` passes no wrapper, and an integration test asserts the
+    production path fences anyway.
+  - This is the tool layer's only import outside `core`, and deliberately so — `safety` is
+    a leaf that may not import `ronin.tools`, so the edge cannot become a cycle, and the
+    alternative was a second set of fence markers free to drift from the canonical ones.
+    `tests/tools/test_boundaries.py` now pins the tool layer's permitted imports, which it
+    previously did not constrain at all.
 - **Every pull request showed a failing check that could not be fixed from the repo.** A
   second Vercel project (`web`, root directory unset, so it built the repo root as if it
   were a Next.js app) failed on every push and left every PR at

@@ -11,6 +11,7 @@ from pathlib import Path
 
 from harness import FakeNet, call, context
 
+from ronin.safety.injection import CLOSE_MARKER, OPEN_MARKER
 from ronin.tools import WebFetchTool, WebSearchTool, html_to_markdown
 from ronin.tools.net import CACHE_TTL_SECONDS, MAX_MARKDOWN_CHARS
 
@@ -129,19 +130,38 @@ async def test_different_urls_are_cached_separately(tmp_path: Path) -> None:
     assert len(net.fetches) == 2
 
 
+def fenced_body(text: str) -> str:
+    """The content between the untrusted-content markers.
+
+    Assertions about *what the model was given* have to look inside the fence now
+    that one is always applied: the body is passed through byte-for-byte, but it no
+    longer arrives bare. Slicing it out here keeps these tests about reduction and
+    clipping rather than about the wrapper, which has its own tests.
+    """
+    assert OPEN_MARKER in text and CLOSE_MARKER in text, text[:200]
+    after_header = text.split("\n", 1)[1]
+    return after_header.rsplit(CLOSE_MARKER, 1)[0].removesuffix("\n")
+
+
 async def test_a_non_html_body_is_passed_through_unreduced(tmp_path: Path) -> None:
     net = FakeNet({"https://x.test/raw.md": ("text/markdown", "# Title\n\nBody\n")})
     await call(fetcher(net), context(tmp_path), url="https://x.test/raw.md", prompt="q")
     _, text = net.extractions[0]
-    assert text == "# Title\n\nBody\n"
+    assert fenced_body(text) == "# Title\n\nBody\n"
 
 
 async def test_an_enormous_page_is_clipped_before_extraction(tmp_path: Path) -> None:
+    """The clip bounds the *page*, which is what costs tokens.
+
+    The fence adds a fixed header and footer on top, so the payload is a little
+    larger than `MAX_MARKDOWN_CHARS` — a constant overhead, not a proportional one,
+    and the alternative is content silently losing its quoting to fit a budget.
+    """
     body = "<p>" + ("word " * 40_000) + "</p>"
     net = FakeNet({"https://x.test/big": ("text/html", body)})
     result = await call(fetcher(net), context(tmp_path), url="https://x.test/big", prompt="q")
     _, text = net.extractions[0]
-    assert len(text) <= MAX_MARKDOWN_CHARS
+    assert len(fenced_body(text)) <= MAX_MARKDOWN_CHARS
     assert "page truncated before extraction" in result.content
 
 
