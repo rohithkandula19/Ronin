@@ -194,6 +194,7 @@ module = [
     "test_context_integration",
     "test_context_memory",
     "test_context_repomap",
+    "test_context_repomap_paths",
     "test_core_demo",
     "test_definitions",
     "test_files",
