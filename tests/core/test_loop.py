@@ -939,3 +939,169 @@ async def test_every_stop_preserves_the_messages_it_started_with(scenario: str) 
     events = await run_events(model, tools, policy, state=start, **kwargs)
     messages: tuple[Message, ...] = ended_state(events).messages
     assert messages[: len(start.messages)] == start.messages
+
+
+# --------------------------------------------------------------------------- #
+# Interrupt arriving between calls in one batch
+# --------------------------------------------------------------------------- #
+
+
+async def test_an_interrupt_between_calls_in_a_batch_synthesizes_a_result() -> None:
+    """The spec's "a cancelled tool gets a synthetic ToolResult" for the *second*
+    call of a batch, not just the first.
+
+    A serial batch checks `policy.cancelled()` before each call. When the first
+    tool sets the cancel flag, the second never runs — but the transcript still
+    needs an answer for its id, or the next provider call sees an unpaired
+    tool_use and rejects the state the loop just promised was resumable.
+    """
+    policy = FakePolicy()
+
+    def cancel_then_succeed(_arguments: Mapping[str, Any]) -> ToolResult:
+        policy.cancel_now = True
+        return ToolResult(ok=True, content="first ran")
+
+    tools = FakeTools(
+        {
+            # MUTATING so the batch runs serially; parallel has no between-calls gap.
+            "write_a": (spec("write_a", danger=DangerLevel.MUTATING), cancel_then_succeed),
+            "write_b": (spec("write_b", danger=DangerLevel.MUTATING), succeeds("second ran")),
+        }
+    )
+    model = FakeModel([tool_turn(call("t1", "write_a"), call("t2", "write_b"))])
+
+    events = await drain(run_turn(seed(), model, tools, policy))
+
+    # The second tool never executed…
+    assert tools.executed_names == ("write_a",)
+    # …but both ids are answered, so the transcript stays well-formed.
+    blocks = tool_blocks(ended_state(events))
+    assert [b.tool_use_id for b in blocks] == ["t1", "t2"]
+    second = next(b for b in blocks if b.tool_use_id == "t2")
+    assert second.is_error
+    assert "interrupted" in second.content
+    # And a ToolEnd was still emitted for it, so a renderer does not hang on "running".
+    ends = of_type(events, ToolEnd)
+    assert [e.tool_use_id for e in ends] == ["t1", "t2"]
+    assert only_turn_end(events).state is TurnState.INTERRUPTED
+
+
+# --------------------------------------------------------------------------- #
+# A parallel tool that escapes with a BaseException
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_parallel_tool_raising_a_base_exception_becomes_a_value() -> None:
+    """`gather(return_exceptions=True)` hands back BaseExceptions too.
+
+    A BaseException that is not an Exception slips past the per-call
+    `except Exception` guard, so only the parallel collector's BaseException
+    branch can turn it into a value. Without that branch the exception object
+    itself would be appended as if it were a ToolResult.
+
+    A locally-defined subclass rather than `KeyboardInterrupt`: pytest treats a
+    real KeyboardInterrupt as "the user pressed ^C" and aborts the whole session
+    with an interrupt banner, which is exactly what the first draft of this test
+    did — it read as 94 passed while having actually killed the run.
+    """
+
+    class HardStop(BaseException):
+        """Not an Exception, so `except Exception` cannot see it."""
+
+    tools = FakeTools(
+        {
+            "read_ok": (spec("read_ok"), succeeds("fine")),
+            "read_boom": (spec("read_boom"), explodes(HardStop("hardware quit"))),
+        }
+    )
+    model = FakeModel(
+        [
+            tool_turn(call("t1", "read_ok"), call("t2", "read_boom")),
+            # The escape became a value, so the loop keeps going and asks again —
+            # which is the point. A second response is needed to let it finish.
+            text_turn("one of those failed; stopping here"),
+        ]
+    )
+
+    events = await drain(run_turn(seed(), model, tools, FakePolicy()))
+
+    blocks = tool_blocks(ended_state(events))
+    assert [b.tool_use_id for b in blocks] == ["t1", "t2"]
+    boom = next(b for b in blocks if b.tool_use_id == "t2")
+    assert boom.is_error
+    assert "HardStop" in boom.content
+    assert "hardware quit" in boom.content
+    # Both tools are read-only, so the loop took the parallel path — which is the
+    # only path with a BaseException collector. Not asserted via `max_in_flight`:
+    # both handlers are synchronous and never await, so they cannot overlap even
+    # under gather, and that number would be measuring the fake rather than the loop.
+    assert tools.executed_names == ("read_ok", "read_boom")
+    assert only_turn_end(events).state is TurnState.DONE
+
+
+# --------------------------------------------------------------------------- #
+# Malformed arguments
+# --------------------------------------------------------------------------- #
+
+
+async def test_malformed_arguments_come_back_as_a_failed_tool_result() -> None:
+    """A model sending arguments the tool cannot use must not end the run.
+
+    Argument *validation* is the registry's job — the loop passes `arguments`
+    through untouched. What the loop owes is that a rejection arrives as a value
+    the model can read and retry, paired to the right id.
+    """
+
+    def needs_a_path(arguments: Mapping[str, Any]) -> ToolResult:
+        path = arguments.get("path")
+        if not isinstance(path, str) or not path:
+            return ToolResult(ok=False, error=f"path must be a non-empty string, got {path!r}")
+        return ToolResult(ok=True, content=f"read {path}")
+
+    tools = FakeTools({"read_file": (spec("read_file"), needs_a_path)})
+    model = FakeModel(
+        [
+            # The model sends `paht`, a typo — so `path` is missing entirely.
+            tool_turn(call("t1", "read_file", paht="a.py")),
+            text_turn("sorry, retrying with the right key"),
+        ]
+    )
+
+    events = await drain(run_turn(seed(), model, tools, FakePolicy()))
+
+    (block,) = tool_blocks(ended_state(events))
+    assert block.tool_use_id == "t1"
+    assert block.is_error
+    assert "must be a non-empty string" in block.content
+    # The turn continued to a second model call rather than aborting.
+    assert len(model.calls) == 2
+    assert only_turn_end(events).stop_reason == StopReason.NO_TOOL_CALLS.value
+
+
+async def test_an_interrupt_during_the_approval_pass_answers_the_remaining_calls() -> None:
+    """A distinct moment from the one above, and a distinct branch.
+
+    The loop approves the whole batch first, then executes. An interrupt that
+    lands *during* the approval pass means a call is never even queued — so it is
+    answered right there, from the approval loop, rather than by the executor.
+    Nothing runs at all, and every id still gets a result.
+    """
+    tools = FakeTools(
+        {
+            "read_a": (spec("read_a"), succeeds("a")),
+            "read_b": (spec("read_b"), succeeds("b")),
+        }
+    )
+    # Polls: 1 = top of turn, 2 = approving read_a, 3 = approving read_b. Flipping
+    # after the second poll interrupts the batch mid-approval.
+    policy = FakePolicy(cancel_after=2)
+    model = FakeModel([tool_turn(call("t1", "read_a"), call("t2", "read_b"))])
+
+    events = await drain(run_turn(seed(), model, tools, policy))
+
+    # Not one tool body ran.
+    assert tools.executed_names == ()
+    blocks = tool_blocks(ended_state(events))
+    assert [b.tool_use_id for b in blocks] == ["t1", "t2"]
+    assert all(b.is_error and "interrupted" in b.content for b in blocks)
+    assert only_turn_end(events).stop_reason == StopReason.INTERRUPTED.value
