@@ -11,6 +11,22 @@ requires-python = ">=3.11"
 # working agent and each extra adds a capability rather than repairing a broken one.
 dependencies = []
 
+[project.scripts]
+# `ronin2`, deliberately not `ronin`. The v1 tree (`packages/cli`, ~300 modules) owns
+# the `ronin` name and is what every existing install runs; taking that name here would
+# silently swap the agent under people who upgraded for an unrelated reason.
+#
+# Two trees ship side by side on purpose, and the point is that the choice gets decided
+# by evidence rather than by preference: `tests/evals/` measures v2 today, and until it
+# has measured both there is no honest basis for a cutover. `ronin2` is how someone runs
+# the measured one without giving up the one that works.
+#
+# `main` rather than an app object because `ronin.cli.main.main` returns an int and never
+# calls `sys.exit` — see its module docstring. The console-script wrapper turns the
+# return value into the process status, so the exit codes (0 done, 1 error, 2 an approval
+# was refused) survive the packaging layer unchanged.
+ronin2 = "ronin.cli.main:main"
+
 [project.optional-dependencies]
 # The interactive app. Textual brings Rich transitively, so this is one tree, not
 # two; every pure module in `ronin.ui` (reducer, renderers, command parsing) stays

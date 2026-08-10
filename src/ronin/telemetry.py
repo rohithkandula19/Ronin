@@ -505,10 +505,10 @@ SENT_LOG_RELATIVE_PATH = Path(".ronin") / "telemetry-sent.jsonl"
 #: The one line shown at first run, once. Kept as a constant so the README, the
 #: docs site and the CLI cannot each paraphrase it into a different promise.
 DISCLOSURE = (
-    "telemetry is OFF and nothing has been sent: `python -m ronin telemetry on` opts "
+    "telemetry is OFF and nothing has been sent: `ronin2 telemetry on` opts "
     "in to aggregate task outcomes only — never prompts, code, paths, filenames, "
-    "commands or identifiers — `python -m ronin telemetry show` prints every payload "
-    "sent, and `python -m ronin telemetry off` stops it."
+    "commands or identifiers — `ronin2 telemetry show` prints every payload "
+    "sent, and `ronin2 telemetry off` stops it."
 )
 
 

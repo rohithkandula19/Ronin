@@ -705,3 +705,45 @@ def test_main_returns_the_usage_code_without_touching_the_process() -> None:
 
 def test_main_with_no_model_configuration_returns_one(tmp_path: Path) -> None:
     assert main(["--no-wizard", "-p", "hello", "--cwd", str(tmp_path)]) == 1
+
+
+# --------------------------------------------------------------------------- #
+# The shipped console script
+# --------------------------------------------------------------------------- #
+
+
+def test_the_declared_entry_point_resolves_to_a_callable() -> None:
+    """`ronin2 = "ronin.cli.main:main"` must name something importable.
+
+    A typo in that string is invisible until somebody installs the wheel — `uv run`
+    and `python -m ronin` both work regardless, so the whole local development loop
+    passes while the published artifact has a broken command. Resolved here the same
+    way importlib.metadata resolves it at install time.
+    """
+    import tomllib
+    from importlib import import_module
+
+    root = Path(__file__).resolve().parents[2]
+    config = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    scripts = config["project"]["scripts"]
+
+    assert "ronin2" in scripts, "the v2 console script must stay declared"
+    assert "ronin" not in scripts, (
+        "the bare `ronin` name belongs to packages/cli (v1); taking it here would swap "
+        "the agent under everyone who upgraded for an unrelated reason"
+    )
+
+    module_path, _, attribute = scripts["ronin2"].partition(":")
+    resolved = getattr(import_module(module_path), attribute)
+    assert callable(resolved)
+    assert resolved is main, "the script must point at the same main() tested above"
+
+
+def test_the_console_script_returns_an_int_rather_than_exiting() -> None:
+    """The wrapper turns the return value into the process status.
+
+    If `main` called `sys.exit` instead, the exit codes (0 done, 1 error, 2 an approval
+    was refused) would still work — but nothing in this file could assert on them
+    without catching SystemExit, which is why the contract is a return value.
+    """
+    assert isinstance(main(["--help"]), int)
