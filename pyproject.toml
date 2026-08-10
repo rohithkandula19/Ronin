@@ -198,6 +198,7 @@ module = [
     "test_context_repomap_paths",
     "test_core_demo",
     "test_definitions",
+    "test_definitions_edges",
     "test_files",
     "test_files_edges",
     "test_golden_streams",
