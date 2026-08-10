@@ -66,6 +66,7 @@ from typing import Final
 
 from ..core.types import (
     ApprovalRequest,
+    Compaction,
     Event,
     StreamReset,
     TextDelta,
@@ -73,6 +74,7 @@ from ..core.types import (
     ToolStart,
     TurnEnd,
     TurnStart,
+    VerifyResult,
 )
 from ..verify.runner import CommandRunner, run_command
 from .adapters import AgentFactory, OpenedAgent, RunAgent, usage_from_budget
@@ -229,6 +231,27 @@ def transcript_lines(
                 f"({event.stop_reason or 'unspecified'})"
             )
             anchor = len(lines)
+            continue
+        if isinstance(event, Compaction):
+            # Both token estimates, because the ratio is the only honest measure of
+            # whether compaction bought anything — and a duel comparing two models is
+            # exactly where "it compacted" without "by how much" misleads.
+            failed = ", summarizer failed" if event.summarizer_failed else ""
+            emit(
+                f"compaction folded {event.folded_messages} msg "
+                f"({event.token_estimate_before}→{event.token_estimate_after} tok{failed})"
+            )
+            continue
+        if isinstance(event, VerifyResult):
+            if not event.ran:
+                emit(f"verify skipped ({event.summary or 'nothing to verify'})")
+            else:
+                outcome = "passed" if event.passed else "failed"
+                repaired = ", repaired" if event.repaired else ""
+                emit(
+                    f"verify {outcome} ({event.checks_passed} ok, "
+                    f"{event.checks_failed} failed{repaired})"
+                )
             continue
         kind = "recoverable" if event.recoverable else "fatal"
         emit(f"error ({event.kind}, {kind}) {_clip(event.message, max_line_chars)}")

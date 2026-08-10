@@ -47,6 +47,11 @@ the two agree and that every member of the ``Event`` union appears.
                      ``danger_rank`` int, ``rendered`` str, ``reason`` str
 ``turn_end``         ``turn_index`` int, ``state`` str, ``stop_reason`` str,
                      ``has_agent_state`` bool
+``compaction``       ``folded_messages`` int, ``token_estimate_before`` int,
+                     ``token_estimate_after`` int, ``reason`` str,
+                     ``summarizer_failed`` bool
+``verify_result``    ``ran`` bool, ``passed`` bool, ``checks_passed`` int,
+                     ``checks_failed`` int, ``summary`` str, ``repaired`` bool
 ``error``            ``message`` str, ``kind`` str, ``recoverable`` bool
 ``result``           ``exit_code`` int, ``text`` str, ``stop_reason`` str, ``turns`` int,
                      ``resets`` int, ``cost_usd`` float, ``tokens`` int,
@@ -74,6 +79,7 @@ from ronin.core.types import (
     ApprovalDecision,
     ApprovalRequest,
     Budget,
+    Compaction,
     Error,
     Event,
     StreamReset,
@@ -85,6 +91,7 @@ from ronin.core.types import (
     TurnEnd,
     TurnStart,
     TurnState,
+    VerifyResult,
 )
 
 from .reduce import ViewState, reduce_event
@@ -132,6 +139,21 @@ SCHEMA: Mapping[str, tuple[str, ...]] = {
         "reason",
     ),
     "turn_end": ("turn_index", "state", "stop_reason", "has_agent_state"),
+    "compaction": (
+        "folded_messages",
+        "token_estimate_before",
+        "token_estimate_after",
+        "reason",
+        "summarizer_failed",
+    ),
+    "verify_result": (
+        "ran",
+        "passed",
+        "checks_passed",
+        "checks_failed",
+        "summary",
+        "repaired",
+    ),
     "error": ("message", "kind", "recoverable"),
     RESULT_TYPE: (
         "exit_code",
@@ -156,6 +178,8 @@ EVENT_TYPE_NAMES: Mapping[type, str] = {
     ToolStart: "tool_start",
     ToolEnd: "tool_end",
     ApprovalRequest: "approval_request",
+    Compaction: "compaction",
+    VerifyResult: "verify_result",
     TurnEnd: "turn_end",
     Error: "error",
 }
@@ -221,6 +245,25 @@ def event_to_json(event: Event) -> dict[str, Any]:
             "state": event.state.value,
             "stop_reason": event.stop_reason,
             "has_agent_state": event.agent_state is not None,
+        }
+    if isinstance(event, Compaction):
+        return {
+            "type": "compaction",
+            "folded_messages": event.folded_messages,
+            "token_estimate_before": event.token_estimate_before,
+            "token_estimate_after": event.token_estimate_after,
+            "reason": event.reason,
+            "summarizer_failed": event.summarizer_failed,
+        }
+    if isinstance(event, VerifyResult):
+        return {
+            "type": "verify_result",
+            "ran": event.ran,
+            "passed": event.passed,
+            "checks_passed": event.checks_passed,
+            "checks_failed": event.checks_failed,
+            "summary": event.summary,
+            "repaired": event.repaired,
         }
     return {
         "type": "error",

@@ -47,6 +47,7 @@ from ..core.types import (
     AgentState,
     ApprovalRequest,
     Budget,
+    Compaction,
     ContentBlock,
     DangerLevel,
     Error,
@@ -68,6 +69,7 @@ from ..core.types import (
     TurnEnd,
     TurnStart,
     TurnState,
+    VerifyResult,
 )
 
 #: Bump on any change that an older reader would misread. Readers refuse anything
@@ -567,6 +569,48 @@ def _dec_turn_end(record: Mapping[str, Any]) -> Event:
     )
 
 
+def _enc_compaction(event: Compaction) -> dict[str, Any]:
+    return {
+        "folded_messages": event.folded_messages,
+        "token_estimate_before": event.token_estimate_before,
+        "token_estimate_after": event.token_estimate_after,
+        "reason": event.reason,
+        "summarizer_failed": event.summarizer_failed,
+    }
+
+
+def _dec_compaction(record: Mapping[str, Any]) -> Event:
+    return Compaction(
+        folded_messages=_req_int(record, "folded_messages"),
+        token_estimate_before=_opt_int(record, "token_estimate_before"),
+        token_estimate_after=_opt_int(record, "token_estimate_after"),
+        reason=_opt_str(record, "reason"),
+        summarizer_failed=_opt_bool(record, "summarizer_failed"),
+    )
+
+
+def _enc_verify_result(event: VerifyResult) -> dict[str, Any]:
+    return {
+        "ran": event.ran,
+        "passed": event.passed,
+        "checks_passed": event.checks_passed,
+        "checks_failed": event.checks_failed,
+        "summary": event.summary,
+        "repaired": event.repaired,
+    }
+
+
+def _dec_verify_result(record: Mapping[str, Any]) -> Event:
+    return VerifyResult(
+        ran=_opt_bool(record, "ran"),
+        passed=_opt_bool(record, "passed"),
+        checks_passed=_opt_int(record, "checks_passed"),
+        checks_failed=_opt_int(record, "checks_failed"),
+        summary=_opt_str(record, "summary"),
+        repaired=_opt_bool(record, "repaired"),
+    )
+
+
 def _enc_error(event: Error) -> dict[str, Any]:
     return {
         "message": event.message,
@@ -593,6 +637,8 @@ _EVENT_CODECS: Mapping[type, tuple[str, Callable[[Any], dict[str, Any]]]] = Mapp
         ToolStart: ("tool_start", _enc_tool_start),
         ToolEnd: ("tool_end", _enc_tool_end),
         ApprovalRequest: ("approval_request", _enc_approval_request),
+        Compaction: ("compaction", _enc_compaction),
+        VerifyResult: ("verify_result", _enc_verify_result),
         TurnEnd: ("turn_end", _enc_turn_end),
         Error: ("error", _enc_error),
     }
@@ -612,6 +658,8 @@ _EVENT_DECODERS: Mapping[str, Callable[[Mapping[str, Any]], Event]] = MappingPro
         "tool_start": _dec_tool_start,
         "tool_end": _dec_tool_end,
         "approval_request": _dec_approval_request,
+        "compaction": _dec_compaction,
+        "verify_result": _dec_verify_result,
         "turn_end": _dec_turn_end,
         "error": _dec_error,
     }

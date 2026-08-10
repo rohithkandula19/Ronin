@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import dataclasses
 import itertools
+from collections.abc import Callable
 
 import pytest
 
@@ -21,6 +22,7 @@ from ronin.core.types import (
     ApprovalDecision,
     ApprovalRequest,
     Budget,
+    Compaction,
     DangerLevel,
     Error,
     IllegalTransition,
@@ -42,6 +44,7 @@ from ronin.core.types import (
     TurnEnd,
     TurnStart,
     TurnState,
+    VerifyResult,
     assert_transition,
     can_transition,
     is_event,
@@ -565,6 +568,8 @@ def test_the_event_union_is_closed_and_complete() -> None:
         ApprovalRequest(
             tool_use_id="t1", name="rm", danger_level=DangerLevel.DESTRUCTIVE, rendered="rm -rf ."
         ),
+        Compaction(folded_messages=12, token_estimate_before=9000, token_estimate_after=2000),
+        VerifyResult(ran=True, passed=True, checks_passed=3),
         TurnEnd(turn_index=0, state=TurnState.DONE),
         Error(message="boom"),
     ]
@@ -573,7 +578,93 @@ def test_the_event_union_is_closed_and_complete() -> None:
     assert all(is_event(sample) for sample in samples)
 
 
+# --------------------------------------------------------------------------- #
+# Compaction
+# --------------------------------------------------------------------------- #
+
+
+def test_compaction_carries_before_and_after_so_the_ratio_is_visible() -> None:
+    event = Compaction(folded_messages=20, token_estimate_before=8000, token_estimate_after=1500)
+    assert event.folded_messages == 20
+    assert event.token_estimate_after < event.token_estimate_before
+    assert not event.summarizer_failed
+
+
+def test_a_no_op_compaction_is_legal() -> None:
+    """Equal before/after is a real outcome — nothing was foldable."""
+    assert Compaction(folded_messages=0, token_estimate_before=500, token_estimate_after=500)
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda: Compaction(folded_messages=-1),
+        lambda: Compaction(folded_messages=0, token_estimate_before=-1),
+        lambda: Compaction(folded_messages=0, token_estimate_after=-1),
+    ],
+    ids=["folded", "before", "after"],
+)
+def test_compaction_rejects_negative_counts(build: Callable[[], Compaction]) -> None:
+    # A thunk rather than a kwargs dict: `Compaction(**dict[str, int])` cannot type
+    # check under --strict, since the dataclass also takes str and bool fields.
+    with pytest.raises(ValueError):
+        build()
+
+
+def test_compaction_that_grew_the_transcript_is_rejected() -> None:
+    """A summarizer that made the transcript bigger is a bug, not a nuance."""
+    with pytest.raises(ValueError, match="cannot exceed"):
+        Compaction(folded_messages=3, token_estimate_before=100, token_estimate_after=101)
+
+
+def test_compaction_records_a_failed_summarizer_without_pretending_it_worked() -> None:
+    event = Compaction(folded_messages=5, summarizer_failed=True, reason="window")
+    assert event.summarizer_failed
+    assert event.reason == "window"
+
+
+# --------------------------------------------------------------------------- #
+# VerifyResult
+# --------------------------------------------------------------------------- #
+
+
+def test_verify_result_distinguishes_did_not_run_from_failed() -> None:
+    """The distinction that matters: no test command is not a broken change."""
+    skipped = VerifyResult(ran=False, summary="no test command for this language")
+    failed = VerifyResult(ran=True, passed=False, checks_failed=2)
+    assert not skipped.ran and not skipped.passed
+    assert failed.ran and not failed.passed
+    assert skipped != failed
+
+
+def test_verify_result_that_did_not_run_cannot_carry_results() -> None:
+    with pytest.raises(ValueError, match="cannot carry results"):
+        VerifyResult(ran=False, checks_passed=1)
+
+
+def test_verify_result_cannot_pass_with_failed_checks() -> None:
+    with pytest.raises(ValueError, match="passed=True"):
+        VerifyResult(ran=True, passed=True, checks_failed=1)
+
+
+def test_verify_result_rejects_negative_counts() -> None:
+    with pytest.raises(ValueError):
+        VerifyResult(ran=True, checks_passed=-1)
+
+
+def test_verify_result_records_repair_separately_from_passing() -> None:
+    """`repaired` says the loop fixed it; `passed` says it is now correct."""
+    event = VerifyResult(ran=True, passed=True, checks_passed=4, repaired=True)
+    assert event.repaired and event.passed
+
+
 def test_non_events_are_rejected() -> None:
     assert not is_event("TextDelta")
     assert not is_event(Message(role=Role.USER))
     assert not is_event(None)
+
+
+def test_turn_end_rejects_a_non_agent_state() -> None:
+    """The last uncovered validator branch: `agent_state` is a type, not a dict."""
+    with pytest.raises(TypeError, match="must be an AgentState or None"):
+        TurnEnd(turn_index=0, state=TurnState.DONE, agent_state={"messages": ()})  # type: ignore[arg-type]

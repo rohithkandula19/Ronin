@@ -22,12 +22,14 @@ from ronin.core.types import (
     EVENT_TYPES,
     ApprovalRequest,
     Budget,
+    Compaction,
     DangerLevel,
     Error,
     Event,
     ToolSpec,
     ToolStart,
     ToolUse,
+    VerifyResult,
 )
 from ronin.ui.headless import (
     DENIAL_NOTICE,
@@ -311,3 +313,31 @@ def test_cancellation_is_explicit_and_starts_off() -> None:
     assert policy.cancelled() is False
     policy.cancel()
     assert policy.cancelled() is True
+
+
+def test_compaction_serializes_every_documented_field() -> None:
+    payload = event_to_json(
+        Compaction(
+            folded_messages=17,
+            token_estimate_before=9400,
+            token_estimate_after=1800,
+            reason="window",
+            summarizer_failed=True,
+        )
+    )
+    assert payload["type"] == "compaction"
+    assert set(payload) == {"type", *SCHEMA["compaction"]}
+    # Both estimates survive: a CI consumer computing the ratio needs both.
+    assert payload["token_estimate_before"] == 9400
+    assert payload["token_estimate_after"] == 1800
+    assert payload["summarizer_failed"] is True
+
+
+def test_verify_result_serializes_did_not_run_distinctly_from_failed() -> None:
+    skipped = event_to_json(VerifyResult(ran=False, summary="no test command"))
+    failed = event_to_json(VerifyResult(ran=True, passed=False, checks_failed=2))
+    assert skipped["type"] == failed["type"] == "verify_result"
+    assert set(skipped) == {"type", *SCHEMA["verify_result"]}
+    # The distinction a script must be able to make without guessing.
+    assert skipped["ran"] is False and skipped["passed"] is False
+    assert failed["ran"] is True and failed["checks_failed"] == 2

@@ -8,6 +8,7 @@ from ui_harness import APPROVAL, END_STATE, TODOS, approval_turn, happy_turn, st
 from ronin.core.types import (
     AgentState,
     Budget,
+    Compaction,
     DangerLevel,
     Error,
     Mode,
@@ -21,6 +22,7 @@ from ronin.core.types import (
     TurnEnd,
     TurnStart,
     TurnState,
+    VerifyResult,
 )
 from ronin.ui.reduce import (
     ViewState,
@@ -288,3 +290,15 @@ def test_the_danger_level_travels_on_the_pending_approval() -> None:
     state = reduce_all((APPROVAL,))
     assert state.pending_approval is not None
     assert state.pending_approval.danger_level is DangerLevel.DESTRUCTIVE
+
+
+def test_compaction_and_verify_are_ignored_rather_than_filed_as_errors() -> None:
+    """`ViewState` has no field for either yet. What must NOT happen is them
+    landing in `state.errors`, which is typed `tuple[Error, ...]` and would make
+    the TUI report a successful verification as a failure."""
+    state = reduce_all((TurnStart(turn_index=0),))
+    after_compaction = reduce_event(state, Compaction(folded_messages=4))
+    after_verify = reduce_event(after_compaction, VerifyResult(ran=True, passed=True))
+    assert after_compaction.errors == ()
+    assert after_verify.errors == ()
+    assert after_verify == state
