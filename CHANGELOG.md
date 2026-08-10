@@ -80,6 +80,20 @@ All notable changes to this project will be documented here. Format follows [Kee
   than absolute, since the opt-in path now exists.
 
 ### Fixed
+- **Every pull request showed a failing check that could not be fixed from the repo.** A
+  second Vercel project (`web`, root directory unset, so it built the repo root as if it
+  were a Next.js app) failed on every push and left every PR at
+  `mergeable_state: "unstable"` — a red check nobody could act on, which is the kind of
+  noise that teaches people to ignore CI. A root `vercel.json` with
+  `git.deploymentEnabled: false` stops it triggering on any branch.
+  - `deploymentEnabled: false`, not `{"main": false}`: the branch-map form only disables
+    the named branches, and the deployments that were failing were *preview* builds from
+    PR branches.
+  - `apps/web/vercel.json` sets `deploymentEnabled: true` explicitly. The real project
+    (`ronin-ai-os-staging`) has its root directory set to `apps/web` and therefore reads
+    *that* file rather than the repo root's, so this is a no-op today — it exists so that
+    the root-level `false` can never be mistaken for a repo-wide switch that silently
+    takes staging previews down with it.
 - **A failed turn reached the user as if the model had simply answered.** The shim set
   `FinishReason.ERROR` when its repair budget ran out and put the reason in
   `Completed.notes`, and **nothing read either**: `providers/bridge.py` dropped both on
