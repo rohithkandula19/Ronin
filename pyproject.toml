@@ -261,6 +261,7 @@ module = [
     "test_search",
     "test_session",
     "test_shell",
+    "test_shell_failures",
     "test_shim",
     "test_shim_edges",
     "test_shim_surface",
