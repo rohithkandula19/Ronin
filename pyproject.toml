@@ -97,14 +97,17 @@ markers = [
     "adapter_smoke: LIVE fine-tuned-adapter smoke tests (need mlx-lm + a trained adapter; skipped elsewhere)",
 ]
 
-# Strict typing + lint for the new src/ronin contract tree. Two dev deps, each
+# Strict typing + lint for the new src/ronin contract tree. Three dev deps, each
 # justified in one line:
 #   mypy — the only way "strict typing" is a gate rather than an intention.
 #   ruff — lint + format in one fast binary, replacing nothing we already have.
+#   pytest-cov — the only way a coverage number is measured rather than asserted; see
+#     docs/STACK.md, which refuses to state a threshold it has no baseline for.
 [dependency-groups]
 dev = [
     "mypy>=1.11",
     "ruff>=0.6",
+    "pytest-cov>=5.0",
 ]
 
 # The four lists below have to agree with the filesystem, and a test directory
