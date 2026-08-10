@@ -134,10 +134,19 @@ def repair_message(raw_payload: str, error: str) -> Message:
 
 @dataclass(frozen=True, slots=True)
 class ShimCall:
-    """One call extracted from the text stream, still un-normalized."""
+    """One call extracted from the text stream, still un-normalized.
+
+    ``call_id`` is empty for a call parsed out of text — a shimmed model has no
+    concept of a call id, so the normalizer mints a stable synthetic one. It is
+    *not* empty on the native passthrough below, where the wrapped provider issued
+    a real id: dropping that and minting our own would send the next turn a
+    ``tool_result`` whose id the provider never issued, which is the 400-several-
+    turns-later failure :mod:`ronin.providers.normalize` exists to prevent.
+    """
 
     name: str
     raw_arguments: str
+    call_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -471,6 +480,10 @@ class ShimClient:
                             ShimCall(
                                 name=use.name,
                                 raw_arguments=json.dumps(dict(use.arguments), sort_keys=True),
+                                # Carried, not re-minted: this id came from the
+                                # provider and the next turn's tool_result has to
+                                # match it exactly.
+                                call_id=use.id,
                             )
                         )
 
@@ -518,7 +531,12 @@ def _normalize(calls: Sequence[ShimCall]) -> NormalizedCalls:
     """
     accumulator = ToolCallAccumulator()
     for index, call in enumerate(calls):
-        accumulator.add_complete(index, name=call.name, arguments=call.raw_arguments)
+        accumulator.add_complete(
+            index,
+            name=call.name,
+            arguments=call.raw_arguments,
+            call_id=call.call_id or None,
+        )
     return accumulator.finish()
 
 
@@ -544,10 +562,16 @@ def _complete(
         # the user can see what it tried, and the finish reason says this turn
         # failed rather than quietly returning "no tool calls" (which the loop
         # would read as a finished answer).
+        #
+        # The calls that *did* parse are kept too. Discarding them punished a model
+        # for its worst call: ask for three files and mis-type the fourth, and all
+        # four vanished while the retry replayed only the first failure — so the
+        # model was likely to re-emit all four and lose them all again. The loop
+        # runs what parsed and reports what did not.
         notes.extend(f"unparseable tool call: {failure.error}" for failure in failures)
         detail = "; ".join(f.error for f in failures)
         return Completed(
-            message=Message(role=Role.ASSISTANT, content_blocks=text_blocks),
+            message=Message(role=Role.ASSISTANT, content_blocks=(*text_blocks, *normalized.uses)),
             finish=FinishReason.ERROR,
             usage=attempt.usage,
             notes=(

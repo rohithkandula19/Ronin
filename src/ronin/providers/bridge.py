@@ -29,7 +29,26 @@ from ..core import protocols as core
 from ..core.types import Message, ToolSpec
 from .assembly import CacheStats, StablePrefix, assemble
 from .base import ModelClient
-from .types import Completed, ModelRequest, StreamReset, TextDelta, ThinkingDelta
+from .types import (
+    Completed,
+    FinishReason,
+    ModelRequest,
+    StreamReset,
+    TextDelta,
+    ThinkingDelta,
+)
+
+
+def _error_text(delta: Completed) -> str:
+    """The sentence a consumer shows when a provider reported a failed turn.
+
+    Prefers the notes, because that is where the shim puts "gave up after 2 repair
+    attempt(s): …" — the part a user can act on. Falls back to naming the finish
+    reason so the error is never an empty string, which
+    :class:`~ronin.core.types.Error` rejects anyway.
+    """
+    detail = "; ".join(note for note in delta.notes if note)
+    return detail or "the provider ended this turn with an error"
 
 
 class LoopClient:
@@ -113,6 +132,14 @@ class LoopClient:
                     input_tokens=delta.usage.input_tokens + delta.usage.cache_read_tokens,
                     output_tokens=delta.usage.output_tokens,
                     cost_usd=delta.usage.cost_usd,
+                    # `finish` and `notes` used to stop here. That made this
+                    # translation lossy in a second direction the docstring above
+                    # did not claim: a shim that exhausted its repair budget set
+                    # `FinishReason.ERROR`, and the turn still reached the loop as
+                    # ordinary prose with no tool calls — indistinguishable from a
+                    # model that simply answered.
+                    error=_error_text(delta) if delta.finish is FinishReason.ERROR else "",
+                    notes=delta.notes,
                 )
 
 

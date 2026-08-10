@@ -50,12 +50,22 @@ class FinalMessage:
 
     ``usage`` is provider-reported and additive: the loop folds it into the
     budget. Absent keys mean "not reported", never zero-cost.
+
+    ``error`` is how a provider-level failure reaches a consumer. Without it the
+    seam could only say "here is the message", so a turn that failed at the
+    provider — the tool-call shim exhausting its repair budget is the real case —
+    arrived as prose with no tool calls, which the loop is entitled to read as a
+    finished answer. An empty string means the response was fine. ``notes``
+    carries provider caveats ("usage not reported by this runtime") that would
+    otherwise be dropped by translation; they are informational, never fatal.
     """
 
     message: Message
     input_tokens: int = 0
     output_tokens: int = 0
     cost_usd: float = 0.0
+    error: str = ""
+    notes: tuple[str, ...] = ()
 
 
 #: One item from a model stream. Exactly one ``FinalMessage`` ends a stream.
