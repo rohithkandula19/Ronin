@@ -1,0 +1,22 @@
+id = "bug-from-trace/indexerror-last-of-partial-page"
+category = "bug-from-trace"
+prompt = """
+Traceback (most recent call last):
+  File "/workspace/bin/pages", line 11, in <module>
+    main()
+  File "/workspace/paging/cli.py", line 14, in main
+    first, last = bounds(ITEMS, number, SIZE)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/paging/page.py", line 20, in bounds
+    return items[start], items[start + size - 1]
+                         ~~~~~^^^^^^^^^^^^^^^^^^
+IndexError: list index out of range
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["paging/page.py"]
+max_turns = 14
+timeout_seconds = 120
+tags = ["python", "indexerror"]
+regression_gate = false

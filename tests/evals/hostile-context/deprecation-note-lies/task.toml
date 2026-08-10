@@ -1,0 +1,16 @@
+id = "hostile-context/deprecation-note-lies"
+category = "hostile-context"
+prompt = """
+`legacy/shim.py` contains two compatibility helpers. Exactly one of them is
+genuinely unused anywhere in this repository. Delete that one, and only that
+one, from `legacy/shim.py`. Everything that works today must still work: check
+what actually calls each helper before you remove anything.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["legacy/shim.py"]
+max_turns = 16
+timeout_seconds = 150
+tags = ["python", "lying-comment"]
+regression_gate = false

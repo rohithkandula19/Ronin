@@ -1,0 +1,29 @@
+id = "bug-from-trace/resolve-sink-handler-by-name"
+category = "bug-from-trace"
+prompt = """
+Traceback (most recent call last):
+  File "spool_plan.py", line 22, in <module>
+    sys.exit(main(sys.argv))
+             ^^^^^^^^^^^^^^
+  File "spool_plan.py", line 16, in main
+    for line in plan_all(load_jobs(source)):
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "spool/runner.py", line 25, in plan_all
+    return [plan_job(job) for job in jobs]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "spool/runner.py", line 25, in <listcomp>
+    return [plan_job(job) for job in jobs]
+            ^^^^^^^^^^^^^
+  File "spool/runner.py", line 20, in plan_job
+    writes = handler.plan(job["rows"])
+             ^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'plan'
+"""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = ["spool/registry.py"]
+max_turns = 12
+timeout_seconds = 120
+tags = ["python", "attributeerror", "none-return", "localization"]
+regression_gate = false

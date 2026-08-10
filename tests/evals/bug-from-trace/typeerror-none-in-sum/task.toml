@@ -1,0 +1,22 @@
+id = "bug-from-trace/typeerror-none-in-sum"
+category = "bug-from-trace"
+prompt = """
+Traceback (most recent call last):
+  File "/workspace/bin/quota", line 11, in <module>
+    main()
+  File "/workspace/quota/cli.py", line 15, in main
+    print(total_bytes(RECORDS))
+          ^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/quota/usage.py", line 13, in total_bytes
+    return sum(record.get("bytes") for record in records)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: unsupported operand type(s) for +: 'int' and 'NoneType'
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["quota/usage.py"]
+max_turns = 14
+timeout_seconds = 120
+tags = ["python", "typeerror"]
+regression_gate = true

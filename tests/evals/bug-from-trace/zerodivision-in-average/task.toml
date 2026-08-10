@@ -1,0 +1,28 @@
+id = "bug-from-trace/zerodivision-in-average"
+category = "bug-from-trace"
+prompt = """
+Traceback (most recent call last):
+  File "/workspace/bin/latency", line 11, in <module>
+    main()
+  File "/workspace/metrics/cli.py", line 11, in main
+    for name, value in per_route(SAMPLES):
+                       ^^^^^^^^^^^^^^^^^^
+  File "/workspace/metrics/agg.py", line 15, in per_route
+    return [(name, mean(routes[name])) for name in sorted(routes)]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/metrics/agg.py", line 15, in <listcomp>
+    return [(name, mean(routes[name])) for name in sorted(routes)]
+                   ^^^^^^^^^^^^^^^^^^
+  File "/workspace/metrics/agg.py", line 11, in mean
+    return sum(samples) / len(samples)
+           ~~~~~~~~~~~~~^~~~~~~~~~~~~~
+ZeroDivisionError: division by zero
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["metrics/agg.py"]
+max_turns = 14
+timeout_seconds = 120
+tags = ["python", "zerodivision"]
+regression_gate = true

@@ -1,0 +1,22 @@
+id = "add-feature/json-output-flag"
+category = "add-feature"
+prompt = """
+`bin/hosts` prints one host per line. Add a `--json` flag with this exact
+behaviour:
+
+* `bin/hosts` keeps printing one host per line, unchanged.
+* `bin/hosts --json` prints a single line of JSON: an object with one key,
+  `"hosts"`, whose value is the list of hosts in the same order, serialised
+  with `json.dumps` and no extra whitespace beyond the default.
+* `--json` may appear anywhere in the argument list.
+* An unknown flag makes the command exit with status 2 and print
+  `unknown option: <flag>` on stderr, printing nothing on stdout.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["inventory/cli.py"]
+max_turns = 16
+timeout_seconds = 150
+tags = ["python", "cli"]
+regression_gate = true

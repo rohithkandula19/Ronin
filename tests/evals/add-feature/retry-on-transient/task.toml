@@ -1,0 +1,23 @@
+id = "add-feature/retry-on-transient"
+category = "add-feature"
+prompt = """
+`call/retry.py` has `attempt(operation, sleeper)` which calls `operation()`
+once. Turn it into a bounded retry:
+
+* Retry only `TransientError`; any other exception propagates immediately.
+* At most 3 attempts in total.
+* Before each retry, call `sleeper(delay)` with 0.5, then 1.0 — the delay
+  doubles and there is no jitter, so the sequence is reproducible.
+* On success, return the operation's value.
+* If the third attempt also raises `TransientError`, re-raise that exception.
+* `operation` is called at most 3 times, and `sleeper` exactly one fewer time
+  than the number of attempts made.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["call/retry.py"]
+max_turns = 16
+timeout_seconds = 150
+tags = ["python", "retry"]
+regression_gate = false

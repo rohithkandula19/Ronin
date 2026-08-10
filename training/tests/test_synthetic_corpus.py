@@ -1,8 +1,6 @@
 """Synthetic corpus generator: deterministic, registry-valid, D1/D2-closing."""
 from __future__ import annotations
 
-import json
-
 from ronin_training.synthetic_corpus import generate, write_corpus
 from ronin_training.validators import load_registry, validate_example
 

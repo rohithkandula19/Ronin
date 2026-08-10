@@ -1,0 +1,13 @@
+id = "add-feature/add-a-priority-field-to-tasks"
+category = "add-feature"
+prompt = """Tasks on the board need a priority. Call the field `priority`; the values we use are "low", "normal" and "high", and it should be "normal" when nobody says otherwise. It has to come out of `to_dict()` too, since that is what we save.
+
+The catch is the saved history: rows written before today have no priority key at all, and loading one of those must still work and come out as normal. There is also a lot of code doing `Task("t3", "Ship the thing", False)` positionally — none of that may start failing."""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = ["board/task.py"]
+max_turns = 12
+timeout_seconds = 180
+tags = ["python", "dataclass", "backward-compatibility"]
+regression_gate = false

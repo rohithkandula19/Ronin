@@ -37,7 +37,7 @@ import asyncio
 import os
 import sys
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import TextIO
@@ -57,6 +57,7 @@ from ..persistence.resume import ResumedSession, resume_latest, resume_session
 from ..persistence.transcript import list_sessions
 from ..providers.router import Router
 from ..providers.types import ProviderError
+from ..telemetry import DISCLOSURE
 from ..ui.app import TEXTUAL_MISSING, run_app, textual_available
 from ..ui.app import Session as AppSession
 from ..ui.commands import BUILTIN_REGISTRY, ParseError, is_command, render_help
@@ -64,15 +65,19 @@ from ..ui.commands import parse as parse_command
 from ..ui.headless import (
     EXIT_ERROR,
     EXIT_OK,
+    ApprovalTracker,
     OutputFormat,
     exit_code_for,
     run_headless,
 )
 from ..ui.reduce import ViewState, reduce_event, summarize_arguments, summarize_result
+from .bench import BenchOptions, default_suite, run_duel_command, run_eval
 from .doctor import run_doctor
 from .sdk import Agent, load_router
 from .spine import Paths
 from .stream import DEFAULT_MAX_ITERATIONS
+from .telemetry_cmd import TelemetryOptions, Verb
+from .telemetry_cmd import run as run_telemetry
 from .wire import load_workspace
 from .wizard import apply_plan, plan_first_run
 
@@ -104,6 +109,9 @@ class Command(StrEnum):
     EXPORT = "export"
     SESSIONS = "sessions"
     VERSION = "version"
+    EVAL = "eval"
+    DUEL = "duel"
+    TELEMETRY = "telemetry"
 
 
 class ExportFormat(StrEnum):
@@ -152,6 +160,15 @@ class Options:
     export_session: str = ""
     export_format: ExportFormat = ExportFormat.MARKDOWN
     export_out: Path | None = None
+    #: Present for ``eval``/``duel`` only. ``None`` everywhere else, so a code path
+    #: that reads it without checking the command fails loudly instead of running an
+    #: eval with default settings.
+    bench: BenchOptions | None = None
+    #: Whether ``--suite`` was passed. Distinguishes "the user chose this path" from
+    #: "nobody said, so use the workspace default", which a bare ``Path()`` cannot.
+    suite_given: bool = False
+    #: Present for ``telemetry`` only, same rule as ``bench``.
+    telemetry: TelemetryOptions | None = None
 
     @property
     def flags(self) -> dict[str, object]:
@@ -259,6 +276,20 @@ def build_parser() -> _Parser:
             "  export [ID] [-o FILE]      write a session as markdown or html\n"
             "  sessions                   list the sessions recorded in this "
             "directory\n"
+            "  eval [--dry-run]           run the task suite in tests/evals and "
+            "report\n"
+            "  duel --model A --model B   run the same tasks against two models\n"
+            "  telemetry [status|on|off|show]\n"
+            "                             opt-in aggregate task outcomes; off by "
+            "default\n"
+            "\n"
+            "eval/duel flags: --suite PATH, --model NAME (repeat for duel), "
+            "--parallel N,\n"
+            "  --category C, --tag T, --task ID, --regression-gate, --limit N, "
+            "--seed N,\n"
+            "  --json FILE, --markdown FILE, --keep-workspaces, --record, "
+            "--allow-network.\n"
+            "  --dry-run lists what would run and opens no model, so it needs no key.\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -306,6 +337,44 @@ def build_parser() -> _Parser:
     parser.add_argument("-o", "--out", dest="export_out", default=None, metavar="FILE",
                         help="write the export here instead of stdout (export only)")
     parser.add_argument("--version", action="store_true", help="print the version")
+
+    # eval / duel. In this parser rather than a subparser so `--help` stays one page
+    # and so a flag cannot be defined twice with two different meanings.
+    parser.add_argument("--suite", default=None, metavar="PATH",
+                        help="eval suite root (default: tests/evals under the "
+                             "workspace)")
+    parser.add_argument("--model", dest="models", action="append", default=None,
+                        metavar="NAME",
+                        help="a model named in your router config; pass twice for duel")
+    parser.add_argument("--parallel", type=int, default=1, metavar="N",
+                        help="tasks to run concurrently (eval/duel)")
+    parser.add_argument("--category", dest="categories", action="append", default=None,
+                        metavar="C", help="only tasks in this category (repeatable)")
+    parser.add_argument("--tag", dest="eval_tags", action="append", default=None,
+                        metavar="T", help="only tasks carrying this tag (repeatable)")
+    parser.add_argument("--task", dest="task_ids", action="append", default=None,
+                        metavar="ID", help="only this task id (repeatable)")
+    parser.add_argument("--regression-gate", action="store_true",
+                        help="only the tasks flagged regression_gate")
+    parser.add_argument("--limit", type=int, default=None, metavar="N",
+                        help="stop after N tasks")
+    parser.add_argument("--seed", type=int, default=0, metavar="N",
+                        help="duel seed; the same seed is used for both sides")
+    parser.add_argument("--json", dest="eval_json", default=None, metavar="FILE",
+                        help="write the report as json here")
+    parser.add_argument("--markdown", dest="eval_markdown", default=None,
+                        metavar="FILE", help="write the report as markdown here")
+    parser.add_argument("--workspaces", dest="workspace_root", default=None,
+                        metavar="DIR",
+                        help="create task workspaces here instead of a temp dir")
+    parser.add_argument("--keep-workspaces", action="store_true",
+                        help="do not delete task workspaces after the run")
+    parser.add_argument("--record", dest="eval_record", action="store_true",
+                        help="write a transcript per task (what the harvest reads)")
+    parser.add_argument("--allow-network", action="store_true",
+                        help="turn a git_sha task from skipped into a hard error")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="list what would run; opens no model, needs no key")
     return parser
 
 
@@ -314,7 +383,8 @@ def parse(argv: Sequence[str]) -> Options | Usage:
     tokens = list(argv)
     command = Command.RUN
     if tokens and tokens[0] in {Command.DOCTOR.value, Command.EXPORT.value,
-                                Command.SESSIONS.value}:
+                                Command.SESSIONS.value, Command.EVAL.value,
+                                Command.DUEL.value, Command.TELEMETRY.value}:
         command = Command(tokens.pop(0))
 
     parser = build_parser()
@@ -331,6 +401,10 @@ def parse(argv: Sequence[str]) -> Options | Usage:
     words = " ".join(namespace.words).strip()
     if command is Command.EXPORT:
         return _export_options(namespace, words)
+    if command in (Command.EVAL, Command.DUEL):
+        return _bench_options(namespace, command, words)
+    if command is Command.TELEMETRY:
+        return _telemetry_options(namespace, words)
 
     prompt = namespace.print_prompt if namespace.print_prompt is not None else words
     headless = namespace.print_prompt is not None
@@ -387,6 +461,114 @@ def _export_options(namespace: argparse.Namespace, words: str) -> Options | Usag
     )
 
 
+def _bench_options(
+    namespace: argparse.Namespace, command: Command, words: str
+) -> Options | Usage:
+    """``eval``/``duel`` argv into :class:`BenchOptions`, carried on :class:`Options`.
+
+    ``--suite`` stays ``None`` here rather than being defaulted to ``tests/evals``:
+    the default is relative to the *workspace root*, which is discovered in
+    :func:`dispatch`, and resolving it in a pure parse function would mean either
+    touching the filesystem here or hard-coding a path that is wrong when ``--cwd``
+    was passed.
+    """
+    if words:
+        return Usage(
+            f"{PROGRAM}: error: {command.value} takes flags, not a prompt "
+            f"(got {words!r}). Select tasks with --task/--category/--tag."
+        )
+    if namespace.print_prompt:
+        return Usage(f"{PROGRAM}: error: {command.value} does not take --print")
+    if namespace.parallel < 1:
+        return Usage(f"{PROGRAM}: error: --parallel must be at least 1")
+    if namespace.limit is not None and namespace.limit < 1:
+        return Usage(f"{PROGRAM}: error: --limit must be at least 1")
+
+    models = tuple(namespace.models or ())
+    dry_run = bool(namespace.dry_run)
+    # Model-count rules are checked here, where the message can name the other
+    # command, rather than in the runner where the only honest thing left to say is
+    # "wrong number of models".
+    #
+    # All of them are relaxed under --dry-run, which opens no model at all: a flag
+    # whose purpose is "show me what would run without a provider" must not demand a
+    # provider first. That inconsistency shipped for one commit and was caught by the
+    # CI smoke rather than by a test, because the argv layer and `bench.py` each had
+    # their own copy of the rule — so the argv tests below now cover the dry-run case
+    # explicitly.
+    if not dry_run:
+        if command is Command.DUEL and len(models) != 2:
+            return Usage(
+                f"{PROGRAM}: error: duel compares two models — pass --model twice "
+                f"(got {len(models)})"
+            )
+        if command is Command.EVAL and len(models) > 1:
+            return Usage(
+                f"{PROGRAM}: error: eval runs one model; use `{PROGRAM} duel` to "
+                f"compare two (got {len(models)})"
+            )
+        if not models:
+            return Usage(
+                f"{PROGRAM}: error: {command.value} needs --model NAME, or --dry-run "
+                "to see what would run without opening a model"
+            )
+
+    bench = BenchOptions(
+        # Replaced in `dispatch` when None — see the docstring.
+        suite=Path(namespace.suite) if namespace.suite else Path(),
+        models=models,
+        parallel=int(namespace.parallel),
+        ids=frozenset(namespace.task_ids or ()),
+        categories=frozenset(namespace.categories or ()),
+        tags=frozenset(namespace.eval_tags or ()),
+        regression_gate=bool(namespace.regression_gate),
+        limit=namespace.limit,
+        seed=int(namespace.seed),
+        json_out=Path(namespace.eval_json) if namespace.eval_json else None,
+        markdown_out=(
+            Path(namespace.eval_markdown) if namespace.eval_markdown else None
+        ),
+        workspace_root=(
+            Path(namespace.workspace_root) if namespace.workspace_root else None
+        ),
+        keep_workspaces=bool(namespace.keep_workspaces),
+        record=bool(namespace.eval_record),
+        allow_network=bool(namespace.allow_network),
+        dry_run=dry_run,
+    )
+    return Options(
+        command=command,
+        cwd=Path(namespace.cwd),
+        bench=bench,
+        suite_given=namespace.suite is not None,
+    )
+
+
+def _telemetry_options(namespace: argparse.Namespace, words: str) -> Options | Usage:
+    """``telemetry [status|on|off|show]``. Bare ``telemetry`` means ``status``.
+
+    Defaulting to ``status`` rather than to ``on`` is not a style choice: a verb that
+    turns data collection on when the user typed only the noun is a dark pattern.
+    """
+    verb_word = words or Verb.STATUS.value
+    if verb_word not in {member.value for member in Verb}:
+        return Usage(
+            f"{PROGRAM}: error: unknown telemetry verb {verb_word!r} — expected one of "
+            f"{', '.join(member.value for member in Verb)}"
+        )
+    return Options(
+        command=Command.TELEMETRY,
+        cwd=Path(namespace.cwd),
+        telemetry=TelemetryOptions(
+            verb=Verb(verb_word),
+            # Replaced in `dispatch` from the discovered Paths, so a test can point the
+            # whole thing at a tmp_path without touching a real home directory.
+            home=Path(),
+            limit=max(0, int(namespace.limit or 0)),
+        ),
+    )
+
+
 def _budget(namespace: argparse.Namespace) -> Budget | None:
     """A budget only when a ceiling was actually asked for.
 
@@ -433,6 +615,11 @@ async def dispatch(
         return _sessions(options, streams=streams)
 
     paths = Paths.discover(options.cwd)
+    if options.command in (Command.EVAL, Command.DUEL):
+        return await _bench(options, paths, env, streams)
+    if options.command is Command.TELEMETRY:
+        return _telemetry(options, paths, streams)
+
     if options.command is Command.DOCTOR:
         report = await run_doctor(
             load_workspace(paths, flags=options.flags, environ=env),
@@ -469,6 +656,78 @@ async def dispatch(
     finally:
         if owns:
             await agent.aclose()
+
+
+async def _bench(
+    options: Options,
+    paths: Paths,
+    env: Mapping[str, str],
+    streams: Streams,
+) -> int:
+    """``eval``/``duel``: resolve the suite path, run, print.
+
+    Deliberately *before* the first-run wizard in :func:`dispatch`. An eval run does
+    not need ``.ronin/`` and must not create it: the workspaces it measures in are
+    throwaway copies, and writing config into someone's repository as a side effect of
+    asking for a benchmark is a surprise.
+    """
+    bench = options.bench
+    if bench is None:  # pragma: no cover - parse always supplies one for these
+        streams.err(f"{PROGRAM}: internal error: {options.command.value} without "
+                    "options\n")
+        return EXIT_ERROR
+    if not options.suite_given:
+        bench = replace(bench, suite=default_suite(paths))
+
+    run = run_eval if options.command is Command.EVAL else run_duel_command
+    code, out, err = await run(bench, paths, env)
+    if err:
+        streams.err(err)
+    if out:
+        streams.out(out)
+    return code
+
+
+def _telemetry(options: Options, paths: Paths, streams: Streams) -> int:
+    """``telemetry``: resolve ``home`` from the discovered paths, then run the verb.
+
+    Before the wizard, like ``eval``: someone checking what a tool collects about them
+    should not have their repository written to as a side effect of asking.
+    """
+    settings = options.telemetry
+    if settings is None:  # pragma: no cover - parse always supplies one here
+        streams.err(f"{PROGRAM}: internal error: telemetry without options\n")
+        return EXIT_ERROR
+    code, out, err = run_telemetry(replace(settings, home=paths.home))
+    if err:
+        streams.err(err)
+    if out:
+        streams.out(out)
+    return code
+
+
+def _disclose_telemetry_once(paths: Paths, streams: Streams) -> None:
+    """Print the one-line disclosure on first run, to **stderr**, then never again.
+
+    stderr rather than stdout because stdout is the agent's answer and may be piped
+    into something that parses it; a privacy notice appearing inside a JSON payload
+    would be both useless and a bug.
+
+    Only when consent is ``UNASKED``. It is not a prompt — nothing blocks and nothing
+    is enabled — because a first run that interrogates you before doing the thing you
+    asked for is worse than one line you can read afterwards. Telemetry stays off
+    until somebody types ``ronin telemetry on``.
+    """
+    from ..telemetry import Consent, ConsentStore, default_consent_path
+
+    store = ConsentStore(default_consent_path(paths.home))
+    record = store.read()
+    if record.state is not Consent.UNASKED or record.disclosed:
+        return
+    streams.err(DISCLOSURE + "\n")
+    # Marked after printing: if the write fails the user sees the line again next
+    # time, which is the harmless direction to fail in.
+    store.mark_disclosed()
 
 
 def _version() -> str:
@@ -661,7 +920,8 @@ async def _one_turn(
 ) -> int:
     """Stream one turn to the terminal, and report what it exited as."""
     state = ViewState()
-    approvals: list[ApprovalRequest] = []
+    # See ApprovalTracker: counting raw requests made every approved gated call exit 2.
+    tracker = ApprovalTracker()
     # Only this turn's notes: the list accumulates across the session, and reprinting
     # turn one's degradation after every later turn trains the user to ignore it.
     before = len(agent.conversation.notes)
@@ -673,12 +933,11 @@ async def _one_turn(
     ):
         state = reduce_event(state, event)
         _print_event(event, streams)
-        if isinstance(event, ApprovalRequest):
-            approvals.append(event)
+        tracker.observe(event)
     streams.out("\n")
     for note in agent.conversation.notes[before:]:
         streams.err(f"note: {note}\n")
-    return exit_code_for(state, approvals)
+    return exit_code_for(state, tracker.resolve())
 
 
 def _print_event(event: Event, streams: Streams) -> None:
@@ -811,6 +1070,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         if parsed.message:
             writer(parsed.message if parsed.message.endswith("\n") else parsed.message + "\n")
         return parsed.exit_code
+    # The one-time telemetry notice lives here rather than in `dispatch`, and that is
+    # not a style choice. `Paths.discover()` defaults `home` to `Path.home()`, so a
+    # disclosure written from `dispatch` writes to the *real* home directory of whoever
+    # is running — including a test suite. It did: the first run of the suite created
+    # ~/.ronin/telemetry.json on the developer's machine, and then whichever test ran
+    # first consumed the once-only notice, making a later assertion order-dependent.
+    #
+    # `main` is the process entry point and the only place that legitimately resolves a
+    # real home, so the notice belongs here. Every test that calls `dispatch` stays
+    # hermetic, and `_disclose_telemetry_once` is still unit-tested directly with an
+    # injected `Paths`.
+    if parsed.command is Command.RUN:
+        _disclose_telemetry_once(Paths.discover(parsed.cwd), streams)
     try:
         return asyncio.run(dispatch(parsed, streams=streams))
     except KeyboardInterrupt:

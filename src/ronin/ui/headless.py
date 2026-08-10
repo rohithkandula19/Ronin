@@ -234,6 +234,49 @@ def to_line(payload: Mapping[str, Any]) -> str:
     return json.dumps(payload, sort_keys=True, ensure_ascii=False, default=repr) + "\n"
 
 
+#: What ``ronin.core.loop`` prefixes a refused tool result with. It is the only signal
+#: that separates an approval which was *refused* from one that was *granted*: the
+#: request event is emitted before the policy is consulted, so the event itself cannot
+#: say which happened.
+DENIED_RESULT_PREFIX = "DENIED:"
+
+
+@dataclass(slots=True)
+class ApprovalTracker:
+    """Which approvals were actually refused, as opposed to merely requested.
+
+    ``core.loop`` yields ``ApprovalRequest`` *before* it calls ``policy.approve``,
+    because a UI has to render the prompt in order to ask. Counting every request made
+    exit code 2 mean "this run touched a gated tool" rather than "this run was refused"
+    — and it did, for every ``--mode auto_edit`` run that wrote a file: the write was
+    allowed by a rule, succeeded with ``ok=True``, and the process still exited 2 with
+    that write listed under ``approvals_denied``. A script cannot act on an exit code
+    that means two different things, which made 2 useless as the signal it exists to be.
+
+    A request is resolved by its answering ``ToolEnd``: a ``DENIED:`` error means
+    refused, anything else means it ran.
+    """
+
+    pending: dict[str, ApprovalRequest] = field(default_factory=dict)
+    denied: list[ApprovalRequest] = field(default_factory=list)
+
+    def observe(self, event: Event) -> None:
+        if isinstance(event, ApprovalRequest):
+            self.pending[event.tool_use_id] = event
+        elif isinstance(event, ToolEnd):
+            request = self.pending.pop(event.tool_use_id, None)
+            if request is not None and event.result.error.startswith(DENIED_RESULT_PREFIX):
+                self.denied.append(request)
+
+    def resolve(self) -> tuple[ApprovalRequest, ...]:
+        """Refusals, plus any request that never got a ``ToolEnd``.
+
+        An unanswered prompt is not an approval. A stream that stopped while waiting did
+        not do the work, and exiting 0 there would tell a script the task was done.
+        """
+        return (*self.denied, *self.pending.values())
+
+
 def exit_code_for(state: ViewState, approvals: Sequence[ApprovalRequest]) -> int:
     """The process exit code, as a pure function of what the stream said."""
     if state.errors:
@@ -310,22 +353,21 @@ async def run_headless(
     do_flush = _flush_stdout if flush is None else flush
 
     current = ViewState() if state is None else state
-    approvals: list[ApprovalRequest] = []
+    tracker = ApprovalTracker()
     streaming = output_format is OutputFormat.STREAM_JSON
 
     async for event in events:
         current = reduce_event(current, event)
-        if isinstance(event, ApprovalRequest):
-            approvals.append(event)
+        tracker.observe(event)
         if streaming:
             out(to_line(event_to_json(event)))
             do_flush()
 
     result = HeadlessResult(
-        exit_code=exit_code_for(current, approvals),
+        exit_code=exit_code_for(current, tracker.resolve()),
         text=current.text,
         state=current,
-        approvals=tuple(approvals),
+        approvals=tracker.resolve(),
     )
 
     if output_format is OutputFormat.TEXT:
@@ -337,7 +379,7 @@ async def run_headless(
 
     # Notices never go to stdout: a consumer of `--output-format=text` is piping
     # the model's answer somewhere, and a warning mixed into it corrupts the data.
-    for request in approvals:
+    for request in result.approvals:
         err(DENIAL_NOTICE.format(name=request.name, rendered=request.rendered) + "\n")
     for error in current.errors:
         err(ERROR_NOTICE.format(kind=error.kind, message=error.message) + "\n")
@@ -399,6 +441,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "DENIAL_NOTICE",
+    "DENIED_RESULT_PREFIX",
     "ERROR_NOTICE",
     "EVENT_TYPE_NAMES",
     "EXIT_ERROR",
@@ -407,6 +450,7 @@ __all__ = [
     "NO_TURN_END",
     "RESULT_TYPE",
     "SCHEMA",
+    "ApprovalTracker",
     "HeadlessPolicy",
     "HeadlessResult",
     "OutputFormat",

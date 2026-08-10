@@ -10,7 +10,7 @@ surfaced (it should be given a floor, even a small one).
 """
 from __future__ import annotations
 
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 
 import yaml
@@ -19,7 +19,7 @@ _ROOT = Path(__file__).resolve().parents[2]           # training/
 _WEIGHTS = _ROOT / "config" / "scenario_weights.yaml"
 
 
-@lru_cache(maxsize=None)
+@cache
 def load_weights(path: str | None = None) -> dict:
     p = Path(path) if path else _WEIGHTS
     data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}

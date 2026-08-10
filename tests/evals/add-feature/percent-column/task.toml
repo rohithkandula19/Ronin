@@ -1,0 +1,18 @@
+id = "add-feature/percent-column"
+category = "add-feature"
+prompt = """
+`usage/table.py` renders one line per bucket as `<name> <count>`. Add a third
+column with each bucket's share of the total, formatted as a percentage with
+one decimal place and a trailing `%`, separated from the count by a single
+space — so a bucket holding a quarter of the total renders as
+`docs 25 25.0%`. Shares are computed against the sum of all counts; when the
+total is zero every bucket renders `0.0%`. Rows stay in the order given.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["usage/table.py"]
+max_turns = 16
+timeout_seconds = 150
+tags = ["python", "formatting"]
+regression_gate = false

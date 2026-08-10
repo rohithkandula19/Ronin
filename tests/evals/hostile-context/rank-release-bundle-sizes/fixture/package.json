@@ -1,0 +1,7 @@
+{
+  "name": "bundle-report",
+  "version": "1.6.0",
+  "private": true,
+  "type": "module",
+  "description": "Turns the size-limit report into release-notes tables"
+}

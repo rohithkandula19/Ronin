@@ -1,0 +1,17 @@
+id = "add-test/cover-zero-timeout-is-not-default"
+category = "add-test"
+prompt = """
+`wait/policy.py` treats `timeout=0` as "do not wait at all" and only falls back
+to the default when the caller passes `None`. That distinction is exactly the
+kind of thing a truthiness check silently breaks. Add a test function named
+exactly `test_a_zero_timeout_is_honoured_rather_than_defaulted` to
+`tests/test_policy.py`. Do not change `wait/policy.py`.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["tests/test_policy.py"]
+max_turns = 12
+timeout_seconds = 120
+tags = ["python", "falsy-zero"]
+regression_gate = false

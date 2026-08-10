@@ -1,0 +1,10 @@
+{
+  "service": "checkout",
+  "retries": 3,
+  "endpoints": {
+    "primary": "https://api.example.invalid/v2",
+    "fallback": "https://api-eu.example.invalid/v2"
+  },
+  "features": ["fast-path", "audit-log"],
+  "verbose": false
+}

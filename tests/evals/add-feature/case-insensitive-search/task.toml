@@ -1,0 +1,17 @@
+id = "add-feature/case-insensitive-search"
+category = "add-feature"
+prompt = """
+`find/search.py` has `find(lines, needle)`, which matches case-sensitively.
+Add a keyword-only parameter `fold_case: bool = False`. When it is true,
+matching ignores ASCII case. The default must keep the current behaviour
+exactly, the returned value stays a list of the matching lines in input
+order, and an empty needle must keep matching every line.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["find/search.py"]
+max_turns = 16
+timeout_seconds = 150
+tags = ["python", "search"]
+regression_gate = false

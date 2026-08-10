@@ -1,0 +1,222 @@
+# Ronin CI failure fixer.
+#
+# Copy to .github/workflows/ronin-fix.yml.
+#
+# Trigger is `workflow_dispatch` ON PURPOSE. A `workflow_run` trigger that fires an
+# agent with write access on every red build is how you get a surprise commit at 3am
+# from a flaky test. Run it by hand until you have watched it work several times; the
+# commented-out `workflow_run` block at the bottom is what to uncomment then, and it
+# still opens a PR rather than pushing to a branch anyone merges from.
+#
+# What it does, in order:
+#   1. downloads the failing job's log with `gh run view --log-failed`
+#   2. asks Ronin to reproduce the failure locally, fix it, and re-run the check
+#   3. if Ronin exits 0 AND left a diff, pushes a branch and opens a draft PR
+#
+# It never pushes to the default branch. It opens a DRAFT pr, because a machine-authored
+# fix that arrives ready-to-merge is a fix nobody reads.
+name: ronin fix
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "The failing workflow run id (from the URL of the red run)"
+        required: true
+        type: string
+      max_usd:
+        description: "Dollar ceiling for this attempt"
+        required: false
+        default: "1.00"
+        type: string
+
+permissions:
+  contents: write        # to push the fix branch
+  pull-requests: write   # to open the PR
+  actions: read          # to read the failing run's logs
+
+concurrency:
+  # One fixer at a time per failing run. Two agents editing the same branch is a merge
+  # conflict authored by robots.
+  group: ronin-fix-${{ inputs.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history: the agent is told to look at what changed, and a shallow
+          # clone makes `git log` useless for that.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: install ronin
+        # The `http` extra is what provides real sockets for provider streaming. A bare
+        # install has zero dependencies and cannot reach a hosted model.
+        run: pip install "ronin[http]"
+
+      - name: install the project under test
+        # Replace with whatever makes your test suite runnable. The agent needs the
+        # failure to reproduce locally, or it is guessing from a log.
+        run: pip install -e ".[dev]" || pip install -r requirements.txt || true
+
+      - name: capture the failing log
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p .ronin/tmp
+          # Inside the workspace: the file tools refuse paths outside the tree, so a log
+          # in /tmp is a log the agent cannot read.
+          gh run view "${{ inputs.run_id }}" --log-failed > .ronin/tmp/ci-failure.log 2>&1 || true
+          # The read tool truncates at its own cap and marks what it cut, so a 40MB log
+          # would be read as a fragment. Keep the tail, which is where failures are.
+          tail -c 50000 .ronin/tmp/ci-failure.log > .ronin/tmp/ci-failure.tail.log
+          mv .ronin/tmp/ci-failure.tail.log .ronin/tmp/ci-failure.log
+          wc -c .ronin/tmp/ci-failure.log
+
+      - name: model config
+        # models.toml holds no secrets — `api_key_env` names an environment variable —
+        # so it is committed to the repo. Only the key itself is a secret.
+        run: test -f .ronin/models.toml || cp examples/workflows/ci-failure-fixer/models.toml .ronin/models.toml
+
+      - name: permission rules for this run
+        # Without these the job always exits 2. A headless run denies every gated call,
+        # `bash` is DESTRUCTIVE and requires approval, so the agent could not run the
+        # test suite. Rules APPEND across layers, so this cannot remove a builtin floor.
+        run: cp examples/workflows/ci-failure-fixer/settings.json .ronin/settings.local.json
+
+      - name: check the wiring before spending anything
+        env:
+          # Name the variable your models.toml points `api_key_env` at.
+          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+        run: python -m ronin doctor
+
+      - name: let ronin fix it
+        continue-on-error: true
+        env:
+          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+        run: |
+          set -o pipefail
+          python -m ronin -p "$(cat examples/workflows/ci-failure-fixer/prompt.md)" \
+            --output-format stream-json \
+            --mode auto_edit \
+            --max-turns 30 \
+            --max-usd "${{ inputs.max_usd }}" \
+            --max-seconds 900 \
+            --no-mcp \
+            --no-wizard \
+            | tee .ronin/tmp/ronin.jsonl
+
+      - name: what ronin said
+        if: always()
+        run: |
+          # The closing `result` record carries the exit code, the final text, the turn
+          # count and the spend. jq is preinstalled on ubuntu-latest.
+          jq -r 'select(.type=="result")' .ronin/tmp/ronin.jsonl || true
+          echo "--- gated calls (requested an approval; may or may not have been refused) ---"
+          jq -r 'select(.type=="approval_request") | "\(.tool_use_id) \(.name): \(.rendered)"' \
+            .ronin/tmp/ronin.jsonl || true
+          echo "--- calls actually REFUSED ---"
+          jq -r 'select(.type=="tool_end" and (.error | startswith("DENIED:")))
+                 | "\(.tool_use_id) \(.name): \(.error)"' .ronin/tmp/ronin.jsonl || true
+
+      - name: upload the full event stream
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ronin-stream-${{ inputs.run_id }}
+          path: .ronin/tmp/ronin.jsonl
+          if-no-files-found: warn
+
+      - name: decide
+        id: decide
+        run: |
+          STREAM=.ronin/tmp/ronin.jsonl
+          CODE=$(jq -r 'select(.type=="result") | .exit_code' "$STREAM" | tail -1)
+          CODE="${CODE:-1}"
+          STOP=$(jq -r 'select(.type=="result") | .stop_reason' "$STREAM" | tail -1)
+          ERRORS=$(jq -r 'select(.type=="error") | .message' "$STREAM" | wc -l)
+          # In THIS build, exit code 2 is raised for every approval that was *requested*,
+          # even one a rule then allowed — `ronin.core.loop` yields ApprovalRequest before
+          # it consults the policy, and `ronin.ui.headless.exit_code_for` counts requests
+          # rather than refusals. So `--mode auto_edit` writing a file exits 2 on a clean
+          # run. The only honest signal is a tool_end whose error begins "DENIED:".
+          REFUSED=$(jq -r 'select(.type=="tool_end" and (.error | startswith("DENIED:")))
+                           | .tool_use_id' "$STREAM" | wc -l)
+          echo "exit=$CODE stop_reason=$STOP errors=$ERRORS refused=$REFUSED"
+          # Scratch files are the harness's, not part of the fix.
+          rm -rf .ronin/tmp .ronin/settings.local.json
+          git checkout -- .ronin 2>/dev/null || true
+          if [ "$REFUSED" -gt 0 ]; then
+            echo "::error::a tool call was refused. Add a narrow allow rule for it in" \
+                 "settings.json, or do this one by hand. The refusals are listed above."
+            exit 1
+          fi
+          # `no_tool_calls` is the clean finish: the model stopped asking for tools.
+          # `max_iterations`, `cost_budget`, `token_budget`, `stalled` and `interrupted`
+          # all mean it ran out of something rather than finished.
+          if [ "$ERRORS" -gt 0 ] || [ "$STOP" != "no_tool_calls" ]; then
+            echo "::error::the turn did not finish cleanly (stop_reason=$STOP," \
+                 "errors=$ERRORS). See the uploaded stream."
+            exit 1
+          fi
+          # --porcelain, not `git diff`: a fix that adds a NEW file is invisible to
+          # `git diff`, and "ronin changed nothing" would be a lie that loses the work.
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "::warning::ronin finished but changed nothing. Nothing to open a PR for."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: open a draft pr
+        if: steps.decide.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="ronin/fix-${{ inputs.run_id }}"
+          git config user.name "ronin[bot]"
+          git config user.email "ronin@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add -A
+          git commit -m "fix: repair the failure in run ${{ inputs.run_id }}
+
+          Authored by an agent (python -m ronin, --mode auto_edit). The full event
+          stream is attached to the workflow run as an artifact. Review the diff, not
+          the commit message."
+          git push origin "$BRANCH"
+          gh pr create \
+            --draft \
+            --title "ronin: fix the failure in run ${{ inputs.run_id }}" \
+            --body "Automated attempt at the failure in [run ${{ inputs.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ inputs.run_id }}).
+
+          **Draft on purpose.** A machine-authored fix that arrives ready to merge is a
+          fix nobody reads. Check that the test now fails for the right reason before it
+          passes for the wrong one.
+
+          The complete event stream (every tool call, every result) is attached to
+          [this run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) as \`ronin-stream-${{ inputs.run_id }}\`."
+
+# ---------------------------------------------------------------------------
+# Automatic triggering, once you trust it. Uncomment and delete `workflow_dispatch`
+# above — and read the warning first.
+#
+# on:
+#   workflow_run:
+#     workflows: ["ci"]        # the name: of your test workflow
+#     types: [completed]
+#
+# ...with `if: github.event.workflow_run.conclusion == 'failure'` on the job, and
+# `inputs.run_id` replaced by `github.event.workflow_run.id`.
+#
+# Why not by default: a flaky test then spends money on every red build, and a
+# `workflow_run` job runs with the default branch's workflow file and write
+# permissions. That combination is fine when you have watched the fixer work and
+# bounded it; it is not fine on day one.
+# ---------------------------------------------------------------------------

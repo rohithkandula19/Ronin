@@ -1,0 +1,11 @@
+{
+  "day": "monday",
+  "entries": [
+    { "id": "s-4", "start": "09:00", "end": "11:00", "staff": "ana" },
+    { "id": "s-9", "start": "13:30", "end": "15:00", "staff": "bo" },
+    { "id": "s-1", "start": "08:15", "end": "09:00", "staff": "cleo" },
+    { "id": "s-6", "end": "10:00", "staff": "cancelled" },
+    { "id": "s-7", "start": "17:45", "end": "19:15", "staff": "dev" },
+    { "id": "s-2", "start": "11:00", "end": "12:15", "staff": "eli" }
+  ]
+}

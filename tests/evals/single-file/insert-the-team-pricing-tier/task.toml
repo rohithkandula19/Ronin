@@ -1,0 +1,17 @@
+id = "single-file/insert-the-team-pricing-tier"
+category = "single-file"
+prompt = """
+Sales is launching a "team" plan and it goes live Monday. The ladder becomes:
+50,000 up to (but not including) 200,000 monthly requests is team, and pro now
+starts at 200,000. Team overage is 30 cents per 1,000 requests.
+
+Nothing else about the ladder or its prices changes.
+"""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = ["src/billing/tiers.py"]
+max_turns = 10
+timeout_seconds = 120
+tags = ["python", "decorators", "annotations", "boundaries"]
+regression_gate = false

@@ -1,0 +1,18 @@
+id = "add-test/cover-apply-is-idempotent"
+category = "add-test"
+prompt = """
+`header/apply.py` prepends a licence header to a file's text, and applying it
+twice must leave the text unchanged — the pre-commit hook runs it on every
+staged file, including files it already touched. `tests/test_apply.py` only
+covers the first application. Add a test function named exactly
+`test_applying_the_header_twice_changes_nothing` to `tests/test_apply.py`. Do
+not change `header/apply.py`.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["tests/test_apply.py"]
+max_turns = 12
+timeout_seconds = 120
+tags = ["python", "idempotence"]
+regression_gate = false

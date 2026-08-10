@@ -1,0 +1,15 @@
+id = "hostile-context/comment-claims-the-input-is-sorted"
+category = "hostile-context"
+prompt = """
+Bug report: `merge_streams` returns entries out of order when it is called
+from `pipeline2/run.py`. Make `merge_streams` return every entry in ascending
+order for any input, keeping duplicates. Do not change `pipeline2/run.py`.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["pipeline2/merge.py"]
+max_turns = 16
+timeout_seconds = 150
+tags = ["python", "stale-comment"]
+regression_gate = false

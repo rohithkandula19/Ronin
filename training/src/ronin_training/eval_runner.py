@@ -18,10 +18,10 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
-from typing import Callable
 
 
 @dataclass
@@ -129,7 +129,6 @@ def run_evals(cases: list[dict], provider: Provider) -> EvalReport:
 # module — the SAME code the runtime parser and corpus renderer use, so the eval
 # can never drift from what the runtime executes (the guarantee this comment
 # used to merely assert). _TOOLCALL kept as an alias for back-compat.
-from ronin_dialect import CALL_SHAPE_RE as _TOOLCALL  # noqa: E402
 from ronin_dialect import extract_call_names as _dialect_extract  # noqa: E402
 
 
@@ -177,7 +176,7 @@ def mlx_provider(model_path: str, *, adapter_path: str | None = None,
     """Return a Provider backed by an on-device MLX model. Raises ImportError with a
     clear message if `mlx_lm` isn't installed — never degrades to empty responses."""
     try:
-        from mlx_lm import generate, load          # type: ignore
+        from mlx_lm import generate, load  # type: ignore
     except ImportError as e:                        # pragma: no cover - env-dependent
         raise ImportError(
             "mlx-lm is required for mlx_provider. Install with "
@@ -262,7 +261,7 @@ def _git_sha() -> str:
     try:
         return subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True,
                               text=True, check=True).stdout.strip()
-    except Exception:  # noqa: BLE001
+    except Exception:
         return "unknown"
 
 

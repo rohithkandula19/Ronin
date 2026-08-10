@@ -1,0 +1,9 @@
+{
+  "maxAttempts": 3,
+  "backoffSeconds": [10, 60, 300],
+  "priorities": ["low", "normal", "high", "critical"],
+  "board": {
+    "width": 72,
+    "showHistory": true
+  }
+}

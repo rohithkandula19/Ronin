@@ -16,7 +16,7 @@ quantized repo and keep `--fine-tune-type lora`.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 # Smallest viable Ronin targets (spec: use the smallest model that can learn the
 # protocol). QLoRA-friendly 4-bit variants fit an 8 GB machine; the 0.5B is the

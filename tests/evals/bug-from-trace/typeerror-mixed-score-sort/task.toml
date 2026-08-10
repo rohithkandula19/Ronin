@@ -1,0 +1,22 @@
+id = "bug-from-trace/typeerror-mixed-score-sort"
+category = "bug-from-trace"
+prompt = """
+Traceback (most recent call last):
+  File "/workspace/bin/leaders", line 11, in <module>
+    main()
+  File "/workspace/leaders/cli.py", line 15, in main
+    for name in top(ROWS, 2):
+                ^^^^^^^^^^^^
+  File "/workspace/leaders/rank.py", line 13, in top
+    ordered = sorted(rows, key=lambda row: row["score"], reverse=True)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: '<' not supported between instances of 'str' and 'int'
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["leaders/rank.py"]
+max_turns = 14
+timeout_seconds = 120
+tags = ["python", "typeerror"]
+regression_gate = false

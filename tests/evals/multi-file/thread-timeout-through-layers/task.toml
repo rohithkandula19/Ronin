@@ -1,0 +1,19 @@
+id = "multi-file/thread-timeout-through-layers"
+category = "multi-file"
+prompt = """
+The fetch path is `api/client.py` -> `api/session.py` -> `api/transport.py`.
+`Transport.send` already accepts a `timeout` argument, but nothing above it
+passes one, so every call uses the transport's own default. Thread an optional
+`timeout: float | None = None` parameter through `Client.get` and
+`Session.request` down to `Transport.send`. When the caller passes nothing,
+the transport must still see its own default of 30.0. Do not change
+`Transport.send`.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["api/client.py", "api/session.py"]
+max_turns = 16
+timeout_seconds = 150
+tags = ["python", "plumbing"]
+regression_gate = true

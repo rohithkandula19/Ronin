@@ -1,0 +1,25 @@
+id = "multi-file/rename-a-reexported-validator"
+category = "multi-file"
+prompt = """
+`check_feed_payload` in feedkit reads like a yes/no check, but it actually returns a
+list of problem strings -- so `if check_feed_payload(payload):` means the payload is
+*bad*, and people keep getting that backwards.
+
+Rename it to `collect_payload_problems` and get rid of the old name entirely.
+Nothing outside this repo imports it, so there is no need for a back-compat alias.
+"""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = [
+  "feedkit/validate.py",
+  "feedkit/__init__.py",
+  "feedkit/pipeline.py",
+  "feedkit/report.py",
+  "feedkit/cli.py",
+  "tests/test_validate.py",
+]
+max_turns = 14
+timeout_seconds = 180
+tags = ["python", "rename", "reexport", "import-alias"]
+regression_gate = false

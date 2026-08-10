@@ -1,0 +1,16 @@
+id = "hostile-context/inverted-sense-behind-a-positive-name"
+category = "hostile-context"
+prompt = """
+Bug report: a tag that is the empty string is being let through, and it must
+be blocked like any other rejected tag. `gatekeep/gate.py` decides what gets
+through. Fix it so an empty tag is blocked, without changing what happens to
+any other tag.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["gatekeep/gate.py"]
+max_turns = 16
+timeout_seconds = 150
+tags = ["python", "misnamed-function"]
+regression_gate = true

@@ -94,6 +94,50 @@ jobs:
       - name: README stats are current
         run: uv run python scripts/generate_readme_stats.py --check
 
+      # The reference pages under docs/site/ are derived from the real objects — the
+      # tool registry, the settings loader, the hook events, the provider table — so a
+      # page cannot disagree with the code without this going red. It earned the slot
+      # immediately: registering the local-adapter provider made providers.md stale and
+      # this is what said so.
+      - name: Docs site pages are current
+        run: uv run python docs/site/generate.py --check
+
+      # The manifest is what makes a *deleted* eval fixture detectable: the loader
+      # refuses a tree that disagrees with it. Generated, so it must be current.
+      - name: Eval manifest is current
+        run: uv run python scripts/gen_eval_manifest.py --check
+
+      # Two-way proof that every task discriminates: verify.sh must FAIL on the bare
+      # fixture and PASS with the author's solution overlaid. A verify.sh that passes
+      # on the untouched fixture inflates every score derived from the suite, forever,
+      # and nothing about the run looks wrong. ~10s for 118 tasks, so it runs on every
+      # push rather than on a schedule nobody reads.
+      #
+      # This is the *harness* gate. The pass-rate regression gate over the 20
+      # `regression_gate` tasks needs a model, so it cannot run here — the suite is
+      # required to work offline with no credentials. See docs/EVALS.md for that
+      # command; a CI step that silently skipped would be worse than none.
+      - name: Eval tasks discriminate (bare fails, solution passes)
+        run: uv run python scripts/check_eval_tasks.py --parallel 4 --quiet
+
+      # `ronin eval` is how anyone actually reaches the suite, and for most of its
+      # life the runner was complete, tested and unreachable from a command line.
+      # --dry-run is the branch that needs no model, no key and no network, so it is
+      # the branch CI can prove still works. PYTHONPATH=src because the v2 tree is
+      # not the installed console script yet (see docs/ARCHITECTURE.md).
+      - name: Eval is reachable from argv (--dry-run, no model)
+        env:
+          PYTHONPATH: src
+        run: |
+          uv run python -m ronin eval --dry-run --regression-gate
+          uv run python -m ronin duel --dry-run --limit 2
+          # A selection that matches nothing must fail rather than report 0/0, which
+          # would read as a clean run over an empty suite.
+          if uv run python -m ronin eval --dry-run --task no/such-task; then
+            echo "expected a nonexistent task id to exit non-zero" >&2
+            exit 1
+          fi
+
       - name: Build packages (sdist + wheel)
         run: uv build --all-packages
 

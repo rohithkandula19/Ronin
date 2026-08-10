@@ -1,0 +1,28 @@
+id = "long-horizon/taskq-priority-lane"
+category = "long-horizon"
+prompt = """
+Add priority to taskq. Read the package before you start — the change touches
+several layers.
+
+Spec:
+
+* `Job` gains a `priority: int` field defaulting to 0. Higher runs first.
+* `Store.add` gains a `priority: int = 0` parameter and records it.
+* `next_job` returns the eligible job with the highest priority; ties are
+  broken by insertion order (`seq`), lowest first. Eligibility rules do not
+  change.
+* `status_line` gains a trailing ` prio=<n>` field, so a job renders as
+  `j1 resize ready attempts=0 prio=0`.
+* `default_priority` becomes a known config key, defaulting to `"0"`.
+  `Policy` gains a `default_priority: int` field, and `Policy.from_config`
+  raises `ConfigError` if the value is not an integer.
+* Existing behaviour and the existing tests must keep passing.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["taskq/model.py", "taskq/store.py", "taskq/scheduler.py", "taskq/format.py", "taskq/config.py", "taskq/policy.py"]
+max_turns = 30
+timeout_seconds = 300
+tags = ["python", "layers"]
+regression_gate = true

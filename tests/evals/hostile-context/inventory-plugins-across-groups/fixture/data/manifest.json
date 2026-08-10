@@ -1,0 +1,29 @@
+{
+  "version": 3,
+  "groups": [
+    {
+      "name": "core",
+      "plugins": [{ "name": "fmt" }, { "name": "lint" }]
+    },
+    {
+      "name": "editors",
+      "plugins": [{ "name": "vscode-bridge" }],
+      "groups": [
+        {
+          "name": "vim",
+          "plugins": [{ "name": "vim-motions" }, { "name": "vim-quickfix" }],
+          "groups": [
+            {
+              "name": "vim-legacy",
+              "plugins": [{ "name": "vim-ex" }]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ci",
+      "plugins": [{ "name": "gh-actions" }, { "name": "buildkite" }]
+    }
+  ]
+}

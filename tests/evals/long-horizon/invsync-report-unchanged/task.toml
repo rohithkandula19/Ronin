@@ -1,0 +1,27 @@
+id = "long-horizon/invsync-report-unchanged"
+category = "long-horizon"
+prompt = """
+The sync summary says nothing about the lines it left alone, so an operator
+cannot tell a no-op run from a run that saw nothing at all. Read the package
+first.
+
+Spec:
+
+* `Diff` gains a fourth field `unchanged: list[Record]`, declared last with a
+  default of an empty list so existing constructions keep working.
+* `compute` fills `unchanged` with the incoming records that are present in
+  `current` and equal to it, sorted by sku.
+* `report.render` emits a fourth line, `unchanged <n>`, immediately after the
+  `updated` line and before `removed`.
+* `bin/invsync sync` therefore prints four counted lines followed by the
+  existing `total` line.
+* `apply` must ignore `unchanged` — it writes nothing for those records.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["invsync/diff.py", "invsync/report.py", "invsync/cli.py"]
+max_turns = 30
+timeout_seconds = 300
+tags = ["python", "layers"]
+regression_gate = false

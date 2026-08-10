@@ -1,0 +1,17 @@
+id = "single-file/slugify-collapse-dashes"
+category = "single-file"
+prompt = """
+`web/slug.py` turns a title into a URL slug. It leaves runs of dashes and
+leading/trailing dashes behind, so "Hello -- World!" becomes
+"hello----world-". Fix `slugify` so runs of separators collapse to a single
+dash and the result never starts or ends with a dash. An input with no
+alphanumeric characters must return the empty string.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["web/slug.py"]
+max_turns = 10
+timeout_seconds = 90
+tags = ["python", "strings"]
+regression_gate = false

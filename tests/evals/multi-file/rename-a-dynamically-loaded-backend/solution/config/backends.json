@@ -1,0 +1,15 @@
+{
+  "profiles": {
+    "default": {
+      "target": "storekit.backends.jsonfile:FileStore",
+      "options": {
+        "path": "var/store.json",
+        "indent": 2
+      }
+    },
+    "scratch": {
+      "target": "storekit.backends.memory:MemoryStore",
+      "options": {}
+    }
+  }
+}

@@ -1,0 +1,30 @@
+id = "long-horizon/register-a-checksum-plugin-capability"
+category = "long-horizon"
+prompt = """
+Ops wants the inspector to tell them the fingerprint of a file, in the same
+`crc32:xxxxxxxx` form the tree scanner already prints, so they can compare a single
+file against a scan without re-running the scan.
+
+Teach the tool a new `checksum` question it can ask plugins, and have `bytes_stats`
+answer it — it is the plugin that already deals in raw bytes, and it should be the
+only one that answers. Asking any other plugin for a checksum must keep failing the
+same polite way it does today for a capability a plugin does not provide.
+
+`python3 inspect_file.py --path samples/notes.txt --all` should show the fingerprint
+in its report, and `--capability checksum` should print it on its own. Cover the new
+behaviour in that plugin's tests, and leave the rest of the suite passing.
+"""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = [
+    "inspectorkit/capabilities.py",
+    "inspectorkit/plugin.py",
+    "inspectorkit/plugins/bytes_stats.py",
+    "config/plugins.json",
+    "tests/test_plugins_bytes_stats.py",
+]
+max_turns = 45
+timeout_seconds = 900
+tags = ["python", "plugins", "registry", "multi-file", "layered"]
+regression_gate = false

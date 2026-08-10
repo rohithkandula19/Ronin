@@ -1,0 +1,9 @@
+order_id,region,amount_cents
+A-1001,us-east,12500
+A-1002,us-east,3400
+A-1003,eu-west,8800
+A-1004,ap-south,15000
+A-1005,us-east,2200
+A-1006,eu-west,9100
+A-1007,us-west,4750
+A-1008,eu-west,6300

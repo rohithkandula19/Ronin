@@ -1,0 +1,129 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Ronin DPO preference pair (conversational form: trl DPOTrainer / mlx-lm)",
+  "description": "prompt/chosen/rejected in trl's conversational layout, plus the tools block the run was given and the provenance that makes the row auditable. A trainer that consumes only prompt/chosen/rejected ignores the rest; nothing here is required for training but meta is required for the row to be defensible.",
+  "type": "object",
+  "required": ["prompt", "chosen", "rejected", "meta"],
+  "additionalProperties": false,
+  "properties": {
+    "prompt": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/definitions/message"}
+    },
+    "chosen": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/definitions/assistantMessage"}
+    },
+    "rejected": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/definitions/assistantMessage"}
+    },
+    "tools": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["type", "function"],
+        "additionalProperties": false,
+        "properties": {
+          "type": {"type": "string", "enum": ["function"]},
+          "function": {
+            "type": "object",
+            "required": ["name", "description", "parameters"],
+            "additionalProperties": false,
+            "properties": {
+              "name": {"type": "string", "minLength": 1},
+              "description": {"type": "string", "minLength": 1},
+              "parameters": {"type": "object"}
+            }
+          }
+        }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "required": [
+        "task_id",
+        "run_id",
+        "model",
+        "source",
+        "turn_index",
+        "augmented",
+        "augment_seed",
+        "negative_class",
+        "synthesized_chosen",
+        "rule"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "task_id": {"type": "string", "minLength": 1},
+        "run_id": {"type": "string", "minLength": 1},
+        "model": {"type": "string"},
+        "source": {"type": "string", "enum": ["eval_suite", "session"]},
+        "turn_index": {"type": "integer", "minimum": -1},
+        "augmented": {"type": "boolean"},
+        "augment_seed": {"type": "integer", "minimum": -1},
+        "negative_class": {
+          "type": "string",
+          "enum": [
+            "malformed_tool_json",
+            "ignored_denial",
+            "looping",
+            "edit_without_read"
+          ]
+        },
+        "synthesized_chosen": {"type": "boolean"},
+        "rule": {"type": "string", "minLength": 1},
+        "donor_run_id": {"type": "string"},
+        "donor_turn_index": {"type": "integer", "minimum": -1},
+        "detail": {"type": "string"}
+      }
+    }
+  },
+  "definitions": {
+    "toolCall": {
+      "type": "object",
+      "required": ["id", "type", "function"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "type": {"type": "string", "enum": ["function"]},
+        "function": {
+          "type": "object",
+          "required": ["name", "arguments"],
+          "additionalProperties": false,
+          "properties": {
+            "name": {"type": "string", "minLength": 1},
+            "arguments": {
+              "type": "object",
+              "description": "A JSON OBJECT, never a JSON-encoded string. Divergence D2 of training/reports/valid_tool_json_root_cause.md: a string-typed arguments value contradicts the instruction the chat template gives the model at inference."
+            }
+          }
+        }
+      }
+    },
+    "message": {
+      "type": "object",
+      "required": ["role"],
+      "additionalProperties": false,
+      "properties": {
+        "role": {"type": "string", "enum": ["system", "user", "assistant", "tool"]},
+        "content": {"type": "string"},
+        "tool_call_id": {"type": "string"},
+        "tool_calls": {"type": "array", "items": {"$ref": "#/definitions/toolCall"}}
+      }
+    },
+    "assistantMessage": {
+      "type": "object",
+      "required": ["role", "content"],
+      "additionalProperties": false,
+      "properties": {
+        "role": {"type": "string", "enum": ["assistant"]},
+        "content": {"type": "string"},
+        "tool_calls": {"type": "array", "items": {"$ref": "#/definitions/toolCall"}}
+      }
+    }
+  }
+}

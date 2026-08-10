@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
-from .provenance import DatasetItem, ProvenanceDataset
+from .provenance import ProvenanceDataset
 
 
 class JobState(str, Enum):

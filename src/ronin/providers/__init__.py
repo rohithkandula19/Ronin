@@ -34,6 +34,15 @@ from .assembly import CacheStats, StablePrefix, assemble, extend
 from .base import HttpTransport, ModelClient, SSEReader, Transport
 from .bridge import LoopClient
 from .jsonargs import ArgsParse, parse_arguments
+from .local_adapter import (
+    LOCAL_MODEL_NAME,
+    LOCAL_PROVIDER,
+    Backend,
+    LocalAdapterClient,
+    build_local_adapter,
+    local_adapter_spec,
+    local_router_config,
+)
 from .mlx_local import MLXClient
 from .normalize import NormalizedCalls, ToolCallAccumulator
 from .openai_compat import KNOWN_BASE_URLS, MoonshotClient, OpenAICompatClient
@@ -67,9 +76,12 @@ __all__ = [
     "ADAPTERS",
     "CONSERVATIVE",
     "KNOWN_BASE_URLS",
+    "LOCAL_MODEL_NAME",
+    "LOCAL_PROVIDER",
     "NO_RETRY",
     "AnthropicClient",
     "ArgsParse",
+    "Backend",
     "CacheStats",
     "Capabilities",
     "Completed",
@@ -78,6 +90,7 @@ __all__ = [
     "FinishReason",
     "HttpTransport",
     "Ledger",
+    "LocalAdapterClient",
     "LoopClient",
     "MLXClient",
     "ModelClient",
@@ -108,10 +121,13 @@ __all__ = [
     "Usage",
     "assemble",
     "build_client",
+    "build_local_adapter",
     "build_shim_system",
     "describe",
     "extend",
     "load_config",
+    "local_adapter_spec",
+    "local_router_config",
     "parse_arguments",
     "parse_config",
     "price",

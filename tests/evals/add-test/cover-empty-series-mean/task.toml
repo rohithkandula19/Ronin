@@ -1,0 +1,17 @@
+id = "add-test/cover-empty-series-mean"
+category = "add-test"
+prompt = """
+`series/mean.py` returns 0.0 for an empty series, and nothing in the suite
+covers that: `tests/test_mean.py` only exercises a populated series. Add a
+test function named exactly `test_mean_of_an_empty_series_is_zero` to
+`tests/test_mean.py` that fails if the empty-series guard is removed. Do not
+change `series/mean.py`.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["tests/test_mean.py"]
+max_turns = 12
+timeout_seconds = 120
+tags = ["python", "coverage"]
+regression_gate = true

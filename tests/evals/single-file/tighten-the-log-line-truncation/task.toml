@@ -1,0 +1,18 @@
+id = "single-file/tighten-the-log-line-truncation"
+category = "single-file"
+prompt = """
+Our log table stops lining up as soon as a field is long enough to be shortened:
+every shortened field comes back one column wider than the budget it was given,
+because the ellipsis is added on top of the budget instead of inside it.
+
+Make a shortened field never exceed the number of characters it was asked for,
+and leave `make test` green.
+"""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = ["src/logging_util/shorten.py"]
+max_turns = 10
+timeout_seconds = 120
+tags = ["python", "doctest", "off-by-one"]
+regression_gate = false

@@ -1,0 +1,40 @@
+{
+  "rules": [
+    {
+      "tool": "bash",
+      "decision": "deny",
+      "command": "^git (commit|push|checkout|switch|branch|reset|rebase|merge|cherry-pick|stash|clean|tag)\\b",
+      "reason": "the workflow owns the git history: it creates the branch, commits and opens the PR. A commit from the agent makes `git status --porcelain` empty and the workflow concludes nothing changed, silently discarding the fix."
+    },
+    {
+      "tool": "bash",
+      "decision": "deny",
+      "command": "^(gh|hub)\\b",
+      "reason": "opening the pull request is the workflow's job, with the workflow's token and a draft flag. An agent with gh has an agent with write access to every repository that token reaches."
+    },
+    {
+      "tool": "write",
+      "decision": "deny",
+      "path": ".ronin/**",
+      "reason": "the harness owns .ronin/. A model that edits settings.local.json edits the rules that constrain it."
+    },
+    {
+      "tool": "write",
+      "decision": "deny",
+      "path": ".github/**",
+      "reason": "a fix that edits the workflow that is running it is not a fix"
+    },
+    {
+      "tool": "edit",
+      "decision": "deny",
+      "path": ".github/**",
+      "reason": "a fix that edits the workflow that is running it is not a fix"
+    },
+    {
+      "tool": "multi_edit",
+      "decision": "deny",
+      "path": ".github/**",
+      "reason": "a fix that edits the workflow that is running it is not a fix"
+    }
+  ]
+}

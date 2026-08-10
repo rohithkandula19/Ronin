@@ -1,0 +1,19 @@
+id = "multi-file/route-prints-through-emitter"
+category = "multi-file"
+prompt = """
+`cli/scan.py`, `cli/fix.py` and `cli/summary.py` all call `print` directly,
+which makes them impossible to test and impossible to silence. `cli/emit.py`
+already has an `Emitter` class with a `line()` method that appends to
+`Emitter.lines`. Change all three modules so each function takes an
+`emitter: Emitter` argument as its last parameter and writes through
+`emitter.line(...)` instead of `print`. No `print(` may remain in the three
+modules. The text of each message must not change.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["cli/scan.py", "cli/fix.py", "cli/summary.py"]
+max_turns = 16
+timeout_seconds = 150
+tags = ["python", "testability"]
+regression_gate = false

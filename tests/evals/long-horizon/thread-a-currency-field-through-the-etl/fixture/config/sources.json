@@ -1,0 +1,6 @@
+{
+  "sources": [
+    {"name": "retail-nightly", "format": "csv", "path": "data/orders_sample.csv"},
+    {"name": "feed-replay", "format": "jsonl", "path": "out/orders.jsonl"}
+  ]
+}

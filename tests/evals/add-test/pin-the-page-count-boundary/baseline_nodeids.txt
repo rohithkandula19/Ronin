@@ -1,0 +1,7 @@
+tests/test_paging.py::test_a_page_past_the_end_is_empty
+tests/test_paging.py::test_counts_pages_for_a_partial_last_page
+tests/test_paging.py::test_first_page_starts_at_zero
+tests/test_paging.py::test_last_page_is_clamped_to_the_item_count
+tests/test_paging.py::test_no_items_means_no_pages
+tests/test_paging.py::test_rejects_a_zero_page_size
+tests/test_paging.py::test_rejects_page_zero

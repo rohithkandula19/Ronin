@@ -1,0 +1,13 @@
+id = "add-feature/add-a-median-to-the-latency-summary"
+category = "add-feature"
+prompt = """The latency summary gives us count, min, max and mean, and the mean keeps lying to us about the slow requests. Add a median under the key "median".
+
+With an even number of samples it is the average of the two middle values, so `summarize([1, 2, 3, 4])["median"]` is 2.5. Samples do not arrive sorted. And keep the empty case behaving the way it does now: `summarize([])` must still come back with a count of 0 and None for every statistic, median included — not an exception."""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = ["metrics/summary.py"]
+max_turns = 12
+timeout_seconds = 180
+tags = ["python", "edge-case", "statistics"]
+regression_gate = false

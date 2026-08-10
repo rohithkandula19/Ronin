@@ -4,6 +4,81 @@ All notable changes to this project will be documented here. Format follows [Kee
 
 ## [Unreleased]
 
+### Added
+- **A published eval suite, and the gate that keeps it honest.** 118 tasks under
+  `tests/evals/` across eight categories, each a fixture repo, a prompt and a
+  `verify.sh`. `scripts/check_eval_tasks.py` proves every task discriminates in three
+  directions on every push — bare fixture must fail, the reference solution must pass,
+  and an `injection-resistance` task must also fail when the injection's artefact is
+  planted in an otherwise-solved workspace. A `verify.sh` that passes on the untouched
+  fixture inflates every score derived from the suite forever, and nothing about such a
+  run looks wrong. `manifest.toml` is generated (`scripts/gen_eval_manifest.py`), so a
+  deleted fixture cannot quietly make the suite easier.
+- **`ronin eval` and `ronin duel`.** The runner, the six-class failure taxonomy and the
+  paired A/B were complete, tested and unreachable from a command line. `--dry-run`
+  needs no model, no key and no network, and is the form CI exercises. Exit 1 means the
+  suite could not run; exit 0 means a measurement happened — a 0% pass rate is a result,
+  not a command failure.
+- **`ronin telemetry status|on|off|show`, with telemetry off by default.** The consent
+  store, payload log and bucketing existed with no way for a user to reach them; a
+  privacy control that exists only as a Python API is not a control. `on` prints what
+  will and will not be sent before recording the grant, `show` prints the local log
+  verbatim so a user can audit rather than trust, and a one-line disclosure appears once
+  on stderr on a first run — a notice, not a prompt. `doctor` reports the state and
+  warns only when a consent file cannot be read, since that is the case where the user's
+  actual choice is not the one being applied.
+- **`--model ronin-qwen-local` resolves.** `local-adapter` was missing from
+  `providers.registry.ADAPTERS`, so a config naming it failed with "unknown provider".
+  `examples/models.local.toml` is the copy-pasteable $0 config, pointing all three roles
+  at local weights — `fast` included, since that role carries subagents and compaction
+  and a key needed there fails partway into a session rather than at startup.
+- **`training/cuda/train_cuda.py --config`.** The trainer's constants are the v1
+  ronin-code-1.5b recipe and contradicted `training/config/adapter_sft.yaml` by 20x on
+  learning rate (2e-4 against 1.0e-5) and 2x on sequence length. Two files describing one
+  run and disagreeing like that means whichever you did not read is silently wrong, and
+  the artifact is named the same either way. The config is now selectable, validated
+  before any GPU work, and recorded in the run report so two runs can be compared.
+- **Colab cells 2b and 5b**, plus `python -m ronin_training.adapter preflight|validate`
+  subcommand dispatch. Cell 5b previously invoked a library module as if it had a CLI,
+  which exits 0 printing nothing — a cell that appears to succeed and does nothing.
+  `training/tests/test_colab_notebook.py` now checks every command in the notebook
+  against the real entry points and flags.
+
+### Changed
+- **The release workflow's publish gate now matches CI.** It ran `pytest packages` only
+  — 10 of 23 workspace paths — so `src/ronin`, `apps/` and `training/` were unguarded at
+  exactly the moment the artifact became immutable. It now runs the full workspace plus
+  ruff, mypy and every generated-file check.
+- **A release with no `PYPI_TOKEN` now fails instead of exiting 0.** On a tag push,
+  "skipping publish" with a green result is the worst available outcome: the tag looks
+  released and no package exists. A manual `workflow_dispatch` run may still dry-run.
+- **`docs/site/generate.py --check` runs in CI.** It earned the slot immediately —
+  registering the local-adapter provider made `providers.md` stale, and the generator
+  refused to document a new provider until its four per-builder descriptions were filled
+  in.
+- **README states where ronin loses.** The comparison table names model quality on hard
+  tasks, IDE integration, polish, user base and autocomplete as losses against Claude
+  Code, Cursor and Aider. A table with no losing rows is an advertisement.
+- **The "no telemetry, ever" claim is now "off unless you turn it on".** Accurate rather
+  than absolute, since the opt-in path now exists.
+
+### Fixed
+- **Exit code 2 meant "asked", not "refused".** `core.loop` emits `ApprovalRequest`
+  before calling `policy.approve`, so counting requests made *every* `--mode auto_edit`
+  run that wrote a file exit 2 on a clean run and list the successful write under
+  `approvals_denied`. One `ApprovalTracker`, keyed on `tool_use_id`, at all three call
+  sites.
+
+### Known gaps
+- **No eval numbers exist.** Nothing has been run against a real model, so nothing is
+  reported anywhere in this repository. The benchmark surface ships with its cells empty
+  rather than with placeholders.
+- The README has no asciinema cast; recording one requires a real model run.
+- `web_fetch` and `web_search` still have no real backends.
+- The v2 CLI is not the shipped `ronin` console script (still `ronin_cli.main:app`), so
+  `python -m ronin` with `PYTHONPATH=src` is how the v2 commands are reached today.
+
+
 ### Security
 - Updated transitive dependencies for the remediable Dependabot alerts:
   `brace-expansion` 1.1.18 and 5.0.9, PostCSS 8.5.23, and cryptography 50.0.0.

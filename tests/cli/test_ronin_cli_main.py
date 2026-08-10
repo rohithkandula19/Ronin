@@ -13,6 +13,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import pytest
 import stream_harness as h
 
 from ronin.cli.main import (
@@ -195,6 +196,114 @@ def test_subcommands_are_recognized_by_their_first_token() -> None:
 def test_a_prompt_that_looks_like_a_subcommand_word_is_still_a_prompt() -> None:
     # Only the *first* token dispatches, so "explain the export path" is a prompt.
     assert options(["explain", "the", "export", "path"]).command is Command.RUN
+
+
+# --------------------------------------------------------------------------- #
+# eval / duel argv
+# --------------------------------------------------------------------------- #
+
+
+def test_eval_collects_every_selection_flag() -> None:
+    parsed = options(
+        [
+            "eval", "--model", "qwen-local", "--parallel", "8",
+            "--category", "single-file", "--category", "multi-file",
+            "--tag", "quick", "--task", "single-file/x",
+            "--limit", "12", "--json", "r.json", "--markdown", "r.md",
+            "--keep-workspaces", "--record", "--allow-network",
+        ]
+    )
+    assert parsed.command is Command.EVAL
+    bench = parsed.bench
+    assert bench is not None
+    assert bench.models == ("qwen-local",)
+    assert bench.parallel == 8
+    assert bench.categories == frozenset({"single-file", "multi-file"})
+    assert bench.tags == frozenset({"quick"})
+    assert bench.ids == frozenset({"single-file/x"})
+    assert bench.limit == 12
+    assert bench.json_out == Path("r.json")
+    assert bench.markdown_out == Path("r.md")
+    assert bench.keep_workspaces and bench.record and bench.allow_network
+
+
+def test_the_suite_default_is_left_unresolved_by_parsing() -> None:
+    """``tests/evals`` is relative to the workspace root, which parsing has not found.
+
+    Resolving it here would mean either touching the filesystem in a pure function or
+    baking in a path that is wrong whenever ``--cwd`` was passed.
+    """
+    parsed = options(["eval", "--dry-run"])
+    assert parsed.suite_given is False
+    explicit = options(["eval", "--dry-run", "--suite", "/somewhere/else"])
+    assert explicit.suite_given is True
+    assert explicit.bench is not None
+    assert explicit.bench.suite == Path("/somewhere/else")
+
+
+def test_dry_run_is_the_one_way_to_omit_a_model() -> None:
+    assert isinstance(parse(["eval"]), Usage)
+    parsed = options(["eval", "--dry-run"])
+    assert parsed.bench is not None
+    assert parsed.bench.models == ()
+
+
+def test_eval_refuses_two_models_and_names_duel() -> None:
+    usage = parse(["eval", "--model", "a", "--model", "b"])
+    assert isinstance(usage, Usage)
+    assert "duel" in usage.message
+
+
+def test_duel_requires_exactly_two_models() -> None:
+    for argv in (["duel", "--model", "a"], ["duel", "--model", "a", "--model", "b",
+                                            "--model", "c"]):
+        usage = parse(argv)
+        assert isinstance(usage, Usage), argv
+        assert "two models" in usage.message
+    parsed = options(["duel", "--model", "a", "--model", "b", "--seed", "9"])
+    assert parsed.bench is not None
+    assert parsed.bench.models == ("a", "b")
+    assert parsed.bench.seed == 9
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["duel", "--dry-run"],
+        ["duel", "--dry-run", "--model", "only-one"],
+        ["eval", "--dry-run", "--model", "a", "--model", "b"],
+    ],
+    ids=["duel-no-models", "duel-one-model", "eval-two-models"],
+)
+def test_dry_run_relaxes_every_model_count_rule(argv: list[str]) -> None:
+    """A flag whose purpose is "no provider needed" must not demand a provider.
+
+    This shipped wrong for one commit: the argv layer enforced duel's two-model rule
+    before looking at ``--dry-run``, while ``bench.run_duel_command`` short-circuits on
+    dry-run first. Two copies of one rule, and only the CI smoke noticed.
+    """
+    parsed = parse(argv)
+    assert not isinstance(parsed, Usage), parsed
+    assert parsed.bench is not None
+    assert parsed.bench.dry_run is True
+
+
+def test_eval_takes_flags_not_a_prompt() -> None:
+    """`ronin eval fix the bug` is a confusion worth catching at the boundary."""
+    usage = parse(["eval", "--dry-run", "fix", "the", "bug"])
+    assert isinstance(usage, Usage)
+    assert "takes flags, not a prompt" in usage.message
+
+
+def test_a_nonsense_parallel_or_limit_is_a_usage_error() -> None:
+    assert isinstance(parse(["eval", "--dry-run", "--parallel", "0"]), Usage)
+    assert isinstance(parse(["eval", "--dry-run", "--limit", "0"]), Usage)
+
+
+def test_a_run_carries_no_bench_options() -> None:
+    """``bench`` is ``None`` off these two commands, so a stray read fails loudly."""
+    assert options(["hello"]).bench is None
+    assert options(["doctor"]).bench is None
 
 
 # --------------------------------------------------------------------------- #

@@ -97,7 +97,7 @@ class ProvenanceDataset:
 
     # --------------------------------------------------------------- IO
     @classmethod
-    def load_jsonl(cls, path: str | Path) -> "ProvenanceDataset":
+    def load_jsonl(cls, path: str | Path) -> ProvenanceDataset:
         items = []
         for n, line in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), 1):
             line = line.strip()

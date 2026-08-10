@@ -1,0 +1,8 @@
+Release notes for the nightly inspector run.
+
+The scanner walks the tree in sorted order so two runs of the same tree produce
+the same output, which is what makes the diff in the morning report meaningful.
+Known rough edge: a file with a byte-order mark is reported as utf-8-sig even
+when the rest of the file is plain ASCII.
+Known rough edge: a file with a byte-order mark is reported as utf-8-sig even
+when the rest of the file is plain ASCII.

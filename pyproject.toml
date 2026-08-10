@@ -68,6 +68,14 @@ asyncio_mode = "auto"
 # no install-time dependencies. `tests` collects the contract's invariant tests.
 pythonpath = ["src"]
 testpaths = ["packages", "apps", "tests"]
+# `tests/evals/` holds eval *task fixtures*, not tests: small repos the agent is
+# pointed at, several of which legitimately contain their own `test_*.py`. Collecting
+# them would run another project's tests as if they were ours — and the "add a test"
+# category deliberately ships tests that FAIL until the agent fixes the code, so the
+# suite would go red by design. `tests/evals/conftest.py` also sets
+# `collect_ignore_glob`; this is the belt to that braces, because the two mechanisms
+# fail in different ways (a deleted conftest vs. a renamed directory).
+norecursedirs = ["tests/evals"]
 faulthandler_timeout = 90
 markers = [
     "adapter_smoke: LIVE fine-tuned-adapter smoke tests (need mlx-lm + a trained adapter; skipped elsewhere)",
@@ -98,10 +106,12 @@ files = [
     "tests/cli",
     "tests/context",
     "tests/core",
+    "tests/evalsuite",
     "tests/mcp",
     "tests/persistence",
     "tests/providers",
     "tests/safety",
+    "tests/telemetry",
     "tests/tools",
     "tests/ui",
     "tests/verify",
@@ -109,7 +119,7 @@ files = [
 strict = true
 warn_unreachable = true
 explicit_package_bases = true
-mypy_path = "src:tests/agents:tests/cli:tests/context:tests/core:tests/mcp:tests/persistence:tests/providers:tests/safety:tests/tools:tests/ui:tests/verify"
+mypy_path = "src:tests/agents:tests/cli:tests/context:tests/core:tests/evalsuite:tests/mcp:tests/persistence:tests/providers:tests/safety:tests/telemetry:tests/tools:tests/ui:tests/verify"
 
 # pytest's @parametrize is an untyped decorator as far as mypy is concerned;
 # that is a property of pytest, not a hole in our typing. Enumerated rather
@@ -118,6 +128,8 @@ mypy_path = "src:tests/agents:tests/cli:tests/context:tests/core:tests/mcp:tests
 module = [
     "agents_harness",
     "context_harness",
+    "duel_harness",
+    "evals_harness",
     "fakes",
     "gate_harness",
     "harness",
@@ -126,6 +138,7 @@ module = [
     "replay",
     "safety_harness",
     "stream_harness",
+    "telemetry_harness",
     "test_accounting",
     "test_agent_hooks",
     "test_assembly",
@@ -153,6 +166,7 @@ module = [
     "test_plan_mode",
     "test_registry",
     "test_resilience",
+    "test_ronin_cli_bench",
     "test_ronin_cli_doctor",
     "test_ronin_cli_gate",
     "test_ronin_cli_integration",
@@ -160,8 +174,18 @@ module = [
     "test_ronin_cli_sdk",
     "test_ronin_cli_spine",
     "test_ronin_cli_stream",
+    "test_ronin_cli_telemetry",
     "test_ronin_cli_wire",
     "test_ronin_cli_wizard",
+    "test_ronin_evals_duel",
+    "test_ronin_evals_integration",
+    "test_ronin_evals_report",
+    "test_ronin_evals_runner",
+    "test_ronin_evals_suite_shape",
+    "test_ronin_evals_swebench",
+    "test_ronin_evals_task",
+    "test_ronin_evals_taxonomy",
+    "test_ronin_local_adapter",
     "test_ronin_mcp_client",
     "test_ronin_mcp_config",
     "test_ronin_mcp_integration",
@@ -169,6 +193,11 @@ module = [
     "test_ronin_mcp_server",
     "test_ronin_mcp_tools",
     "test_ronin_mcp_transport",
+    "test_ronin_telemetry_consent",
+    "test_ronin_telemetry_docsite",
+    "test_ronin_telemetry_payload",
+    "test_ronin_telemetry_transport",
+    "test_ronin_ui_approvals",
     "test_router",
     "test_safety_command",
     "test_safety_denylist",
@@ -221,10 +250,12 @@ include = [
     "tests/cli/**/*.py",
     "tests/context/**/*.py",
     "tests/core/**/*.py",
+    "tests/evalsuite/**/*.py",
     "tests/mcp/**/*.py",
     "tests/persistence/**/*.py",
     "tests/providers/**/*.py",
     "tests/safety/**/*.py",
+    "tests/telemetry/**/*.py",
     "tests/tools/**/*.py",
     "tests/ui/**/*.py",
     "tests/verify/**/*.py",

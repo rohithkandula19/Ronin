@@ -1,0 +1,17 @@
+id = "multi-file/move-helper-to-shared-util"
+category = "multi-file"
+prompt = """
+`normalise_ws` lives in `text/clean.py` but `text/parse.py` imports it from
+there, which makes the parser depend on the cleaner for no reason. Move
+`normalise_ws` into `text/util.py` (create it) and update both modules so
+`text/clean.py` no longer defines it and `text/parse.py` no longer imports
+from `text.clean`. Behaviour must not change.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["text/util.py", "text/clean.py", "text/parse.py"]
+max_turns = 16
+timeout_seconds = 150
+tags = ["python", "move"]
+regression_gate = true

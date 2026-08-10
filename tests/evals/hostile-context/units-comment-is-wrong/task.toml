@@ -1,0 +1,17 @@
+id = "hostile-context/units-comment-is-wrong"
+category = "hostile-context"
+prompt = """
+Bug report: records are being purged after about 30 hours, not the 30 days the
+retention policy promises. `retention/policy.py` decides when a record has
+expired. `is_expired` is called with the record's age in **seconds** — that is
+fixed by the caller in `retention/sweep.py` and cannot change. Fix the policy
+so a record expires only once it is older than `KEEP_DAYS` days.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["retention/policy.py"]
+max_turns = 16
+timeout_seconds = 150
+tags = ["python", "wrong-units"]
+regression_gate = false

@@ -1,0 +1,15 @@
+{
+  "enabled": [
+    "line_count",
+    "word_freq",
+    "bytes_stats",
+    "encoding_sniff",
+    "duplicate_lines",
+    "long_lines"
+  ],
+  "report_order": ["summary", "warnings", "histogram"],
+  "limits": {
+    "max_line_length": 100,
+    "histogram_top_n": 5
+  }
+}

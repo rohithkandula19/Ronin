@@ -1,0 +1,127 @@
+#!/bin/sh
+# A git pre-commit hook that has Ronin review the staged diff.
+#
+# Copy to .git/hooks/pre-commit (or point core.hooksPath at this directory) and
+# chmod +x. See README.md in this directory for what it costs and what can go wrong.
+#
+# Two rules shape this script, and both are the opposite of what feels rigorous:
+#
+#   1. It FAILS OPEN. A missing model config, a network blip, a timeout or a
+#      malformed answer lets the commit through with a loud warning on stderr. A
+#      reviewer that blocks commits when the reviewer itself is broken gets deleted
+#      within a week, and then you have no reviewer at all. Set
+#      RONIN_REVIEW_STRICT=1 to invert this once you trust it.
+#   2. It only blocks on an EXPLICIT verdict. The model must end its answer with
+#      "VERDICT: BLOCK" for the commit to be refused. Anything else — including a
+#      confident essay about how bad the code is — passes. An agent that can veto a
+#      commit by accident is an agent you will bypass with --no-verify.
+#
+# Bypass any time with: git commit --no-verify
+
+set -eu
+
+MAX_USD="${RONIN_REVIEW_MAX_USD:-0.20}"
+MAX_TURNS="${RONIN_REVIEW_MAX_TURNS:-8}"
+MAX_SECONDS="${RONIN_REVIEW_MAX_SECONDS:-120}"
+# Diffs beyond this are not reviewable in one turn, and paying to find that out is
+# worse than saying so. `read` also truncates at its own cap, so a huge diff would be
+# reviewed on a fragment while looking like a full review.
+MAX_DIFF_BYTES="${RONIN_REVIEW_MAX_DIFF_BYTES:-60000}"
+STRICT="${RONIN_REVIEW_STRICT:-0}"
+
+warn() { printf 'ronin-review: %s\n' "$1" >&2; }
+
+# Hooks run from the top level, but be explicit rather than assume it.
+ROOT=$(git rev-parse --show-toplevel)
+cd "$ROOT"
+
+if [ "${RONIN_REVIEW_SKIP:-0}" = "1" ]; then
+    warn "skipped (RONIN_REVIEW_SKIP=1)"
+    exit 0
+fi
+
+# `git diff --cached --quiet` exits 0 when there is nothing staged.
+if git diff --cached --quiet; then
+    warn "nothing staged; nothing to review"
+    exit 0
+fi
+
+TMPDIR_REL=".ronin/tmp"
+DIFF="$TMPDIR_REL/staged.diff"
+mkdir -p "$TMPDIR_REL"
+# Inside the workspace on purpose: the file tools refuse paths outside the tree, so a
+# diff in /tmp is a diff the agent cannot read. Add .ronin/tmp/ to .gitignore.
+git diff --cached --unified=3 --no-color >"$DIFF"
+
+SIZE=$(wc -c <"$DIFF" | tr -d ' ')
+if [ "$SIZE" -gt "$MAX_DIFF_BYTES" ]; then
+    warn "staged diff is ${SIZE} bytes, over the ${MAX_DIFF_BYTES}-byte review cap."
+    warn "not reviewed. Split the commit, or raise RONIN_REVIEW_MAX_DIFF_BYTES."
+    exit 0
+fi
+
+PROMPT=$(cat <<'EOF'
+Read .ronin/tmp/staged.diff. It is the diff that is about to be committed.
+
+Review it for defects that would matter after this commit lands: a wrong result, a
+lost error path, a broken invariant, a resource that is not released, a test that
+cannot fail, a secret or credential in the diff. Read the surrounding code with the
+read/grep tools before judging anything — the diff alone does not show you the
+caller.
+
+Report at most five findings, each starting with file:line and stating the
+consequence rather than the rule. Say "no findings" plainly if you have none; a
+review that manufactures a problem to look thorough trains me to ignore reviews.
+
+Then end your answer with exactly one of these two lines, and nothing after it:
+
+VERDICT: BLOCK   -- only if something in this diff is wrong, unsafe, or leaks a secret
+VERDICT: PASS    -- anything else, including findings you would merely like fixed
+EOF
+)
+
+set +e
+ANSWER=$(python -m ronin -p "$PROMPT" \
+    --output-format text \
+    --mode plan \
+    --max-turns "$MAX_TURNS" \
+    --max-usd "$MAX_USD" \
+    --max-seconds "$MAX_SECONDS" \
+    --no-record \
+    --no-mcp \
+    --no-wizard 2>&1)
+CODE=$?
+set -e
+
+rm -f "$DIFF"
+
+# 0 done · 1 error · 2 an approval was requested and denied (ronin.ui.headless).
+# In --mode plan the mutating tools are not in the registry at all, so a 2 here means
+# something unexpected was gated — worth reporting, not worth blocking a commit over.
+if [ "$CODE" -ne 0 ]; then
+    warn "ronin exited $CODE; the diff was NOT reviewed."
+    printf '%s\n' "$ANSWER" >&2
+    if [ "$STRICT" = "1" ]; then
+        exit 1
+    fi
+    exit 0
+fi
+
+printf '%s\n' "$ANSWER"
+
+case "$ANSWER" in
+    *"VERDICT: BLOCK"*)
+        warn "blocked by the reviewer above. Fix it, or commit with --no-verify."
+        exit 1
+        ;;
+    *"VERDICT: PASS"*)
+        exit 0
+        ;;
+    *)
+        warn "no VERDICT line in the answer; treating as a pass."
+        if [ "$STRICT" = "1" ]; then
+            exit 1
+        fi
+        exit 0
+        ;;
+esac

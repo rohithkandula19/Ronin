@@ -1,0 +1,5 @@
+{
+  "root": "samples/logs",
+  "keep_days": 14,
+  "verbose": false
+}

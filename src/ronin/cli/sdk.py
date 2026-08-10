@@ -40,9 +40,9 @@ from pathlib import Path
 from types import TracebackType
 
 from ..context.compaction import Summarizer
-from ..core.types import AgentState, ApprovalRequest, Budget, Event, Mode
+from ..core.types import AgentState, Budget, Event, Mode
 from ..providers.router import Router, load_config
-from ..ui.headless import exit_code_for
+from ..ui.headless import ApprovalTracker, exit_code_for
 from ..ui.reduce import ViewState, reduce_event
 from .spine import Loaded, Note, Paths, Runtime
 from .stream import DEFAULT_MAX_ITERATIONS, Conversation, plan_runtime
@@ -275,7 +275,10 @@ class Agent:
     ) -> AgentResult:
         """Run one prompt to completion and fold the stream into a result."""
         events: list[Event] = []
-        approvals: list[ApprovalRequest] = []
+        # Requests are counted through the tracker, never directly: `core.loop` emits
+        # ApprovalRequest before the policy answers, so a raw count reports a granted
+        # call as denied and exits 2 on a clean run.
+        tracker = ApprovalTracker()
         state = ViewState()
         before = len(self._conversation.notes)
         async for event in self.stream(
@@ -287,11 +290,10 @@ class Agent:
         ):
             events.append(event)
             state = reduce_event(state, event)
-            if isinstance(event, ApprovalRequest):
-                approvals.append(event)
+            tracker.observe(event)
         return AgentResult(
             text=state.text,
-            exit_code=exit_code_for(state, approvals),
+            exit_code=exit_code_for(state, tracker.resolve()),
             state=state,
             events=tuple(events),
             notes=tuple(self._conversation.notes[before:]),

@@ -1,0 +1,7 @@
+{
+  "jobs": [
+    {"id": "nightly-events", "sink": "s3", "rows": 4100},
+    {"id": "warehouse-sync", "sink": "Postgres", "rows": 1200},
+    {"id": "ops-digest", "sink": "smtp", "rows": 75}
+  ]
+}

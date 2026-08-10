@@ -1,0 +1,11 @@
+{
+  "limits": {
+    "max_title_length": 80,
+    "max_body_length": 4000,
+    "search_page_size": 20,
+    "max_active_notes_per_user": 5
+  },
+  "features": {
+    "archive_enabled": true
+  }
+}

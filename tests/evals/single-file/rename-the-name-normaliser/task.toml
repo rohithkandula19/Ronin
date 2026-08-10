@@ -1,0 +1,18 @@
+id = "single-file/rename-the-name-normaliser"
+category = "single-file"
+prompt = """
+In src/schema/names.py the header-folding helper is just called `normalize`,
+which nobody can keep straight from the path cleaner sitting next to it - two
+reviews in a row have caught someone calling the wrong one.
+
+Rename that header-folding helper to `canonicalize` and update its callers. The
+other helpers keep the names they have.
+"""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = ["src/schema/names.py"]
+max_turns = 10
+timeout_seconds = 120
+tags = ["python", "rename", "substring-collision"]
+regression_gate = false

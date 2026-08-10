@@ -7,6 +7,7 @@ import pytest
 
 VOLUMES = Path(__file__).resolve().parents[2] / "docs" / "volumes"
 
+from ronin_training.coverage import coverage_gaps, load_weights
 from ronin_training.eval_runner import (
     ProviderResponse,
     extract_tool_names,
@@ -14,9 +15,7 @@ from ronin_training.eval_runner import (
     run_evals,
     score_case,
 )
-from ronin_training.coverage import coverage_gaps, coverage_table, load_weights
 from ronin_training.mlx_config import DEFAULT_MODEL, MLXTrainConfig
-
 
 # ---------------------------------------------------------------- eval runner
 

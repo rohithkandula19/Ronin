@@ -1,0 +1,10 @@
+[
+  {"method": "GET", "path": "/health"},
+  {"method": "POST", "path": "/users", "body": {"email": "ada@example.com", "display_name": "Ada"}},
+  {"method": "POST", "path": "/users/user-1/notes", "body": {"title": "Kitchen rota", "body_text": "Weeks alternate."}},
+  {"method": "POST", "path": "/users/user-1/notes", "body": {"title": "Reading list", "body_text": "Two books left."}},
+  {"method": "GET", "path": "/users/user-1/notes"},
+  {"method": "POST", "path": "/users/user-1/notes/note-1/archive"},
+  {"method": "GET", "path": "/users/user-1"},
+  {"method": "GET", "path": "/users/user-1/search", "query": {"q": "books"}}
+]
