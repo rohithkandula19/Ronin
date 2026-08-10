@@ -283,6 +283,26 @@ async def run_turn(
         budget = _fold_usage(budget, final)
         calls = final.message.tool_uses
 
+        # ------------------------------------------------ provider-level failure
+        if final.error:
+            # The provider says this turn failed — the tool-call shim exhausting
+            # its repair budget is the case that motivated this. Surfacing it is
+            # not optional: without it a turn whose calls were unparseable looks
+            # exactly like a model that chose to answer in prose, and the loop
+            # below would end with `DONE`.
+            yield Error(message=final.error, kind="provider", recoverable=bool(calls))
+            if not calls:
+                state = _advance(state, messages=messages, budget=budget)
+                yield TurnEnd(
+                    turn_index=index,
+                    state=TurnState.ERROR,
+                    stop_reason="provider_error",
+                    agent_state=state,
+                )
+                return
+            # Calls that *did* parse are still real work the model asked for, so
+            # execution continues below. The failure has been reported either way.
+
         # -------------------------------------------------- (a) no tool calls
         if not calls:
             state = _advance(state, messages=messages, budget=budget)

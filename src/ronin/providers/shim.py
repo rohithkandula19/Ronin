@@ -134,10 +134,19 @@ def repair_message(raw_payload: str, error: str) -> Message:
 
 @dataclass(frozen=True, slots=True)
 class ShimCall:
-    """One call extracted from the text stream, still un-normalized."""
+    """One call extracted from the text stream, still un-normalized.
+
+    ``call_id`` is empty for a call parsed out of text — a shimmed model has no
+    concept of a call id, so the normalizer mints a stable synthetic one. It is
+    *not* empty on the native passthrough below, where the wrapped provider issued
+    a real id: dropping that and minting our own would send the next turn a
+    ``tool_result`` whose id the provider never issued, which is the 400-several-
+    turns-later failure :mod:`ronin.providers.normalize` exists to prevent.
+    """
 
     name: str
     raw_arguments: str
+    call_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,6 +180,45 @@ def _held_suffix_len(text: str, token: str) -> int:
     return 0
 
 
+def _find_close_outside_string(text: str) -> int:
+    """Index of the first :data:`CLOSE_TAG` that begins *outside* a JSON string.
+
+    A plain ``find`` is wrong here, and wrong in the worst way. Ask a model to
+    write a file documenting this very protocol and it emits::
+
+        <ronin:tool_call>{"name":"write_file","arguments":{"content":"</ronin:tool_call>"}}</ronin:tool_call>
+
+    A naive scan cuts at the *first* close tag — inside the string — so the payload
+    becomes ``{"name":…,"content":"`` which :func:`close_truncated` cheerfully
+    repairs into ``{"content": ""}``, and the remaining ``"}}</ronin:tool_call>``
+    is emitted as prose. Two silent failures at once: the file is written empty,
+    and the tag leaks into the visible answer.
+
+    Every scanner in :mod:`ronin.providers.jsonargs` is string-aware for exactly
+    this reason; this is the same discipline applied to the tag search.
+    """
+    in_string = False
+    escaped = False
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            index += 1
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "<" and text.startswith(CLOSE_TAG, index):
+            return index
+        index += 1
+    return -1
+
+
 class ShimStreamParser:
     """Splits a text stream into visible prose and tool-call blocks.
 
@@ -196,10 +244,15 @@ class ShimStreamParser:
 
         while True:
             if self._in_call:
-                end = self._buffer.find(CLOSE_TAG)
+                end = _find_close_outside_string(self._buffer)
                 if end < 0:
                     # Still inside a call: the payload stays buffered, and none of
                     # it is visible. Nothing to release.
+                    #
+                    # A close tag sitting inside an *unterminated* string is not
+                    # resolvable yet — it could be a literal (the string closes
+                    # later) or the real terminator of a truncated payload. That
+                    # is decided in `finish`, where nothing more can arrive.
                     break
                 payload = self._buffer[:end]
                 self._buffer = self._buffer[end + len(CLOSE_TAG) :]
@@ -237,6 +290,33 @@ class ShimStreamParser:
         self._buffer = ""
         if self._in_call:
             self._in_call = False
+            # The stream is over, so a close tag that only ever appeared inside an
+            # unterminated string was the real terminator after all — the payload
+            # was truncated mid-value. Recovering it keeps the truncation-repair
+            # path that `close_truncated` exists for, instead of discarding a call
+            # the model genuinely made.
+            fallback = tail.find(CLOSE_TAG)
+            if fallback >= 0:
+                calls, failures = _read_payload(tail[:fallback])
+                rest = tail[fallback + len(CLOSE_TAG) :]
+                trailing = ShimEmit()
+                if rest:
+                    # Run the remainder through a fresh parser rather than
+                    # releasing it blind: it may itself hold a whole call, and
+                    # emitting that as prose is the leak this class forbids.
+                    nested = ShimStreamParser()
+                    first = nested.feed(rest)
+                    last = nested.finish()
+                    trailing = ShimEmit(
+                        visible=first.visible + last.visible,
+                        calls=first.calls + last.calls,
+                        failures=first.failures + last.failures,
+                    )
+                return ShimEmit(
+                    visible=trailing.visible,
+                    calls=calls + trailing.calls,
+                    failures=failures + trailing.failures,
+                )
             return ShimEmit(
                 failures=(
                     ShimFailure(
@@ -280,9 +360,12 @@ def _read_payload(payload: str) -> tuple[tuple[ShimCall, ...], tuple[ShimFailure
             ),
         )
 
-    # Not one object: try reading it as several.
+    # Not one clean object: try reading the balanced objects out of it. This also
+    # covers the *single* call wrapped in chatter ("Here you go: {…}"), which used
+    # to fail while the two-call version of the same shape parsed — an asymmetry
+    # that hit the commoner case.
     objects = find_json_objects(stripped)
-    if len(objects) > 1:
+    if objects:
         calls: list[ShimCall] = []
         failures: list[ShimFailure] = []
         for raw in objects:
@@ -397,6 +480,10 @@ class ShimClient:
                             ShimCall(
                                 name=use.name,
                                 raw_arguments=json.dumps(dict(use.arguments), sort_keys=True),
+                                # Carried, not re-minted: this id came from the
+                                # provider and the next turn's tool_result has to
+                                # match it exactly.
+                                call_id=use.id,
                             )
                         )
 
@@ -444,7 +531,12 @@ def _normalize(calls: Sequence[ShimCall]) -> NormalizedCalls:
     """
     accumulator = ToolCallAccumulator()
     for index, call in enumerate(calls):
-        accumulator.add_complete(index, name=call.name, arguments=call.raw_arguments)
+        accumulator.add_complete(
+            index,
+            name=call.name,
+            arguments=call.raw_arguments,
+            call_id=call.call_id or None,
+        )
     return accumulator.finish()
 
 
@@ -470,10 +562,16 @@ def _complete(
         # the user can see what it tried, and the finish reason says this turn
         # failed rather than quietly returning "no tool calls" (which the loop
         # would read as a finished answer).
+        #
+        # The calls that *did* parse are kept too. Discarding them punished a model
+        # for its worst call: ask for three files and mis-type the fourth, and all
+        # four vanished while the retry replayed only the first failure — so the
+        # model was likely to re-emit all four and lose them all again. The loop
+        # runs what parsed and reports what did not.
         notes.extend(f"unparseable tool call: {failure.error}" for failure in failures)
         detail = "; ".join(f.error for f in failures)
         return Completed(
-            message=Message(role=Role.ASSISTANT, content_blocks=text_blocks),
+            message=Message(role=Role.ASSISTANT, content_blocks=(*text_blocks, *normalized.uses)),
             finish=FinishReason.ERROR,
             usage=attempt.usage,
             notes=(

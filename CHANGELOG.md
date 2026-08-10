@@ -80,6 +80,41 @@ All notable changes to this project will be documented here. Format follows [Kee
   than absolute, since the opt-in path now exists.
 
 ### Fixed
+- **A failed turn reached the user as if the model had simply answered.** The shim set
+  `FinishReason.ERROR` when its repair budget ran out and put the reason in
+  `Completed.notes`, and **nothing read either**: `providers/bridge.py` dropped both on
+  the way to the loop seam, so an exhausted repair budget arrived as prose with no tool
+  calls — the exact shape of a model that chose to answer — and the loop ended with
+  `DONE` / `no_tool_calls`. `FinalMessage` now carries `error` and `notes`; the loop
+  emits the `Error` event that already existed, and ends the turn as
+  `TurnState.ERROR` / `provider_error` when nothing survived. Turns that *did* produce
+  usable calls continue, with the failure reported alongside.
+- **The shim discarded a provider's `tool_call_id` on the native passthrough.** A
+  native-shaped call from a wrapped client had its id dropped and a synthetic `ron_…`
+  minted, so the next turn's `tool_result` answered a call the provider never issued —
+  the 400-a-turn-later failure `providers/normalize.py` exists to prevent, and a
+  contradiction of the copied-verbatim invariant already under test on the write path.
+  `ShimCall` carries `call_id` through to the accumulator.
+- **Exhausted repairs threw away the calls that had parsed.** Asking for three files and
+  mis-typing the fourth lost all four, while the retry replayed only the first failure —
+  so the model was likely to re-emit all four and lose them again. The good calls are
+  kept and run; the failure is still reported.
+- **The tool-call shim leaked its own close tag into the answer and silently emptied
+  the argument that contained it.** `ShimStreamParser` found `</ronin:tool_call>` with a
+  plain `str.find`, with none of the string-awareness every scanner in `jsonargs.py`
+  has. So a call whose argument legitimately contained that text — writing a file
+  that documents this protocol, for instance — was cut at the *first* close tag,
+  inside the string. The truncation repair then turned `{…"content":"` into
+  `{"content": ""}` and the leftover `"}}</ronin:tool_call>` was printed as prose:
+  an empty file written, the tag shown to the user, and no failure reported at any
+  layer. The scan is now string-aware, and the ambiguous case (a close tag inside an
+  *unterminated* string, which may be either a literal or a truncated payload's real
+  terminator) is resolved in `finish()`, where the stream is over and the two are no
+  longer indistinguishable — so the truncation-repair path still works. Text after a
+  recovered terminator is re-parsed rather than released blind.
+  - A single tool call wrapped in chatter (`Here you go: {…}`) was rejected while the
+    same block holding *two* objects parsed, because the multi-object path was gated
+    on `len(objects) > 1`. One is what a weak model actually emits.
 - **A checkpoint could stage files into the user's own git index.** `verify.checkpoints`
   promises the user's index is never touched, and ran every command with `--git-dir` and
   `--work-tree` pointed at a shadow repo — but neither flag overrides `GIT_INDEX_FILE`,
