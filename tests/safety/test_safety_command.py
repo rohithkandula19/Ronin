@@ -329,3 +329,79 @@ def test_a_top_level_segment_cannot_claim_an_origin() -> None:
 
 def test_an_empty_command_yields_no_segments() -> None:
     assert parse_command("   \n  ") == ()
+
+
+# --------------------------------------------------------------------------- #
+# Lexer edges — the quoting cases a denied command could hide behind
+# --------------------------------------------------------------------------- #
+#
+# The suite above already covers `$(...)`, backticks, quoted separators and escaped
+# separators. What was left uncovered in `_Lexer` is the arithmetic *inside* double
+# quotes and inside a balanced scan: escapes, nested quotes, `${...}`, and inputs that
+# simply end mid-token. Those matter for the same reason as everything else here — the
+# deny list only sees what the lexer surfaces, so a shape the lexer mishandles is a
+# shape a rule cannot refuse.
+
+
+def test_an_escaped_dollar_inside_double_quotes_is_not_a_substitution() -> None:
+    r"""`"\$(rm -rf x)"` is the literal text `$(rm -rf x)` to a shell, not a command.
+
+    Surfacing a nested `rm` here would be a *false* positive — the opposite failure
+    from the ones above, and the kind that trains people to disable the gate.
+    """
+    segments = parse_command(r'echo "\$(rm -rf x)"')
+    assert [s.binary for s in segments] == ["echo"]
+    assert not any(s.origin is Origin.SUBSTITUTION for s in segments)
+
+
+def test_an_escaped_backtick_inside_double_quotes_is_not_a_substitution() -> None:
+    segments = parse_command(r'echo "\`rm -rf x\`"')
+    assert [s.binary for s in segments] == ["echo"]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [r'echo "a\"b"', r'echo "a\\b"', 'echo "a\\\nb"'],
+    ids=["escaped-quote", "escaped-backslash", "escaped-newline"],
+)
+def test_backslash_escapes_recognised_inside_double_quotes(command: str) -> None:
+    """The four characters a shell treats specially after a backslash inside `"` are
+    `"`, `\\`, `$` and a newline. Anything else keeps the backslash literally."""
+    assert [s.binary for s in parse_command(command)] == ["echo"]
+
+
+def test_a_brace_expansion_inside_double_quotes_does_not_split_the_segment() -> None:
+    segments = parse_command('echo "${HOME}/notes.md"')
+    assert [s.binary for s in segments] == ["echo"]
+
+
+def test_a_backslash_at_the_very_end_of_input_is_not_a_crash() -> None:
+    r"""A trailing `\` with nothing after it. The lexer has to emit it and stop rather
+    than read past the end — a truncated command line is a normal thing to receive."""
+    assert binaries("rm -rf x \\") == ["rm"]
+
+
+def test_an_unterminated_single_quote_still_yields_a_segment() -> None:
+    """Malformed input must still be *analysed*, not skipped.
+
+    A command the parser gives up on is a command the deny list never inspects, which
+    is the one outcome worse than a false positive.
+    """
+    assert binaries("rm -rf 'x") == ["rm"]
+
+
+def test_an_unterminated_double_quote_still_yields_a_segment() -> None:
+    assert binaries('rm -rf "x') == ["rm"]
+
+
+def test_quotes_inside_a_substitution_do_not_end_the_scan_early() -> None:
+    """`$( ... )` containing quoted parens: the balanced scan has to skip quoted text
+    or it closes on the wrong `)` and the tail of the command vanishes."""
+    segments = parse_command("""echo $(grep ')' file.txt; rm -rf x)""")
+    nested = [s.binary for s in segments if s.origin is Origin.SUBSTITUTION]
+    assert "rm" in nested, f"the `rm` was lost to an early close: {[s.binary for s in segments]}"
+
+
+def test_escapes_inside_a_substitution_do_not_end_the_scan_early() -> None:
+    segments = parse_command(r"echo $(printf '%s' \) ; rm -rf x)")
+    assert "rm" in [s.binary for s in segments]
