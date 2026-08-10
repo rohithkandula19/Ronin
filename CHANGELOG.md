@@ -80,6 +80,22 @@ All notable changes to this project will be documented here. Format follows [Kee
   than absolute, since the opt-in path now exists.
 
 ### Fixed
+- **The tool-call shim leaked its own close tag into the answer and silently emptied
+  the argument that contained it.** `ShimStreamParser` found `</ronin:tool_call>` with a
+  plain `str.find`, with none of the string-awareness every scanner in `jsonargs.py`
+  has. So a call whose argument legitimately contained that text — writing a file
+  that documents this protocol, for instance — was cut at the *first* close tag,
+  inside the string. The truncation repair then turned `{…"content":"` into
+  `{"content": ""}` and the leftover `"}}</ronin:tool_call>` was printed as prose:
+  an empty file written, the tag shown to the user, and no failure reported at any
+  layer. The scan is now string-aware, and the ambiguous case (a close tag inside an
+  *unterminated* string, which may be either a literal or a truncated payload's real
+  terminator) is resolved in `finish()`, where the stream is over and the two are no
+  longer indistinguishable — so the truncation-repair path still works. Text after a
+  recovered terminator is re-parsed rather than released blind.
+  - A single tool call wrapped in chatter (`Here you go: {…}`) was rejected while the
+    same block holding *two* objects parsed, because the multi-object path was gated
+    on `len(objects) > 1`. One is what a weak model actually emits.
 - **A checkpoint could stage files into the user's own git index.** `verify.checkpoints`
   promises the user's index is never touched, and ran every command with `--git-dir` and
   `--work-tree` pointed at a shadow repo — but neither flag overrides `GIT_INDEX_FILE`,

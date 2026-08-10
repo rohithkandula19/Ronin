@@ -171,6 +171,45 @@ def _held_suffix_len(text: str, token: str) -> int:
     return 0
 
 
+def _find_close_outside_string(text: str) -> int:
+    """Index of the first :data:`CLOSE_TAG` that begins *outside* a JSON string.
+
+    A plain ``find`` is wrong here, and wrong in the worst way. Ask a model to
+    write a file documenting this very protocol and it emits::
+
+        <ronin:tool_call>{"name":"write_file","arguments":{"content":"</ronin:tool_call>"}}</ronin:tool_call>
+
+    A naive scan cuts at the *first* close tag — inside the string — so the payload
+    becomes ``{"name":…,"content":"`` which :func:`close_truncated` cheerfully
+    repairs into ``{"content": ""}``, and the remaining ``"}}</ronin:tool_call>``
+    is emitted as prose. Two silent failures at once: the file is written empty,
+    and the tag leaks into the visible answer.
+
+    Every scanner in :mod:`ronin.providers.jsonargs` is string-aware for exactly
+    this reason; this is the same discipline applied to the tag search.
+    """
+    in_string = False
+    escaped = False
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            index += 1
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "<" and text.startswith(CLOSE_TAG, index):
+            return index
+        index += 1
+    return -1
+
+
 class ShimStreamParser:
     """Splits a text stream into visible prose and tool-call blocks.
 
@@ -196,10 +235,15 @@ class ShimStreamParser:
 
         while True:
             if self._in_call:
-                end = self._buffer.find(CLOSE_TAG)
+                end = _find_close_outside_string(self._buffer)
                 if end < 0:
                     # Still inside a call: the payload stays buffered, and none of
                     # it is visible. Nothing to release.
+                    #
+                    # A close tag sitting inside an *unterminated* string is not
+                    # resolvable yet — it could be a literal (the string closes
+                    # later) or the real terminator of a truncated payload. That
+                    # is decided in `finish`, where nothing more can arrive.
                     break
                 payload = self._buffer[:end]
                 self._buffer = self._buffer[end + len(CLOSE_TAG) :]
@@ -237,6 +281,33 @@ class ShimStreamParser:
         self._buffer = ""
         if self._in_call:
             self._in_call = False
+            # The stream is over, so a close tag that only ever appeared inside an
+            # unterminated string was the real terminator after all — the payload
+            # was truncated mid-value. Recovering it keeps the truncation-repair
+            # path that `close_truncated` exists for, instead of discarding a call
+            # the model genuinely made.
+            fallback = tail.find(CLOSE_TAG)
+            if fallback >= 0:
+                calls, failures = _read_payload(tail[:fallback])
+                rest = tail[fallback + len(CLOSE_TAG) :]
+                trailing = ShimEmit()
+                if rest:
+                    # Run the remainder through a fresh parser rather than
+                    # releasing it blind: it may itself hold a whole call, and
+                    # emitting that as prose is the leak this class forbids.
+                    nested = ShimStreamParser()
+                    first = nested.feed(rest)
+                    last = nested.finish()
+                    trailing = ShimEmit(
+                        visible=first.visible + last.visible,
+                        calls=first.calls + last.calls,
+                        failures=first.failures + last.failures,
+                    )
+                return ShimEmit(
+                    visible=trailing.visible,
+                    calls=calls + trailing.calls,
+                    failures=failures + trailing.failures,
+                )
             return ShimEmit(
                 failures=(
                     ShimFailure(
@@ -280,9 +351,12 @@ def _read_payload(payload: str) -> tuple[tuple[ShimCall, ...], tuple[ShimFailure
             ),
         )
 
-    # Not one object: try reading it as several.
+    # Not one clean object: try reading the balanced objects out of it. This also
+    # covers the *single* call wrapped in chatter ("Here you go: {…}"), which used
+    # to fail while the two-call version of the same shape parsed — an asymmetry
+    # that hit the commoner case.
     objects = find_json_objects(stripped)
-    if len(objects) > 1:
+    if objects:
         calls: list[ShimCall] = []
         failures: list[ShimFailure] = []
         for raw in objects:
