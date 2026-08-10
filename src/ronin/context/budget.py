@@ -240,9 +240,16 @@ def _fit_lines(lines: list[str], budget: OutputBudget, marker_cost: int) -> tupl
         used += len(line)
         tail_n += 1
 
-    if head_n + tail_n >= len(lines):
-        # Claiming truncation while eliding nothing would make the marker a lie.
-        tail_n = max(0, len(lines) - head_n - 1)
+    if lines and head_n + tail_n == len(lines):
+        # Claiming truncation while eliding nothing would make the marker a lie, so one
+        # line is given up — from the tail if there is one, otherwise from the head.
+        # :func:`clamp` checks ``fits`` first and so never asks for a fit it does not
+        # need, which makes this unreachable from there; the marker's honesty must not
+        # depend on that staying true.
+        if tail_n:
+            tail_n -= 1
+        else:
+            head_n -= 1
     return head_n, tail_n
 
 

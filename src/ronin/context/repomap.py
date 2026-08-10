@@ -198,14 +198,16 @@ def _compile_rule(line: str, *, base: str) -> IgnoreRule | None:
     # Trailing whitespace is not significant unless escaped; leading is.
     stripped = re.sub(r"(?<!\\)\s+$", "", line)
     if not stripped:
-        return None
+        return None  # pragma: no cover - `str.strip` and `\s` agree, so 197 caught this
     negated = stripped.startswith("!")
     # A leading `!` negates; a leading `\!` is a literal one. Both lose one char.
     if negated or stripped.startswith("\\!"):
         stripped = stripped[1:]
     dir_only = stripped.endswith("/")
     if dir_only:
-        stripped = stripped[:-1]
+        # Every trailing slash, not just one: `//` would otherwise compile to a rule
+        # with an empty pattern, which matches nothing and looks configured.
+        stripped = stripped.rstrip("/")
     if not stripped:
         return None
     anchored = stripped.startswith("/") or "/" in stripped.rstrip("/")

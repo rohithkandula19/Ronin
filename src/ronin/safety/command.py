@@ -559,14 +559,15 @@ class _Lexer:
         while self.i < len(self.text) and self.text[self.i] in "<>":
             operator += self.text[self.i]
             self.i += 1
-        heredoc = operator.endswith("<<")
+        # `<<<` is a here-string — one word of data on stdin — not a heredoc. The `<`
+        # run above is greedy, so this has to be read off the finished operator rather
+        # than by peeking for another `<`: that peek could never fire, and treating
+        # `<<<` as `<<` makes the *next line* the heredoc body. A command on that line
+        # is then never examined at all, which is a denylist bypass one character wide.
+        heredoc = operator.endswith("<<") and not operator.endswith("<<<")
         if heredoc and self._char(self.i) == "-":
             operator += "-"
             self.i += 1
-        if heredoc and self._char(self.i) == "<":  # `<<<` is a here-string: data, not a file
-            operator += "<"
-            self.i += 1
-            heredoc = False
         tail = self._char(self.i)
         if not heredoc and tail and tail in "&|" and operator.endswith((">", "<")):
             operator += tail
@@ -828,6 +829,14 @@ def _parse_nested(
             _parse_into(payload, out, depth=depth + 1, parent=index, origin=Origin.SHELL_C)
         for body in heredoc_bodies:
             _parse_into(body, out, depth=depth + 1, parent=index, origin=Origin.HEREDOC)
+        for redirect in segment.redirects:
+            # `bash <<<"rm -rf /"` executes the word. Same channel as a heredoc body and
+            # the same treatment: without this the payload is a redirect target nobody
+            # reads, and the only visible binary is a harmless `bash`.
+            if redirect.operator.endswith("<<<") and redirect.target.strip():
+                _parse_into(
+                    redirect.target, out, depth=depth + 1, parent=index, origin=Origin.HEREDOC
+                )
     if segment.binary in EVAL_BINARIES and len(segment.argv) > 1:
         payload = " ".join(segment.argv[1:])
         # `eval "$(curl …)"` already yielded the inner fetch as a substitution segment;
