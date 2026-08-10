@@ -8,6 +8,7 @@ than the real thing.
 
 from __future__ import annotations
 
+import asyncio
 import shutil
 from pathlib import Path
 
@@ -273,3 +274,63 @@ def test_every_search_tool_is_read_only() -> None:
     for tool in (GLOB, GREP, LS):
         assert tool.spec().danger_level is DangerLevel.READ_ONLY
         assert not tool.spec().requires_approval
+
+
+# --------------------------------------------------------------------------- #
+# Refusals — the half a happy-path suite hides
+# --------------------------------------------------------------------------- #
+
+
+async def test_grep_refuses_with_install_instructions_when_ripgrep_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """These tools wrap `rg` rather than reimplementing it, so a missing binary is a
+    normal environment state — and the refusal has to tell the reader how to fix it,
+    not just that something is absent.
+    """
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+    result = await call(GREP, context(tmp_path), pattern="handler")
+    assert not result.ok
+    assert "ripgrep (rg) is not installed" in result.error
+    # The actionable half: at least one real install command.
+    assert "apt install ripgrep" in result.error
+
+
+async def test_grep_reports_ripgreps_own_failure_rather_than_pretending_zero_matches(
+    tmp_path: Path,
+) -> None:
+    """An invalid regex makes `rg` exit 2. Exit 1 means "no matches" and exit 0 means
+    "matches"; anything else is a real failure, and reporting it as an empty result
+    would tell the model its search succeeded and found nothing.
+
+    Runs the real binary — an unclosed group is genuinely invalid, not a mocked code.
+    """
+    tree(tmp_path)
+    result = await call(GREP, context(tmp_path), pattern="(unclosed")
+    assert not result.ok
+    assert "ripgrep failed" in result.error
+
+
+async def test_a_search_timeout_says_how_to_narrow_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A timeout that only says "timed out" leaves the model with no next move.
+
+    The timeout is forced rather than waited for: making a real search take 30s would
+    put 30s in the suite, and the branch under test is the message, not the clock.
+    """
+    tree(tmp_path)
+
+    async def instant_timeout(awaitable: object, *_args: object, **_kwargs: object) -> object:
+        # Close the coroutine we are refusing to await, or Python warns that
+        # `Process.communicate` was never awaited — a leak in the test, not the code.
+        close = getattr(awaitable, "close", None)
+        if callable(close):
+            close()
+        raise TimeoutError
+
+    monkeypatch.setattr(asyncio, "wait_for", instant_timeout)
+    result = await call(GREP, context(tmp_path), pattern="handler")
+    assert not result.ok
+    assert "timed out" in result.error
+    assert "Narrow it with a path or glob" in result.error
