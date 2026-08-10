@@ -41,6 +41,28 @@ repomap = ["tree-sitter-language-pack>=0.9"]
 # against injected transports, so this is only needed to talk to something real.
 http = ["httpx>=0.27"]
 
+# Without this the root is a "virtual" project: uv sync prints "Skipping installation of
+# entry points (`project.scripts`) because this project is not packaged", `uv build
+# --all-packages` emits a wheel for every workspace member and none for the root, and so
+# the `ronin2` console script declared above existed in no venv anywhere. `pipx install
+# ronin` — the install path docs/STACK.md names as the end state — had no distribution
+# to install either.
+#
+# hatchling because it is the lightest backend that can be told "the package is at
+# src/ronin" without a src-layout convention fight, and it is already what every
+# packaged member of this workspace uses.
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ronin"]
+
+[tool.uv]
+# Build and install the root project itself, not just its dependencies — this is the
+# half of the fix that makes `ronin2` appear in the workspace venv.
+package = true
+
 [tool.uv.workspace]
 members = [
     "packages/agent-patterns",
@@ -130,6 +152,7 @@ files = [
     "tests/persistence",
     "tests/providers",
     "tests/safety",
+    "tests/scripts",
     "tests/telemetry",
     "tests/tools",
     "tests/ui",
@@ -138,7 +161,7 @@ files = [
 strict = true
 warn_unreachable = true
 explicit_package_bases = true
-mypy_path = "src:tests/agents:tests/cli:tests/context:tests/core:tests/evalsuite:tests/mcp:tests/persistence:tests/providers:tests/safety:tests/telemetry:tests/tools:tests/ui:tests/verify"
+mypy_path = "src:scripts:tests/agents:tests/cli:tests/context:tests/core:tests/evalsuite:tests/mcp:tests/persistence:tests/providers:tests/safety:tests/scripts:tests/telemetry:tests/tools:tests/ui:tests/verify"
 
 # pytest's @parametrize is an untyped decorator as far as mypy is concerned;
 # that is a property of pytest, not a hole in our typing. Enumerated rather
@@ -163,6 +186,7 @@ module = [
     "test_assembly",
     "test_boundaries",
     "test_bridge",
+    "test_check_test_imports",
     "test_context_budget",
     "test_context_compaction",
     "test_context_filestate",
@@ -274,6 +298,7 @@ include = [
     "tests/persistence/**/*.py",
     "tests/providers/**/*.py",
     "tests/safety/**/*.py",
+    "tests/scripts/**/*.py",
     "tests/telemetry/**/*.py",
     "tests/tools/**/*.py",
     "tests/ui/**/*.py",
@@ -283,3 +308,38 @@ include = [
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 # <<< generated
+
+# Coverage gate: 85% over ALL of src/ronin. Measured before being written down — the
+# reading at the time this landed was 86.0% (14,752 of 17,160 statements), so the gate
+# has **1.0 point of headroom** and that is a deliberate, known-tight choice.
+#
+# What that tightness means, stated plainly rather than discovered later: eleven
+# `demo.py` modules totalling 1,506 statements sit at exactly 0%, because every
+# subsystem ships a demo command by standing convention and no test runs one. The next
+# demo module somebody adds is therefore likelier to trip this gate than a real
+# regression is. The alternative — excluding demos and setting 90% — is argued for in
+# docs/STACK.md; scope here is "all", so a failing build may mean "add a test for your
+# demo" rather than "you broke something", and the fix in that case is a test, not a
+# lower number.
+#
+# `providers/local_adapter.py` is the one genuine low spot at 58%: its generation paths
+# need mlx_lm or transformers and CI has neither. That is a real limit of an offline
+# suite, not an oversight, and it is why the $0 lane's inference code is the least
+# exercised code in the tree.
+[tool.coverage.run]
+source = ["src/ronin"]
+branch = false
+omit = ["*/__pycache__/*"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = false
+skip_covered = true
+# `if TYPE_CHECKING:` blocks and `@overload` stubs never execute by construction, so
+# counting them as uncovered would measure the type annotations rather than the tests.
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "@overload",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]

@@ -46,7 +46,9 @@ def package_count() -> int:
 
 def game_count() -> int:
     sys.path.insert(0, str(ROOT / "packages" / "cli" / "src"))
-    from ronin_arcade.games import GAMES  # noqa: E402
+    # No `noqa: E402` needed — the rule is about module-level imports, and this one is
+    # inside a function, so ruff flags the suppression itself as unused (RUF100).
+    from ronin_arcade.games import GAMES
     return len(GAMES)
 
 

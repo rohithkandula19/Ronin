@@ -1994,7 +1994,7 @@ wheels = [
 [[package]]
 name = "ronin"
 version = "1.0.0"
-source = { virtual = "." }
+source = { editable = "." }
 
 [package.optional-dependencies]
 http = [

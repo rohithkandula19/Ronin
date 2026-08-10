@@ -142,7 +142,10 @@ def test_modules() -> list[str]:
 def render() -> str:
     dirs = test_dirs()
     files = ["src/ronin", *(f"tests/{name}" for name in dirs)]
-    mypy_path = ":".join(["src", *(f"tests/{name}" for name in dirs)])
+    # `scripts` is on mypy_path but deliberately not in `files`: tests/scripts/ imports
+    # the hook modules under test from there, and without it mypy cannot resolve them —
+    # a test mypy cannot resolve is a test with no type checking at all.
+    mypy_path = ":".join(["src", "scripts", *(f"tests/{name}" for name in dirs)])
     include = ["src/ronin/**/*.py", *(f"tests/{name}/**/*.py" for name in dirs)]
     modules = test_modules()
 

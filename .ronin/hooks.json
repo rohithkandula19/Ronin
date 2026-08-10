@@ -1,0 +1,33 @@
+{
+  "PreToolUse": [
+    {
+      "matcher": "write|edit|multi_edit",
+      "hooks": [
+        {
+          "command": "git diff --quiet -- '*.lock' || echo 'lockfile is dirty'",
+          "name": "lockfile-notice",
+          "timeout": 5
+        }
+      ]
+    }
+  ],
+  "PostToolUse": [
+    {
+      "matcher": "edit|write",
+      "hooks": [
+        {
+          "command": "jq -r '.arguments.path // empty' | xargs -r uv run ruff check --force-exclude",
+          "name": "lint-after-edit",
+          "timeout": 30
+        }
+      ]
+    }
+  ],
+  "SessionStart": [
+    {
+      "hooks": [
+        {"command": "git rev-parse --abbrev-ref HEAD", "name": "current-branch", "timeout": 5}
+      ]
+    }
+  ]
+}
