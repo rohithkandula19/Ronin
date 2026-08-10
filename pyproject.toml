@@ -193,6 +193,7 @@ module = [
     "test_context_integration",
     "test_context_memory",
     "test_context_repomap",
+    "test_core_demo",
     "test_definitions",
     "test_files",
     "test_golden_streams",
