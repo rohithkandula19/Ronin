@@ -22,6 +22,7 @@ sentence a good engineer says out loud — "i could not fix this, here is what i
 tried and what i think is wrong". An agent that admits failure is worth more than
 one that loops, so admitting it is a first-class return type.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -84,9 +85,7 @@ _LOC = r"(?:L|\d+(?::\d+)?)"
 _PYTEST_FAILED = re.compile(r"^(?:FAILED|ERROR)\s+(\S+?)(?:\s+-\s+(.*))?$")
 _PYTEST_HEADER = re.compile(r"^_{3,}\s+(.+?)\s+_{3,}$")
 _PYTEST_ASSERT = re.compile(r"^E\s+(.*)$")
-_RUFF = re.compile(
-    rf"^(?P<file>[^\s:]+):{_LOC}:\s*(?P<code>[A-Z]{{1,4}}\d{{3,4}})\s+(?P<msg>.*)$"
-)
+_RUFF = re.compile(rf"^(?P<file>[^\s:]+):{_LOC}:\s*(?P<code>[A-Z]{{1,4}}\d{{3,4}})\s+(?P<msg>.*)$")
 _MYPY = re.compile(rf"^(?P<file>[^\s:]+):{_LOC}:\s*error:\s*(?P<msg>.*)$")
 _PYTEST_SUMMARY = re.compile(r"\b(\d+) failed\b")
 _PYTEST_ERRORS = re.compile(r"\b(\d+) errors?\b")
@@ -386,8 +385,7 @@ class RepairReport:
         lines = [
             "i could not fix this.",
             "",
-            f"what failed: {self.baseline.count} failing, signature "
-            f"{self.baseline.signature}",
+            f"what failed: {self.baseline.count} failing, signature {self.baseline.signature}",
         ]
         for failure in self.baseline.failures[:5]:
             lines.append(f"  - {failure.kind.value}: {failure.where} — {failure.detail}")
@@ -470,9 +468,7 @@ async def repair_loop(
 
     baseline = await verify()
     if baseline.ok:
-        return RepairReport(
-            verdict=RepairVerdict.ALREADY_GREEN, attempts=(), baseline=baseline
-        )
+        return RepairReport(verdict=RepairVerdict.ALREADY_GREEN, attempts=(), baseline=baseline)
 
     attempts: list[Attempt] = []
     seen: dict[str, int] = {baseline.signature: 1}

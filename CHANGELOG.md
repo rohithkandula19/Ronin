@@ -5,6 +5,23 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Added
+- **The repo scaffold's missing half, and the packaging bug it exposed.** `pre-commit`
+  (whitespace, ruff, mypy, and four generated-file gates), `.env.example`, three working
+  `.ronin/` example configs with a schema README, `make install/run/eval/coverage`, a
+  **coverage gate at 85% on `src/ronin`** enforced by its own CI job, and
+  `docs/RULES.md` — the one-page non-negotiables `CONTRIBUTING.md` now points at.
+  - **`ronin2` did not exist in any dev checkout.** The root project declared
+    `[project.scripts]` but had no `[build-system]`, so `uv sync` skipped entry points
+    ("this project is not packaged") and `uv build --all-packages` emitted a wheel for
+    every workspace member and none for the root — `pipx install ronin` had nothing to
+    install. hatchling plus `tool.uv.package = true` fixes both: `ronin2` is in the venv
+    and `ronin-1.0.0` builds.
+  - **`scripts/check_test_imports.py`** enforces the offline-tests rule by parsing each
+    test's AST. It walks the tree rather than grepping because a grep matched a docstring
+    in `test_ronin_telemetry_transport.py` — a file that imports nothing of the kind.
+  - `make lint` and `make typecheck` were `@echo` stubs that exited 0 without running
+    anything, and `make test` omitted `tests/` — so the entire v2 suite CI runs sat
+    outside the Makefile. Both fixed.
 - **A published eval suite, and the gate that keeps it honest.** 118 tasks under
   `tests/evals/` across eight categories, each a fixture repo, a prompt and a
   `verify.sh`. `scripts/check_eval_tasks.py` proves every task discriminates in three

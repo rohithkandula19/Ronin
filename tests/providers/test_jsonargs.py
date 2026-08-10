@@ -8,6 +8,7 @@ Two properties matter more than any individual case:
   that fixes things quietly is one that will eventually fix something into the
   wrong shape and nobody will know which pass did it.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -64,7 +65,7 @@ def test_a_non_string_non_mapping_is_rejected_with_its_type_named() -> None:
     ("raw", "expected"),
     [
         ('```json\n{"a": 1}\n```', {"a": 1}),
-        ("```\n{\"a\": 1}\n```", {"a": 1}),
+        ('```\n{"a": 1}\n```', {"a": 1}),
         ('```tool_call\n{"a": 1}```', {"a": 1}),
     ],
 )
@@ -105,7 +106,7 @@ def test_an_escaped_quote_does_not_end_the_string() -> None:
 
 
 def test_python_literals_become_json_literals() -> None:
-    result = parse_arguments("{\"a\": None, \"b\": True, \"c\": False}")
+    result = parse_arguments('{"a": None, "b": True, "c": False}')
     assert result.ok
     assert result.value == {"a": None, "b": True, "c": False}
     assert "python_literals" in result.repairs
@@ -116,7 +117,7 @@ def test_the_word_none_inside_a_string_survives() -> None:
 
 
 def test_a_word_containing_true_is_not_rewritten() -> None:
-    assert python_literals_to_json("{\"a\": Truest}") == "{\"a\": Truest}"
+    assert python_literals_to_json('{"a": Truest}') == '{"a": Truest}'
 
 
 def test_single_quotes_are_converted_when_unambiguous() -> None:
@@ -128,7 +129,7 @@ def test_single_quotes_are_converted_when_unambiguous() -> None:
 
 def test_single_quotes_are_refused_when_double_quotes_are_also_present() -> None:
     """An apostrophe inside a value cannot be told from a delimiter."""
-    raw = "{\"msg\": \"it's fine\"}"
+    raw = '{"msg": "it\'s fine"}'
     assert single_to_double_quotes(raw) == raw
 
 

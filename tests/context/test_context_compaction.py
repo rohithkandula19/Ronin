@@ -6,6 +6,7 @@ turn 3", and the boundary case where a tool call and its result straddle the
 tail — the split that produces a provider 400 on the *following* turn, where the
 traceback is useless.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -180,9 +181,7 @@ def test_the_leading_system_messages_are_pinned() -> None:
 def test_a_mid_transcript_system_message_is_not_pinned() -> None:
     """`core.loop` inserts system-role stall nudges; pinning those keeps scaffolding."""
     messages = scripted_session(10)
-    messages.insert(
-        5, Message(role=Role.SYSTEM, content_blocks=(Text("stall nudge"),))
-    )
+    messages.insert(5, Message(role=Role.SYSTEM, content_blocks=(Text("stall nudge"),)))
     assert plan_compaction(messages, policy=TINY).head_end == 1
 
 
@@ -342,9 +341,7 @@ async def test_retained_results_are_capped_per_path_when_asked() -> None:
         user("turn 1"),
         assistant("", write_call("c1", "big.py", "x")),
         tool_results(
-            ToolResultBlock(
-                tool_use_id="c1", content="\n".join("line" for _ in range(500))
-            )
+            ToolResultBlock(tool_use_id="c1", content="\n".join("line" for _ in range(500)))
         ),
         *scripted_session(5)[1:],
     ]
@@ -505,9 +502,7 @@ async def test_a_200_turn_session_can_still_answer_what_we_edited_in_turn_3() ->
         # More turns arrive on top of the compacted transcript, with fresh ids:
         # reusing a tool-use id is itself a provider 400, so a test that did it
         # would be measuring a broken transcript rather than compaction.
-        messages.extend(
-            scripted_session(6, marked_turn=0, offset=1000 * compactions)[1:]
-        )
+        messages.extend(scripted_session(6, marked_turn=0, offset=1000 * compactions)[1:])
 
     assert compactions >= 3, "the session never actually compacted"
     final = transcript_text(messages)

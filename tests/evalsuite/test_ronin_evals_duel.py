@@ -4,6 +4,7 @@ that reproduces from its seed.
 Every model here is a scripted fake and every path is under ``tmp_path``: nothing in
 this module opens a socket, reads an API key, or spends a cent.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -121,9 +122,9 @@ def test_a_long_line_is_clipped_with_the_cut_named() -> None:
 
 
 def test_an_error_event_renders_its_kind_and_recoverability() -> None:
-    assert transcript_lines(
-        (Error(message="boom", kind="provider", recoverable=True),)
-    ) == ("error (provider, recoverable) boom",)
+    assert transcript_lines((Error(message="boom", kind="provider", recoverable=True),)) == (
+        "error (provider, recoverable) boom",
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -240,9 +241,7 @@ async def test_the_recording_adapter_keeps_the_events_and_still_folds_them(
         return OpenedAgent(agent=agent, registered_tools=("edit",))
 
     recorder = TranscriptRecorder()
-    outcome = await recording_v2_adapter(open_agent, recorder)(
-        task("t1", root=tmp_path), tmp_path
-    )
+    outcome = await recording_v2_adapter(open_agent, recorder)(task("t1", root=tmp_path), tmp_path)
     assert recorder.stream_for("t1") == events
     assert outcome.final_text == "hi"
     assert outcome.turns_used == 1
@@ -260,9 +259,7 @@ async def test_an_agent_that_raises_records_an_empty_stream_rather_than_no_entry
         return OpenedAgent(agent=agent)
 
     recorder = TranscriptRecorder()
-    outcome = await recording_v2_adapter(open_agent, recorder)(
-        task("t1", root=tmp_path), tmp_path
-    )
+    outcome = await recording_v2_adapter(open_agent, recorder)(task("t1", root=tmp_path), tmp_path)
     assert recorder.streams == {"t1": ()}
     assert "no model configured" in outcome.error
     assert agent.closed
@@ -445,9 +442,9 @@ def test_the_scoreboard_ignores_wall_clock_so_a_slow_machine_is_not_a_difference
     fast = pair_reports(fast_a, fast_b, seed=42)
     slow = pair_reports(slower(fast_a, 40.0), slower(fast_b, 40.0), seed=42)
 
-    assert render_duel_scoreboard(duel_scoreboard(fast)).encode(
-        "utf-8"
-    ) == render_duel_scoreboard(duel_scoreboard(slow)).encode("utf-8")
+    assert render_duel_scoreboard(duel_scoreboard(fast)).encode("utf-8") == render_duel_scoreboard(
+        duel_scoreboard(slow)
+    ).encode("utf-8")
     assert render_duel_markdown(fast) != render_duel_markdown(slow)
     assert "0.10s" in render_duel_markdown(fast)
 
@@ -461,16 +458,16 @@ def _script(duelist: str, seed: int, eval_task: object) -> FakeRun:
         events=turn(
             0,
             text=f"{duelist} on {task_id}",
-            calls=[
-                Call(id="c1", name="edit", arguments={"path": edits[0]}, artifacts=edits)
-            ],
+            calls=[Call(id="c1", name="edit", arguments={"path": edits[0]}, artifacts=edits)],
         ),
     )
 
 
 async def _duel(root: Path, seed: int) -> Duel:
-    tasks = [task("t1", root=root, files_expected=("target.py",)),
-             task("t2", root=root, files_expected=("target.py",))]
+    tasks = [
+        task("t1", root=root, files_expected=("target.py",)),
+        task("t2", root=root, files_expected=("target.py",)),
+    ]
 
     def gate(eval_task: object, outcome: AgentOutcome) -> tuple[int, bool]:
         return (0 if "target.py" in outcome.edited_paths else 1, False)
@@ -525,9 +522,7 @@ async def test_a_different_seed_is_allowed_to_produce_a_different_scoreboard(
         )
         return duel_scoreboard(duel).rows
 
-    assert await board_for(task_seed_parity_even()) != await board_for(
-        task_seed_parity_odd()
-    )
+    assert await board_for(task_seed_parity_even()) != await board_for(task_seed_parity_odd())
 
 
 def task_seed_parity_even() -> int:
@@ -540,7 +535,7 @@ def task_seed_parity_odd() -> int:
 
 
 async def test_both_sides_are_built_with_the_same_per_task_seed(tmp_path: Path) -> None:
-    """"Same seed" has to mean the two sides sampled the same way, or the A/B is a lie."""
+    """ "Same seed" has to mean the two sides sampled the same way, or the A/B is a lie."""
     tasks = [task("t1", root=tmp_path), task("t2", root=tmp_path)]
     seen: list[tuple[str, int]] = []
 

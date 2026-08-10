@@ -4,6 +4,7 @@
 actually asks for: half of agent quality is in those strings, so "did anyone write the
 when-not-to-use section" is checked mechanically rather than by review.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

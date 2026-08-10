@@ -1,4 +1,5 @@
 """The runner's guarantees: bounded, isolated, timed out, unkillable, deterministic."""
+
 from __future__ import annotations
 
 import asyncio
@@ -61,9 +62,7 @@ async def test_an_agent_that_fixes_the_fixture_passes(tmp_path: Path) -> None:
 
 async def test_an_agent_that_edits_the_wrong_file_fails_as_wrong_file(tmp_path: Path) -> None:
     tasks = suite_of(tmp_path, 1)
-    adapter = v2_adapter(
-        scripted_factory([Step(tool="edit", path="notes.md", content="hello\n")])
-    )
+    adapter = v2_adapter(scripted_factory([Step(tool="edit", path="notes.md", content="hello\n")]))
     report = await run_suite(tasks, adapter)
     assert report.overall.passed == 0
     assert FailureClass.WRONG_FILE in report.rows[0].classes
@@ -354,9 +353,7 @@ async def test_workspaces_are_removed_unless_asked_for(tmp_path: Path) -> None:
     await run_suite(tasks, adapter, config=RunnerConfig(workspace_root=keep))
     assert list(keep.iterdir()) == []
 
-    await run_suite(
-        tasks, adapter, config=RunnerConfig(workspace_root=keep, keep_workspaces=True)
-    )
+    await run_suite(tasks, adapter, config=RunnerConfig(workspace_root=keep, keep_workspaces=True))
     kept_dirs = sorted(path.name for path in keep.iterdir())
     assert len(kept_dirs) == 1 and kept_dirs[0].startswith("task-0-")
     work = keep / kept_dirs[0] / "work"

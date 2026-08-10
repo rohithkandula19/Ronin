@@ -20,6 +20,7 @@ learns which provider produced the events it is writing down.
 
 The whole layer, run end to end: ``python -m ronin.persistence.demo``.
 """
+
 from __future__ import annotations
 
 from .codec import (

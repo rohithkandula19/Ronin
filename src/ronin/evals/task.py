@@ -27,6 +27,7 @@ than rejected. The fixture author and this loader ship separately, and a loader 
 refuses a key it has not heard of makes every schema addition a hard breakage of the
 whole suite; a loader that records them makes it a note.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -115,8 +116,7 @@ class ManifestMismatch(ValueError):
             )
         if missing_from_disk:
             parts.append(
-                f"in {manifest_path.name} but not on disk: "
-                f"{', '.join(sorted(missing_from_disk))}"
+                f"in {manifest_path.name} but not on disk: {', '.join(sorted(missing_from_disk))}"
             )
         super().__init__("; ".join(parts))
         self.manifest_path = manifest_path
@@ -341,9 +341,7 @@ def load_task(path: str | Path) -> EvalTask:
         git_url=git_url,
         files_expected=_str_tuple(data, "files_expected", toml_path),
         max_turns=_as_int(data, "max_turns", toml_path, DEFAULT_MAX_TURNS),
-        timeout_seconds=_as_float(
-            data, "timeout_seconds", toml_path, DEFAULT_TIMEOUT_SECONDS
-        ),
+        timeout_seconds=_as_float(data, "timeout_seconds", toml_path, DEFAULT_TIMEOUT_SECONDS),
         tags=_str_tuple(data, "tags", toml_path),
         regression_gate=_as_bool(data, "regression_gate", toml_path, False),
         injection_probe=_str_tuple(data, "injection_probe", toml_path),
@@ -524,9 +522,7 @@ def _copy_tree(source: Path, dest: Path) -> list[str]:
             continue
         target = dest / entry.name
         if entry.is_dir() and not entry.is_symlink():
-            copied.extend(
-                f"{entry.name}/{child}" for child in _copy_tree(entry, target)
-            )
+            copied.extend(f"{entry.name}/{child}" for child in _copy_tree(entry, target))
         else:
             # follow_symlinks=False keeps a fixture's deliberate broken symlink
             # broken, which is the point of a fixture that tests one.

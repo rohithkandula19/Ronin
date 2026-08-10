@@ -8,6 +8,7 @@ Two integrations that matter more than the unit tests:
   real :class:`McpClient` on the other, so ``ronin_task`` arrives as an ordinary
   namespaced tool in a registry.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -145,9 +146,7 @@ async def test_ronin_talks_to_ronin_and_ronin_task_becomes_a_namespaced_tool(
     near, far = memory_duplex()
     serving = asyncio.create_task(serve_stdio(inner, far))
 
-    config = server_config(
-        "self", danger_level=DangerLevel.READ_ONLY, requires_approval=False
-    )
+    config = server_config("self", danger_level=DangerLevel.READ_ONLY, requires_approval=False)
     client = McpClient(config, lambda _c: StdioTransport(streams=near, timeout=2.0))
     try:
         capabilities = await client.connect()
@@ -204,9 +203,7 @@ async def test_a_gated_tool_over_the_wire_is_refused_when_nobody_is_attached(
     async def nested(prompt: str) -> str:  # pragma: no cover - must never be reached
         raise AssertionError("the gate let a call through")
 
-    inner = McpServer(
-        build_registry(ToolContext(root=inner_root, env={})), nested_runner=nested
-    )
+    inner = McpServer(build_registry(ToolContext(root=inner_root, env={})), nested_runner=nested)
     near, far = memory_duplex()
     serving = asyncio.create_task(serve_stdio(inner, far))
 

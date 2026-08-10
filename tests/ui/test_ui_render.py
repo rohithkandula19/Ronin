@@ -1,4 +1,5 @@
 """The pure renderers: diff, todos, status, approval, and the panel set."""
+
 from __future__ import annotations
 
 from pathlib import Path

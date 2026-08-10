@@ -10,6 +10,7 @@ The repair-loop tests use a scripted fake model rather than a fixture, because w
 is being tested is a *conversation*: what we send back after a bad call, and what
 happens on the third strike.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Sequence
@@ -186,8 +187,7 @@ def test_two_separate_blocks_are_two_calls() -> None:
 
 def test_two_objects_in_one_block_are_two_calls() -> None:
     body = (
-        '{"name":"read_file","arguments":{"path":"a"}}'
-        '{"name":"read_file","arguments":{"path":"b"}}'
+        '{"name":"read_file","arguments":{"path":"a"}}{"name":"read_file","arguments":{"path":"b"}}'
     )
     _, names, _ = feed_all((f"{OPEN_TAG}{body}{CLOSE_TAG}",))
     assert names == ["read_file", "read_file"]

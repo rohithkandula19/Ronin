@@ -18,6 +18,7 @@ refusals are the half you cannot see from a passing handshake:
 6. Ronin's own server answering ``tools/list``, refusing a gated tool with no
    approver attached, and then running ``ronin_task`` once one is.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -288,9 +289,7 @@ async def demo_call(registry: ToolRegistry) -> None:
     )
     show(
         "mcp__docs__search with a name the server does not have",
-        await registry.execute(
-            ToolUse(id="d3", name="mcp__docs__missing", arguments={})
-        ),
+        await registry.execute(ToolUse(id="d3", name="mcp__docs__missing", arguments={})),
     )
 
 
@@ -406,9 +405,7 @@ async def demo_server(ctx: ToolContext) -> None:
                 for line in str(called.result["content"][0]["text"]).split("\n"):
                     print(f"       {line}")
 
-            bad = await transport.send(
-                Request(method="tools/call", params={"name": 42}, id=4)
-            )
+            bad = await transport.send(Request(method="tools/call", params={"name": 42}, id=4))
             assert bad.error is not None
             print(f"     tools/call with name=42 → {bad.error.code} (invalid params)")
             unknown = await transport.send(Request(method="tools/frobnicate", params={}, id=5))

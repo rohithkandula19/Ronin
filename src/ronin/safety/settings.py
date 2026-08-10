@@ -43,6 +43,7 @@ rule is dropped, the rest of the file still applies, and the error says which in
 why. Unknown keys are errors too — a silently ignored typo is a permission the user
 believes they granted.
 """
+
 from __future__ import annotations
 
 import json
@@ -183,9 +184,7 @@ def load_settings(
     each other.
     """
     base_rules = tuple(builtin) if builtin is not None else builtin_rules()
-    layers: list[Layer] = [
-        Layer(name="builtin", path=None, present=True, rules=base_rules)
-    ]
+    layers: list[Layer] = [Layer(name="builtin", path=None, present=True, rules=base_rules)]
     layers.append(_file_layer("user", home / USER_SETTINGS))
     layers.append(_file_layer("project", cwd / PROJECT_SETTINGS))
     layers.append(_file_layer("local", cwd / LOCAL_SETTINGS))

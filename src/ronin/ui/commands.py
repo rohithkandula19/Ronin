@@ -16,6 +16,7 @@ Two failure modes drive the design:
   substituting an empty string turns it into a mysteriously wrong prompt sent to a
   model. The error names the path.
 """
+
 from __future__ import annotations
 
 import difflib
@@ -164,9 +165,7 @@ class Registry:
 
     def names(self) -> tuple[str, ...]:
         seen = {command.name for command in self.builtins}
-        extra = tuple(
-            entry.command.name for entry in self.user if entry.command.name not in seen
-        )
+        extra = tuple(entry.command.name for entry in self.user if entry.command.name not in seen)
         return tuple(command.name for command in self.builtins) + extra
 
     def get(self, name: str) -> Command | None:
@@ -366,9 +365,7 @@ def parse(line: str, *, registry: Registry = BUILTIN_REGISTRY) -> ParsedCommand 
     if not name:
         return ParseError(f"{PREFIX!r} is not a command; type {PREFIX}help for the list")
     if not NAME_PATTERN.match(name):
-        return ParseError(
-            f"{PREFIX}{head} is not a command name (expected {NAME_PATTERN.pattern})"
-        )
+        return ParseError(f"{PREFIX}{head} is not a command name (expected {NAME_PATTERN.pattern})")
 
     command = registry.get(name)
     if command is None:

@@ -11,6 +11,7 @@ The pairing invariant (every ``ToolUse`` answered by exactly one
 condition — see ``test_the_transcript_stays_paired_at_every_reachable_stop`` —
 because a transcript that violates it is one a provider rejects on resume.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -292,9 +293,7 @@ async def test_no_turn_end_is_emitted_when_a_stall_aborts_the_turn() -> None:
 
 
 async def test_a_tool_call_is_bracketed_by_tool_start_and_tool_end() -> None:
-    model = FakeModel(
-        [tool_turn(call("use-1", "read_file", path="a.py")), text_turn("done")]
-    )
+    model = FakeModel([tool_turn(call("use-1", "read_file", path="a.py")), text_turn("done")])
     events = await run_events(model, one_reader("hello"), FakePolicy())
     start = of_type(events, ToolStart)[0]
     end = of_type(events, ToolEnd)[0]
@@ -307,9 +306,7 @@ async def test_a_tool_call_is_bracketed_by_tool_start_and_tool_end() -> None:
 
 
 async def test_the_tool_result_lands_in_the_transcript_paired_to_its_call() -> None:
-    model = FakeModel(
-        [tool_turn(call("use-1", "read_file", path="a.py")), text_turn("done")]
-    )
+    model = FakeModel([tool_turn(call("use-1", "read_file", path="a.py")), text_turn("done")])
     events = await run_events(model, one_reader("hello"), FakePolicy())
     blocks = tool_blocks(ended_state(events))
     assert len(blocks) == 1
@@ -337,18 +334,14 @@ async def test_the_assistant_message_and_tool_results_accumulate_in_order() -> N
 
 async def test_the_model_sees_the_tool_result_on_the_next_call() -> None:
     # The loop's whole job between iterations: feed the observation back.
-    model = FakeModel(
-        [tool_turn(call("use-1", "read_file", path="a.py")), text_turn("done")]
-    )
+    model = FakeModel([tool_turn(call("use-1", "read_file", path="a.py")), text_turn("done")])
     await run_events(model, one_reader("hello"), FakePolicy())
     assert model.calls[0].roles == (Role.USER,)
     assert model.calls[1].roles == (Role.USER, Role.ASSISTANT, Role.TOOL)
 
 
 async def test_the_loop_hands_the_system_prompt_and_tool_specs_to_the_model() -> None:
-    tools = FakeTools(
-        {"read_file": (READER, succeeds("x")), "grep": (GREPPER, succeeds("y"))}
-    )
+    tools = FakeTools({"read_file": (READER, succeeds("x")), "grep": (GREPPER, succeeds("y"))})
     model = FakeModel([text_turn("ok")])
     await run_events(model, tools, FakePolicy(), system="be terse")
     assert model.calls[0].system == "be terse"
@@ -408,14 +401,10 @@ async def test_a_mutating_call_in_the_batch_forces_serial_execution() -> None:
         await yield_to_loop()
         return ToolResult(ok=True, content="ok")
 
-    tools = FakeTools(
-        {"read_file": (READER, cooperative), "edit_file": (EDITOR, cooperative)}
-    )
+    tools = FakeTools({"read_file": (READER, cooperative), "edit_file": (EDITOR, cooperative)})
     model = FakeModel(
         [
-            tool_turn(
-                call("u1", "read_file", path="a.py"), call("u2", "edit_file", path="a.py")
-            ),
+            tool_turn(call("u1", "read_file", path="a.py"), call("u2", "edit_file", path="a.py")),
             text_turn("done"),
         ]
     )
@@ -430,9 +419,7 @@ async def test_a_single_read_only_call_is_not_gathered() -> None:
         return ToolResult(ok=True, content="ok")
 
     tools = FakeTools({"read_file": (READER, cooperative)})
-    model = FakeModel(
-        [tool_turn(call("u1", "read_file", path="a.py")), text_turn("done")]
-    )
+    model = FakeModel([tool_turn(call("u1", "read_file", path="a.py")), text_turn("done")])
     await run_events(model, tools, FakePolicy())
     assert tools.max_in_flight == 1
 
@@ -516,9 +503,7 @@ async def test_a_denied_tool_is_never_executed_and_comes_back_as_a_denied_error(
 
 async def test_an_ungated_tool_never_reaches_the_policy() -> None:
     tools = one_reader()
-    model = FakeModel(
-        [tool_turn(call("u1", "read_file", path="a.py")), text_turn("done")]
-    )
+    model = FakeModel([tool_turn(call("u1", "read_file", path="a.py")), text_turn("done")])
     policy = FakePolicy()
     await run_events(model, tools, policy)
     assert policy.approvals == []
@@ -540,9 +525,7 @@ async def test_a_denial_still_leaves_a_paired_transcript() -> None:
 
 async def test_a_tool_that_raises_becomes_a_failed_tool_result() -> None:
     tools = FakeTools({"read_file": (READER, explodes(FileNotFoundError("a.py")))})
-    model = FakeModel(
-        [tool_turn(call("u1", "read_file", path="a.py")), text_turn("recovering")]
-    )
+    model = FakeModel([tool_turn(call("u1", "read_file", path="a.py")), text_turn("recovering")])
     events = await run_events(model, tools, FakePolicy())
     result = of_type(events, ToolEnd)[0].result
     assert (result.ok, result.error) == (False, "FileNotFoundError: a.py")
@@ -587,17 +570,13 @@ async def test_a_tool_cancelled_inside_a_parallel_batch_reports_the_interruption
         ]
     )
     events = await run_events(model, tools, FakePolicy())
-    assert of_type(events, ToolEnd)[0].result == ToolResult(
-        ok=False, error=INTERRUPTED_ERROR
-    )
+    assert of_type(events, ToolEnd)[0].result == ToolResult(ok=False, error=INTERRUPTED_ERROR)
     assert unpaired_tool_uses(ended_state(events).messages) == ()
 
 
 async def test_a_hallucinated_tool_name_is_reported_without_executing_anything() -> None:
     tools = one_reader()
-    model = FakeModel(
-        [tool_turn(call("u1", "definitely_not_a_tool", x=1)), text_turn("sorry")]
-    )
+    model = FakeModel([tool_turn(call("u1", "definitely_not_a_tool", x=1)), text_turn("sorry")])
     events = await run_events(model, tools, FakePolicy())
     result = of_type(events, ToolEnd)[0].result
     assert result.ok is False
@@ -776,18 +755,12 @@ async def test_alternating_actions_do_not_trip_the_stall_detector() -> None:
 
 
 def test_fingerprint_ignores_argument_order() -> None:
-    assert fingerprint(call("t1", "grep", a=1, b=2)) == fingerprint(
-        call("t2", "grep", b=2, a=1)
-    )
+    assert fingerprint(call("t1", "grep", a=1, b=2)) == fingerprint(call("t2", "grep", b=2, a=1))
 
 
 def test_fingerprint_separates_different_actions() -> None:
-    assert fingerprint(call("t1", "grep", q="x")) != fingerprint(
-        call("t1", "grep", q="y")
-    )
-    assert fingerprint(call("t1", "grep", q="x")) != fingerprint(
-        call("t1", "read_file", q="x")
-    )
+    assert fingerprint(call("t1", "grep", q="x")) != fingerprint(call("t1", "grep", q="y"))
+    assert fingerprint(call("t1", "grep", q="x")) != fingerprint(call("t1", "read_file", q="x"))
 
 
 def test_fingerprint_survives_unserializable_arguments() -> None:
@@ -829,9 +802,7 @@ def test_truncation_is_deterministic() -> None:
 async def test_a_long_tool_result_reaches_the_transcript_truncated() -> None:
     content = "line\n" * 40  # 200 chars, 40 newlines
     tools = one_reader(content)
-    model = FakeModel(
-        [tool_turn(call("u1", "read_file", path="a.py")), text_turn("done")]
-    )
+    model = FakeModel([tool_turn(call("u1", "read_file", path="a.py")), text_turn("done")])
     events = await run_events(model, tools, FakePolicy(), max_tool_result_chars=50)
     block = tool_blocks(ended_state(events))[0]
     assert block.content == "line\n" * 10 + "\n…[truncated: 150 chars, 30 lines cut]"
@@ -841,20 +812,14 @@ async def test_the_tool_end_event_carries_the_untruncated_result() -> None:
     # Truncation is for the model's context window, not for the UI: the event
     # stream keeps the full text so a consumer can still show all of it.
     content = "line\n" * 40
-    model = FakeModel(
-        [tool_turn(call("u1", "read_file", path="a.py")), text_turn("done")]
-    )
-    events = await run_events(
-        model, one_reader(content), FakePolicy(), max_tool_result_chars=50
-    )
+    model = FakeModel([tool_turn(call("u1", "read_file", path="a.py")), text_turn("done")])
+    events = await run_events(model, one_reader(content), FakePolicy(), max_tool_result_chars=50)
     assert of_type(events, ToolEnd)[0].result.content == content
 
 
 async def test_a_long_error_is_truncated_too() -> None:
     tools = FakeTools({"read_file": (READER, explodes(RuntimeError("z" * 200)))})
-    model = FakeModel(
-        [tool_turn(call("u1", "read_file", path="a.py")), text_turn("done")]
-    )
+    model = FakeModel([tool_turn(call("u1", "read_file", path="a.py")), text_turn("done")])
     events = await run_events(model, tools, FakePolicy(), max_tool_result_chars=40)
     block = tool_blocks(ended_state(events))[0]
     assert block.is_error is True
@@ -931,15 +896,11 @@ def _scenario(
         boom = FakeTools({"read_file": (READER, explodes(RuntimeError("boom")))})
         return FakeModel(round_trip), boom, FakePolicy(), {}
     if name == "parallel_batch":
-        both = FakeTools(
-            {"read_file": (READER, succeeds("x")), "grep": (GREPPER, succeeds("y"))}
-        )
+        both = FakeTools({"read_file": (READER, succeeds("x")), "grep": (GREPPER, succeeds("y"))})
         return (
             FakeModel(
                 [
-                    tool_turn(
-                        call("u1", "read_file", path="a.py"), call("u2", "grep", q="x")
-                    ),
+                    tool_turn(call("u1", "read_file", path="a.py"), call("u2", "grep", q="x")),
                     text_turn("done"),
                 ]
             ),

@@ -19,6 +19,7 @@ a README asks for trust it has not earned.
 Nothing here sends anything. :class:`~ronin.telemetry.Telemetry` owns that, and it
 refuses in every consent state but ``GRANTED``.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -175,9 +176,7 @@ def _status(store: ConsentStore, log_path: Path, home: Path) -> str:
         lines.append(DISCLOSURE)
     elif record.state is Consent.GRANTED:
         if sender_configured(home):
-            lines.append(
-                "aggregate task outcomes are being sent. `telemetry off` stops it."
-            )
+            lines.append("aggregate task outcomes are being sent. `telemetry off` stops it.")
         else:
             # Saying "outcomes are being sent" here would be false in this build, and a
             # privacy surface that overstates what it does is not a safe error to make
@@ -213,14 +212,11 @@ def _show(log_path: Path, limit: int) -> tuple[int, str, str]:
     if not log_path.exists():
         return (
             EXIT_OK,
-            "no telemetry has been sent from this machine "
-            f"(no {log_path}).\n",
+            f"no telemetry has been sent from this machine (no {log_path}).\n",
             "",
         )
     try:
-        lines = [
-            line for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()
-        ]
+        lines = [line for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     except OSError as exc:
         return EXIT_ERROR, "", f"cannot read {log_path}: {exc}\n"
 

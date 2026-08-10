@@ -5,6 +5,7 @@ the developer's real ``~/.ronin`` — which is both a correctness property of
 ``load_settings`` (it takes both directories as parameters) and the reason these tests
 give the same answer on every machine.
 """
+
 from __future__ import annotations
 
 import json
@@ -51,9 +52,7 @@ def allow(pattern: str) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 
 
-def test_with_no_files_the_builtin_layer_is_the_whole_configuration(
-    home: Path, cwd: Path
-) -> None:
+def test_with_no_files_the_builtin_layer_is_the_whole_configuration(home: Path, cwd: Path) -> None:
     settings = load_settings(home=home, cwd=cwd)
     assert settings.healthy
     assert settings.rules_from("builtin") == settings.rules
@@ -110,9 +109,7 @@ def test_every_effective_rule_names_the_layer_it_came_from(home: Path, cwd: Path
     assert settings.rules_from("project")[0].matcher == CommandRegex("^docker ps")
 
 
-def test_the_provenance_report_names_every_file_and_every_scalar(
-    home: Path, cwd: Path
-) -> None:
+def test_the_provenance_report_names_every_file_and_every_scalar(home: Path, cwd: Path) -> None:
     write(cwd / PROJECT_SETTINGS, {"yolo": False, "rules": [allow("^docker ps")]})
     report = "\n".join(load_settings(home=home, cwd=cwd).provenance())
     assert str(home / USER_SETTINGS) in report
@@ -134,9 +131,7 @@ def test_a_layer_that_exists_but_is_empty_is_reported_as_absent(home: Path, cwd:
 # --------------------------------------------------------------------------- #
 
 
-def test_a_json_syntax_error_skips_one_layer_and_keeps_the_rest(
-    home: Path, cwd: Path
-) -> None:
+def test_a_json_syntax_error_skips_one_layer_and_keeps_the_rest(home: Path, cwd: Path) -> None:
     write(home / USER_SETTINGS, {"rules": [allow("^htop")]})
     (cwd / PROJECT_SETTINGS).write_text('{"rules": [ {"tool": "bash",', encoding="utf-8")
     write(cwd / LOCAL_SETTINGS, {"rules": [allow("^kubectl get")]})
@@ -152,9 +147,7 @@ def test_a_json_syntax_error_skips_one_layer_and_keeps_the_rest(
     assert settings.rules_from("builtin")
 
 
-def test_a_json_document_that_is_not_an_object_is_a_named_error(
-    home: Path, cwd: Path
-) -> None:
+def test_a_json_document_that_is_not_an_object_is_a_named_error(home: Path, cwd: Path) -> None:
     write(cwd / PROJECT_SETTINGS, ["not", "an", "object"])
     settings = load_settings(home=home, cwd=cwd)
     assert "must contain a JSON object" in settings.errors[0].message
@@ -179,9 +172,7 @@ def test_one_bad_rule_is_dropped_and_the_rest_of_the_file_still_applies(
     assert "must be one of allow, ask, deny" in settings.errors[0].message
 
 
-def test_an_unknown_setting_is_an_error_rather_than_a_silent_no_op(
-    home: Path, cwd: Path
-) -> None:
+def test_an_unknown_setting_is_an_error_rather_than_a_silent_no_op(home: Path, cwd: Path) -> None:
     """A typo that does nothing is a permission the user believes they granted."""
     write(cwd / PROJECT_SETTINGS, {"saandbox": True})
     settings = load_settings(home=home, cwd=cwd)
@@ -279,9 +270,7 @@ def test_always_ask_marks_a_rule_unwaivable() -> None:
         ({"decision": "ask", "always_ask": "yes"}, "must be true or false"),
     ],
 )
-def test_a_malformed_rule_raises_a_message_a_user_can_act_on(
-    entry: object, fragment: str
-) -> None:
+def test_a_malformed_rule_raises_a_message_a_user_can_act_on(entry: object, fragment: str) -> None:
     with pytest.raises(ValueError, match=fragment.replace("(", r"\(").replace("[", r"\[")):
         parse_rule(entry, source="project")
 
@@ -300,9 +289,7 @@ def test_the_settings_produce_a_ruleset_that_honours_the_configured_default(
     assert ruleset.rules
 
 
-def test_a_project_deny_rule_reaches_the_ruleset_with_its_provenance(
-    home: Path, cwd: Path
-) -> None:
+def test_a_project_deny_rule_reaches_the_ruleset_with_its_provenance(home: Path, cwd: Path) -> None:
     write(
         cwd / PROJECT_SETTINGS,
         {

@@ -5,6 +5,7 @@ ripgrep instead of reimplementing search is its behaviour — gitignore handling
 filters, multiline mode — and a mock would assert on our idea of that behaviour rather
 than the real thing.
 """
+
 from __future__ import annotations
 
 import shutil

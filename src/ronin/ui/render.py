@@ -22,6 +22,7 @@ Every renderer truncates deterministically and says what it cut. Silence about a
 cut is the one failure mode that makes a diff or an approval prompt dangerous
 rather than merely ugly.
 """
+
 from __future__ import annotations
 
 import difflib
@@ -86,9 +87,7 @@ class Styles:
     def __post_init__(self) -> None:
         unknown = sorted(set(self.pairs) - TOKENS)
         if unknown:
-            raise ValueError(
-                f"unknown style tokens {unknown}; known tokens are {sorted(TOKENS)}"
-            )
+            raise ValueError(f"unknown style tokens {unknown}; known tokens are {sorted(TOKENS)}")
 
     def text(self, raw: str) -> str:
         """Make model-derived text safe to embed. Every renderer calls this."""

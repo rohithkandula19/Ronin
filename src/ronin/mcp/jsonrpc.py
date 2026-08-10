@@ -20,6 +20,7 @@ Two shapes that are easy to conflate and are kept distinct:
 Framing is not here. A JSON-RPC message is a JSON object; how it is delimited on
 a pipe or a socket is the transport's problem (see :mod:`ronin.mcp.transport`).
 """
+
 from __future__ import annotations
 
 import json
@@ -239,9 +240,7 @@ def decode_object(raw: bytes | str) -> Mapping[str, Any]:
     try:
         parsed = json.loads(text)
     except ValueError as exc:
-        raise JsonRpcError(
-            PARSE_ERROR, f"could not parse the frame as JSON: {exc}"
-        ) from exc
+        raise JsonRpcError(PARSE_ERROR, f"could not parse the frame as JSON: {exc}") from exc
     if not isinstance(parsed, Mapping):
         raise JsonRpcError(
             INVALID_REQUEST,
@@ -267,9 +266,7 @@ def parse_request(raw: bytes | str) -> Request:
         )
     method = payload.get("method")
     if not isinstance(method, str) or not method:
-        raise JsonRpcError(
-            INVALID_REQUEST, f"method must be a non-empty string, got {method!r}"
-        )
+        raise JsonRpcError(INVALID_REQUEST, f"method must be a non-empty string, got {method!r}")
     raw_id = payload.get("id")
     if raw_id is not None and (isinstance(raw_id, bool) or not isinstance(raw_id, (int, str))):
         raise JsonRpcError(
@@ -299,8 +296,7 @@ def parse_response(raw: bytes | str) -> Response:
     payload = decode_object(raw)
     if payload.get("jsonrpc") != JSONRPC_VERSION:
         raise ProtocolError(
-            f"response declares jsonrpc={payload.get('jsonrpc')!r}, expected "
-            f"{JSONRPC_VERSION!r}"
+            f"response declares jsonrpc={payload.get('jsonrpc')!r}, expected {JSONRPC_VERSION!r}"
         )
     if "result" in payload and "error" in payload:
         raise ProtocolError("response carries both result and error")

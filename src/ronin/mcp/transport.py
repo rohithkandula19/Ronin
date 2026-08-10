@@ -24,6 +24,7 @@ This module deliberately does **not** import ``ronin.providers``, whose
 model stream). The reader below dispatches on blank lines and keeps ``event:``
 names, per the SSE spec, because MCP puts more than one message on a stream.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -158,9 +159,7 @@ async def read_frame(reader: ByteReader, *, max_bytes: int = MAX_FRAME_BYTES) ->
     try:
         line = await reader.readline()
     except ValueError as exc:  # asyncio raises this for a line past its limit
-        raise ProtocolError(
-            f"a peer sent a frame longer than the reader's buffer: {exc}"
-        ) from exc
+        raise ProtocolError(f"a peer sent a frame longer than the reader's buffer: {exc}") from exc
     if not line:
         raise TransportClosed("stream reached EOF")
     if len(line) > max_bytes:
@@ -472,9 +471,7 @@ class StdioTransport:
                     self._read_matching(streams, request), timeout=self._timeout
                 )
             except TimeoutError as exc:
-                self._fail(
-                    f"no response to {request.method!r} within {self._timeout}s"
-                )
+                self._fail(f"no response to {request.method!r} within {self._timeout}s")
                 raise TransportTimeout(self.detail) from exc
 
     async def notify(self, request: Request) -> None:
@@ -728,9 +725,7 @@ class SseTransport:
             raise TransportClosed(self._detail) from exc
 
     async def _stream(self, request: Request) -> Response:
-        chunks = self._sender.post(
-            url=self._url, headers=self._headers, body=request.to_wire()
-        )
+        chunks = self._sender.post(url=self._url, headers=self._headers, body=request.to_wire())
         async for response in sse_responses(chunks):
             if response.id == request.id:
                 return response
@@ -742,9 +737,7 @@ class SseTransport:
     async def notify(self, request: Request) -> None:
         if not request.is_notification:
             raise ValueError("notify() needs a request with no id; use send()")
-        chunks = self._sender.post(
-            url=self._url, headers=self._headers, body=request.to_wire()
-        )
+        chunks = self._sender.post(url=self._url, headers=self._headers, body=request.to_wire())
         async for _ in chunks:
             pass
 

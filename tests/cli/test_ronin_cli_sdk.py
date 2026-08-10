@@ -5,6 +5,7 @@ exit code agrees with what ``ronin -p`` would have exited, ``aclose`` really
 releases the runtime, and a workspace with no model configuration says so instead
 of raising something a caller cannot act on.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -35,9 +36,7 @@ main = "local"
 
 def agent_for(tmp_path: Path, responses: list[object]) -> tuple[Agent, h.ScriptedModel]:
     """An agent over a hand-built runtime — no wire, no router, no model."""
-    runtime = h.build_runtime(
-        h.build_loaded(tmp_path), tools=h.ScriptedTools([h.reader()])
-    )
+    runtime = h.build_runtime(h.build_loaded(tmp_path), tools=h.ScriptedTools([h.reader()]))
     model = h.ScriptedModel(responses)  # type: ignore[arg-type]
     from ronin.cli.stream import Conversation
 
@@ -123,14 +122,10 @@ async def test_state_is_a_resumable_value(tmp_path: Path) -> None:
 async def test_notes_lift_the_conversation_degradations_into_workspace_notes(
     tmp_path: Path,
 ) -> None:
-    runtime = h.build_runtime(
-        h.build_loaded(tmp_path), tools=h.ScriptedTools([h.writer(tmp_path)])
-    )
+    runtime = h.build_runtime(h.build_loaded(tmp_path), tools=h.ScriptedTools([h.writer(tmp_path)]))
     from ronin.cli.stream import Conversation
 
-    model = h.ScriptedModel(
-        [h.call("edit", {"file_path": "a.py", "content": "1"}), h.say("done")]
-    )
+    model = h.ScriptedModel([h.call("edit", {"file_path": "a.py", "content": "1"}), h.say("done")])
     agent = Agent(runtime, conversation=Conversation(model=model))
 
     await agent.run("edit", verify=False)
@@ -155,9 +150,7 @@ async def test_aclose_is_idempotent_and_runs_every_closer(tmp_path: Path) -> Non
 
     from dataclasses import replace
 
-    runtime = replace(
-        h.build_runtime(h.build_loaded(tmp_path)), closers=(close_one, close_two)
-    )
+    runtime = replace(h.build_runtime(h.build_loaded(tmp_path)), closers=(close_one, close_two))
     agent = Agent(runtime)
 
     await agent.aclose()

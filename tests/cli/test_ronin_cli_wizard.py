@@ -5,6 +5,7 @@ destructive: ``plan_first_run`` touches nothing, ``apply_plan`` writes only what
 plan said it would write, and an existing file is never overwritten — a first run that
 clobbers somebody's RONIN.md is data loss with a friendly banner.
 """
+
 from __future__ import annotations
 
 import json
@@ -135,7 +136,7 @@ def test_either_half_can_be_turned_off(tmp_path: Path) -> None:
 def test_what_the_wizard_writes_loads_back_as_a_clean_workspace(tmp_path: Path) -> None:
     """The point of the wizard: the files it creates are the files the loader reads."""
     paths = workspace(tmp_path)
-    write(tmp_path, "pyproject.toml", '[tool.ruff]\nline-length = 100\n')
+    write(tmp_path, "pyproject.toml", "[tool.ruff]\nline-length = 100\n")
 
     apply_plan(plan_first_run(paths))
     loaded = load_workspace(paths)

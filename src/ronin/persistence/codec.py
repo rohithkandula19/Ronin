@@ -35,6 +35,7 @@ rather than a session.
 ``DangerLevel``'s value is a comparison rank, and a rank is exactly the kind of
 thing that gets renumbered.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
@@ -108,9 +109,7 @@ class UnknownRecordType(CodecError):
     """A discriminator this codec has no decoder for."""
 
     def __init__(self, tag: object, known: Sequence[str]) -> None:
-        super().__init__(
-            f"unknown record type {tag!r}; this codec knows {sorted(known)}"
-        )
+        super().__init__(f"unknown record type {tag!r}; this codec knows {sorted(known)}")
         self.tag = tag
 
 
@@ -196,9 +195,7 @@ def _opt_float(record: Mapping[str, Any], key: str, default: float = 0.0) -> flo
         return default
     value = record[key]
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise MalformedRecord(
-            f"{_where(record, key)} must be a number, got {type(value).__name__}"
-        )
+        raise MalformedRecord(f"{_where(record, key)} must be a number, got {type(value).__name__}")
     return float(value)
 
 
@@ -233,9 +230,7 @@ def _opt_list(record: Mapping[str, Any], key: str) -> Sequence[Any]:
         return ()
     value = record[key]
     if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
-        raise MalformedRecord(
-            f"{_where(record, key)} must be an array, got {type(value).__name__}"
-        )
+        raise MalformedRecord(f"{_where(record, key)} must be an array, got {type(value).__name__}")
     return value
 
 
@@ -257,8 +252,9 @@ def _record_list(record: Mapping[str, Any], key: str) -> tuple[Mapping[str, Any]
     return tuple(items)
 
 
-def _enum(value: str, enum: type[Role] | type[Mode] | type[TurnState] | type[TodoStatus],
-          where: str) -> Any:
+def _enum(
+    value: str, enum: type[Role] | type[Mode] | type[TurnState] | type[TodoStatus], where: str
+) -> Any:
     try:
         return enum(value)
     except ValueError as exc:
@@ -340,9 +336,7 @@ def decode_block(record: Mapping[str, Any]) -> ContentBlock:
     if tag == BLOCK_TAGS[Text]:
         return Text(text=_req_str(record, "text"))
     if tag == BLOCK_TAGS[Thinking]:
-        return Thinking(
-            text=_req_str(record, "text"), signature=_opt_str(record, "signature")
-        )
+        return Thinking(text=_req_str(record, "text"), signature=_opt_str(record, "signature"))
     if tag == BLOCK_TAGS[ToolUse]:
         return ToolUse(
             id=_req_str(record, "id"),
@@ -375,9 +369,7 @@ def decode_message(record: Mapping[str, Any]) -> Message:
     role: Role = _enum(_req_str(record, "role"), Role, "message.role")
     return Message(
         role=role,
-        content_blocks=tuple(
-            decode_block(block) for block in _record_list(record, "blocks")
-        ),
+        content_blocks=tuple(decode_block(block) for block in _record_list(record, "blocks")),
         metadata=_opt_mapping(record, "metadata"),
     )
 
@@ -410,9 +402,7 @@ def decode_todo(record: Mapping[str, Any]) -> Todo:
     status: TodoStatus = _enum(
         _opt_str(record, "status", TodoStatus.PENDING.value), TodoStatus, "todo.status"
     )
-    return Todo(
-        id=_req_str(record, "id"), subject=_req_str(record, "subject"), status=status
-    )
+    return Todo(id=_req_str(record, "id"), subject=_req_str(record, "subject"), status=status)
 
 
 def encode_budget(budget: Budget) -> dict[str, Any]:
@@ -464,9 +454,7 @@ def decode_state(record: Mapping[str, Any]) -> AgentState:
     mode: Mode = _enum(_opt_str(record, "mode", Mode.ASK.value), Mode, "agent_state.mode")
     checkpoint = record.get("checkpoint_id")
     return AgentState(
-        messages=tuple(
-            decode_message(message) for message in _record_list(record, "messages")
-        ),
+        messages=tuple(decode_message(message) for message in _record_list(record, "messages")),
         todos=tuple(decode_todo(todo) for todo in _record_list(record, "todos")),
         cwd=_opt_str(record, "cwd", "."),
         budget=decode_budget(_opt_mapping(record, "budget")),
@@ -496,9 +484,7 @@ def _enc_text_delta(event: TextDelta) -> dict[str, Any]:
 
 
 def _dec_text_delta(record: Mapping[str, Any]) -> Event:
-    return TextDelta(
-        text=_req_str(record, "text"), thinking=_opt_bool(record, "thinking")
-    )
+    return TextDelta(text=_req_str(record, "text"), thinking=_opt_bool(record, "thinking"))
 
 
 def _enc_stream_reset(event: StreamReset) -> dict[str, Any]:
@@ -555,9 +541,7 @@ def _dec_approval_request(record: Mapping[str, Any]) -> Event:
     return ApprovalRequest(
         tool_use_id=_req_str(record, "tool_use_id"),
         name=_req_str(record, "name"),
-        danger_level=_danger(
-            _req_str(record, "danger_level"), "approval_request.danger_level"
-        ),
+        danger_level=_danger(_req_str(record, "danger_level"), "approval_request.danger_level"),
         rendered=_req_str(record, "rendered"),
         reason=_opt_str(record, "reason"),
     )
@@ -568,9 +552,7 @@ def _enc_turn_end(event: TurnEnd) -> dict[str, Any]:
         "turn_index": event.turn_index,
         "state": event.state.value,
         "stop_reason": event.stop_reason,
-        "agent_state": (
-            None if event.agent_state is None else encode_state(event.agent_state)
-        ),
+        "agent_state": (None if event.agent_state is None else encode_state(event.agent_state)),
     }
 
 
@@ -680,9 +662,7 @@ def missing_event_codecs() -> tuple[str, ...]:
     Exposed rather than kept in the test so a caller can assert it at startup if it
     ever links against a core built from a different revision.
     """
-    return tuple(
-        event_type.__name__ for event_type in EVENT_TYPES if event_type not in EVENT_TAGS
-    )
+    return tuple(event_type.__name__ for event_type in EVENT_TYPES if event_type not in EVENT_TAGS)
 
 
 __all__ = [

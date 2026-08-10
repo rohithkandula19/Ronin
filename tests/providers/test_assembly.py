@@ -5,6 +5,7 @@ that adding a turn, or repairing a call, or asking a different question leaves t
 front of the request byte-identical. A "caching enabled" flag proves nothing; a
 stable fingerprint across ten turns does.
 """
+
 from __future__ import annotations
 
 from ronin.core.types import Message, Role, Text, ToolSpec
@@ -133,16 +134,12 @@ def test_the_marker_counts_only_the_blocks_that_exist() -> None:
 
 
 def test_a_thinking_budget_is_dropped_for_a_model_that_cannot_think() -> None:
-    req = assemble(
-        PREFIX, [user("hi")], model="m", capabilities=NO_CACHE, thinking_budget=4000
-    )
+    req = assemble(PREFIX, [user("hi")], model="m", capabilities=NO_CACHE, thinking_budget=4000)
     assert req.thinking_budget == 0
 
 
 def test_a_thinking_budget_survives_for_a_model_that_can() -> None:
-    req = assemble(
-        PREFIX, [user("hi")], model="m", capabilities=CACHING, thinking_budget=4000
-    )
+    req = assemble(PREFIX, [user("hi")], model="m", capabilities=CACHING, thinking_budget=4000)
     assert req.thinking_budget == 4000
 
 

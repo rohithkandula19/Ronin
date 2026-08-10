@@ -27,6 +27,7 @@ kind of act from creating ``.ronin/settings.json`` — so the plan carries the e
 lines as a note, and ``ronin.cli.doctor`` reports the same thing as a check with the
 patch attached. The user applies it.
 """
+
 from __future__ import annotations
 
 import json
@@ -151,10 +152,7 @@ def plan_first_run(
             PlannedFile(
                 path=target,
                 content=propose_bootstrap(root),
-                reason=(
-                    "the standing instructions the model reads on every turn — "
-                    f"{detail}"
-                ),
+                reason=(f"the standing instructions the model reads on every turn — {detail}"),
                 exists=target.exists(),
             )
         )

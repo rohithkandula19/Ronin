@@ -5,6 +5,7 @@ deliberately not packages, so every module under ``tests/*/`` is importable by i
 basename and two directories cannot share one — ``tests/tools/harness.py`` already owns
 that name, and shadowing it breaks seven unrelated tool tests.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -33,9 +34,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 #: A fixed environment, so a payload built in a test is byte-identical on every machine.
 #: Nothing in ``tests/telemetry`` may call ``local_environment``: it reads the real
 #: interpreter version and would make every assertion depend on the runner.
-FIXED_ENVIRONMENT = Environment(
-    ronin_version="1.0.0", python_version="3.11", os_name=OsName.LINUX
-)
+FIXED_ENVIRONMENT = Environment(ronin_version="1.0.0", python_version="3.11", os_name=OsName.LINUX)
 
 
 def payload(

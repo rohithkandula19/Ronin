@@ -27,6 +27,7 @@ The three backends, and why each is built the way it is:
   the workspace, ``--network none`` unless the caller asks otherwise, and capabilities
   dropped. Slower to start than the other two, hence last in the preference order.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence

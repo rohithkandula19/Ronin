@@ -8,6 +8,7 @@ Everything here exists to keep a test's *subject* visible. A taxonomy test shoul
 "given an edit that failed with an ambiguity error, the class is EDIT_AMBIGUITY" — not
 twenty lines of dataclass construction.
 """
+
 from __future__ import annotations
 
 import textwrap

@@ -44,6 +44,34 @@ jobs:
       - name: Test (Python — full workspace)
         run: uv run --python ${{ matrix.python }} pytest packages apps training tests -q
 
+  # Its own job rather than a step in the matrix: coverage is one number for the tree, so
+  # measuring it six times over would be six chances to disagree with itself and six
+  # times the runtime for one answer. Single OS, single Python, one threshold.
+  coverage:
+    name: coverage (gate 85% on src/ronin)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install Python deps (with dev groups)
+        run: uv sync --all-packages --all-groups
+
+      # The threshold lives in `[tool.coverage.report] fail_under` in pyproject.toml, not
+      # in this flag — one number, in the file the local `make coverage` also reads, so a
+      # contributor cannot pass locally and fail here. pytest-cov exits non-zero on its
+      # own when the gate is missed; there is nothing to compare by hand.
+      #
+      # Only `tests` is collected: it is the suite that exercises src/ronin. Adding the
+      # v1 `packages` tree would pull thousands of tests that touch none of the measured
+      # code and dilute the number toward meaninglessness.
+      - name: Coverage gate
+        run: uv run pytest tests -q --cov --cov-report=term
+
   gates:
     name: gates (build · smoke · docs-stats)
     runs-on: ubuntu-latest

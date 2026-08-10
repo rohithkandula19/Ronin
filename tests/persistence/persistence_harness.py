@@ -7,6 +7,7 @@ shadows the first and breaks whichever suite pytest imported later.
 Everything here builds *real* core values. There is no provider fake because this
 layer has no provider seam: it takes events and gives back events.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -59,9 +60,7 @@ def sample_event(event_type: type) -> Event:
         TurnStart: TurnStart(turn_index=3, state=TurnState.THINKING),
         TextDelta: TextDelta(text="hello ✓\nworld", thinking=True),
         StreamReset: StreamReset(reason="failover after 12 tokens"),
-        ToolStart: ToolStart(
-            tool_use_id="toolu_1", name="read", arguments=NESTED_ARGS
-        ),
+        ToolStart: ToolStart(tool_use_id="toolu_1", name="read", arguments=NESTED_ARGS),
         ToolEnd: ToolEnd(
             tool_use_id="toolu_1",
             name="read",
@@ -169,9 +168,7 @@ def interrupted_tail() -> tuple[Event, ...]:
     return (
         TurnStart(turn_index=0),
         TextDelta(text="Applying the fix."),
-        ToolStart(
-            tool_use_id="toolu_write_2", name="write", arguments={"path": "src/app.py"}
-        ),
+        ToolStart(tool_use_id="toolu_write_2", name="write", arguments={"path": "src/app.py"}),
         ApprovalRequest(
             tool_use_id="toolu_write_2",
             name="write",

@@ -30,6 +30,7 @@ histogram over an integer scale) from pydantic models, and this suite has no rub
 and no judge — its unit of truth is a green or red ``verify.sh``. Bending one into the
 other would mean inventing criteria, which is the one thing forbidden here.
 """
+
 from __future__ import annotations
 
 import json
@@ -142,11 +143,7 @@ def distribution(name: str, values: Sequence[float], *, absent: int = 0) -> Dist
     ordered = sorted(values)
     count = len(ordered)
     middle = count // 2
-    median = (
-        ordered[middle]
-        if count % 2
-        else (ordered[middle - 1] + ordered[middle]) / 2
-    )
+    median = ordered[middle] if count % 2 else (ordered[middle - 1] + ordered[middle]) / 2
     # ceil-of-rank rather than interpolation: an integer index is identical on every
     # platform, and an interpolated p90 over eight tasks is false precision anyway.
     p90_index = min(count - 1, max(0, math.ceil(0.9 * count) - 1))
@@ -323,9 +320,7 @@ def build_report(
         results=ordered,
         overall=aggregate(ordered),
         per_category={
-            category: aggregate(
-                [result for result in ordered if result.category == category]
-            )
+            category: aggregate([result for result in ordered if result.category == category])
             for category in categories
         },
         taxonomy=taxonomy_breakdown(ordered),
@@ -388,12 +383,10 @@ def report_payload(report: RunReport, *, include_timings: bool = True) -> dict[s
             "classified": report.taxonomy.classified,
             "unclassified": report.taxonomy.unclassified,
             "counts": {
-                member.value: report.taxonomy.counts.get(member, 0)
-                for member in FailureClass
+                member.value: report.taxonomy.counts.get(member, 0) for member in FailureClass
             },
             "blame": {
-                key: report.taxonomy.blame.get(key, 0)
-                for key in sorted(report.taxonomy.blame)
+                key: report.taxonomy.blame.get(key, 0) for key in sorted(report.taxonomy.blame)
             },
         },
         "distributions": {
@@ -467,10 +460,8 @@ def report_markdown(report: RunReport, *, include_timings: bool = True) -> str:
     overall = report.overall
     lines.extend(
         [
-            f"- tasks: {overall.tasks} ({overall.attempted} attempted, "
-            f"{overall.skipped} skipped)",
-            f"- pass rate: {overall.render_pass_rate()} "
-            f"({overall.passed}/{overall.attempted})",
+            f"- tasks: {overall.tasks} ({overall.attempted} attempted, {overall.skipped} skipped)",
+            f"- pass rate: {overall.render_pass_rate()} ({overall.passed}/{overall.attempted})",
             f"- unverifiable (no verify.sh): {overall.unverifiable}",
             f"- unclassified failures: {report.taxonomy.render_unclassified()}",
             "",
@@ -561,8 +552,7 @@ def report_markdown(report: RunReport, *, include_timings: bool = True) -> str:
             if row.detail:
                 lines.append(f"- {row.detail}")
             lines.extend(
-                f"- **{finding.failure_class.value}** (fix the {finding.blame}): "
-                f"{finding.evidence}"
+                f"- **{finding.failure_class.value}** (fix the {finding.blame}): {finding.evidence}"
                 for finding in row.findings
             )
             lines.append("")
@@ -693,10 +683,7 @@ def scoreboard_markdown(board: Scoreboard) -> str:
     lines.extend(
         _table(
             ("id", "category", *board.labels),
-            [
-                (f"`{row.task_id}`", row.category, *row.outcomes)
-                for row in board.rows
-            ],
+            [(f"`{row.task_id}`", row.category, *row.outcomes) for row in board.rows],
         )
     )
     lines.extend(
@@ -704,8 +691,7 @@ def scoreboard_markdown(board: Scoreboard) -> str:
             "",
             f"- regressions vs `{board.labels[0]}`: "
             f"{', '.join(board.regressions) if board.regressions else ABSENT}",
-            f"- fixes vs `{board.labels[0]}`: "
-            f"{', '.join(board.fixes) if board.fixes else ABSENT}",
+            f"- fixes vs `{board.labels[0]}`: {', '.join(board.fixes) if board.fixes else ABSENT}",
         ]
     )
     if board.incomparable:

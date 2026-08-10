@@ -27,6 +27,7 @@ deliberately **fails closed**: an adapter path that is set but missing or half-w
 raises instead of quietly serving the bare base model, because a silently-base run
 produces a plausible number that is not a measurement of the adapter.
 """
+
 from __future__ import annotations
 
 import threading
@@ -204,9 +205,7 @@ class LocalAdapterClient:
         chat_template: Callable[[ModelRequest], str] | None = None,
     ) -> None:
         self._backend = Backend(backend)
-        self._model = model or (
-            BASE_MODEL_MLX if self._backend is Backend.MLX else BASE_MODEL_HF
-        )
+        self._model = model or (BASE_MODEL_MLX if self._backend is Backend.MLX else BASE_MODEL_HF)
         self._adapter_path = adapter_path
         self._capabilities = capabilities or LOCAL_ADAPTER_DEFAULTS
         self._chat_template = chat_template or render_chatml
@@ -397,9 +396,7 @@ def build_local_adapter(
     """
     del transport  # local generation has no transport
     raw = spec.extra_body.get("backend")
-    backend = (
-        Backend(str(raw)) if isinstance(raw, str) and raw else resolve_backend(env)
-    )
+    backend = Backend(str(raw)) if isinstance(raw, str) and raw else resolve_backend(env)
     return LocalAdapterClient(
         model=spec.model,
         adapter_path=spec.adapter_path or (env or {}).get(ADAPTER_PATH_ENV, ""),
@@ -447,9 +444,7 @@ def local_router_config(
     )
 
 
-def resolve_model_flag(
-    name: str, *, env: Mapping[str, str] | None = None
-) -> RouterConfig | None:
+def resolve_model_flag(name: str, *, env: Mapping[str, str] | None = None) -> RouterConfig | None:
     """``--model <name>`` → a router config, or ``None`` if it names something else.
 
     Returning ``None`` rather than raising is what lets the CLI try this first and

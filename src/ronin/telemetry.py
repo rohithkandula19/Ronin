@@ -106,6 +106,7 @@ a ``Path``); there is no module-level mutable state and no environment read. The
 impure function is :func:`local_environment`, named so it is obvious, and it reads
 ``sys`` and the installed package version — not ``os.environ``.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -399,9 +400,7 @@ class Environment:
     os_name: OsName
 
 
-def describe_environment(
-    *, ronin_version: str, python_version: str, platform: str
-) -> Environment:
+def describe_environment(*, ronin_version: str, python_version: str, platform: str) -> Environment:
     """Build an :class:`Environment` from raw strings. Pure, so it is testable."""
     return Environment(
         ronin_version=normalize_ronin_version(ronin_version),
@@ -797,9 +796,7 @@ async def demo() -> int:
         home = Path(raw)
         telemetry = for_home(home, sender=capture)
         payload = outcome_payload(
-            describe_environment(
-                ronin_version="1.0.0", python_version="3.11", platform="linux"
-            ),
+            describe_environment(ronin_version="1.0.0", python_version="3.11", platform="linux"),
             task_category=TaskCategory.FIX,
             outcome=Outcome.DONE,
             turns=6,
@@ -831,6 +828,7 @@ async def demo() -> int:
             print(f"  {line}")
 
         print("\na sender that raises does not propagate:")
+
         async def broken(fields: Mapping[str, PayloadValue]) -> None:
             raise RuntimeError("endpoint on fire")
 

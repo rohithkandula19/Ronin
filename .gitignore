@@ -76,6 +76,10 @@ csk_saas.db-journal
 !.ronin/hooks.json
 !.ronin/agents/
 !.ronin/commands/
+# The schema notes for the three files above. JSON has no comments, and an unknown key
+# in settings.json is an *error* rather than ignored, so the documentation cannot live
+# inside the files it documents.
+!.ronin/README.md
 # ...but never the local layer, even though its parent is now walkable.
 .ronin/settings.local.json
 .ronin/*.local.json

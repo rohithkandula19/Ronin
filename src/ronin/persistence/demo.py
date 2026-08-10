@@ -12,6 +12,7 @@ the resulting state is sendable; the session picker lists both sessions without
 reading their events; and both exporters produce a file, the HTML with no external
 reference in it.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -69,9 +70,7 @@ def rule(title: str) -> None:
 def first_prompt_state() -> AgentState:
     """The state the orchestrator hands the loop for the first prompt."""
     return AgentState(
-        messages=(
-            Message(role=Role.USER, content_blocks=(Text(text="Why does handler() 404?"),)),
-        ),
+        messages=(Message(role=Role.USER, content_blocks=(Text(text="Why does handler() 404?"),)),),
         todos=(Todo(id="1", subject="find the bug", status=TodoStatus.IN_PROGRESS),),
         cwd=".",
         budget=Budget(max_usd=5.0, spent_tokens=1_240, spent_usd=0.0182),
@@ -204,8 +203,10 @@ async def main() -> int:
             path = transcript.path
             meta = transcript.meta
         print(f"  {path.name}: {len(events)} events, {meta.turns} completed turn(s)")
-        print(f"  cost ${meta.cost_usd:.4f}, checkpoints {list(meta.checkpoint_ids)}, "
-              f"files touched {list(meta.files_touched)}")
+        print(
+            f"  cost ${meta.cost_usd:.4f}, checkpoints {list(meta.checkpoint_ids)}, "
+            f"files touched {list(meta.files_touched)}"
+        )
 
         with Transcript.open(
             directory, OTHER_ID, model=MODEL, cwd=str(other), title="unrelated work"
@@ -233,8 +234,10 @@ async def main() -> int:
         rule("3. load it — the torn line is reported, not raised")
         read = read_events(path)
         header = read.header or SessionMeta(session_id=SESSION_ID)
-        print(f"  loaded {len(read.events)} events; header says model={header.model!r} "
-              f"cwd={Path(header.cwd).name!r}")
+        print(
+            f"  loaded {len(read.events)} events; header says model={header.model!r} "
+            f"cwd={Path(header.cwd).name!r}"
+        )
         for note in read.skipped:
             print(f"  skipped  → {note}")
 
@@ -268,22 +271,28 @@ async def main() -> int:
         ]
         print(f"  thinking signatures round-tripped byte-identical: {signatures}")
         budget = result.state.budget
-        print(f"  budget carried: ${budget.spent_usd:.4f} of ${budget.max_usd}, "
-              f"mode={result.state.mode.value}, checkpoint={result.state.checkpoint_id}, "
-              f"todos={[(t.id, t.status.value) for t in result.state.todos]}")
+        print(
+            f"  budget carried: ${budget.spent_usd:.4f} of ${budget.max_usd}, "
+            f"mode={result.state.mode.value}, checkpoint={result.state.checkpoint_id}, "
+            f"todos={[(t.id, t.status.value) for t in result.state.todos]}"
+        )
 
         # ----------------------------------------------------- 5. the picker
         rule("5. the picker reads sidecars only; --continue filters on cwd")
         for row in list_sessions(directory):
-            print(f"  {row.session_id}  {row.turns} turn(s)  ${row.cost_usd:.4f}  "
-                  f"{row.duration_seconds:.2f}s  {row.title!r}  cwd={Path(row.cwd).name}")
+            print(
+                f"  {row.session_id}  {row.turns} turn(s)  ${row.cost_usd:.4f}  "
+                f"{row.duration_seconds:.2f}s  {row.title!r}  cwd={Path(row.cwd).name}"
+            )
         here = sessions_for_cwd(directory, str(project))
         print(f"  sessions in {project.name}/: {[row.session_id for row in here]}")
         continued = resume_latest(directory, str(project))
         if continued is not None:
-            print(f"  --continue picks {continued.meta.session_id}: "
-                  f"{len(continued.events)} events, {len(continued.skipped)} skipped line(s), "
-                  f"{len(continued.state.messages)} messages restored")
+            print(
+                f"  --continue picks {continued.meta.session_id}: "
+                f"{len(continued.events)} events, {len(continued.skipped)} skipped line(s), "
+                f"{len(continued.state.messages)} messages restored"
+            )
 
         # ---------------------------------------------------------- 6. export
         rule("6. export: Markdown, and one self-contained HTML file")
@@ -298,16 +307,22 @@ async def main() -> int:
             for marker in ("<script", "<link", "http://", "https://", "src=", "@import")
             if marker in html
         ]
-        print(f"  {md_path.name}:   {md_path.stat().st_size} bytes, "
-              f"{markdown.count(chr(10)) + 1} lines")
-        print(f"  {html_path.name}: {html_path.stat().st_size} bytes, "
-              f"{html.count('<details')} collapsed tool block(s)")
+        print(
+            f"  {md_path.name}:   {md_path.stat().st_size} bytes, "
+            f"{markdown.count(chr(10)) + 1} lines"
+        )
+        print(
+            f"  {html_path.name}: {html_path.stat().st_size} bytes, "
+            f"{html.count('<details')} collapsed tool block(s)"
+        )
         print(f"  external references in the HTML: {external or 'none'}")
 
         hostile = to_html(adversarial_events(), header)
-        print("  adversarial fixture: "
-              f"<script> escaped: {'<script' not in hostile}, "
-              f"</details> escaped: {'&lt;/details&gt;' in hostile}")
+        print(
+            "  adversarial fixture: "
+            f"<script> escaped: {'<script' not in hostile}, "
+            f"</details> escaped: {'&lt;/details&gt;' in hostile}"
+        )
 
     rule("done")
     print("A crash mid-write is a reportable event, not a lost session: the torn line")

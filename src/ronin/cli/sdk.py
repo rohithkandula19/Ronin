@@ -31,6 +31,7 @@ does not restart it, so a second call sees the first call's transcript — which
 what makes compaction, the 200-turn recall property, and ``--continue`` mean
 anything. :meth:`Agent.reset` is the explicit way to start over.
 """
+
 from __future__ import annotations
 
 import os
@@ -65,9 +66,7 @@ _NO_ROUTER = (
 )
 
 
-def find_router_config(
-    paths: Paths, *, environ: Mapping[str, str] | None = None
-) -> Path | None:
+def find_router_config(paths: Paths, *, environ: Mapping[str, str] | None = None) -> Path | None:
     """The router config this workspace should use, or ``None``.
 
     Searched rather than assumed, and every candidate is reported by

@@ -30,6 +30,7 @@ Shape::
       }
     }
 """
+
 from __future__ import annotations
 
 import json
@@ -74,9 +75,7 @@ _COMMON_KEYS = frozenset(
 _STDIO_KEYS = frozenset({"command", "args", "env", "cwd"})
 _NETWORK_KEYS = frozenset({"url", "headers"})
 
-_DANGER_BY_NAME: Mapping[str, DangerLevel] = {
-    level.name.lower(): level for level in DangerLevel
-}
+_DANGER_BY_NAME: Mapping[str, DangerLevel] = {level.name.lower(): level for level in DangerLevel}
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,15 +152,11 @@ def parse_mcp_config(
         raise ConfigError(f"{SERVERS_KEY}: the config root must be a JSON object")
     unknown = sorted(set(data) - {SERVERS_KEY})
     if unknown:
-        raise ConfigError(
-            f"unknown top-level key(s) {unknown}; the only one is {SERVERS_KEY!r}"
-        )
+        raise ConfigError(f"unknown top-level key(s) {unknown}; the only one is {SERVERS_KEY!r}")
     servers = data.get(SERVERS_KEY, {})
     if not isinstance(servers, Mapping):
         raise ConfigError(f"{SERVERS_KEY} must be an object of name -> server config")
-    return tuple(
-        _server(str(name), body, environ or {}) for name, body in servers.items()
-    )
+    return tuple(_server(str(name), body, environ or {}) for name, body in servers.items())
 
 
 def load_mcp_config(
@@ -199,9 +194,7 @@ def enabled_servers(configs: tuple[McpServerConfig, ...]) -> tuple[McpServerConf
 # --------------------------------------------------------------------------- #
 
 
-def _server(
-    name: str, body: object, environ: Mapping[str, str]
-) -> McpServerConfig:
+def _server(name: str, body: object, environ: Mapping[str, str]) -> McpServerConfig:
     if not name:
         raise ConfigError(f"{SERVERS_KEY}: a server name cannot be empty")
     if "__" in name:
@@ -273,8 +266,7 @@ def _transport_kind(name: str, body: Mapping[str, Any]) -> TransportKind:
         )
     if not isinstance(declared, str):
         raise ConfigError(
-            f"server {name!r}: key 'transport' must be a string, got "
-            f"{type(declared).__name__}"
+            f"server {name!r}: key 'transport' must be a string, got {type(declared).__name__}"
         )
     try:
         return TransportKind(declared)
@@ -291,8 +283,7 @@ def _danger(name: str, body: Mapping[str, Any]) -> DangerLevel | None:
         return None
     if not isinstance(raw, str):
         raise ConfigError(
-            f"server {name!r}: key 'danger_level' must be a string, got "
-            f"{type(raw).__name__}"
+            f"server {name!r}: key 'danger_level' must be a string, got {type(raw).__name__}"
         )
     level = _DANGER_BY_NAME.get(raw.strip().lower())
     if level is None:
@@ -328,9 +319,7 @@ def _optional_bool(name: str, body: Mapping[str, Any], key: str) -> bool | None:
     if value is None:
         return None
     if not isinstance(value, bool):
-        raise ConfigError(
-            f"server {name!r}: key {key!r} must be true or false, got {value!r}"
-        )
+        raise ConfigError(f"server {name!r}: key {key!r} must be true or false, got {value!r}")
     return value
 
 
@@ -339,13 +328,9 @@ def _timeout(name: str, body: Mapping[str, Any]) -> float:
     if value is None:
         return DEFAULT_TIMEOUT_SECONDS
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ConfigError(
-            f"server {name!r}: key 'timeout_seconds' must be a number, got {value!r}"
-        )
+        raise ConfigError(f"server {name!r}: key 'timeout_seconds' must be a number, got {value!r}")
     if value <= 0:
-        raise ConfigError(
-            f"server {name!r}: key 'timeout_seconds' must be positive, got {value!r}"
-        )
+        raise ConfigError(f"server {name!r}: key 'timeout_seconds' must be positive, got {value!r}")
     return float(value)
 
 
@@ -355,14 +340,12 @@ def _string_list(name: str, body: Mapping[str, Any], key: str) -> tuple[str, ...
         return ()
     if isinstance(value, str) or not isinstance(value, (list, tuple)):
         raise ConfigError(
-            f"server {name!r}: key {key!r} must be a list of strings, got "
-            f"{type(value).__name__}"
+            f"server {name!r}: key {key!r} must be a list of strings, got {type(value).__name__}"
         )
     for index, item in enumerate(value):
         if not isinstance(item, str):
             raise ConfigError(
-                f"server {name!r}: key {key!r}[{index}] must be a string, got "
-                f"{type(item).__name__}"
+                f"server {name!r}: key {key!r}[{index}] must be a string, got {type(item).__name__}"
             )
     return tuple(value)
 
@@ -389,9 +372,7 @@ def _string_map(
     return resolved
 
 
-def _expand(
-    server: str, key: str, entry: str, raw: str, environ: Mapping[str, str]
-) -> str:
+def _expand(server: str, key: str, entry: str, raw: str, environ: Mapping[str, str]) -> str:
     """Substitute ``${VAR}`` from the injected environment, or refuse.
 
     An unset variable becomes an error rather than an empty string: sending an
@@ -408,8 +389,7 @@ def _expand(
         end = rest.find("}", start)
         if end < 0:
             raise ConfigError(
-                f"server {server!r}: key {key!r}[{entry!r}] has an unterminated "
-                "'${' reference"
+                f"server {server!r}: key {key!r}[{entry!r}] has an unterminated '${{' reference"
             )
         out.append(rest[:start])
         variable = rest[start + 2 : end]

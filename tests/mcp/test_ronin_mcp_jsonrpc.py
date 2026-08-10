@@ -4,6 +4,7 @@ The table is the interesting half. A client that reads ``-32602`` as ``-32603``
 retries a malformed call forever, so each code is asserted against the shape that
 must produce it rather than against "an error happened".
 """
+
 from __future__ import annotations
 
 import json

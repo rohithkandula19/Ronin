@@ -4,6 +4,7 @@ These assert the *rules*, not behavior — there is no logic to test yet. Every
 validator branch, every transition-table entry, and both closed unions are
 covered, because a contract that isn't enforced is a comment.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -199,9 +200,7 @@ def test_tool_spec_requires_name_description_and_typed_danger() -> None:
         ToolSpec(name="x", description="y", danger_level=2)  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize(
-    "level", [DangerLevel.DESTRUCTIVE, DangerLevel.IRREVERSIBLE]
-)
+@pytest.mark.parametrize("level", [DangerLevel.DESTRUCTIVE, DangerLevel.IRREVERSIBLE])
 def test_a_destructive_tool_cannot_opt_out_of_approval(level: DangerLevel) -> None:
     with pytest.raises(ValueError, match=r"cannot opt out of"):
         ToolSpec(name="rm", description="delete", danger_level=level, requires_approval=False)
@@ -288,9 +287,7 @@ def test_budget_spend_cannot_be_negative(name: str) -> None:
         ({"max_wall_seconds": 5.0, "elapsed_seconds": 1.0}, False),
     ],
 )
-def test_budget_exhaustion_per_dimension(
-    kwargs: dict[str, float], expected: bool
-) -> None:
+def test_budget_exhaustion_per_dimension(kwargs: dict[str, float], expected: bool) -> None:
     assert Budget(**kwargs).exhausted is expected  # type: ignore[arg-type]
 
 
@@ -339,9 +336,7 @@ def test_agent_state_checkpoint_id_is_none_or_meaningful() -> None:
 
 def test_agent_state_surfaces_pairing_errors() -> None:
     state = AgentState(
-        messages=(
-            Message(role=Role.ASSISTANT, content_blocks=(ToolUse(id="t1", name="read"),)),
-        )
+        messages=(Message(role=Role.ASSISTANT, content_blocks=(ToolUse(id="t1", name="read"),)),)
     )
     assert state.pairing_errors == ("t1",)
 
@@ -350,7 +345,7 @@ def test_with_message_returns_a_new_state_and_never_mutates() -> None:
     state = AgentState()
     grown = state.with_message(Message(role=Role.USER, content_blocks=(Text("hi"),)))
     assert len(grown.messages) == 1
-    assert state.messages == ()          # the original is untouched
+    assert state.messages == ()  # the original is untouched
     assert grown is not state
 
 
@@ -422,9 +417,9 @@ def test_every_active_state_can_fail_or_be_interrupted(source: TurnState) -> Non
 
 @pytest.mark.parametrize("source", [TurnState.ERROR, TurnState.INTERRUPTED])
 def test_error_and_interrupted_are_resumable_not_dead_ends(source: TurnState) -> None:
-    assert can_transition(source, TurnState.THINKING)   # resume
-    assert can_transition(source, TurnState.DONE)       # give up cleanly
-    assert can_transition(source, TurnState.IDLE)       # abandon the turn
+    assert can_transition(source, TurnState.THINKING)  # resume
+    assert can_transition(source, TurnState.DONE)  # give up cleanly
+    assert can_transition(source, TurnState.IDLE)  # abandon the turn
 
 
 def test_idle_and_done_are_narrow() -> None:
@@ -455,7 +450,7 @@ def test_assert_transition_returns_the_target_or_raises() -> None:
     assert error.source is TurnState.IDLE
     assert error.target is TurnState.DONE
     assert "illegal turn transition idle -> done" in str(error)
-    assert "thinking" in str(error)          # names the legal targets
+    assert "thinking" in str(error)  # names the legal targets
 
 
 # --------------------------------------------------------------------------- #
@@ -510,13 +505,9 @@ def test_approval_request_must_show_what_it_asks_about() -> None:
     assert request.rendered == "rm -rf build/"
 
     with pytest.raises(ValueError, match=r"tool_use_id is required"):
-        ApprovalRequest(
-            tool_use_id="", name="x", danger_level=DangerLevel.MUTATING, rendered="y"
-        )
+        ApprovalRequest(tool_use_id="", name="x", danger_level=DangerLevel.MUTATING, rendered="y")
     with pytest.raises(ValueError, match=r"cannot approve what is not shown"):
-        ApprovalRequest(
-            tool_use_id="t1", name="x", danger_level=DangerLevel.MUTATING, rendered=""
-        )
+        ApprovalRequest(tool_use_id="t1", name="x", danger_level=DangerLevel.MUTATING, rendered="")
     with pytest.raises(TypeError, match=r"must be a DangerLevel"):
         ApprovalRequest(tool_use_id="t1", name="x", danger_level=1, rendered="y")  # type: ignore[arg-type]
 
@@ -544,9 +535,7 @@ def test_an_unattended_consumer_denies_rather_than_auto_allowing() -> None:
     assert not is_event(DENY_UNATTENDED)
 
 
-@pytest.mark.parametrize(
-    "state", [TurnState.DONE, TurnState.ERROR, TurnState.INTERRUPTED]
-)
+@pytest.mark.parametrize("state", [TurnState.DONE, TurnState.ERROR, TurnState.INTERRUPTED])
 def test_turn_end_only_reports_a_terminal_state(state: TurnState) -> None:
     assert TurnEnd(turn_index=1, state=state).state is state
 

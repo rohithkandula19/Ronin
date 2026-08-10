@@ -4,6 +4,7 @@ Every test here writes inside ``tmp_path``. Nothing may touch a real home direct
 :func:`ronin.telemetry.for_home` takes ``home`` as a parameter for exactly that reason,
 and a test that called ``Path.home()`` would edit the developer's own consent record.
 """
+
 from __future__ import annotations
 
 import json

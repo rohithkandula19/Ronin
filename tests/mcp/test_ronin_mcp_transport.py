@@ -4,6 +4,7 @@ The one-byte-at-a-time SSE test is the important one here. Ronin's provider laye
 shipped real reassembly bugs that only a pathological chunking exposes, and the MCP
 transports repeat the same shape, so they get the same treatment.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -294,7 +295,8 @@ async def test_a_non_response_http_body_kills_the_transport_with_a_reason() -> N
 async def test_an_oversized_http_body_is_refused() -> None:
     body = encode(Response(id=1, result={"text": "y" * 4096}))
     transport = HttpTransport(
-        url="https://x.invalid/mcp", sender=ScriptedSender([body], chunk_size=16),
+        url="https://x.invalid/mcp",
+        sender=ScriptedSender([body], chunk_size=16),
         max_frame_bytes=128,
     )
     with pytest.raises(TransportClosed, match="128-byte limit"):

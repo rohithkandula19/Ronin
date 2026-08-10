@@ -10,6 +10,7 @@ site.
 the offline-tests rule and make the golden fixtures impossible. Instead an adapter
 is handed something that yields bytes, and in tests that something reads a file.
 """
+
 from __future__ import annotations
 
 import json

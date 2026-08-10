@@ -19,6 +19,7 @@ promises:
 Nothing here reaches the network, and no model is called: the two model-shaped
 seams (the fixer and the critic) are scripted callables.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -139,9 +140,7 @@ async def _demo_spec_and_plan(root: Path) -> int:
     print(spec.explain())
 
     _heading("2. the narrowed plan for one changed file")
-    plan = plan_for_changes(
-        spec, ["src/pkg/thing.py", "src/pkg/orphan.py"], root=root
-    )
+    plan = plan_for_changes(spec, ["src/pkg/thing.py", "src/pkg/orphan.py"], root=root)
     print(plan.render())
 
     outcome = await run_plan(plan, run=_scripted_runner, cwd=root)
@@ -180,8 +179,10 @@ async def _demo_repair() -> tuple[int, RepairReport]:
     runs = (report.baseline, *(attempt.snapshot for attempt in report.attempts))
     signatures = {snapshot.signature for snapshot in runs}
     print()
-    print(f"distinct signatures across all three runs: {len(signatures)} "
-          f"(tmpdir, line number and duration differed every time)")
+    print(
+        f"distinct signatures across all three runs: {len(signatures)} "
+        f"(tmpdir, line number and duration differed every time)"
+    )
     if len(signatures) != 1 or report.fixed:
         print("UNEXPECTED: the noise was not stripped, or the loop claimed success")
         return 1, report
@@ -231,9 +232,7 @@ async def _demo_checkpoints(root: Path) -> int:
     if after_index != before_index:
         problems.append("the user's .git/index changed")
     if after_status.output != before_status.output:
-        problems.append(
-            f"git status changed: {before_status.output!r} → {after_status.output!r}"
-        )
+        problems.append(f"git status changed: {before_status.output!r} → {after_status.output!r}")
     print("the user's own repo, before and after:")
     print(f"  .git/index bytes identical: {after_index == before_index}")
     print(f"  git status --porcelain identical: {after_status.output == before_status.output}")
@@ -283,13 +282,24 @@ async def main() -> int:
 
         created = await run_command(["git", "init", "--quiet"], cwd=root)
         if created.failure is CommandFailure.NOT_FOUND:
-            print("git is not installed; the checkpoint section will show the "
-                  "degraded path instead of the happy path")
+            print(
+                "git is not installed; the checkpoint section will show the "
+                "degraded path instead of the happy path"
+            )
         else:
             for argv in (
                 ["git", "add", "-A"],
-                ["git", "-c", "user.name=demo", "-c", "user.email=demo@localhost",
-                 "commit", "--quiet", "-m", "initial"],
+                [
+                    "git",
+                    "-c",
+                    "user.name=demo",
+                    "-c",
+                    "user.email=demo@localhost",
+                    "commit",
+                    "--quiet",
+                    "-m",
+                    "initial",
+                ],
             ):
                 await run_command(argv, cwd=root)
 

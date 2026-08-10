@@ -31,6 +31,7 @@ Usage::
     python scripts/sync_typecheck_paths.py           # rewrite in place
     python scripts/sync_typecheck_paths.py --check    # exit 1 if stale (for CI)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -124,25 +125,23 @@ def assert_no_collisions() -> None:
     if collisions:
         raise SystemExit(
             "duplicate module basenames in non-package directories pytest collects; "
-            "the second import silently resolves to the first:\n  "
-            + "\n  ".join(collisions)
+            "the second import silently resolves to the first:\n  " + "\n  ".join(collisions)
         )
 
 
 def test_modules() -> list[str]:
     """Every ``tests/*`` module basename, for the mypy override list."""
     assert_no_collisions()
-    return sorted(
-        path.stem
-        for name in test_dirs()
-        for path in (TESTS / name).glob("*.py")
-    )
+    return sorted(path.stem for name in test_dirs() for path in (TESTS / name).glob("*.py"))
 
 
 def render() -> str:
     dirs = test_dirs()
     files = ["src/ronin", *(f"tests/{name}" for name in dirs)]
-    mypy_path = ":".join(["src", *(f"tests/{name}" for name in dirs)])
+    # `scripts` is on mypy_path but deliberately not in `files`: tests/scripts/ imports
+    # the hook modules under test from there, and without it mypy cannot resolve them —
+    # a test mypy cannot resolve is a test with no type checking at all.
+    mypy_path = ":".join(["src", "scripts", *(f"tests/{name}" for name in dirs)])
     include = ["src/ronin/**/*.py", *(f"tests/{name}/**/*.py" for name in dirs)]
     modules = test_modules()
 

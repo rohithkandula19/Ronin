@@ -32,6 +32,7 @@ Three failure modes get explicit handling, because each one otherwise hangs a tu
 * **A command that never returns** — background mode, so ``npm run dev`` returns a
   handle immediately and ``bash_output`` tails it.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -393,9 +394,7 @@ class BashTool(Tool):
             },
             "description": {
                 "type": "string",
-                "description": (
-                    "5-10 words on what this does, shown in the approval prompt."
-                ),
+                "description": ("5-10 words on what this does, shown in the approval prompt."),
             },
             "run_in_background": {
                 "type": "boolean",
@@ -518,7 +517,7 @@ class BashOutputTool(Tool):
     }
     examples: ClassVar[tuple[Example, ...]] = (
         Example(
-            call="bash_output(handle=\"bg_1\")",
+            call='bash_output(handle="bg_1")',
             result="ready on http://localhost:3000\n(still running)",
         ),
     )

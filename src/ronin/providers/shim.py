@@ -22,6 +22,7 @@ The tag is namespaced (``ronin:``) on purpose. Bare ``<tool_call>`` collides wit
 the chat template of several fine-tunes, which emit it themselves and would make
 every response look like a call.
 """
+
 from __future__ import annotations
 
 import json
@@ -290,9 +291,7 @@ def _read_payload(payload: str) -> tuple[tuple[ShimCall, ...], tuple[ShimFailure
             if call is not None:
                 calls.append(call)
             else:
-                failures.append(
-                    ShimFailure(raw=raw, error=inner.error or "not a tool call object")
-                )
+                failures.append(ShimFailure(raw=raw, error=inner.error or "not a tool call object"))
         if calls:
             return tuple(calls), tuple(failures)
 
@@ -421,9 +420,7 @@ class ShimClient:
                 *(ShimFailure(raw=f.raw, error=f.error) for f in normalized.failed),
             )
             if not failures or attempt_index == self._max_repairs:
-                yield _complete(
-                    attempt, text, normalized, failures, attempts_used=attempt_index
-                )
+                yield _complete(attempt, text, normalized, failures, attempts_used=attempt_index)
                 return
 
             # Repair: replay the model's own words, then the correction. Both go

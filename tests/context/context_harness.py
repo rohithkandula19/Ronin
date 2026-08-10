@@ -4,6 +4,7 @@ Named ``context_harness`` rather than ``harness`` because the test directories a
 deliberately not packages, so every module here is importable by its bare basename
 and two directories may not share one.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -85,9 +86,7 @@ def scripted_session(
         messages.append(user(f"turn {turn}: edit {path}"))
         messages.append(assistant(f"editing {path}", write_call(call_id, path, content)))
         messages.append(
-            tool_results(
-                ToolResultBlock(tool_use_id=call_id, content=f"wrote {path}\n{content}")
-            )
+            tool_results(ToolResultBlock(tool_use_id=call_id, content=f"wrote {path}\n{content}"))
         )
     return messages
 

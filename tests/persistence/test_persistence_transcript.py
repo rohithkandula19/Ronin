@@ -1,4 +1,5 @@
 """The append-only log: its bytes, its durability, and its two failure modes."""
+
 from __future__ import annotations
 
 import json
@@ -143,9 +144,7 @@ def test_fsync_happens_at_turn_boundaries_and_not_per_event(
             transcript.append(TextDelta(text="chunk "))
         transcript.append(ToolStart(tool_use_id="t1", name="read"))
         assert len(calls) == after_open, "no fsync mid-turn"
-        transcript.append(
-            ToolEnd(tool_use_id="t1", name="read", result=ToolResult(ok=True))
-        )
+        transcript.append(ToolEnd(tool_use_id="t1", name="read", result=ToolResult(ok=True)))
         assert len(calls) == after_open, "a ToolEnd is not a turn boundary"
         transcript.append(TurnEnd(turn_index=0, state=TurnState.DONE))
         assert len(calls) > after_open, "a TurnEnd must reach the device"
@@ -278,9 +277,7 @@ def test_unserializable_tool_arguments_fail_loudly_and_write_nothing(
     with Transcript.open(directory, SESSION) as transcript:
         before = transcript.path.read_bytes()
         with pytest.raises(TranscriptError, match="ToolStart"):
-            transcript.append(
-                ToolStart(tool_use_id="t1", name="read", arguments={"bad": {1, 2}})
-            )
+            transcript.append(ToolStart(tool_use_id="t1", name="read", arguments={"bad": {1, 2}}))
     assert read_events(directory / f"{SESSION}{SUFFIX}").events == ()
     assert before.count(b"\n") == 1
 
@@ -292,16 +289,12 @@ def test_a_nan_in_metadata_is_refused_rather_than_written_as_invalid_json(
     load, which is the one thing an append-only log must never do."""
     directory = sessions_dir(tmp_path)
     state = full_state()
-    poisoned = state.with_message(
-        Message(role=Role.USER, metadata={"ratio": float("nan")})
-    )
+    poisoned = state.with_message(Message(role=Role.USER, metadata={"ratio": float("nan")}))
     with (
         Transcript.open(directory, SESSION) as transcript,
         pytest.raises(TranscriptError, match="TurnEnd"),
     ):
-        transcript.append(
-            TurnEnd(turn_index=0, state=TurnState.DONE, agent_state=poisoned)
-        )
+        transcript.append(TurnEnd(turn_index=0, state=TurnState.DONE, agent_state=poisoned))
 
 
 # --------------------------------------------------------------------------- #
@@ -314,9 +307,7 @@ def test_metadata_accumulates_cost_files_and_checkpoints(tmp_path: Path) -> None
     with Transcript.open(directory, SESSION, model="m-1", cwd="/work/repo") as transcript:
         transcript.append(TurnStart(turn_index=0))
         transcript.append(ToolStart(tool_use_id=READ_USE.id, name="read"))
-        transcript.append(
-            ToolEnd(tool_use_id=READ_USE.id, name="read", result=READ_RESULT)
-        )
+        transcript.append(ToolEnd(tool_use_id=READ_USE.id, name="read", result=READ_RESULT))
         transcript.note_files(["docs/NOTES.md"])
         transcript.append(
             TurnEnd(
@@ -366,9 +357,7 @@ def test_sessions_are_listed_newest_first(tmp_path: Path) -> None:
     directory = sessions_dir(tmp_path)
     clock = iter([100.0, 100.0, 200.0, 200.0, 300.0, 300.0, 400.0, 400.0])
     for session_id in ("aaa", "bbb", "ccc"):
-        with Transcript.open(
-            directory, session_id, clock=lambda: next(clock)
-        ) as transcript:
+        with Transcript.open(directory, session_id, clock=lambda: next(clock)) as transcript:
             transcript.append(TurnEnd(turn_index=0, state=TurnState.DONE))
     assert [row.session_id for row in list_sessions(directory)] == ["ccc", "bbb", "aaa"]
 

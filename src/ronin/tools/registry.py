@@ -12,6 +12,7 @@ registry with no network runner simply has no network tools, which is how an off
 or restricted session is configured — by not passing something, rather than by a flag
 that some code path might forget to check.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
@@ -65,9 +66,7 @@ class ToolRegistry:
             known = ", ".join(sorted(self._tools))
             return ToolResult(
                 ok=False,
-                error=(
-                    f"there is no tool called {use.name!r}. Available tools: {known}."
-                ),
+                error=(f"there is no tool called {use.name!r}. Available tools: {known}."),
             )
         return await tool.execute(use.arguments, self.ctx)
 

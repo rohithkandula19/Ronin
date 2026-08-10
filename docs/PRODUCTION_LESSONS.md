@@ -109,7 +109,7 @@ What I do, and recommend: keep the JSON schema, **also** validate inside the han
 The `packages/memory` module splits memory into three layers:
 
 - **Short-term**: the conversation history. Compressed via a rolling summary when token estimate crosses N. Lives in a Python list.
-- **Long-term**: the vector store. User-scoped. Pluggable backend (ChromaDB / Pinecone / your own). 
+- **Long-term**: the vector store. User-scoped. Pluggable backend (ChromaDB / Pinecone / your own).
 - **Preferences**: structured key-value (timezone, tone, role). Lives in a dict you persist however.
 
 I lost half a day trying to use one mechanism for all three. The vector store is too slow for short-term context. The summary string is too lossy for "remember that 6 months ago the user said they hate emoji." The preferences dict doesn't help with semantic recall.

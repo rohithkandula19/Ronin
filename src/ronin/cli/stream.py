@@ -59,6 +59,7 @@ and ``TranscriptError`` only, and the one background task (the repair loop, whic
 has to be a task because ``repair_loop`` takes callbacks and cannot yield through
 them) is cancelled in a ``finally`` and re-raised from.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -659,9 +660,7 @@ class Conversation:
         queue: asyncio.Queue[Event | None] = asyncio.Queue()
 
         async def verify_step() -> FailureSnapshot:
-            outcome = await run_plan(
-                plan, run=self.command, cwd=root, timeout=self.verify_timeout
-            )
+            outcome = await run_plan(plan, run=self.command, cwd=root, timeout=self.verify_timeout)
             self.last_verify = outcome
             for event in self._verify_pair(changed, as_tool_result(outcome)):
                 await queue.put(event)
@@ -713,6 +712,7 @@ class Conversation:
         """A unique id for one middleware step. Unique per conversation, not global."""
         self._step += 1
         return f"ronin-{kind}-{self._step}"
+
 
 async def run_prompt(
     runtime: Runtime,

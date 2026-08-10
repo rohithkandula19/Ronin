@@ -9,6 +9,7 @@ The fakes sit exactly at the seam the offline rule requires: a
 network senders return scripted bytes. Nothing here opens a socket or spawns a
 process, and the client under test cannot tell.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -155,11 +156,7 @@ class FakeMcpServer:
             if request.is_notification:
                 continue
             self.served += 1
-            if (
-                self.die_after is not None
-                and not self.died_once
-                and self.served > self.die_after
-            ):
+            if self.die_after is not None and not self.died_once and self.served > self.die_after:
                 # Dies exactly once, counting across connections, so a test can
                 # assert that a *successful* reconnect recovers the tool rather
                 # than dying again on the retry.
@@ -332,6 +329,4 @@ class FailingSender:
 
 def sse_bytes(*payloads: str, event: str = "message") -> bytes:
     """SSE frames for the given ``data:`` payloads, blank-line separated."""
-    return b"".join(
-        f"event: {event}\ndata: {payload}\n\n".encode() for payload in payloads
-    )
+    return b"".join(f"event: {event}\ndata: {payload}\n\n".encode() for payload in payloads)

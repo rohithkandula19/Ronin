@@ -6,6 +6,7 @@ while the map looks perfectly healthy. So the pattern cases are table-driven and
 cover the four things a naive ``fnmatch`` implementation gets wrong — anchoring,
 directory-only patterns, ``**``, and negation ordering — plus nested files.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -236,10 +237,7 @@ def test_private_names_are_omitted_but_dunders_are_kept() -> None:
 
 
 def test_private_names_can_be_included_on_request() -> None:
-    names = {
-        s.name
-        for s in PythonAstParser(include_private=True).signatures(SOURCE, "engine.py")
-    }
+    names = {s.name for s in PythonAstParser(include_private=True).signatures(SOURCE, "engine.py")}
     assert {"_hidden", "_helper"} <= names
 
 

@@ -31,6 +31,7 @@ one place: deciding what to do before anything is touched). This package may not
 import ``ronin.providers``, so the role travels as the *name* in
 :data:`PLAN_MODEL_ROLE` and the orchestrator resolves it against its router.
 """
+
 from __future__ import annotations
 
 import re
@@ -400,9 +401,7 @@ class PlanApproval:
         return pinned_objective(self.plan) if self.approved else ""
 
 
-def approve(
-    plan: Plan, *, note: str = "", execute_mode: Mode = Mode.AUTO_EDIT
-) -> PlanApproval:
+def approve(plan: Plan, *, note: str = "", execute_mode: Mode = Mode.AUTO_EDIT) -> PlanApproval:
     """Approve ``plan`` and flip to ``execute_mode`` with the plan pinned."""
     return PlanApproval(plan=plan, approved=True, note=note, execute_mode=execute_mode)
 

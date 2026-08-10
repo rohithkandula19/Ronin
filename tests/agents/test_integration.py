@@ -4,6 +4,7 @@ Real registry, real tools, real files in ``tmp_path``, real ``TaskTool``. The on
 fakes are the model (its answer is a string constant) and, for the gate test, the
 hook process — with one genuinely-executing shell hook to keep the argv path honest.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping

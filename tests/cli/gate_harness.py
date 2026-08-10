@@ -10,6 +10,7 @@ the output clamp are all pure and offline, so the tests construct the **real** o
 a fake policy engine could not prove the one thing this suite exists to prove, which
 is that fetched content actually escalates a later call to ``ask``.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
@@ -62,9 +63,7 @@ BASH = ToolSpec(
 )
 WEB_FETCH = ToolSpec(name="web_fetch", description="Fetch a URL and extract from it.")
 WEB_SEARCH = ToolSpec(name="web_search", description="Search the web.")
-MCP_ISSUE = ToolSpec(
-    name="mcp__tracker__get_issue", description="Read an issue from the tracker."
-)
+MCP_ISSUE = ToolSpec(name="mcp__tracker__get_issue", description="Read an issue from the tracker.")
 
 SPECS: tuple[ToolSpec, ...] = (READ, WRITE, EDIT, BASH, WEB_FETCH, WEB_SEARCH, MCP_ISSUE)
 
@@ -200,9 +199,7 @@ class RecordingAsker:
 
 def engine(taint: TaintTracker, *, asker: RecordingAsker | None = None) -> PolicyEngine:
     """The real policy engine on the shipped ruleset, sharing ``taint`` with the gate."""
-    return PolicyEngine(
-        rules=builtin_ruleset(), asker=asker or RecordingAsker(), taint=taint
-    )
+    return PolicyEngine(rules=builtin_ruleset(), asker=asker or RecordingAsker(), taint=taint)
 
 
 # --------------------------------------------------------------------------- #

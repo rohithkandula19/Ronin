@@ -6,6 +6,7 @@ compaction over its trigger, that a read-only turn does not checkpoint, that the
 verify failure arrived on a ``TOOL``-role message and on no ``USER``-role message,
 that the repair loop stops and says so, and that a cancel gets out.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -82,9 +83,7 @@ async def test_compaction_fires_because_the_pinned_prefix_is_counted(tmp_path: P
     # The transcript on its own is nowhere near the trigger; the repo map and
     # RONIN.md are. If ``pinned_prefix_tokens`` were left at its default of 0 —
     # the bug ``spine`` exists to prevent — nothing here would compact.
-    loaded = h.build_loaded(
-        tmp_path, memory_text="remember this\n" * 40, repo_map_tokens=1_500
-    )
+    loaded = h.build_loaded(tmp_path, memory_text="remember this\n" * 40, repo_map_tokens=1_500)
     runtime = h.build_runtime(loaded, context_window=2_000)
     pinned = loaded.pinned_prefix_tokens()
     assert pinned > 0
@@ -168,9 +167,7 @@ def test_a_pairing_error_names_the_ids_it_found() -> None:
 async def test_a_read_only_turn_takes_no_checkpoint(tmp_path: Path) -> None:
     root = h.git_repo(tmp_path)
     git = h.FakeGit()
-    runtime = h.build_runtime(
-        h.build_loaded(root), tools=h.ScriptedTools([h.reader()]), git=git
-    )
+    runtime = h.build_runtime(h.build_loaded(root), tools=h.ScriptedTools([h.reader()]), git=git)
     model = h.ScriptedModel([h.call("read", {"file_path": "a.py"}), h.say("done")])
 
     events = await h.collect(Conversation(model=model).run_prompt(runtime, "look"))
@@ -193,9 +190,7 @@ async def test_a_mutating_turn_checkpoints_before_the_edit_lands(tmp_path: Path)
         [h.call("edit", {"file_path": "src/widget.py", "content": "changed\n"}), h.say("done")]
     )
 
-    events = await h.collect(
-        Conversation(model=model).run_prompt(runtime, "edit it", verify=False)
-    )
+    events = await h.collect(Conversation(model=model).run_prompt(runtime, "edit it", verify=False))
 
     assert git.checkpoints_taken == 1
     # The file still held its original bytes when the snapshot was taken. A
@@ -227,9 +222,7 @@ async def test_only_one_checkpoint_per_turn_however_many_edits(tmp_path: Path) -
 
 async def test_unavailable_checkpoints_are_a_note_not_a_failure(tmp_path: Path) -> None:
     # No ``.git`` at all: the store degrades with a reason a human can act on.
-    runtime = h.build_runtime(
-        h.build_loaded(tmp_path), tools=h.ScriptedTools([h.writer(tmp_path)])
-    )
+    runtime = h.build_runtime(h.build_loaded(tmp_path), tools=h.ScriptedTools([h.writer(tmp_path)]))
     model = h.ScriptedModel([h.call("edit", {"file_path": "a.py", "content": "1"}), h.say("ok")])
     conversation = Conversation(model=model)
 
@@ -335,9 +328,7 @@ async def test_a_verify_failure_arrives_as_a_tool_result_and_not_as_a_user_messa
     tmp_path: Path,
 ) -> None:
     root, git, tools = verify_setup(tmp_path)
-    runtime = h.build_runtime(
-        h.build_loaded(root, verify=h.pytest_spec()), tools=tools, git=git
-    )
+    runtime = h.build_runtime(h.build_loaded(root, verify=h.pytest_spec()), tools=tools, git=git)
     commands = h.ScriptedCommands(outputs=[(1, h.PYTEST_FAILURE)])
     conversation = Conversation(model=h.ScriptedModel(edits(6)), command=commands)  # type: ignore[arg-type]
 
@@ -364,14 +355,10 @@ async def test_the_repair_loop_stops_at_its_cap_with_an_honest_report(
     tmp_path: Path,
 ) -> None:
     root, git, tools = verify_setup(tmp_path)
-    runtime = h.build_runtime(
-        h.build_loaded(root, verify=h.pytest_spec()), tools=tools, git=git
-    )
+    runtime = h.build_runtime(h.build_loaded(root, verify=h.pytest_spec()), tools=tools, git=git)
     # The same failure with cosmetic differences: a different tmpdir, a line number
     # that moved, a different duration. The signature must read them as one.
-    commands = h.ScriptedCommands(
-        outputs=[(1, h.PYTEST_FAILURE), (1, h.PYTEST_FAILURE_AGAIN)]
-    )
+    commands = h.ScriptedCommands(outputs=[(1, h.PYTEST_FAILURE), (1, h.PYTEST_FAILURE_AGAIN)])
     conversation = Conversation(model=h.ScriptedModel(edits(8)), command=commands)  # type: ignore[arg-type]
 
     events = await h.collect(conversation.run_prompt(runtime, "fix widget"))
@@ -394,9 +381,7 @@ async def test_a_verify_pass_that_goes_green_reports_fixed_and_no_error(
     tmp_path: Path,
 ) -> None:
     root, git, tools = verify_setup(tmp_path)
-    runtime = h.build_runtime(
-        h.build_loaded(root, verify=h.pytest_spec()), tools=tools, git=git
-    )
+    runtime = h.build_runtime(h.build_loaded(root, verify=h.pytest_spec()), tools=tools, git=git)
     commands = h.ScriptedCommands(outputs=[(1, h.PYTEST_FAILURE), (0, "2 passed")])
     conversation = Conversation(model=h.ScriptedModel(edits(4)), command=commands)  # type: ignore[arg-type]
 
@@ -409,9 +394,7 @@ async def test_a_verify_pass_that_goes_green_reports_fixed_and_no_error(
 
 async def test_a_green_first_pass_runs_no_repair_turn(tmp_path: Path) -> None:
     root, git, tools = verify_setup(tmp_path)
-    runtime = h.build_runtime(
-        h.build_loaded(root, verify=h.pytest_spec()), tools=tools, git=git
-    )
+    runtime = h.build_runtime(h.build_loaded(root, verify=h.pytest_spec()), tools=tools, git=git)
     commands = h.ScriptedCommands(outputs=[(0, "2 passed")])
     model = h.ScriptedModel(edits(1))  # type: ignore[arg-type]
     conversation = Conversation(model=model, command=commands)
@@ -458,9 +441,7 @@ async def test_ask_mode_skips_verification_and_says_so(tmp_path: Path) -> None:
 
 async def test_verify_false_runs_nothing_at_all(tmp_path: Path) -> None:
     root, git, tools = verify_setup(tmp_path)
-    runtime = h.build_runtime(
-        h.build_loaded(root, verify=h.pytest_spec()), tools=tools, git=git
-    )
+    runtime = h.build_runtime(h.build_loaded(root, verify=h.pytest_spec()), tools=tools, git=git)
     commands = h.ScriptedCommands(outputs=[(1, h.PYTEST_FAILURE)])
     conversation = Conversation(model=h.ScriptedModel(edits(1)), command=commands)  # type: ignore[arg-type]
 

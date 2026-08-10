@@ -27,6 +27,7 @@ Everything that is not prose — tool arguments, tool results, approval renderin
 goes inside a fence whose length is computed from the content, so a result
 containing three backticks cannot break out of its block.
 """
+
 from __future__ import annotations
 
 import json
@@ -74,9 +75,9 @@ def _stamp(when: float) -> str:
     return datetime.fromtimestamp(when, tz=UTC).isoformat(timespec="seconds")
 
 
-def _meta_rows(meta: SessionMeta, turns: Sequence[ReplayTurn], events: int) -> tuple[
-    tuple[str, str], ...
-]:
+def _meta_rows(
+    meta: SessionMeta, turns: Sequence[ReplayTurn], events: int
+) -> tuple[tuple[str, str], ...]:
     """The header every export carries. One source, so the two agree."""
     return (
         ("session", meta.session_id),
@@ -237,8 +238,7 @@ def to_html(events: Sequence[Event], meta: SessionMeta) -> str:
     ]
     for name, value in _meta_rows(meta, turns, len(events)):
         out.append(
-            f"<tr><th>{escape(name, quote=True)}</th>"
-            f"<td>{escape(value, quote=True)}</td></tr>"
+            f"<tr><th>{escape(name, quote=True)}</th><td>{escape(value, quote=True)}</td></tr>"
         )
     out.append("</table>")
 
@@ -247,7 +247,7 @@ def to_html(events: Sequence[Event], meta: SessionMeta) -> str:
 
     for position, turn in enumerate(turns, start=1):
         out.append('<section class="turn">')
-        out.append(f"<h2>Turn {position} <span class=\"dim\">(index {turn.index})</span></h2>")
+        out.append(f'<h2>Turn {position} <span class="dim">(index {turn.index})</span></h2>')
         if turn.resets:
             out.append(
                 f'<p class="dim">stream was reset {turn.resets} time(s) — text before the '
@@ -275,14 +275,10 @@ def to_html(events: Sequence[Event], meta: SessionMeta) -> str:
                 )
                 body.append(_pre(approval.rendered))
             if result is None:
-                body.append(
-                    '<p class="dim err">the session ended before this tool returned.</p>'
-                )
+                body.append('<p class="dim err">the session ended before this tool returned.</p>')
             else:
                 body.append(_pre(result.content, "err" if result.is_error else ""))
-            out.append(
-                _details(f"tool {call.name} · {call.id} · {verdict}", "".join(body))
-            )
+            out.append(_details(f"tool {call.name} · {call.id} · {verdict}", "".join(body)))
         for error in turn.errors:
             kind = "recoverable" if error.recoverable else "fatal"
             out.append(
@@ -297,9 +293,7 @@ def to_html(events: Sequence[Event], meta: SessionMeta) -> str:
                 f"({escape(reason, quote=True)})</p>"
             )
         else:
-            out.append(
-                '<p class="dim">turn has no recorded end — the session stopped here.</p>'
-            )
+            out.append('<p class="dim">turn has no recorded end — the session stopped here.</p>')
         out.append("</section>")
     out.extend(["</body>", "</html>", ""])
     return "\n".join(out)

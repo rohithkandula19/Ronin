@@ -18,6 +18,7 @@ Capabilities default to ``native_tools=False``: base Qwen, Hermes and most local
 GGUF/MLX builds have no tool-calling head, so the router puts them behind the
 format shim. A build that *does* have one can say so in config.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -104,9 +105,7 @@ class MLXClient:
         model, tokenizer = self._loaded
 
         def generate(prompt: str, max_tokens: int) -> Iterator[str]:
-            for response in stream_generate(
-                model, tokenizer, prompt=prompt, max_tokens=max_tokens
-            ):
+            for response in stream_generate(model, tokenizer, prompt=prompt, max_tokens=max_tokens):
                 yield str(response.text)
 
         return generate

@@ -5,6 +5,7 @@ tools' whole job is touching real files and a mocked filesystem would test the m
 Nothing reaches the developer's tree: ``ToolContext.root`` is the temp directory and
 the tools refuse paths outside it.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence

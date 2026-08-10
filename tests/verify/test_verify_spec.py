@@ -1,4 +1,5 @@
 """Detection must be evidence-based: no command without a reason, ever."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -89,9 +90,7 @@ def test_a_declared_build_dependency_does_justify_one(tmp_path: Path) -> None:
 
 
 def test_pyright_is_used_only_when_mypy_is_absent(tmp_path: Path) -> None:
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.pyright]\nstrict = []\n", encoding="utf-8"
-    )
+    (tmp_path / "pyproject.toml").write_text("[tool.pyright]\nstrict = []\n", encoding="utf-8")
     assert detect_verify_spec(tmp_path).typecheck == DetectedCommand(
         argv=("pyright",),
         source="pyproject.toml",

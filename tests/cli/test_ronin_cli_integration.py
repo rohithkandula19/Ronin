@@ -11,6 +11,7 @@ this file exists to check.
 The 200-turn recall test lives here too, for the same reason: it is a *session*, not
 a unit.
 """
+
 from __future__ import annotations
 
 import json
@@ -313,8 +314,7 @@ async def test_two_hundred_turns_of_compaction_still_recall_turn_threes_file(
     # the model was handed on the last turn.
     last = model.calls[-1].rendered()
     assert marker(RECALL_TURN) in last, (
-        f"the turn-{RECALL_TURN} tool result did not survive "
-        f"{conversation.compactions} compactions"
+        f"the turn-{RECALL_TURN} tool result did not survive {conversation.compactions} compactions"
     )
     assert path_for(RECALL_TURN) in last
     # In full, not summarized: the whole padded body is still there.

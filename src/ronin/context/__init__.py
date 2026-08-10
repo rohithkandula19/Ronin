@@ -28,6 +28,7 @@ Every token figure this package produces is an estimate at ``len(text) / 4``. It
 labelled as an estimate everywhere it is rendered, because a number that looks
 measured and is not is worse than no number.
 """
+
 from __future__ import annotations
 
 from .budget import (

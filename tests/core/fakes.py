@@ -15,6 +15,7 @@ Two deliberate choices:
   *can* happen *will* happen. That makes concurrency assertions deterministic
   without putting the wall clock in the test's critical path.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -84,9 +85,7 @@ class FakeModel:
         messages: Sequence[Message],
         tools: Sequence[ToolSpec],
     ) -> AsyncIterator[ModelChunk]:
-        self.calls.append(
-            ModelCall(system=system, messages=tuple(messages), tools=tuple(tools))
-        )
+        self.calls.append(ModelCall(system=system, messages=tuple(messages), tools=tuple(tools)))
         if len(self.calls) > len(self._responses):
             raise AssertionError(
                 f"FakeModel script exhausted: the loop asked for response "
@@ -139,9 +138,7 @@ class FakeTools:
         self.executions.append(use)
         entry = self._tools.get(use.name)
         if entry is None:
-            raise AssertionError(
-                f"the loop executed {use.name!r}, which is not registered"
-            )
+            raise AssertionError(f"the loop executed {use.name!r}, which is not registered")
 
         self.in_flight += 1
         self.max_in_flight = max(self.max_in_flight, self.in_flight)
@@ -196,9 +193,7 @@ class FakePolicy:
         #: is how a test cancels *mid-batch* without touching loop internals.
         self.cancel_now = False
 
-    async def approve(
-        self, spec: ToolSpec, use: ToolUse, *, rendered: str
-    ) -> ApprovalDecision:
+    async def approve(self, spec: ToolSpec, use: ToolUse, *, rendered: str) -> ApprovalDecision:
         self.approvals.append(ApprovalAsk(spec=spec, use=use, rendered=rendered))
         if self._approve is not None:
             return self._approve(spec, use)

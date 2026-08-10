@@ -5,6 +5,7 @@ is about argv rather than about a process, the subprocess runner. ``verify.sh`` 
 through real ``bash`` here, because "the pass criterion actually executed" is the one
 thing a fake cannot establish.
 """
+
 from __future__ import annotations
 
 import json
@@ -444,9 +445,9 @@ async def test_each_class_is_reachable_through_the_real_runner(
         files_expected=["app.py"],
     )
     write_manifest(root, ["fix-add"])
-    report = await EvalRunner(
-        v2_adapter(scripted_factory(steps)), clock=frozen_clock()
-    ).run(load_suite(root))
+    report = await EvalRunner(v2_adapter(scripted_factory(steps)), clock=frozen_clock()).run(
+        load_suite(root)
+    )
     assert expected in report.rows[0].classes
 
 
@@ -461,9 +462,9 @@ async def test_a_looping_agent_is_classified_looped_through_the_runner(tmp_path:
     )
     write_manifest(root, ["loop"])
     same = [Step(tool="grep", arguments={"pattern": "add"}) for _ in range(4)]
-    report = await EvalRunner(
-        v2_adapter(scripted_factory(same)), clock=frozen_clock()
-    ).run(load_suite(root))
+    report = await EvalRunner(v2_adapter(scripted_factory(same)), clock=frozen_clock()).run(
+        load_suite(root)
+    )
     assert FailureClass.LOOPED in report.rows[0].classes
 
 

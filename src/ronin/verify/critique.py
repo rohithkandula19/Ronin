@@ -19,6 +19,7 @@ parses to nothing at all is treated as **no**, with the raw text as the missing
 piece: one extra iteration costs a turn, whereas a mis-read "no" that becomes a
 "yes" ships an unfinished task.
 """
+
 from __future__ import annotations
 
 import re
@@ -58,10 +59,7 @@ MAX_EXTRA_ITERATIONS: Final[int] = 1
 _YES = re.compile(r"(?:^|[^a-z])(yes|pass(?:es|ed)?|correct|complete|✅|👍)(?:$|[^a-z])", re.I)
 _NO = re.compile(r"(?:^|[^a-z])(no|nope|fail(?:s|ed)?|incomplete|missing|❌|👎)(?:$|[^a-z])", re.I)
 
-_UNPARSEABLE = (
-    "the critique did not answer yes or no, so this counts as no; the raw answer "
-    "follows"
-)
+_UNPARSEABLE = "the critique did not answer yes or no, so this counts as no; the raw answer follows"
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,9 +116,7 @@ def parse_critique(text: str) -> Critique:
         verdict = _verdict(stripped)
         rest = stripped
     if verdict is None:
-        return Critique(
-            passes=False, missing=f"{_UNPARSEABLE}: {stripped}", raw=text, parsed=False
-        )
+        return Critique(passes=False, missing=f"{_UNPARSEABLE}: {stripped}", raw=text, parsed=False)
     if verdict:
         return Critique(passes=True, missing="", raw=text)
     return Critique(

@@ -5,6 +5,7 @@ the two halves fit. It uses the actual ``ronin.core.loop.run_turn`` — not a
 reimplementation — driven by an actual ``AnthropicClient`` reading actual recorded
 bytes off disk. If the vocabularies had drifted, that test would not run at all.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Sequence
@@ -79,9 +80,7 @@ class Registry:
 
 
 class AllowAll:
-    async def approve(
-        self, spec: ToolSpec, use: ToolUse, *, rendered: str
-    ) -> ApprovalDecision:
+    async def approve(self, spec: ToolSpec, use: ToolUse, *, rendered: str) -> ApprovalDecision:
         del spec, use, rendered
         return ApprovalDecision(approved=True, reason="test policy")
 
@@ -116,9 +115,7 @@ async def test_the_loop_runs_a_full_turn_over_a_replayed_provider() -> None:
     state = AgentState(
         messages=(Message(role=Role.USER, content_blocks=(Text("read src/main.py"),)),)
     )
-    transport = ScriptedTransport(
-        [load("anthropic/happy.sse"), load("anthropic/final_answer.sse")]
-    )
+    transport = ScriptedTransport([load("anthropic/happy.sse"), load("anthropic/final_answer.sse")])
     inner = AnthropicClient(model="claude-x", transport=transport)
     bridge = LoopClient(inner, model="claude-x")
 
@@ -149,9 +146,7 @@ async def test_a_shimmed_local_model_drives_the_same_loop() -> None:
         ),
     )
     bridge = LoopClient(ShimClient(inner), model="q")
-    state = AgentState(
-        messages=(Message(role=Role.USER, content_blocks=(Text("read it"),)),)
-    )
+    state = AgentState(messages=(Message(role=Role.USER, content_blocks=(Text("read it"),)),))
     events = [event async for event in run_turn(state, bridge, tools, AllowAll())]
     assert tools.ran == ["read_file(src/main.py)"]
     end = events[-1]

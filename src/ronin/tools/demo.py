@@ -5,6 +5,7 @@ see is what a model would get. The three rules the layer is built on each get a
 demonstration, including the refusals — a tool layer's refusals are half its behaviour
 and they are the half you cannot see from a passing test suite.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -204,9 +205,7 @@ async def demo_net(registry: ToolRegistry) -> None:
     )
     show(
         "web_fetch localhost",
-        await registry.execute(
-            _use("web_fetch", url="http://localhost:3000/", prompt="anything")
-        ),
+        await registry.execute(_use("web_fetch", url="http://localhost:3000/", prompt="anything")),
     )
     show("web_search", await registry.execute(_use("web_search", query="ripgrep multiline")))
 

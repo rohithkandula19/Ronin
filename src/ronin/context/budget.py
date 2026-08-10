@@ -19,6 +19,7 @@ mode :attr:`ClampMode.MARKER_ONLY`, the one case where the returned text may
 exceed the budget. Returning empty text instead would be a silent drop, which is
 the failure this module exists to prevent.
 """
+
 from __future__ import annotations
 
 import math
@@ -198,9 +199,7 @@ def _clamp_lines(text: str, lines: list[str], budget: OutputBudget) -> Clamped:
     )
 
 
-def _fit_lines(
-    lines: list[str], budget: OutputBudget, marker_cost: int
-) -> tuple[int, int]:
+def _fit_lines(lines: list[str], budget: OutputBudget, marker_cost: int) -> tuple[int, int]:
     """How many whole lines fit at the head and at the tail. Never all of them.
 
     Greedy from each end, which is what makes it reproducible: no search, no
@@ -255,9 +254,7 @@ def _clamp_chars(text: str, budget: OutputBudget) -> Clamped:
         marker = char_marker(elided)
         allowance = budget.remaining_chars - len(marker)
         if allowance <= 0:
-            return _marker_only(
-                char_marker(len(text)), elided_lines=0, elided_chars=len(text)
-            )
+            return _marker_only(char_marker(len(text)), elided_lines=0, elided_chars=len(text))
         head_n = int(allowance * budget.head_fraction)
         tail_n = allowance - head_n
         settled = len(text) - head_n - tail_n

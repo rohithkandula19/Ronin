@@ -21,6 +21,7 @@ goal, and it has three consequences:
   server asserting ``readOnlyHint: true`` is a claim by the thing we are trying to
   contain, and believing it would make the gate decorative.
 """
+
 from __future__ import annotations
 
 import re
@@ -60,8 +61,7 @@ _PLACEHOLDERS: Mapping[str, Any] = {
 #: reader of the assembled prompt must be able to tell what the upstream server
 #: actually said from what Ronin filled in.
 _SYNTHESIZED_MARKER = (
-    "(synthesized by Ronin — the MCP server supplied no guidance on when this "
-    "tool is a poor fit)"
+    "(synthesized by Ronin — the MCP server supplied no guidance on when this tool is a poor fit)"
 )
 
 
@@ -164,9 +164,7 @@ class Described:
     examples: tuple[Example, ...]
 
 
-def adapt_description(
-    server: str, local_name: str, descriptor: Mapping[str, Any]
-) -> Described:
+def adapt_description(server: str, local_name: str, descriptor: Mapping[str, Any]) -> Described:
     """Turn an MCP tool descriptor into the house format.
 
     The upstream ``description`` becomes the summary and the body of "when to
@@ -255,9 +253,7 @@ def _placeholder(spec: object) -> Any:
 # --------------------------------------------------------------------------- #
 
 
-def danger_for(
-    config: McpServerConfig, descriptor: Mapping[str, Any]
-) -> tuple[DangerLevel, bool]:
+def danger_for(config: McpServerConfig, descriptor: Mapping[str, Any]) -> tuple[DangerLevel, bool]:
     """``(danger_level, requires_approval)`` for one remote tool.
 
     Starts from the config — which fails closed for a server that declared

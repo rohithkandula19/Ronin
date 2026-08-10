@@ -1,4 +1,5 @@
 """plan mode: the registry guarantee, and the plan → approval → objective path."""
+
 from __future__ import annotations
 
 import re
@@ -36,9 +37,7 @@ from ronin.tools.registry import ToolRegistry
 
 
 @pytest.mark.parametrize("forbidden", sorted(FORBIDDEN_IN_PLAN_MODE))
-def test_a_plan_registry_does_not_contain_any_mutating_tool(
-    tmp_path: Path, forbidden: str
-) -> None:
+def test_a_plan_registry_does_not_contain_any_mutating_tool(tmp_path: Path, forbidden: str) -> None:
     plan = plan_registry(registry(tmp_path))
     assert plan.get(forbidden) is None
 

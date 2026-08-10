@@ -9,6 +9,7 @@ the model would have typed anyway is a gate people switch off.
 
 Everything here is offline and touches no real file outside ``tmp_path``.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -115,9 +116,7 @@ def test_the_gate_is_indistinguishable_from_a_registry_to_the_loop() -> None:
 async def test_a_pre_tool_use_hook_exiting_2_blocks_the_call_and_the_tool_never_runs() -> None:
     process = ScriptedHookProcess({"guard": blocked("migrations/ is off limits")})
     inner = RecordingRegistry()
-    gate, _ = build(
-        inner, hooks=runner(hook_spec("guard", name="no-migrations"), process=process)
-    )
+    gate, _ = build(inner, hooks=runner(hook_spec("guard", name="no-migrations"), process=process))
 
     result = await gate.execute(use("write", path="migrations/001.sql", content="x"))
 
@@ -192,9 +191,7 @@ async def test_a_timed_out_hook_blocks_only_when_it_asked_to(
 async def test_a_hook_matcher_that_does_not_match_leaves_no_stage() -> None:
     process = ScriptedHookProcess({"guard": blocked("never fires")})
     inner = RecordingRegistry()
-    gate, _ = build(
-        inner, hooks=runner(hook_spec("guard", matcher="write|edit"), process=process)
-    )
+    gate, _ = build(inner, hooks=runner(hook_spec("guard", matcher="write|edit"), process=process))
 
     result = await gate.execute(use("read", path="a.py"))
 
@@ -408,9 +405,7 @@ async def test_a_call_quoting_fetched_content_is_escalated_to_ask_by_the_real_en
     await gate.execute(use("web_fetch", url="https://widget.example/notes", prompt="?"))
 
     # `echo …` is on the shipped allowlist, so without taint this is a plain allow.
-    quoted = ToolUse(
-        id="call_2", name="bash", arguments={"command": f'echo "{COPIED_SPAN}"'}
-    )
+    quoted = ToolUse(id="call_2", name="bash", arguments={"command": f'echo "{COPIED_SPAN}"'})
     verdict = gate.policy.evaluate(BASH, quoted)
     decision = await gate.policy.approve(BASH, quoted, rendered="")
 

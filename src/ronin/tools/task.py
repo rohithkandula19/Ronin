@@ -12,6 +12,7 @@ intermediate turns, which is the entire point: forty grep hits and eight file re
 cost the subagent's context, not the parent's. It uses the ``fast`` model, because
 triage and summarizing are mechanical work — see ``ronin.providers.router``.
 """
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping, Sequence

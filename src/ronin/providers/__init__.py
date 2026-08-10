@@ -26,6 +26,7 @@ Nothing here imports from ``ronin.core`` except the shared *types*, and nothing 
 ``ronin.core`` imports this package at all — the loop receives a client, it never
 looks one up.
 """
+
 from __future__ import annotations
 
 from .accounting import Ledger, Totals, price

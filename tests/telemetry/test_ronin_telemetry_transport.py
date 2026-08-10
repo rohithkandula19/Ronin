@@ -11,6 +11,7 @@ Two assertions in here are the reason the module is shaped the way it is:
   rather than a grep: the first version of this test failed on the docstring that
   *mentions* httpx.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -40,9 +41,7 @@ from ronin.telemetry import (
 
 
 @pytest.mark.parametrize("state", [Consent.UNASKED, Consent.REFUSED])
-async def test_the_sender_is_never_called_without_consent(
-    tmp_path: Path, state: Consent
-) -> None:
+async def test_the_sender_is_never_called_without_consent(tmp_path: Path, state: Consent) -> None:
     sender = unreachable_sender()
     telemetry = for_home(tmp_path, sender=sender)
     if state is Consent.REFUSED:
@@ -234,8 +233,17 @@ def test_the_module_imports_no_http_client() -> None:
     that touches a session. Lazy imports are the case that matters, which is why this
     walks the AST instead of checking ``sys.modules``.
     """
-    forbidden = {"httpx", "requests", "urllib", "urllib.request", "socket",
-                 "http", "http.client", "aiohttp", "ssl"}
+    forbidden = {
+        "httpx",
+        "requests",
+        "urllib",
+        "urllib.request",
+        "socket",
+        "http",
+        "http.client",
+        "aiohttp",
+        "ssl",
+    }
     assert _imported_modules() & forbidden == set()
 
 

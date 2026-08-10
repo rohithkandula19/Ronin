@@ -26,6 +26,7 @@ A call whose arguments cannot be recovered is *not* dropped. Dropping it makes
 the model look like it said nothing, and it retries the same broken call forever.
 It is kept, marked, and the caller decides — see :attr:`NormalizedCalls.failed`.
 """
+
 from __future__ import annotations
 
 import hashlib

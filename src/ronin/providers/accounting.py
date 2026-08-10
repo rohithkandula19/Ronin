@@ -17,6 +17,7 @@ Two rules that keep the numbers honest:
 Time is injected (``clock``) rather than read from the wall, so ledger tests are
 deterministic and a replayed session gets its original timestamps.
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -208,9 +209,7 @@ class Ledger:
         """Per-role breakdown. This is where "main did the grep triage" shows up."""
         out: dict[Role, Totals] = {}
         for role in Role:
-            totals = self._totals(
-                "WHERE session_id = ? AND role = ?", (session_id, role.value)
-            )
+            totals = self._totals("WHERE session_id = ? AND role = ?", (session_id, role.value))
             if totals.requests:
                 out[role] = totals
         return out

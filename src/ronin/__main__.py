@@ -12,6 +12,7 @@ The body is one line on purpose. Everything argv-shaped lives in
 so every path through it is testable without a subprocess. This file is the one
 place that turns a returned code into a process exit.
 """
+
 from __future__ import annotations
 
 from .cli.main import main

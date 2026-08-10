@@ -4,6 +4,7 @@ Named ``safety_harness`` rather than ``harness``: the test trees are deliberatel
 packages, so every module in them lives in one flat namespace and a second ``harness.py``
 would shadow ``tests/tools/harness.py``.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

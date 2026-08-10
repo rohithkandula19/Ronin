@@ -10,6 +10,7 @@ that branches on ``if model == "claude-…"`` breaks the moment someone points
 ``base_url`` at a proxy; code that branches on ``caps.native_tools`` keeps
 working, because that is the property it actually cares about.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence

@@ -6,6 +6,7 @@ something times out. The gate gets the same treatment because "a mutating tool
 exposed over MCP must not silently become un-gated" is a security claim, and a
 claim without a test is a hope.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -331,9 +332,7 @@ async def test_an_ungated_tool_never_reaches_the_approver(tmp_path: Path) -> Non
     instance = server(tmp_path, approver=recording)
     await handshake(instance)
     response = await instance.handle(
-        Request(
-            method="tools/call", params={"name": "read", "arguments": {"path": "a.txt"}}, id=1
-        )
+        Request(method="tools/call", params={"name": "read", "arguments": {"path": "a.txt"}}, id=1)
     )
     assert response is not None and response.result is not None
     assert asked == []

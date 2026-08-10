@@ -30,6 +30,7 @@ therefore last.
 **A skip is not a failure and a pass is not classified.** Both return no findings, so
 the taxonomy denominator is failures and nothing else.
 """
+
 from __future__ import annotations
 
 import ast
@@ -542,8 +543,7 @@ def classify_wrong_file(record: RunRecord) -> Finding | None:
         return None
     return Finding(
         FailureClass.WRONG_FILE,
-        f"edited {', '.join(sorted(edited))} — expected any of "
-        f"{', '.join(sorted(expected))}",
+        f"edited {', '.join(sorted(edited))} — expected any of {', '.join(sorted(expected))}",
     )
 
 
@@ -616,9 +616,7 @@ def classify(record: RunRecord) -> tuple[Finding, ...]:
     for rank, classifier in enumerate(CLASSIFIERS):
         found = classifier(record)
         if found is not None:
-            findings.append(
-                Finding(found.failure_class, found.evidence, rank=rank)
-            )
+            findings.append(Finding(found.failure_class, found.evidence, rank=rank))
     if findings:
         return tuple(findings)
     return (

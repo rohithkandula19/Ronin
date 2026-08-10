@@ -1,4 +1,5 @@
 """Slash commands: the registry, validation, substitution, and suggestions."""
+
 from __future__ import annotations
 
 from pathlib import Path

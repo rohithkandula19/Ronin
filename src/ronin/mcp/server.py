@@ -45,6 +45,7 @@ What it does **not** protect
 In short: this is a *capability handoff*, gated by the ``Approver`` and bounded by
 the ``ToolContext``, over a transport with no identity of its own.
 """
+
 from __future__ import annotations
 
 import json
@@ -230,8 +231,7 @@ class McpServer:
                 request.id,
                 JsonRpcError(
                     INTERNAL_ERROR,
-                    f"{self._name} failed handling {request.method!r}: "
-                    f"{type(exc).__name__}: {exc}",
+                    f"{self._name} failed handling {request.method!r}: {type(exc).__name__}: {exc}",
                 ),
             )
         if request.is_notification:
@@ -264,8 +264,7 @@ class McpServer:
             return None
         raise JsonRpcError(
             METHOD_NOT_FOUND,
-            f"{self._name} does not implement {method!r}; it implements "
-            f"{sorted(_IMPLEMENTED)}",
+            f"{self._name} does not implement {method!r}; it implements {sorted(_IMPLEMENTED)}",
         )
 
     def _initialize(self, params: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -337,8 +336,7 @@ class McpServer:
         if not isinstance(arguments, Mapping):
             raise JsonRpcError(
                 INVALID_PARAMS,
-                f"tools/call 'arguments' must be an object, got "
-                f"{type(arguments).__name__}",
+                f"tools/call 'arguments' must be an object, got {type(arguments).__name__}",
             )
         spec = self._registry.get(name)
         if spec is None:

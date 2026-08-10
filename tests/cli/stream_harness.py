@@ -22,6 +22,7 @@ The names here are deliberately not ``harness``/``fakes``/``conftest``: the test
 trees are not packages, so every module under ``tests/`` is importable by its bare
 basename and two directories cannot share one.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -175,9 +176,7 @@ class ScriptedModel:
         messages: Sequence[Message],
         tools: Sequence[ToolSpec],
     ) -> AsyncIterator[ModelChunk]:
-        self.calls.append(
-            Recorded(system=system, messages=tuple(messages), tools=tuple(tools))
-        )
+        self.calls.append(Recorded(system=system, messages=tuple(messages), tools=tuple(tools)))
         index = len(self.calls) - 1
         if index >= len(self._responses):
             raise AssertionError(
@@ -206,9 +205,7 @@ class CyclingModel:
         messages: Sequence[Message],
         tools: Sequence[ToolSpec],
     ) -> AsyncIterator[ModelChunk]:
-        self.calls.append(
-            Recorded(system=system, messages=tuple(messages), tools=tuple(tools))
-        )
+        self.calls.append(Recorded(system=system, messages=tuple(messages), tools=tuple(tools)))
         return _replay(tuple(self._respond(len(self.calls) - 1)))
 
 
@@ -423,9 +420,7 @@ def writer(root: Path, *, name: str = "edit") -> FakeTool:
         target.parent.mkdir(parents=True, exist_ok=True)
         body = str(arguments.get("content", "x"))
         target.write_text(body, encoding="utf-8", newline="\n")
-        return ToolResult(
-            ok=True, content=f"wrote {target.name}", artifacts=(str(target),)
-        )
+        return ToolResult(ok=True, content=f"wrote {target.name}", artifacts=(str(target),))
 
     return FakeTool(name=name, danger=DangerLevel.MUTATING, handler=handle)
 
@@ -604,9 +599,7 @@ def build_loaded(
     memory = (
         Memory(
             files=(
-                MemoryFile(
-                    path="RONIN.md", scope=MemoryScope.PROJECT, text=memory_text, depth=0
-                ),
+                MemoryFile(path="RONIN.md", scope=MemoryScope.PROJECT, text=memory_text, depth=0),
             ),
             root=str(root),
         )

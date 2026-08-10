@@ -22,6 +22,7 @@ Imports ``ronin.core`` and ``ronin.tools`` only. A model *role* arrives as a nam
 (:data:`~ronin.agents.plan_mode.PLAN_MODEL_ROLE`, ``AgentDefinition.model``) and the
 orchestrator resolves it — nothing here may see ``ronin.providers``.
 """
+
 from __future__ import annotations
 
 from .definitions import (

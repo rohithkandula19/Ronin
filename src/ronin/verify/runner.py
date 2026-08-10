@@ -24,6 +24,7 @@ this package is offline and deterministic; :func:`run_command` is the one real
 implementation, exercised against ``python -c`` so the argv and exit-code
 plumbing is proven rather than assumed.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -263,9 +264,7 @@ class LanguageRules:
 PYTHON_RULES: Final[LanguageRules] = LanguageRules(
     name="python",
     extensions=frozenset({".py", ".pyi"}),
-    tools=frozenset(
-        {"ruff", "mypy", "pytest", "pyright", "flake8", "black", "python", "python3"}
-    ),
+    tools=frozenset({"ruff", "mypy", "pytest", "pyright", "flake8", "black", "python", "python3"}),
     test_patterns=(
         "{dir}/test_{stem}.py",
         "{dir}/{stem}_test.py",
@@ -412,9 +411,7 @@ def candidate_test_paths(source: str, rules: LanguageRules) -> tuple[str, ...]:
     return tuple(candidates)
 
 
-def resolve_test_targets(
-    source: str, *, root: Path, rules: LanguageRules
-) -> TestTargets:
+def resolve_test_targets(source: str, *, root: Path, rules: LanguageRules) -> TestTargets:
     """Find the test files for ``source``, or report that there are none.
 
     A changed *test* file is its own target — the most common edit in a
@@ -475,8 +472,7 @@ class VerifyPlan:
 
     def render(self) -> str:
         lines = [
-            f"{step.kind.value:<9} {step.display}   [{step.scope.value}]"
-            for step in self.steps
+            f"{step.kind.value:<9} {step.display}   [{step.scope.value}]" for step in self.steps
         ]
         if not lines:
             lines.append("(nothing to run)")
@@ -760,9 +756,7 @@ _UNKNOWN_NEXT_STEP = (
 )
 
 
-def as_tool_result(
-    outcome: VerifyOutcome, *, limit: int = MAX_TOOL_RESULT_CHARS
-) -> ToolResult:
+def as_tool_result(outcome: VerifyOutcome, *, limit: int = MAX_TOOL_RESULT_CHARS) -> ToolResult:
     """Package a verify pass as a tool result — **not** as a user message.
 
     The distinction is the whole point of this function. Delivered as a
@@ -791,9 +785,7 @@ def as_tool_result(
     detail = clamp_output(outcome.failure_output, limit=limit)
     return ToolResult(
         ok=False,
-        error=(
-            f"verify failed ({failed}).\n{body}\n\n{detail}\n\n{_NEXT_STEP}"
-        ),
+        error=(f"verify failed ({failed}).\n{body}\n\n{detail}\n\n{_NEXT_STEP}"),
     )
 
 

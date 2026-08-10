@@ -23,6 +23,7 @@ unchanged from an ordinary session.
 selects tasks, builds a router, and writes bytes. A command that both ran the suite
 and decided what "passed" means is a command that can quietly redefine the number.
 """
+
 from __future__ import annotations
 
 import functools
@@ -330,9 +331,13 @@ async def run_eval(
         return EXIT_OK, render_dry_run(chosen, options), _err(notes)
 
     if len(options.models) > 1:
-        return EXIT_ERROR, "", (
-            "eval runs one model; you gave "
-            f"{len(options.models)}. Use `ronin duel` to compare two.\n"
+        return (
+            EXIT_ERROR,
+            "",
+            (
+                "eval runs one model; you gave "
+                f"{len(options.models)}. Use `ronin duel` to compare two.\n"
+            ),
         )
     model = options.models[0] if options.models else ""
     open_agent = factory
@@ -343,9 +348,7 @@ async def run_eval(
         open_agent = functools.partial(
             sdk_agent_factory, router=router, connect_mcp=False, record=options.record
         )
-    report = await run_suite(
-        chosen, v2_adapter(open_agent), config=runner_config(options, model)
-    )
+    report = await run_suite(chosen, v2_adapter(open_agent), config=runner_config(options, model))
     written = _write_outputs(options, report)
     return EXIT_OK, report_markdown(report), _err(notes, *written)
 
@@ -399,15 +402,23 @@ async def run_duel_command(
         return EXIT_OK, render_dry_run(chosen, options), _err(notes)
 
     if len(options.models) != 2:
-        return EXIT_ERROR, "", (
-            f"duel compares exactly two models; you gave {len(options.models)}. "
-            "Pass --model twice.\n"
+        return (
+            EXIT_ERROR,
+            "",
+            (
+                f"duel compares exactly two models; you gave {len(options.models)}. "
+                "Pass --model twice.\n"
+            ),
         )
     a_name, b_name = options.models
     if a_name == b_name:
-        return EXIT_ERROR, "", (
-            f"both sides are {a_name!r}. A duel against itself measures sampling "
-            "noise, which is a real thing to measure but not with this command.\n"
+        return (
+            EXIT_ERROR,
+            "",
+            (
+                f"both sides are {a_name!r}. A duel against itself measures sampling "
+                "noise, which is a real thing to measure but not with this command.\n"
+            ),
         )
 
     duelists: DuelistFactory | None = factory
@@ -460,9 +471,7 @@ async def run_duel_command(
                     "seed": duel.seed,
                     "duelists": list(duel.duelists),
                     "incomparable": list(duel.incomparable),
-                    "reports": [
-                        json.loads(report_json(report)) for report in duel.reports
-                    ],
+                    "reports": [json.loads(report_json(report)) for report in duel.reports],
                 },
                 indent=2,
             )

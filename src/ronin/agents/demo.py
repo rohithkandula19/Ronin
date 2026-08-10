@@ -9,6 +9,7 @@ The hook at the end runs a genuine ``/bin/sh`` one-liner. Local, no network, no 
 key: the point is that argv construction and exit-code plumbing are real, because
 those are exactly what a stubbed runner would paper over.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -134,8 +135,7 @@ def demo_plan_pinning() -> None:
     print(f"  rationale: {plan.rationale[:70]}…\n")
 
     decision = approve(plan, note="looks right, go")
-    print(f"  approved → session mode becomes {decision.mode.value!r}, "
-          f"leaving plan mode behind")
+    print(f"  approved → session mode becomes {decision.mode.value!r}, leaving plan mode behind")
     print("  pinned into context every turn from here on:\n")
     for line in decision.objective.split("\n"):
         print(f"      │ {line}")
@@ -156,8 +156,10 @@ def demo_definitions(root: Path) -> None:
     print(f"  + from file: {sorted(set(agents) - set(BUILTIN_AGENTS))}")
     print(f"  doc-writer  source={loaded.source}")
     print(f"              model={loaded.model!r}  tools={list(loaded.tools)}")
-    print(f"              write_paths={list(loaded.write_paths)}  "
-          f"max_iterations={loaded.max_iterations}")
+    print(
+        f"              write_paths={list(loaded.write_paths)}  "
+        f"max_iterations={loaded.max_iterations}"
+    )
     print(f"              prompt starts: {loaded.system_prompt.splitlines()[0]!r}")
     catalogue = subagent_catalogue(agents)
     print(f"  catalogue handed to TaskTool: {sorted(catalogue)}")
@@ -221,8 +223,7 @@ async def demo_hooks(root: Path) -> None:
                 {
                     "matcher": "write",
                     "hooks": [
-                        {"command": "echo 'would run prettier here' ; exit 1",
-                         "name": "formatter"}
+                        {"command": "echo 'would run prettier here' ; exit 1", "name": "formatter"}
                     ],
                 }
             ],
@@ -230,10 +231,14 @@ async def demo_hooks(root: Path) -> None:
     )
     runner = HookRunner(config=config, cwd=str(root), env={"PATH": "/usr/bin:/bin"})
     print("  hook: reads the event JSON on stdin, greps it, exits 2 to refuse")
-    print(f"  matcher 'write|edit' → applies to write: "
-          f"{config.for_event(HookEvent.PRE_TOOL_USE, 'write') != ()}")
-    print(f"                       → applies to read : "
-          f"{config.for_event(HookEvent.PRE_TOOL_USE, 'read') != ()}\n")
+    print(
+        f"  matcher 'write|edit' → applies to write: "
+        f"{config.for_event(HookEvent.PRE_TOOL_USE, 'write') != ()}"
+    )
+    print(
+        f"                       → applies to read : "
+        f"{config.for_event(HookEvent.PRE_TOOL_USE, 'read') != ()}\n"
+    )
 
     ok = await runner.fire(
         HookEvent.PRE_TOOL_USE, tool_name="write", data={"arguments": {"path": "src/app.py"}}
@@ -245,15 +250,19 @@ async def demo_hooks(root: Path) -> None:
         tool_name="write",
         data={"arguments": {"path": "migrations/003_add_column.sql"}},
     )
-    print(f"  write migrations/003…sql    → blocked={denied.blocked}, "
-          f"exit={denied.runs[0].completion.exit_code}")
+    print(
+        f"  write migrations/003…sql    → blocked={denied.blocked}, "
+        f"exit={denied.runs[0].completion.exit_code}"
+    )
     result = denied.as_tool_result()
     assert result is not None
     show("what the model gets back", result)
 
     warned = await runner.fire(HookEvent.POST_TOOL_USE, tool_name="write")
-    print(f"\n  PostToolUse hook exits 1    → blocked={warned.blocked} "
-          f"(non-2 is a warning, never a block)")
+    print(
+        f"\n  PostToolUse hook exits 1    → blocked={warned.blocked} "
+        f"(non-2 is a warning, never a block)"
+    )
     for warning in warned.warnings():
         print(f"      ⚠ {warning}")
 

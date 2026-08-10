@@ -11,6 +11,7 @@ survives contact with a real user's config.
 gets switched off, and a switched-off gate protects nothing — so every one of these must
 resolve to ``allow`` *and* never reach the asker.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -197,9 +198,7 @@ async def test_an_ordinary_developer_command_never_prompts(command: str) -> None
     policy = engine(Answer(outcome=Outcome.NO, feedback="should never have been asked"))
     decision = await policy.approve(BASH, use(command), rendered=command)
     verdict = policy.evaluate(BASH, use(command))
-    assert decision.approved is True, (
-        f"PROMPTED OR REFUSED: {command!r}\n{verdict.trace}"
-    )
+    assert decision.approved is True, f"PROMPTED OR REFUSED: {command!r}\n{verdict.trace}"
     assert asker_of(policy).asked is False, f"asked about {command!r}: {verdict.reason}"
     assert verdict.decision is Decision.ALLOW
 

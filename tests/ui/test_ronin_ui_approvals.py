@@ -8,6 +8,7 @@ An exit code that means two different things is not a signal a script can act on
 
 These tests pin the distinction at all three call sites that compute it.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator

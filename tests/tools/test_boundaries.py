@@ -8,6 +8,7 @@ It parses imports with ``ast`` rather than importing the modules, so a violation
 caught even if the offending import is inside a function (which is exactly where one
 would hide: a lazy import to "avoid the cycle" is how a boundary quietly dissolves).
 """
+
 from __future__ import annotations
 
 import ast
@@ -37,9 +38,9 @@ ORCHESTRATOR_PACKAGES = ("ronin.cli", "ronin.evals")
 def is_orchestrator(dotted: str) -> bool:
     """Whether ``dotted`` is allowed to import across every layer."""
     return dotted in ORCHESTRATOR_MODULES or any(
-        dotted == package or dotted.startswith(f"{package}.")
-        for package in ORCHESTRATOR_PACKAGES
+        dotted == package or dotted.startswith(f"{package}.") for package in ORCHESTRATOR_PACKAGES
     )
+
 
 #: The layers above ``core`` and their prohibitions, as a table — this *is* the
 #: dependency graph from ``docs/ARCHITECTURE.md`` §3, in executable form.
@@ -261,11 +262,7 @@ def test_telemetry_depends_on_core_only() -> None:
     if not path.exists():
         pytest.skip("telemetry.py not present")
     imports = imported_modules(path, "ronin.telemetry")
-    forbidden = sorted(
-        name
-        for name in imports
-        if not name.startswith("ronin.core")
-    )
+    forbidden = sorted(name for name in imports if not name.startswith("ronin.core"))
     assert forbidden == [], (
         f"telemetry imports {forbidden}; it may only see ronin.core, because a module "
         "that cannot reach prompts, paths or code cannot transmit them"

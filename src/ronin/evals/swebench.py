@@ -39,6 +39,7 @@ The resolution rule itself is SWE-bench's, unchanged: a task is resolved iff eve
 ``FAIL_TO_PASS`` test passes and every ``PASS_TO_PASS`` test still passes. See
 :func:`is_resolved`.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -311,9 +312,7 @@ class Evaluator(Protocol):
     failures that belong to the environment.
     """
 
-    async def __call__(
-        self, task: SWEBenchTask, patch: str, workdir: Path
-    ) -> TaskEvaluation: ...
+    async def __call__(self, task: SWEBenchTask, patch: str, workdir: Path) -> TaskEvaluation: ...
 
 
 def is_resolved(task: SWEBenchTask, evaluation: TaskEvaluation) -> bool:
@@ -602,9 +601,7 @@ class SWEBenchRun:
                 "empty run reported as 0/0 is a resolve rate nobody measured"
             )
         if self.outcomes and self.did_not_run:
-            raise ValueError(
-                "a SWEBenchRun cannot both carry outcomes and claim it did not run"
-            )
+            raise ValueError("a SWEBenchRun cannot both carry outcomes and claim it did not run")
 
     @property
     def ran(self) -> bool:
@@ -745,9 +742,7 @@ class SWEBenchHarness:
         try:
             evaluation = await self.evaluator(task, attempt.patch, workdir)
         except Exception as exc:  # same rule: an evaluator blow-up is this task's outcome
-            return replace(
-                counted, patch_generated=True, error=f"evaluator failed: {exc!r}"
-            )
+            return replace(counted, patch_generated=True, error=f"evaluator failed: {exc!r}")
 
         passed = frozenset(evaluation.passed_tests)
         return replace(
@@ -808,8 +803,7 @@ def render_markdown(run: SWEBenchRun, *, include_repo_breakdown: bool = False) -
             "",
             f"> {SWEBENCH_DISCLAIMER}",
             "",
-            f"**No resolve rate is reported, because no instance was scored.** "
-            f"{run.did_not_run}",
+            f"**No resolve rate is reported, because no instance was scored.** {run.did_not_run}",
             "",
             "A real run needs the published SWE-bench-lite dataset (network access) and a",
             "per-repo test environment at each instance's base commit. Supply the dataset",

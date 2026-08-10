@@ -1,4 +1,5 @@
 """The two hard key behaviours, as pure logic: the mode cycle and esc esc."""
+
 from __future__ import annotations
 
 import pytest

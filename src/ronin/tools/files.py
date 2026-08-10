@@ -18,6 +18,7 @@ has not been read in this session. One rule, and it prevents most destructive ed
 — a model that has read the file knows what it is throwing away, and a model that
 has not is guessing.
 """
+
 from __future__ import annotations
 
 import base64
@@ -65,8 +66,7 @@ def _read_text(path: Path) -> str:
     """Read a file as text, or raise a :class:`ToolError` explaining why not."""
     if not path.exists():
         raise ToolError(
-            f"{path} does not exist. Check the path, or use glob/ls to find the "
-            "file you meant."
+            f"{path} does not exist. Check the path, or use glob/ls to find the file you meant."
         )
     if path.is_dir():
         raise ToolError(f"{path} is a directory. Use ls to list it, or read a file inside it.")
@@ -170,8 +170,7 @@ class ReadTool(Tool):
         start = 1 if offset is None else max(offset, 1)
         if start > len(lines):
             raise ToolError(
-                f"offset {start} is past the end of {path.name}, which has "
-                f"{len(lines)} lines."
+                f"offset {start} is past the end of {path.name}, which has {len(lines)} lines."
             )
         window = lines[start - 1 :]
         requested = limit if limit is not None else MAX_READ_LINES
@@ -380,8 +379,7 @@ class EditTool(Tool):
         return ToolResult(
             ok=True,
             content=(
-                f"edited {path} ({replacements} replacement"
-                f"{'s' if replacements != 1 else ''})"
+                f"edited {path} ({replacements} replacement{'s' if replacements != 1 else ''})"
             ),
             artifacts=(str(path),),
         )

@@ -8,6 +8,7 @@ The honesty tests carry more weight than the argv tests. The policy engine auto-
 under an isolating sandbox, so anything that reported isolation it did not have would
 open the gate onto nothing.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence

@@ -26,6 +26,7 @@ Nothing here opens a network connection. Reachability of a remote MCP server is
 deliberately not probed: a diagnostic that hangs for thirty seconds is a diagnostic
 people stop running.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -165,9 +166,8 @@ class DoctorReport:
                 + ", ".join(check.name for check in self.failures)
             )
         if self.warnings:
-            return (
-                f"no problems, {len(self.warnings)} warning(s): "
-                + ", ".join(check.name for check in self.warnings)
+            return f"no problems, {len(self.warnings)} warning(s): " + ", ".join(
+                check.name for check in self.warnings
             )
         return "everything checked out"
 
@@ -274,8 +274,7 @@ def _telemetry_check(loaded: Loaded) -> Check:
         state = (
             "on — aggregate task outcomes only, never prompts or code"
             if wired
-            else "consent granted, but this build has no endpoint wired, so nothing is "
-            "transmitted"
+            else "consent granted, but this build has no endpoint wired, so nothing is transmitted"
         )
         return Check(
             name="telemetry",
@@ -419,9 +418,7 @@ async def _checkpoint_check(store: CheckpointStore) -> Check:
     )
 
 
-def _mcp_checks(
-    loaded: Loaded, which: Callable[[str], str | None]
-) -> tuple[Check, ...]:
+def _mcp_checks(loaded: Loaded, which: Callable[[str], str | None]) -> tuple[Check, ...]:
     """One check per configured server: does the thing we would launch exist?
 
     Only the stdio transports can be answered offline, and they are the ones that fail
@@ -435,9 +432,7 @@ def _mcp_checks(
     for config in loaded.mcp_servers:
         name = f"mcp:{config.name}"
         if not config.enabled:
-            checks.append(
-                Check(name=name, status=CheckStatus.OK, detail="disabled in mcp.json")
-            )
+            checks.append(Check(name=name, status=CheckStatus.OK, detail="disabled in mcp.json"))
             continue
         if config.transport is not TransportKind.STDIO:
             checks.append(
@@ -512,11 +507,7 @@ def gitignore_report(text: str) -> GitignoreFinding:
     """
     ignore = GitIgnore.parse(text)
     hidden = tuple(path for path in SHARED_CONFIG_PATHS if hidden_by(ignore, path))
-    generated = tuple(
-        path
-        for path in GENERATED_PATHS
-        if not hidden_by(ignore, path, is_dir=True)
-    )
+    generated = tuple(path for path in GENERATED_PATHS if not hidden_by(ignore, path, is_dir=True))
     return GitignoreFinding(
         hidden_shared=hidden,
         secret_tracked=not hidden_by(ignore, SECRET_CONFIG_PATH),
@@ -533,9 +524,7 @@ def _gitignore_check(loaded: Loaded) -> Check:
             name="gitignore",
             status=CheckStatus.WARN,
             detail=f"{path} does not exist, so .ronin/settings.local.json is tracked",
-            remedy=(
-                "settings.local.json holds plaintext API keys. add:\n" + GITIGNORE_PATCH
-            ),
+            remedy=("settings.local.json holds plaintext API keys. add:\n" + GITIGNORE_PATCH),
         )
     except OSError as exc:
         return Check(
@@ -556,16 +545,13 @@ def _gitignore_check(loaded: Loaded) -> Check:
         problems.append(f"{SECRET_CONFIG_PATH} is NOT ignored (it holds API keys)")
     if finding.hidden_shared:
         problems.append(
-            "these are ignored but are meant to be committed: "
-            + ", ".join(finding.hidden_shared)
+            "these are ignored but are meant to be committed: " + ", ".join(finding.hidden_shared)
         )
     return Check(
         name="gitignore",
         status=CheckStatus.WARN,
         detail="; ".join(problems),
-        remedy=(
-            f"replace any blanket `.ronin/` rule in {path} with:\n{GITIGNORE_PATCH}"
-        ),
+        remedy=(f"replace any blanket `.ronin/` rule in {path} with:\n{GITIGNORE_PATCH}"),
     )
 
 

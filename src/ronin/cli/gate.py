@@ -64,6 +64,7 @@ would mean treating all shell output as untrusted, which is exactly the prompt-o
 everything failure above; a deployment that wants it can put ``"bash"`` in
 ``untrusted_tools`` and pay for it deliberately.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -433,9 +434,7 @@ class GatedRegistry:
 
     def is_untrusted(self, name: str) -> bool:
         """Whether output from ``name`` came from outside the workspace."""
-        return name in self.untrusted_tools or (
-            self.mcp_is_untrusted and is_namespaced(name)
-        )
+        return name in self.untrusted_tools or (self.mcp_is_untrusted and is_namespaced(name))
 
     # -- 1 / 6: hooks ------------------------------------------------------- #
 
@@ -447,9 +446,7 @@ class GatedRegistry:
             "arguments": dict(use.arguments),
         }
         try:
-            report = await self.hooks.fire(
-                HookEvent.PRE_TOOL_USE, tool_name=use.name, data=data
-            )
+            report = await self.hooks.fire(HookEvent.PRE_TOOL_USE, tool_name=use.name, data=data)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -494,9 +491,7 @@ class GatedRegistry:
             ),
         }
         try:
-            report = await self.hooks.fire(
-                HookEvent.POST_TOOL_USE, tool_name=use.name, data=data
-            )
+            report = await self.hooks.fire(HookEvent.POST_TOOL_USE, tool_name=use.name, data=data)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -577,8 +572,7 @@ class GatedRegistry:
                     ok=False,
                     error=(
                         str(exc)
-                        or f"{raw!r} could not be resolved to a path, so {use.name} "
-                        "was not run"
+                        or f"{raw!r} could not be resolved to a path, so {use.name} was not run"
                     ),
                 ),
                 GateStage.FILE_STATE,

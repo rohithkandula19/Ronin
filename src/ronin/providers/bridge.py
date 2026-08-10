@@ -20,6 +20,7 @@ and its 93 tests to carry fields the loop does not use.
 The translation is lossy in exactly one direction and that is fine: the loop never
 sets a temperature, so :class:`LoopClient` supplies the defaults its config chose.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Sequence

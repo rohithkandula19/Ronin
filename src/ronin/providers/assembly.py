@@ -19,6 +19,7 @@ Ordering rationale, front to back by how often each part changes:
 
 Anything that changes per *turn* is a message, and messages come after the marker.
 """
+
 from __future__ import annotations
 
 import hashlib

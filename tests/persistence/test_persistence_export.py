@@ -1,4 +1,5 @@
 """Exports: readable, self-contained, and hostile-content-proof."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -171,7 +172,7 @@ def test_html_escapes_a_script_tag_in_model_output() -> None:
     out = to_html(adversarial_session(), META)
     assert "<script" not in out
     assert "&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;" in out
-    assert "onerror=x" not in out and "onerror=\"alert" not in out
+    assert "onerror=x" not in out and 'onerror="alert' not in out
 
 
 def test_html_escapes_a_closing_details_tag_in_tool_output() -> None:

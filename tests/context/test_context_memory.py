@@ -4,6 +4,7 @@ The bootstrap tests are all variations on one requirement: it must never invent 
 command. So each one asserts both halves — the command that *was* found, and that
 an absent one is reported as absent rather than guessed.
 """
+
 from __future__ import annotations
 
 from datetime import date
@@ -428,8 +429,7 @@ def test_one_command_is_not_listed_twice_under_two_evidences(tmp_path: Path) -> 
         tmp_path,
         {
             "pyproject.toml": (
-                "[tool.pytest.ini_options]\nx = 1\n\n"
-                '[dependency-groups]\ndev = ["pytest>=8"]\n'
+                '[tool.pytest.ini_options]\nx = 1\n\n[dependency-groups]\ndev = ["pytest>=8"]\n'
             )
         },
     )

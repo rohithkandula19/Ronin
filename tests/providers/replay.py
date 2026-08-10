@@ -11,6 +11,7 @@ a tag split across chunks, a UTF-8 character split across chunks, a JSON fragmen
 split mid-escape — lives exactly there. So each fixture is replayed under several
 chunkings and the results are required to be identical.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterator, Mapping, Sequence

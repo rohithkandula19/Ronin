@@ -1,4 +1,5 @@
 """The self-critique: tolerant parsing, biased toward one more iteration."""
+
 from __future__ import annotations
 
 import pytest

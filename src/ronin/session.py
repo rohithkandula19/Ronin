@@ -43,6 +43,7 @@ place where the obvious wiring is subtly wrong:
    returns text the parent can act on. Raising would kill the parent's turn over a
    child's problem.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -122,9 +123,7 @@ class SubagentPolicy:
     def __init__(self, budget: Budget) -> None:
         self._budget = budget
 
-    async def approve(
-        self, spec: ToolSpec, use: ToolUse, *, rendered: str
-    ) -> ApprovalDecision:
+    async def approve(self, spec: ToolSpec, use: ToolUse, *, rendered: str) -> ApprovalDecision:
         del use, rendered
         return ApprovalDecision(
             approved=False,
@@ -238,8 +237,7 @@ class SubagentSession:
             if exc.agent_state is not None:
                 final_state = exc.agent_state
             text_parts.append(
-                "\n\n[the subagent stopped: it repeated the same action without "
-                "making progress]"
+                "\n\n[the subagent stopped: it repeated the same action without making progress]"
             )
         except asyncio.CancelledError:
             # The user interrupted. Propagate: a cancelled parent must not wait on a

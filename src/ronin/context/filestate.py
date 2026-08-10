@@ -23,6 +23,7 @@ Two details that look like nitpicks and are not:
   what the model reasoned about, so content is what decides — the stat is only a
   fast path to skip hashing.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -171,9 +172,7 @@ class FileStateTracker:
 
     def check_all(self, paths: Iterable[Path] | None = None) -> tuple[FileCheck, ...]:
         """Verdicts for ``paths``, or for everything read so far. Sorted by path."""
-        targets = (
-            sorted(str(p) for p in paths) if paths is not None else self.known_paths()
-        )
+        targets = sorted(str(p) for p in paths) if paths is not None else self.known_paths()
         return tuple(self.check(Path(p)) for p in targets)
 
     def changed_since_read(self) -> tuple[str, ...]:
