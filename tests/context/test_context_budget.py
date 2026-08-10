@@ -5,6 +5,7 @@ already fits being reformatted anyway, a marker that names the wrong count, a bu
 smaller than the marker, a single line with nothing to split on, and a missing
 trailing newline turning into a phantom one.
 """
+
 from __future__ import annotations
 
 import pytest

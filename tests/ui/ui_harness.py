@@ -5,6 +5,7 @@ packages, so every module is importable by its bare basename and two directories
 cannot share one. A generic name here would shadow another subsystem's helper and
 break its suite.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Sequence
@@ -62,9 +63,7 @@ def happy_turn() -> tuple[Event, ...]:
         TextDelta(text="Reading "),
         TextDelta(text="src/main.py now."),
         ToolStart(tool_use_id="t1", name="Read", arguments={"path": "src/main.py"}),
-        ToolEnd(
-            tool_use_id="t1", name="Read", result=ToolResult(ok=True, content="x\n" * 240)
-        ),
+        ToolEnd(tool_use_id="t1", name="Read", result=ToolResult(ok=True, content="x\n" * 240)),
         ToolStart(
             tool_use_id="t2",
             name="mcp__unheard_of__do_thing",

@@ -8,6 +8,7 @@ Errors are values across the tool boundary: :meth:`ToolRegistry.execute` returns
 a ``ToolResult`` rather than raising. The loop still guards the call, because a
 protocol cannot force a third-party implementation to behave.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Sequence
@@ -108,9 +109,7 @@ class Policy(Protocol):
     a consumer never replies through the stream (see ``docs/ARCHITECTURE.md`` §4).
     """
 
-    async def approve(
-        self, spec: ToolSpec, use: ToolUse, *, rendered: str
-    ) -> ApprovalDecision:
+    async def approve(self, spec: ToolSpec, use: ToolUse, *, rendered: str) -> ApprovalDecision:
         """Decide one gated call. Must return a decision, never hang forever."""
         ...
 

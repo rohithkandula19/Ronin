@@ -5,6 +5,7 @@ Fakes appear at exactly one seam — the event stream, which in production is
 reducer, renderers, headless runner, command registry, and the app's own adapter
 functions.
 """
+
 from __future__ import annotations
 
 import asyncio

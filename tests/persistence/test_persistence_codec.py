@@ -1,4 +1,5 @@
 """The codec's job is exactness and loud refusal. These test both."""
+
 from __future__ import annotations
 
 import json
@@ -80,9 +81,7 @@ def test_the_is_error_flag_survives(is_error: bool) -> None:
     assert restored.is_error is is_error
 
 
-@pytest.mark.parametrize(
-    "value", [0.1234567, 1e-9, 12345.6789, 1 / 3, 2.0, 1e17]
-)
+@pytest.mark.parametrize("value", [0.1234567, 1e-9, 12345.6789, 1 / 3, 2.0, 1e17])
 def test_floats_round_trip_exactly(value: float) -> None:
     budget = Budget(max_usd=value, spent_usd=value, elapsed_seconds=value)
     restored = codec.decode_budget(json.loads(json.dumps(codec.encode_budget(budget))))
@@ -110,9 +109,7 @@ def test_a_whole_agent_state_round_trips_with_every_field_populated() -> None:
 def test_none_and_zero_budget_ceilings_are_distinguishable() -> None:
     """``None`` means unbounded; a decoder that turns it into 0 would make every
     budget instantly exhausted."""
-    restored = codec.decode_budget(
-        json.loads(json.dumps(codec.encode_budget(Budget())))
-    )
+    restored = codec.decode_budget(json.loads(json.dumps(codec.encode_budget(Budget()))))
     assert restored.max_tokens is None and restored.max_usd is None
     assert restored.exhausted is False
 

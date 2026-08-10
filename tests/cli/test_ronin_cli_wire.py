@@ -7,6 +7,7 @@ denylist, a remembered rule reaching the gitignored settings layer. Each of thos
 asserted on the **built object**, never on the config that was supposed to produce it —
 reading the config back would pass with no wiring at all.
 """
+
 from __future__ import annotations
 
 import json
@@ -288,15 +289,29 @@ def test_a_ronin_md_test_command_written_in_prose_is_reported_as_undetectable(
 @pytest.mark.parametrize(
     "rule",
     [
-        Rule(tool="bash", matcher=Exact(argument="command", value="pytest -q"),
-             decision=Decision.ALLOW, source="remembered", reason="approved by the user"),
-        Rule(tool="*", matcher=parse_rule({"decision": "deny", "path": "secrets/**"},
-                                          source="x").matcher, decision=Decision.DENY),
-        Rule(tool="bash", matcher=parse_rule({"decision": "ask", "command": "^flyctl"},
-                                             source="x").matcher, decision=Decision.ASK,
-             unwaivable=True),
-        Rule(tool="write", matcher=parse_rule({"decision": "allow"}, source="x").matcher,
-             decision=Decision.ALLOW),
+        Rule(
+            tool="bash",
+            matcher=Exact(argument="command", value="pytest -q"),
+            decision=Decision.ALLOW,
+            source="remembered",
+            reason="approved by the user",
+        ),
+        Rule(
+            tool="*",
+            matcher=parse_rule({"decision": "deny", "path": "secrets/**"}, source="x").matcher,
+            decision=Decision.DENY,
+        ),
+        Rule(
+            tool="bash",
+            matcher=parse_rule({"decision": "ask", "command": "^flyctl"}, source="x").matcher,
+            decision=Decision.ASK,
+            unwaivable=True,
+        ),
+        Rule(
+            tool="write",
+            matcher=parse_rule({"decision": "allow"}, source="x").matcher,
+            decision=Decision.ALLOW,
+        ),
     ],
 )
 def test_a_rule_written_to_disk_parses_back_to_the_same_rule(rule: Rule) -> None:
@@ -355,8 +370,9 @@ def test_an_unparseable_local_layer_is_not_overwritten_and_the_failure_is_record
     write(tmp_path, ".ronin/settings.local.json", original)
     writer = LocalRuleWriter(paths.local_settings)
 
-    writer(Rule(tool="bash", matcher=Exact(argument="command", value="ls"),
-                decision=Decision.ALLOW))
+    writer(
+        Rule(tool="bash", matcher=Exact(argument="command", value="ls"), decision=Decision.ALLOW)
+    )
 
     assert paths.local_settings.read_bytes() == original.encode("utf-8")
     assert len(writer.failures) == 1
@@ -689,9 +705,7 @@ async def test_a_session_remembered_rule_covers_a_subagent_running_the_same_comm
             return Answer(outcome=Outcome.YES_SESSION)
 
     loaded = load_workspace(workspace(git_repo(tmp_path)))
-    runtime = await build_runtime(
-        loaded, fake_router(), record=False, asker=SessionYes()
-    )
+    runtime = await build_runtime(loaded, fake_router(), record=False, asker=SessionYes())
     factory = subagent_policy_factory(runtime.policy)
     try:
         before = await factory(Budget()).approve(
@@ -744,9 +758,7 @@ async def test_a_whole_workspace_becomes_one_wired_runtime(tmp_path: Path) -> No
         json.dumps(
             {
                 "taint_min_span": 24,
-                "rules": [
-                    {"tool": "bash", "decision": "allow", "command": "^flyctl deploy$"}
-                ],
+                "rules": [{"tool": "bash", "decision": "allow", "command": "^flyctl deploy$"}],
             }
         ),
     )

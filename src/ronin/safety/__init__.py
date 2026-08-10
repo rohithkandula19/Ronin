@@ -39,6 +39,7 @@ Known gaps, named rather than papered over:
   the literal text. The deny list therefore cannot see through indirection a shell
   would resolve at runtime.
 """
+
 from __future__ import annotations
 
 from .command import (

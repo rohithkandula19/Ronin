@@ -6,6 +6,7 @@ relative path constant and the failure of composing them wrongly is a session th
 writes a transcript where its own resume cannot find it — silent, and only visible
 a day later when ``--resume`` comes up empty.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -33,9 +34,7 @@ def workspace(tmp_path: Path) -> Paths:
     Nesting home inside the workspace is what a real machine never does, and it makes
     "the user layer is not under the workspace" vacuously false.
     """
-    return Paths(
-        workspace_root=tmp_path / "repo", home=tmp_path / "home", cwd=tmp_path / "repo"
-    )
+    return Paths(workspace_root=tmp_path / "repo", home=tmp_path / "home", cwd=tmp_path / "repo")
 
 
 def settings_for(tmp_path: Path, **kwargs: object) -> Settings:

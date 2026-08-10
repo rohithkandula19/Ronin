@@ -1,4 +1,5 @@
 """Reports: real numbers only, ``—`` where there is none, and a diffable machine record."""
+
 from __future__ import annotations
 
 import json
@@ -63,9 +64,7 @@ def test_skipped_tasks_are_excluded_from_the_pass_rate_denominator() -> None:
 
 
 def test_aggregates_are_computed_per_category() -> None:
-    report = build_report(
-        [passing("a", "edit"), failing("b", "edit"), passing("c", "ask")]
-    )
+    report = build_report([passing("a", "edit"), failing("b", "edit"), passing("c", "ask")])
     assert report.per_category["edit"].pass_rate == 0.5
     assert report.per_category["ask"].pass_rate == 1.0
 

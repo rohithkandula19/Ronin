@@ -26,6 +26,7 @@ has no tool calls, no turn count and no usage — the edited paths come from has
 the workspace before and after. Do not read a v1 taxonomy breakdown as comparable to
 a v2 one; only the pass/fail column is.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -169,9 +170,7 @@ def outcome_from_events(
         elif isinstance(event, ToolEnd):
             start = calls.get(event.tool_use_id)
             arguments: Mapping[str, object] = start.arguments if start else {}
-            mark = fingerprint(
-                ToolUse(id=event.tool_use_id, name=event.name, arguments=arguments)
-            )
+            mark = fingerprint(ToolUse(id=event.tool_use_id, name=event.name, arguments=arguments))
             paths = tuple(relative_to(item, workspace) for item in event.result.artifacts)
             records.append(
                 ToolCallRecord(
@@ -319,9 +318,7 @@ def v2_adapter(
         usage = (
             usage_for(task, opened)
             if usage_for is not None
-            else usage_from_budget(
-                opened.agent.state.budget, requests=_turn_count(result.events)
-            )
+            else usage_from_budget(opened.agent.state.budget, requests=_turn_count(result.events))
         )
         return outcome_from_events(
             result.events,

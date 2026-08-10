@@ -30,6 +30,7 @@ file operation for the rest of the session, users would see a prompt on everythi
 the whole mechanism would be switched off within a day. A gate that is on and catches
 copied spans beats a gate that is off and would have caught paraphrase.
 """
+
 from __future__ import annotations
 
 import re

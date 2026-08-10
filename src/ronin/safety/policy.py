@@ -52,6 +52,7 @@ Feedback travels verbatim into ``ApprovalDecision.reason``, which the loop feeds
 a tool result, so "no, use the staging database instead" is something the model can act
 on rather than a dead end.
 """
+
 from __future__ import annotations
 
 import re
@@ -475,42 +476,195 @@ class UnattendedAsker:
 #: Read-only inspection. None of these can change a byte, so gating them buys nothing
 #: and costs a prompt — which is the trade that gets a gate turned off.
 READ_ONLY_BINARIES: tuple[str, ...] = (
-    "ls", "pwd", "cd", "pushd", "popd", "echo", "printf", "cat", "bat", "head", "tail",
-    "wc", "sort", "uniq", "cut", "tr", "column", "diff", "cmp", "grep", "egrep", "fgrep",
-    "rg", "ag", "ack", "find", "fd", "file", "stat", "which", "type", "date", "printenv",
-    "env", "basename", "dirname", "realpath", "readlink", "tree", "du", "df", "ps",
-    "uname", "whoami", "hostname", "id", "sleep", "true", "false", "test", "seq", "jq",
-    "yq", "awk", "sed", "tee", "xxd", "md5sum", "sha256sum", "nproc", "locale", "man",
-    "curl", "wget", "host", "dig", "ping", "export", "unset", "clear", "history",
+    "ls",
+    "pwd",
+    "cd",
+    "pushd",
+    "popd",
+    "echo",
+    "printf",
+    "cat",
+    "bat",
+    "head",
+    "tail",
+    "wc",
+    "sort",
+    "uniq",
+    "cut",
+    "tr",
+    "column",
+    "diff",
+    "cmp",
+    "grep",
+    "egrep",
+    "fgrep",
+    "rg",
+    "ag",
+    "ack",
+    "find",
+    "fd",
+    "file",
+    "stat",
+    "which",
+    "type",
+    "date",
+    "printenv",
+    "env",
+    "basename",
+    "dirname",
+    "realpath",
+    "readlink",
+    "tree",
+    "du",
+    "df",
+    "ps",
+    "uname",
+    "whoami",
+    "hostname",
+    "id",
+    "sleep",
+    "true",
+    "false",
+    "test",
+    "seq",
+    "jq",
+    "yq",
+    "awk",
+    "sed",
+    "tee",
+    "xxd",
+    "md5sum",
+    "sha256sum",
+    "nproc",
+    "locale",
+    "man",
+    "curl",
+    "wget",
+    "host",
+    "dig",
+    "ping",
+    "export",
+    "unset",
+    "clear",
+    "history",
 )
 
 #: Toolchains. A build, a test run or a linter is the work itself; asking about them is
 #: asking about the task the user just gave you.
 DEV_BINARIES: tuple[str, ...] = (
-    "python", "python3", "uv", "uvx", "pip", "pip3", "pipx", "poetry", "hatch", "tox",
-    "nox", "pytest", "ruff", "mypy", "black", "isort", "flake8", "pylint", "coverage",
-    "node", "npm", "npx", "pnpm", "yarn", "bun", "deno", "tsc", "eslint", "prettier",
-    "jest", "vitest", "make", "cmake", "ninja", "cargo", "rustc", "rustup", "go",
-    "gofmt", "golangci-lint", "javac", "java", "mvn", "gradle", "dotnet", "swift",
-    "ruby", "bundle", "rake", "gem", "php", "composer", "just", "task", "terraform",
-    "kubectl", "helm",
+    "python",
+    "python3",
+    "uv",
+    "uvx",
+    "pip",
+    "pip3",
+    "pipx",
+    "poetry",
+    "hatch",
+    "tox",
+    "nox",
+    "pytest",
+    "ruff",
+    "mypy",
+    "black",
+    "isort",
+    "flake8",
+    "pylint",
+    "coverage",
+    "node",
+    "npm",
+    "npx",
+    "pnpm",
+    "yarn",
+    "bun",
+    "deno",
+    "tsc",
+    "eslint",
+    "prettier",
+    "jest",
+    "vitest",
+    "make",
+    "cmake",
+    "ninja",
+    "cargo",
+    "rustc",
+    "rustup",
+    "go",
+    "gofmt",
+    "golangci-lint",
+    "javac",
+    "java",
+    "mvn",
+    "gradle",
+    "dotnet",
+    "swift",
+    "ruby",
+    "bundle",
+    "rake",
+    "gem",
+    "php",
+    "composer",
+    "just",
+    "task",
+    "terraform",
+    "kubectl",
+    "helm",
 )
 
 #: git subcommands that are read-only or trivially recoverable. ``checkout``, ``clean``,
 #: ``rebase``, ``merge``, ``restore`` and ``switch`` are absent on purpose: each can
 #: destroy uncommitted work, and each is worth one prompt.
 SAFE_GIT_SUBCOMMANDS: tuple[str, ...] = (
-    "status", "diff", "log", "show", "branch", "rev-parse", "rev-list", "describe",
-    "blame", "ls-files", "ls-tree", "remote", "tag", "worktree", "shortlog", "cat-file",
-    "symbolic-ref", "config", "stash", "fetch", "add", "commit", "pull", "bisect",
-    "reflog", "grep", "apply", "diff-tree", "for-each-ref", "check-ignore", "init",
+    "status",
+    "diff",
+    "log",
+    "show",
+    "branch",
+    "rev-parse",
+    "rev-list",
+    "describe",
+    "blame",
+    "ls-files",
+    "ls-tree",
+    "remote",
+    "tag",
+    "worktree",
+    "shortlog",
+    "cat-file",
+    "symbolic-ref",
+    "config",
+    "stash",
+    "fetch",
+    "add",
+    "commit",
+    "pull",
+    "bisect",
+    "reflog",
+    "grep",
+    "apply",
+    "diff-tree",
+    "for-each-ref",
+    "check-ignore",
+    "init",
 )
 
 #: Mutations that are cheap to undo, so a prompt costs more than it saves. Their paths
 #: are still checked against the deny list, which is what keeps them cheap *and* safe.
 CHEAP_MUTATION_BINARIES: tuple[str, ...] = (
-    "mkdir", "rmdir", "touch", "cp", "mv", "ln", "tar", "zip", "unzip", "gzip",
-    "gunzip", "chmod", "truncate", "install",
+    "mkdir",
+    "rmdir",
+    "touch",
+    "cp",
+    "mv",
+    "ln",
+    "tar",
+    "zip",
+    "unzip",
+    "gzip",
+    "gunzip",
+    "chmod",
+    "truncate",
+    "install",
 )
 
 
@@ -937,8 +1091,7 @@ class PolicyEngine:
         if spec.danger_level >= DangerLevel.IRREVERSIBLE:
             return False
         return not any(
-            resolution.rule is not None and resolution.rule.unwaivable
-            for resolution in resolutions
+            resolution.rule is not None and resolution.rule.unwaivable for resolution in resolutions
         )
 
     def _reason(
@@ -1028,9 +1181,7 @@ class PolicyEngine:
             else:
                 note = (f"{note} " if note else "") + "approved for the rest of this session."
             note = note.strip()
-        self._record(
-            spec, use, verdict, approved=True, outcome=answer.outcome, reason=note
-        )
+        self._record(spec, use, verdict, approved=True, outcome=answer.outcome, reason=note)
         return ApprovalDecision(approved=True, reason=note, remember=remember)
 
     def remembered_rule(self, spec: ToolSpec, use: ToolUse, outcome: Outcome) -> Rule:
@@ -1053,9 +1204,7 @@ class PolicyEngine:
                 ),
                 None,
             )
-            matcher = (
-                Exact(argument="path", value=path) if path is not None else AnyUse()
-            )
+            matcher = Exact(argument="path", value=path) if path is not None else AnyUse()
         return Rule(
             tool=spec.name,
             matcher=matcher,

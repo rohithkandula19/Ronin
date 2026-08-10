@@ -9,6 +9,7 @@ Every fixture is replayed under six chunkings (see ``replay.SPLIT_SIZES``),
 including one byte at a time. A result that depends on how the network happened to
 fragment the response is a bug, and this is where it shows up.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
@@ -58,9 +59,7 @@ class Drained:
         providers expressing the same call are not obliged to agree on the id. What
         they *are* obliged to agree on is the name and the arguments.
         """
-        return tuple(
-            (use.name, tuple(sorted(use.arguments.items()))) for use in self.uses
-        )
+        return tuple((use.name, tuple(sorted(use.arguments.items()))) for use in self.uses)
 
 
 async def drain(stream: AsyncIterator[ModelDelta]) -> Drained:

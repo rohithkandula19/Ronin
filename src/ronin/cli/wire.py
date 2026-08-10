@@ -41,6 +41,7 @@ itself. Feeding it in as ``declared`` would relabel an inferred command as "decl
 explicitly in RONIN.md" and destroy the provenance both modules are built around, so
 ``declared`` is left unset and the gap is reported as a note instead.
 """
+
 from __future__ import annotations
 
 import json
@@ -346,8 +347,7 @@ def _load_mcp(
         return (), Note(
             subject="mcp config",
             detail=(
-                f"{exc} — no MCP servers were loaded, so none of their tools exist "
-                "this session"
+                f"{exc} — no MCP servers were loaded, so none of their tools exist this session"
             ),
         )
 
@@ -602,8 +602,10 @@ async def build_runtime(
     )
 
     ctx = ToolContext(root=paths.workspace_root)
-    shell_session = shell if shell is not None else ShellSession(
-        shell=PersistentShell(cwd=paths.workspace_root, env=ctx.env)
+    shell_session = (
+        shell
+        if shell is not None
+        else ShellSession(shell=PersistentShell(cwd=paths.workspace_root, env=ctx.env))
     )
     if shell is None:
         # Only close what we opened. A caller who injected a shell owns its lifetime,
@@ -750,9 +752,7 @@ async def _connect_mcp(
     never a silent outcome — and registers the teardown as a closer.
     """
     provider = (
-        transport_provider
-        if transport_provider is not None
-        else default_transport_provider()
+        transport_provider if transport_provider is not None else default_transport_provider()
     )
     toolset = await connect_all(servers, provider)
     notes: list[Note] = [

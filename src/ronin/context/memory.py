@@ -23,6 +23,7 @@ rather than to ``Path.home()``. A test that accidentally reads the developer's
 real ``~/.ronin/RONIN.md`` is a test whose result depends on whose laptop it ran
 on; the orchestrator passes the real home explicitly.
 """
+
 from __future__ import annotations
 
 import json
@@ -164,9 +165,7 @@ def memory_paths(
     return tuple(candidates)
 
 
-def load_memory(
-    cwd: Path, *, home: Path | None = None, root: Path | None = None
-) -> Memory:
+def load_memory(cwd: Path, *, home: Path | None = None, root: Path | None = None) -> Memory:
     """Load every RONIN.md in effect for ``cwd``. Missing files are simply absent."""
     boundary = root if root is not None else find_repo_root(cwd)
     files: list[MemoryFile] = []
@@ -521,9 +520,7 @@ def _from_pyproject(root: Path) -> list[FoundCommand]:
     tools: Mapping[str, Any] = tool if isinstance(tool, dict) else {}
     out: list[FoundCommand] = []
     if "pytest" in tools:
-        out.append(
-            FoundCommand(CommandKind.TEST, "pytest", "pyproject.toml [tool.pytest]")
-        )
+        out.append(FoundCommand(CommandKind.TEST, "pytest", "pyproject.toml [tool.pytest]"))
     if "ruff" in tools:
         out.append(FoundCommand(CommandKind.LINT, "ruff check", "pyproject.toml [tool.ruff]"))
     if "mypy" in tools:
@@ -598,9 +595,7 @@ def _from_recipes(
         kind = kinds.get(target)
         if kind is None:
             continue
-        out.append(
-            FoundCommand(kind, f"{runner} {target}", f"{label} target {target!r}")
-        )
+        out.append(FoundCommand(kind, f"{runner} {target}", f"{label} target {target!r}"))
     return out
 
 

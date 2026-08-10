@@ -66,6 +66,7 @@ name; it defaults to ``*`` and is only meaningful for the two tool events. The
 event JSON on stdin looks like ``{"event": "PreToolUse", "tool_name": "write",
 "arguments": {...}}`` — keys sorted, so a hook's behaviour is reproducible.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -117,9 +118,7 @@ BLOCKING_EVENTS: frozenset[HookEvent] = frozenset(
 )
 
 #: Events that carry a tool name, and are therefore worth matching on.
-TOOL_EVENTS: frozenset[HookEvent] = frozenset(
-    {HookEvent.PRE_TOOL_USE, HookEvent.POST_TOOL_USE}
-)
+TOOL_EVENTS: frozenset[HookEvent] = frozenset({HookEvent.PRE_TOOL_USE, HookEvent.POST_TOOL_USE})
 
 
 class HookOutcome(StrEnum):
@@ -282,10 +281,7 @@ class HookRun:
             return HookOutcome.BLOCK if self.spec.block_on_timeout else HookOutcome.WARN
         if self.completion.exit_code == 0:
             return HookOutcome.OK
-        if (
-            self.completion.exit_code == BLOCK_EXIT_CODE
-            and self.spec.event in BLOCKING_EVENTS
-        ):
+        if self.completion.exit_code == BLOCK_EXIT_CODE and self.spec.event in BLOCKING_EVENTS:
             return HookOutcome.BLOCK
         return HookOutcome.WARN
 
@@ -311,10 +307,7 @@ class HookRun:
                 f"hook {self.spec.label!r} timed out after "
                 f"{self.spec.timeout_seconds:g}s and was killed"
             )
-        return (
-            f"hook {self.spec.label!r} exited {self.completion.exit_code} "
-            "and printed nothing"
-        )
+        return f"hook {self.spec.label!r} exited {self.completion.exit_code} and printed nothing"
 
 
 @dataclass(frozen=True, slots=True)
@@ -370,9 +363,7 @@ class HookReport:
             for run in self.runs
             if run.outcome is HookOutcome.OK and run.completion.stdout.strip()
         ]
-        return "\n".join(
-            cap(part, label=f"{self.event.value} stdout") for part in parts
-        )
+        return "\n".join(cap(part, label=f"{self.event.value} stdout") for part in parts)
 
     def as_tool_result(self) -> ToolResult | None:
         """The block as the failed ``ToolResult`` the model sees, or ``None``.
@@ -392,9 +383,7 @@ class HookConfig:
 
     def for_event(self, event: HookEvent, tool_name: str | None = None) -> tuple[HookSpec, ...]:
         """Hooks that apply, in config order — users expect their order to hold."""
-        return tuple(
-            spec for spec in self.hooks if spec.event is event and spec.matches(tool_name)
-        )
+        return tuple(spec for spec in self.hooks if spec.event is event and spec.matches(tool_name))
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> HookConfig:
@@ -413,8 +402,7 @@ class HookConfig:
                 ) from exc
             if not isinstance(groups, Sequence) or isinstance(groups, (str, bytes)):
                 raise HookConfigError(
-                    f"{raw_event}: expected a list of "
-                    '{"matcher": ..., "hooks": [...]} groups'
+                    f'{raw_event}: expected a list of {{"matcher": ..., "hooks": [...]}} groups'
                 )
             for index, group in enumerate(groups):
                 specs.extend(cls._parse_group(event, group, index))

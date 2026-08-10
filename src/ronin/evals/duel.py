@@ -51,6 +51,7 @@ not. Putting it in the scoreboard would make "same seed → byte-identical score
 false on real hardware, quietly turning the determinism check into a flake. Wall time
 lives in :func:`render_duel_markdown`, which is for reading rather than comparing.
 """
+
 from __future__ import annotations
 
 import difflib
@@ -501,9 +502,7 @@ class TaskDuel:
     @property
     def both_failed(self) -> bool:
         """Neither side passed, and neither was skipped — a skip is nobody's failure."""
-        return all(
-            row.status not in (PASS_STATUS, SKIP_STATUS) for row in (self.a, self.b)
-        )
+        return all(row.status not in (PASS_STATUS, SKIP_STATUS) for row in (self.a, self.b))
 
     @property
     def both_failed_differently(self) -> bool:

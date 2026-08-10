@@ -4,6 +4,7 @@ The degradation tests are the point of this file. A killed server must leave the
 session usable, its tools must fail as *values* with a message the model can act
 on, and the reconnect budget must be spent at most once.
 """
+
 from __future__ import annotations
 
 import json

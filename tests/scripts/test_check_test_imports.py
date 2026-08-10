@@ -9,6 +9,7 @@ Two of these pin bugs the hook actually had on its first run rather than hypothe
   into ``tests/evals/``, reporting SyntaxErrors from a CSV-quoting *fixture*: another
   project's code, deliberately broken, and none of this hook's business.
 """
+
 from __future__ import annotations
 
 import ast

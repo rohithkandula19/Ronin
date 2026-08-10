@@ -3,6 +3,7 @@
 Everything here is offline. The only subprocess in this suite is the ``sh -c``
 one-liner in ``test_hooks.py``, which is deliberate and local.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence

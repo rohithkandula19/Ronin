@@ -6,6 +6,7 @@ about the boundaries. That one is about the *shape*: it fails the moment someone
 field to :class:`~ronin.telemetry.TaskOutcome`, which is the event that must never be
 silent in the most privacy-sensitive module in the repository.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -73,8 +74,15 @@ def test_the_payload_has_no_field_that_could_hold_free_text() -> None:
     for field in dataclasses.fields(TaskOutcome):
         if field.name in pattern_checked:
             continue
-        assert field.type in ("bool", "OsName", "TaskCategory", "Outcome",
-                              "TaxonomyClass", "TurnBucket", "DurationBucket"), field
+        assert field.type in (
+            "bool",
+            "OsName",
+            "TaskCategory",
+            "Outcome",
+            "TaxonomyClass",
+            "TurnBucket",
+            "DurationBucket",
+        ), field
 
 
 def test_the_payload_is_frozen_so_a_caller_cannot_widen_it_after_construction() -> None:
@@ -292,9 +300,7 @@ def test_every_enum_value_survives_a_round_trip_through_json() -> None:
     for category in TaskCategory:
         for outcome in Outcome:
             for taxonomy in TaxonomyClass:
-                built = payload(
-                    task_category=category, outcome=outcome, taxonomy_class=taxonomy
-                )
+                built = payload(task_category=category, outcome=outcome, taxonomy_class=taxonomy)
                 body = json.loads(to_json(built))
                 assert body["task_category"] == category.value
                 assert body["outcome"] == outcome.value

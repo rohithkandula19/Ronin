@@ -4,6 +4,7 @@ The most important test in this file is
 ``test_subagents_and_compaction_cannot_reach_the_main_model``. Everything else here
 is config parsing; that one is the money.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Mapping

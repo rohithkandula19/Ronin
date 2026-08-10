@@ -5,6 +5,7 @@ below check the claim holds through the parser (quoting, wrappers, chaining) and
 the message tells the model what to do instead — a refusal that only says "denied" gets
 retried with different quoting.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -159,7 +160,7 @@ def test_the_checkpoint_predicate_is_injected_not_discovered() -> None:
 @pytest.mark.parametrize(
     "command",
     [
-        'echo key >> ~/.ssh/authorized_keys',
+        "echo key >> ~/.ssh/authorized_keys",
         "cp id_rsa ~/.ssh/id_rsa",
         "mv creds ~/.aws/credentials",
         "printf 'X=1' > .env",

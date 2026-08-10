@@ -30,6 +30,7 @@ Nothing here imports ``ronin.providers`` or ``ronin.core.loop``. A tool that kne
 which model was calling it would special-case for that model, and the subagent runner
 is injected for the same reason — the tool layer must not reach back into the loop.
 """
+
 from __future__ import annotations
 
 from .base import (

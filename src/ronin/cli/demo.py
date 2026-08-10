@@ -25,6 +25,7 @@ What it walks through, in the order a session does it:
 Every section prints what it proves, and the exit code is non-zero if any of those
 claims turns out to be false — a demo that cannot fail is a screenshot.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -287,7 +288,7 @@ def script() -> list[tuple[ModelDelta, ...]]:
     """
     edit = WIDGET.replace(
         "    return round(x, 2)\n",
-        "    return round(x, 2)\n\n\ndef helper() -> int:\n    \"\"\"Help.\"\"\"\n    return 1\n",
+        '    return round(x, 2)\n\n\ndef helper() -> int:\n    """Help."""\n    return 1\n',
     )
     return [
         calls("read", {"path": "src/widget.py"}, use_id="d1"),
@@ -327,15 +328,21 @@ async def main() -> int:
         paths = Paths(workspace_root=root, home=home, cwd=root)
         loaded = load_workspace(paths, flags={"mode": Mode.AUTO_EDIT.value}, environ={})
         _bullet(f"mode              {loaded.mode.value}")
-        _bullet(f"memory            {len(loaded.memory.files)} file(s): "
-                f"{', '.join(loaded.memory.paths()) or 'none'}")
-        _bullet(f"repo map          {loaded.repo_map.marker() or 'empty'} "
-                f"({len(loaded.repo_map.entries)} file(s), parser "
-                f"{loaded.repo_map.parser_name or 'none'})")
+        _bullet(
+            f"memory            {len(loaded.memory.files)} file(s): "
+            f"{', '.join(loaded.memory.paths()) or 'none'}"
+        )
+        _bullet(
+            f"repo map          {loaded.repo_map.marker() or 'empty'} "
+            f"({len(loaded.repo_map.entries)} file(s), parser "
+            f"{loaded.repo_map.parser_name or 'none'})"
+        )
         detected = ", ".join(kind.value for kind in loaded.verify.available)
         _bullet(f"verify            {detected or 'nothing detected'}")
-        _bullet(f"pinned prefix     ~{loaded.pinned_prefix_tokens():,} tokens "
-                f"(RONIN.md + repo map; the part of the window that never shrinks)")
+        _bullet(
+            f"pinned prefix     ~{loaded.pinned_prefix_tokens():,} tokens "
+            f"(RONIN.md + repo map; the part of the window that never shrinks)"
+        )
         if loaded.notes:
             print()
             _bullet("notes — every degradation named, none of them fatal:")
@@ -372,45 +379,62 @@ async def main() -> int:
             if gated:
                 entry = gated[0]
                 subject = entry.subject.replace("\n", " ")
-                _bullet(f"gate              write → {entry.decision.value}, "
-                        f"approved={entry.approved}")
+                _bullet(
+                    f"gate              write → {entry.decision.value}, approved={entry.approved}"
+                )
                 _bullet(f"                  subject: {subject[:70]}…")
                 _bullet(f"                  because: {entry.reason}")
                 for line in entry.trace[:3]:
                     _bullet(f"                    {line}")
-                _bullet("                  write declares requires_approval=True; auto_edit "
-                        "mode relaxed the ask to")
-                _bullet("                  allow, and the relaxation is *recorded* rather "
-                        "than silent. In ask mode")
-                _bullet(f"                  the same call reaches the asker (asked so far: "
-                        f"{len(asker.asked)}).")
+                _bullet(
+                    "                  write declares requires_approval=True; auto_edit "
+                    "mode relaxed the ask to"
+                )
+                _bullet(
+                    "                  allow, and the relaxation is *recorded* rather "
+                    "than silent. In ask mode"
+                )
+                _bullet(
+                    f"                  the same call reaches the asker (asked so far: "
+                    f"{len(asker.asked)})."
+                )
             else:
                 print("  FAILED: the write never went through the policy engine")
                 failures += 1
             refusals = [entry for entry in runtime.policy.audit if not entry.approved]
             if refusals:
-                _bullet(f"                  {len(refusals)} call(s) were refused outright: "
-                        f"{refusals[0].reason[:70]}")
+                _bullet(
+                    f"                  {len(refusals)} call(s) were refused outright: "
+                    f"{refusals[0].reason[:70]}"
+                )
 
             checkpoints = [e for e in _ends(events) if e.name == CHECKPOINT_STEP]
             if checkpoints and conversation.checkpoints:
                 _bullet(f"checkpoint        {checkpoints[0].result.content}")
-                _bullet(f"                  shadow repo at "
-                        f"{runtime.checkpoints.git_dir.relative_to(root)}; the user's own "
-                        f".git/index was never opened")
+                _bullet(
+                    f"                  shadow repo at "
+                    f"{runtime.checkpoints.git_dir.relative_to(root)}; the user's own "
+                    f".git/index was never opened"
+                )
             elif has_git:
                 print("  FAILED: a mutating turn took no checkpoint")
                 failures += 1
             else:
-                _bullet("checkpoint        git is not installed, so checkpoints degraded to "
-                        "a note (see below)")
+                _bullet(
+                    "checkpoint        git is not installed, so checkpoints degraded to "
+                    "a note (see below)"
+                )
 
             verifies = [e for e in _ends(events) if e.name == VERIFY_STEP]
             if verifies and not verifies[0].result.ok:
-                _bullet(f"verify            ran {' '.join(commands.argv_log[0])} — scoped to "
-                        f"the test that covers the changed file")
-                _bullet("                  it FAILED, and the failure went back to the model "
-                        "as a ToolResult")
+                _bullet(
+                    f"verify            ran {' '.join(commands.argv_log[0])} — scoped to "
+                    f"the test that covers the changed file"
+                )
+                _bullet(
+                    "                  it FAILED, and the failure went back to the model "
+                    "as a ToolResult"
+                )
             else:
                 print("  FAILED: the failing verify pass did not reach the model as a failure")
                 failures += 1
@@ -425,20 +449,28 @@ async def main() -> int:
             ]
             roles = {message.role for message in carrying}
             if roles == {Role.TOOL}:
-                _bullet("                  on a TOOL-role message, never a USER one: a user "
-                        "turn reads as a new")
-                _bullet("                  instruction and the model re-scopes to explaining "
-                        "the traceback")
+                _bullet(
+                    "                  on a TOOL-role message, never a USER one: a user "
+                    "turn reads as a new"
+                )
+                _bullet(
+                    "                  instruction and the model re-scopes to explaining "
+                    "the traceback"
+                )
             else:
                 print(f"  FAILED: the verify failure arrived on {roles or 'nothing'}")
                 failures += 1
 
             report = conversation.last_repair
             if report is not None and not report.fixed:
-                _bullet(f"repair            {len(report.attempts)} attempt(s), verdict "
-                        f"{report.verdict.value}, then it stopped")
-                _bullet(f"                  the signature was identical "
-                        f"{report.identical_seen}x across cosmetically different output")
+                _bullet(
+                    f"repair            {len(report.attempts)} attempt(s), verdict "
+                    f"{report.verdict.value}, then it stopped"
+                )
+                _bullet(
+                    f"                  the signature was identical "
+                    f"{report.identical_seen}x across cosmetically different output"
+                )
                 print()
                 for line in report.render().splitlines():
                     print(f"      {line}")
@@ -464,16 +496,20 @@ async def main() -> int:
             result = conversation.last_compaction
             if result is not None and result.compacted:
                 _bullet(f"messages          {before} → {len(conversation.messages)}")
-                _bullet(f"tokens (est.)     ~{result.token_estimate_before:,} → "
-                        f"~{result.token_estimate_after:,}")
+                _bullet(
+                    f"tokens (est.)     ~{result.token_estimate_before:,} → "
+                    f"~{result.token_estimate_after:,}"
+                )
                 _bullet(f"kept in full      {', '.join(result.retained_paths) or 'nothing'}")
                 _bullet("marker            " + result.marker)
                 if unpaired_tool_uses(conversation.messages):
                     print("  FAILED: compaction left an unpaired tool call")
                     failures += 1
                 else:
-                    _bullet("pairing           every tool call still has its result — the "
-                            "transcript is sendable")
+                    _bullet(
+                        "pairing           every tool call still has its result — the "
+                        "transcript is sendable"
+                    )
             else:
                 print("  FAILED: compaction did not fire")
                 failures += 1
@@ -494,13 +530,19 @@ async def main() -> int:
             failures += 1
         else:
             replayed = resume_session(loaded.paths.sessions_dir, "demo")
-            _bullet(f"file              "
-                    f"{runtime.transcript.path.relative_to(root)} "
-                    f"({runtime.transcript.path.stat().st_size:,} bytes)")
-            _bullet(f"events            {len(replayed.events)} recorded, "
-                    f"{len(replayed.replay.turns)} turn(s) folded")
-            _bullet(f"messages          {len(replayed.state.messages)} rebuilt from events "
-                    f"alone ({replayed.replay.source.value})")
+            _bullet(
+                f"file              "
+                f"{runtime.transcript.path.relative_to(root)} "
+                f"({runtime.transcript.path.stat().st_size:,} bytes)"
+            )
+            _bullet(
+                f"events            {len(replayed.events)} recorded, "
+                f"{len(replayed.replay.turns)} turn(s) folded"
+            )
+            _bullet(
+                f"messages          {len(replayed.state.messages)} rebuilt from events "
+                f"alone ({replayed.replay.source.value})"
+            )
             # From the *sidecar*, not the header: the header line carries the
             # session's immutable identity and is written before anything happens,
             # so it cannot know what the session went on to touch.
@@ -511,15 +553,21 @@ async def main() -> int:
             ]
             touched = ", ".join(rows[0].files_touched) if rows else ""
             _bullet(f"files touched     {touched or 'none recorded'}")
-            _bullet(f"turns / cost      {rows[0].turns} turn(s), "
-                    f"${rows[0].cost_usd:.4f}" if rows else "turns / cost      unknown")
+            _bullet(
+                f"turns / cost      {rows[0].turns} turn(s), ${rows[0].cost_usd:.4f}"
+                if rows
+                else "turns / cost      unknown"
+            )
             if replayed.state.pairing_errors:
-                print(f"  FAILED: the replayed state is unpairable: "
-                      f"{list(replayed.state.pairing_errors)}")
+                print(
+                    f"  FAILED: the replayed state is unpairable: "
+                    f"{list(replayed.state.pairing_errors)}"
+                )
                 failures += 1
             else:
-                _bullet("pairing           clean: the replayed state can be sent to a "
-                        "provider as-is")
+                _bullet(
+                    "pairing           clean: the replayed state can be sent to a provider as-is"
+                )
             if replayed.skipped:
                 for skipped in replayed.skipped:
                     _bullet(f"skipped           {skipped}")
@@ -550,10 +598,7 @@ async def main() -> int:
 
 
 async def _run(conversation: Conversation, runtime: Any, prompt: str) -> list[Event]:
-    return [
-        event
-        async for event in conversation.run_prompt(runtime, prompt, summarizer=summarize)
-    ]
+    return [event async for event in conversation.run_prompt(runtime, prompt, summarizer=summarize)]
 
 
 def _ends(events: Sequence[Event]) -> list[ToolEnd]:

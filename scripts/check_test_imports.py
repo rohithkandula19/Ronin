@@ -36,6 +36,7 @@ Usage::
     python scripts/check_test_imports.py                    # walk every test dir
     python scripts/check_test_imports.py path/to/test.py …  # what pre-commit passes
 """
+
 from __future__ import annotations
 
 import argparse
@@ -163,9 +164,7 @@ def test_files(paths: Sequence[str]) -> Iterable[Path]:
     if paths:
         return [Path(p) for p in paths if p.endswith(".py") and not is_excluded(Path(p))]
     return sorted(
-        p
-        for p in TEST_ROOT.rglob("*.py")
-        if "__pycache__" not in p.parts and not is_excluded(p)
+        p for p in TEST_ROOT.rglob("*.py") if "__pycache__" not in p.parts and not is_excluded(p)
     )
 
 

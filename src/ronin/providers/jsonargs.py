@@ -17,6 +17,7 @@ What is deliberately *not* here: inventing missing required fields, coercing
 types to match a schema, or dropping keys we do not recognize. Those are schema
 concerns and belong to the tool layer, which owns the schema.
 """
+
 from __future__ import annotations
 
 import json

@@ -4,6 +4,7 @@ The git-backed tests run a real local ``git``; they are offline and touch nothin
 outside ``tmp_path``. Where a failure mode cannot be produced locally (no git
 binary, a failing ``git commit``) the runner is scripted instead.
 """
+
 from __future__ import annotations
 
 import shutil

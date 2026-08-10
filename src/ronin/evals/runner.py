@@ -29,6 +29,7 @@ so the cap is testable rather than asserted in a comment. It is deliberately *no
 the report: peak concurrency legitimately varies between two identical runs, and a
 report that varies cannot be diffed.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -206,9 +207,7 @@ class EvalRunner:
         workspace = root / _safe_dirname(task.id)
         timeout = task.timeout_seconds or self._config.default_timeout
         try:
-            return await asyncio.wait_for(
-                self._attempt(task, workspace, started), timeout=timeout
-            )
+            return await asyncio.wait_for(self._attempt(task, workspace, started), timeout=timeout)
         except TimeoutError:
             return judge(
                 self._record(
@@ -388,9 +387,7 @@ async def run_suite(
     The class exists for the caller who does: a cancelled run's partial results live
     on the instance, and a function that only returns a report cannot expose them.
     """
-    runner = EvalRunner(
-        run_agent, config=config, command_runner=command_runner, clock=clock
-    )
+    runner = EvalRunner(run_agent, config=config, command_runner=command_runner, clock=clock)
     return await runner.run(tasks)
 
 

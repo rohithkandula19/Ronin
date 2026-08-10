@@ -17,6 +17,7 @@ to enforce them rather than to be polite:
    requirement are separate fields, and the dangerous ones cannot silently
    default to "no approval needed".
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -132,9 +133,7 @@ class Message:
             raise TypeError("Message.role must be a Role")
         blocks: object = self.content_blocks
         if isinstance(blocks, (str, bytes)):
-            raise TypeError(
-                "Message.content_blocks must be a sequence of blocks, not a string"
-            )
+            raise TypeError("Message.content_blocks must be a sequence of blocks, not a string")
         if not isinstance(self.content_blocks, tuple):
             raise TypeError("Message.content_blocks must be a tuple (frozen)")
         for block in self.content_blocks:
@@ -325,10 +324,7 @@ class Budget:
         return bool(
             (self.max_tokens is not None and self.spent_tokens >= self.max_tokens)
             or (self.max_usd is not None and self.spent_usd >= self.max_usd)
-            or (
-                self.max_wall_seconds is not None
-                and self.elapsed_seconds >= self.max_wall_seconds
-            )
+            or (self.max_wall_seconds is not None and self.elapsed_seconds >= self.max_wall_seconds)
         )
 
 
@@ -471,9 +467,7 @@ TRANSITIONS: Mapping[TurnState, frozenset[TurnState]] = {
     ),
     TurnState.DONE: frozenset({TurnState.IDLE}),
     TurnState.ERROR: frozenset({TurnState.THINKING, TurnState.DONE, TurnState.IDLE}),
-    TurnState.INTERRUPTED: frozenset(
-        {TurnState.THINKING, TurnState.DONE, TurnState.IDLE}
-    ),
+    TurnState.INTERRUPTED: frozenset({TurnState.THINKING, TurnState.DONE, TurnState.IDLE}),
 }
 
 #: States a turn may sit in indefinitely without the loop being wedged.
@@ -681,14 +675,7 @@ class Error:
 
 #: The closed set of events the loop emits. Consumers switch on exactly these.
 Event = (
-    TurnStart
-    | TextDelta
-    | StreamReset
-    | ToolStart
-    | ToolEnd
-    | ApprovalRequest
-    | TurnEnd
-    | Error
+    TurnStart | TextDelta | StreamReset | ToolStart | ToolEnd | ApprovalRequest | TurnEnd | Error
 )
 
 EVENT_TYPES: tuple[type, ...] = (

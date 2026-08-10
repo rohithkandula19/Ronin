@@ -35,6 +35,7 @@ Token counts here are estimates — ``len(text) / 4``, a rule of thumb, not a
 measurement. No tokenizer is available at this layer and taking a dependency on one
 per provider would be worse than being explicit about the approximation.
 """
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -340,17 +341,13 @@ def latest_tool_result_per_path(
 # --------------------------------------------------------------------------- #
 
 
-def plan_compaction(
-    messages: Sequence[Message], *, policy: CompactionPolicy
-) -> CompactionPlan:
+def plan_compaction(messages: Sequence[Message], *, policy: CompactionPolicy) -> CompactionPlan:
     """Decide the head/middle/tail split without touching anything."""
     head_end = _pinned_head_end(messages)
     tail_start = _tail_start(messages, head_end, policy.pinned_tail_turns)
     tail_start = _avoid_splitting_pairs(messages, head_end, tail_start)
     hoisted = tuple(
-        index
-        for index in range(head_end, tail_start)
-        if messages[index].metadata.get(PINNED_KEY)
+        index for index in range(head_end, tail_start) if messages[index].metadata.get(PINNED_KEY)
     )
     return CompactionPlan(head_end=head_end, tail_start=tail_start, hoisted=hoisted)
 
@@ -385,18 +382,14 @@ def _is_user_turn(message: Message) -> bool:
 
 def _tail_start(messages: Sequence[Message], head_end: int, turns: int) -> int:
     boundaries = [
-        index
-        for index in range(head_end, len(messages))
-        if _is_user_turn(messages[index])
+        index for index in range(head_end, len(messages)) if _is_user_turn(messages[index])
     ]
     if len(boundaries) <= turns:
         return head_end
     return boundaries[-turns]
 
 
-def _avoid_splitting_pairs(
-    messages: Sequence[Message], head_end: int, tail_start: int
-) -> int:
+def _avoid_splitting_pairs(messages: Sequence[Message], head_end: int, tail_start: int) -> int:
     """Move the boundary earlier until no tool pair straddles it.
 
     A result kept in the tail whose call was folded is an orphan the provider
@@ -456,9 +449,7 @@ async def maybe_compact(
     pinned_prefix_tokens: int = 0,
 ) -> CompactionResult:
     """Compact only if the trigger has been reached. The orchestrator's entry point."""
-    if not should_compact(
-        messages, policy=policy, pinned_prefix_tokens=pinned_prefix_tokens
-    ):
+    if not should_compact(messages, policy=policy, pinned_prefix_tokens=pinned_prefix_tokens):
         total = transcript_tokens(messages)
         return CompactionResult(
             messages=tuple(messages),
@@ -561,9 +552,7 @@ def missing_sections(summary: str) -> tuple[str, ...]:
     return tuple(section for section in SUMMARY_SECTIONS if section not in summary)
 
 
-async def _summarize(
-    messages: Sequence[Message], summarizer: Summarizer
-) -> tuple[str, str]:
+async def _summarize(messages: Sequence[Message], summarizer: Summarizer) -> tuple[str, str]:
     """``(summary, error)``. A failing summarizer yields the local digest, not a raise."""
     try:
         summary = await summarizer(build_summary_prompt(messages))
@@ -640,9 +629,7 @@ def _summary_message(marker: str, summary: str) -> Message:
     )
 
 
-def _marker(
-    *, folded: int, retained: int, tokens: int, summarizer_error: str, dropped: int
-) -> str:
+def _marker(*, folded: int, retained: int, tokens: int, summarizer_error: str, dropped: int) -> str:
     parts = [
         f"[context compacted: {folded} message(s) folded into a five-part summary",
         f"{retained} tool result(s) kept in full (most recent per file path)",

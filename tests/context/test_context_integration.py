@@ -5,6 +5,7 @@ files, read and edit real files through the tracker, clamp every tool result thr
 the budgeter, and compact when the window fills. The assertions are the properties
 the orchestrator depends on, not the internals of any one module.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -40,9 +41,7 @@ TREE = {
     "RONIN.md": "## Test\n- run `pytest -q`\n",
     "Makefile": "test:\n\tpytest -q\n",
     "src/engine.py": (
-        "class Engine:\n"
-        "    def run(self, steps: int) -> str:\n"
-        "        return 'ok'\n"
+        "class Engine:\n    def run(self, steps: int) -> str:\n        return 'ok'\n"
     ),
     "src/app.py": "from .engine import Engine\n\n\ndef main() -> int:\n    return 0\n",
     "src/util.py": "from .engine import Engine\n\n\ndef helper(x: int) -> int:\n    return x\n",
@@ -67,9 +66,7 @@ async def test_a_simulated_session_holds_every_invariant(tmp_path: Path) -> None
     # ---- the session: read a file, clamp the result, track it, edit it
     tracker = FileStateTracker()
     budget = OutputBudget(remaining_chars=400)
-    transcript: list[Message] = [
-        Message(role=Role.SYSTEM, content_blocks=(Text("system prompt"),))
-    ]
+    transcript: list[Message] = [Message(role=Role.SYSTEM, content_blocks=(Text("system prompt"),))]
     watched = root / "src" / "engine.py"
     for turn in range(1, 40):
         call_id = f"call-{turn}"

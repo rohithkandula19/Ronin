@@ -19,6 +19,7 @@ Four pieces, in the order a turn uses them:
 Everything model-shaped or subprocess-shaped arrives as an injected callable, so
 this package imports ``ronin.core`` and nothing else from Ronin.
 """
+
 from __future__ import annotations
 
 from .checkpoints import (

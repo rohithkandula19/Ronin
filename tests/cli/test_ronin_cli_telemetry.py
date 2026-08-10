@@ -13,6 +13,7 @@ feature makes about itself:
 * **``show`` prints the log verbatim**, because auditing rather than trusting is the
   entire point of keeping a local copy.
 """
+
 from __future__ import annotations
 
 import json
@@ -252,7 +253,7 @@ def test_show_can_be_limited_to_the_most_recent(tmp_path: Path) -> None:
 
 
 def test_show_reports_the_total_even_when_truncating(tmp_path: Path) -> None:
-    """"showing 2" without "of 5" invites the reader to think 2 is all there is."""
+    """ "showing 2" without "of 5" invites the reader to think 2 is all there is."""
     log = default_log_path(tmp_path)
     log.parent.mkdir(parents=True, exist_ok=True)
     log.write_text(

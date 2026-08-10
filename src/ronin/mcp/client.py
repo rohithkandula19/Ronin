@@ -21,6 +21,7 @@ turn must continue. So:
 Nothing here imports ``ronin.providers``: the transports take an injected sender,
 so the only thing this module knows about the network is that someone else does it.
 """
+
 from __future__ import annotations
 
 import json
@@ -55,9 +56,7 @@ PROTOCOL_VERSION = "2025-06-18"
 #: implementation handles. A server answering with anything else contributes no
 #: tools: guessing at an unknown revision's payload shape is how a client starts
 #: silently dropping fields.
-SUPPORTED_PROTOCOL_VERSIONS: frozenset[str] = frozenset(
-    {"2024-11-05", "2025-03-26", "2025-06-18"}
-)
+SUPPORTED_PROTOCOL_VERSIONS: frozenset[str] = frozenset({"2024-11-05", "2025-03-26", "2025-06-18"})
 
 CLIENT_NAME = "ronin"
 
@@ -278,8 +277,7 @@ class McpClient:
         if result.get("isError") is True:
             return ToolResult(
                 ok=False,
-                error=content
-                or f"{self.name}/{name} reported failure without saying why.",
+                error=content or f"{self.name}/{name} reported failure without saying why.",
             )
         structured = result.get("structuredContent")
         if not content and isinstance(structured, Mapping):
@@ -293,9 +291,7 @@ class McpClient:
 
     # ----------------------------------------------------------- internals --
 
-    async def _send_with_recovery(
-        self, method: str, params: Mapping[str, Any]
-    ) -> Response:
+    async def _send_with_recovery(self, method: str, params: Mapping[str, Any]) -> Response:
         """One request, with at most ``max_reconnects`` re-handshakes behind it."""
         try:
             return await self._send(method, params)

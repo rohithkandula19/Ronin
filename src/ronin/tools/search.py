@@ -22,6 +22,7 @@ Two flags are passed that ripgrep does not default to, both found by tests:
   line number and nothing to apply it to. Always printing the path costs a few tokens
   and removes a whole class of confusion.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -321,6 +322,4 @@ class LsTool(Tool):
         if not entries:
             return ToolResult(ok=True, content=f"{target} is empty (or everything was ignored).")
         shown, note = _cap(entries, what="entries")
-        return ToolResult(
-            ok=True, content="\n".join(shown) + f"\n({len(entries)} entries)" + note
-        )
+        return ToolResult(ok=True, content="\n".join(shown) + f"\n({len(entries)} entries)" + note)

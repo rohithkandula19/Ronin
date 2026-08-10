@@ -10,6 +10,7 @@ assumed: that ``--dry-run`` reaches a task list with no provider in the picture 
 and that the *running* path — the one that matters — produces a report, writes the
 files it was asked for, and returns the exit code a script would branch on.
 """
+
 from __future__ import annotations
 
 import json
@@ -92,7 +93,7 @@ def test_the_default_suite_is_relative_to_the_workspace_not_the_process(
 
 
 def test_a_missing_suite_says_so_rather_than_reporting_zero_tasks(tmp_path: Path) -> None:
-    """"0 tasks, 0 passed" over a nonexistent directory is a 100%-shaped lie."""
+    """ "0 tasks, 0 passed" over a nonexistent directory is a 100%-shaped lie."""
     outcome = select(options(tmp_path / "nope"))
     assert isinstance(outcome, Failed)
     assert "no eval suite at" in outcome.message
@@ -161,9 +162,7 @@ async def test_dry_run_lists_the_tasks_and_opens_nothing(tmp_path: Path) -> None
     """
     suite = tmp_path / "suite"
     build_suite(suite)
-    code, out, err = await run_eval(
-        options(suite, dry_run=True), Paths.discover(tmp_path), {}
-    )
+    code, out, err = await run_eval(options(suite, dry_run=True), Paths.discover(tmp_path), {})
     assert code == 0
     assert "2 task(s) selected" in out
     assert "fix-add" in out and "also-add" in out
@@ -278,9 +277,7 @@ async def test_two_models_are_refused_by_eval_with_a_pointer_to_duel(
 ) -> None:
     suite = tmp_path / "suite"
     build_suite(suite)
-    code, _, err = await run_eval(
-        options(suite, models=("a", "b")), Paths.discover(tmp_path), {}
-    )
+    code, _, err = await run_eval(options(suite, models=("a", "b")), Paths.discover(tmp_path), {})
     assert code == 1
     assert "ronin duel" in err
 

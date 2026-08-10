@@ -5,6 +5,7 @@ is a plain function, and no network anywhere. Each section prints the thing that
 would otherwise only be visible in a passing test — the refusals, the markers, and
 the counts.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -39,15 +40,9 @@ TREE: dict[str, str] = {
         "    return Engine()\n"
     ),
     "src/app.py": (
-        "from .engine import Engine, build\n\n\n"
-        "def main(argv: list[str]) -> int:\n"
-        "    return 0\n"
+        "from .engine import Engine, build\n\n\ndef main(argv: list[str]) -> int:\n    return 0\n"
     ),
-    "src/cli.py": (
-        "from .app import main\n\n\n"
-        "def entry() -> int:\n"
-        "    return main([])\n"
-    ),
+    "src/cli.py": ("from .app import main\n\n\ndef entry() -> int:\n    return main([])\n"),
     "src/orphan.py": "def nobody_imports_me() -> None:\n    pass\n",
     "src/broken.py": "def oops(:\n",
     "node_modules/dep/index.js": "export function hidden() {}\n",
@@ -170,10 +165,7 @@ async def main() -> int:
         rule_text = "run `uv run pytest tests/context -q` before pushing"
         target = remember(rule_text, cwd=root / "src", root=root)
         again_path = remember(rule_text, cwd=root / "src", root=root)
-        print(
-            f"  remembered into {target.relative_to(root)} "
-            f"(idempotent: {target == again_path})"
-        )
+        print(f"  remembered into {target.relative_to(root)} (idempotent: {target == again_path})")
         print("  " + "\n  ".join(target.read_text(encoding="utf-8").splitlines()))
 
         rule("2b. AUTO-BOOTSTRAP — only commands with evidence in the tree")
@@ -245,8 +237,7 @@ async def main() -> int:
         clamped = clamp(log, budget=OutputBudget(remaining_chars=400))
         print(clamped.text)
         print(
-            f"  {len(log)} chars in, {len(clamped.text)} out, "
-            f"{clamped.elided_lines} lines elided"
+            f"  {len(log)} chars in, {len(clamped.text)} out, {clamped.elided_lines} lines elided"
         )
         short = "short output\n"
         untouched = clamp(short, budget=OutputBudget(remaining_chars=400))

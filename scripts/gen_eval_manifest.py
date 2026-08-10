@@ -18,6 +18,7 @@ Usage::
     python scripts/gen_eval_manifest.py            # rewrite the manifest
     python scripts/gen_eval_manifest.py --check    # exit 1 if it is stale
 """
+
 from __future__ import annotations
 
 import argparse
@@ -123,8 +124,7 @@ def main() -> int:
             print(f"{manifest.relative_to(ROOT)} is up to date ({len(task_dirs(suite))} tasks)")
             return 0
         print(
-            f"{manifest.relative_to(ROOT)} is stale — run "
-            "`python scripts/gen_eval_manifest.py`",
+            f"{manifest.relative_to(ROOT)} is stale — run `python scripts/gen_eval_manifest.py`",
             file=sys.stderr,
         )
         declared = {

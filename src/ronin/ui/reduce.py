@@ -21,6 +21,7 @@ Three invariants this module exists to protect:
    arguments and its ``ToolResult``, because the alternative — a lookup table — is
    guaranteed to be missing the tool a user actually installed.
 """
+
 from __future__ import annotations
 
 import json

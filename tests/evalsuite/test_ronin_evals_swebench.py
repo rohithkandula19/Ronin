@@ -8,6 +8,7 @@ instances and no number derived from them says anything about any model.
 The one subprocess used is ``git`` against a repository created inside ``tmp_path``,
 which is genuinely local and costs nothing.
 """
+
 from __future__ import annotations
 
 import inspect
@@ -178,9 +179,7 @@ def test_subset_narrows_by_ids_then_repo_then_limit(fixture_path: Path) -> None:
     assert dataset.repos() == ("other/fixture", "ronin/fixture")
     assert len(dataset.subset(repo="ronin/fixture")) == 2
     assert len(dataset.subset(limit=1)) == 1
-    assert [t.instance_id for t in dataset.subset(ids=["other__fixture-3"])] == [
-        "other__fixture-3"
-    ]
+    assert [t.instance_id for t in dataset.subset(ids=["other__fixture-3"])] == ["other__fixture-3"]
 
 
 # --------------------------------------------------------------------------- #
@@ -221,7 +220,7 @@ def test_the_resolution_rule_matches_swebench(
 
 
 def test_a_task_with_no_required_tests_is_never_resolved() -> None:
-    """"All zero required tests passed" is vacuously true, and would score an
+    """ "All zero required tests passed" is vacuously true, and would score an
     unparseable row as a success."""
     empty = SWEBenchTask(instance_id="x-2")
     assert is_resolved(empty, TaskEvaluation(passed_tests=("anything",))) is False
@@ -451,9 +450,7 @@ async def test_a_task_with_no_patch_never_reaches_the_evaluator(tmp_path: Path) 
     async def no_patch(task: SWEBenchTask, workdir: Path) -> PatchAttempt:
         return PatchAttempt(patch="   \n")
 
-    harness = SWEBenchHarness(
-        patch_runner=no_patch, evaluator=spy, workspace=lambda task: tmp_path
-    )
+    harness = SWEBenchHarness(patch_runner=no_patch, evaluator=spy, workspace=lambda task: tmp_path)
     run = await harness.run(
         SWEBenchDataset((SWEBenchTask(instance_id="x-1", fail_to_pass=("f",)),))
     )
@@ -594,9 +591,7 @@ async def test_the_agent_s_exit_code_is_reported_as_a_note_not_as_a_transcript(
     async def no_change(workdir: Path) -> str:
         return ""
 
-    attempt = await agent_patch_runner(opener, no_change)(
-        SWEBenchTask(instance_id="x-1"), tmp_path
-    )
+    attempt = await agent_patch_runner(opener, no_change)(SWEBenchTask(instance_id="x-1"), tmp_path)
     assert attempt.patch == ""
     assert "exited 2" in attempt.note
     assert "unchanged" in attempt.note
@@ -694,6 +689,6 @@ async def test_the_git_diff_capture_reports_what_the_agent_changed(tmp_path: Pat
 async def test_a_directory_git_cannot_read_yields_no_patch_rather_than_a_crash(
     tmp_path: Path,
 ) -> None:
-    """"git could not tell us" and "the agent changed nothing" score identically —
+    """ "git could not tell us" and "the agent changed nothing" score identically —
     both are "no patch" — so inventing a distinction would invent information."""
     assert await git_diff_capture()(tmp_path) == ""

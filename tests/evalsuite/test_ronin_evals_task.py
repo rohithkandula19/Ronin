@@ -1,4 +1,5 @@
 """The loader's failure modes, and the guarantee that the answer key stays behind."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -28,8 +29,7 @@ def test_a_task_round_trips_from_toml(tmp_path: Path) -> None:
         fixture={"app.py": "def add(a, b):\n    return a - b\n"},
         files_expected=["app.py"],
         extra_toml=(
-            'max_turns = 8\ntimeout_seconds = 12.5\n'
-            'tags = ["quick"]\nregression_gate = true\n'
+            'max_turns = 8\ntimeout_seconds = 12.5\ntags = ["quick"]\nregression_gate = true\n'
         ),
     )
     loaded = load_task(root)
@@ -147,7 +147,7 @@ def test_the_manifest_accepts_table_entries(tmp_path: Path) -> None:
 
 
 def test_a_manifest_with_no_id_list_names_the_key_it_wanted(tmp_path: Path) -> None:
-    (tmp_path / "manifest.toml").write_text('count = 3\n', encoding="utf-8")
+    (tmp_path / "manifest.toml").write_text("count = 3\n", encoding="utf-8")
     with pytest.raises(TaskError) as caught:
         load_manifest(tmp_path)
     assert caught.value.key == "tasks"
@@ -209,9 +209,7 @@ def test_the_solution_directory_never_reaches_the_workspace(tmp_path: Path) -> N
     assert (workspace.root / "pkg" / "mod.py").exists()
     assert not (workspace.root / "solution").exists()
     assert "THE ANSWER" not in "".join(
-        path.read_text(encoding="utf-8")
-        for path in workspace.root.rglob("*")
-        if path.is_file()
+        path.read_text(encoding="utf-8") for path in workspace.root.rglob("*") if path.is_file()
     )
 
 

@@ -13,6 +13,7 @@ What it demonstrates, in order:
 4. The ledger showing the split: the expensive model did one turn, the cheap one did
    the sweeping.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -108,9 +109,7 @@ def calls(name: str, *, tokens: int, **args: object) -> tuple[ModelDelta, ...]:
 class AskNothing:
     """The parent's policy for the demo: allow everything, no budget, no interrupt."""
 
-    async def approve(
-        self, spec: ToolSpec, use: ToolUse, *, rendered: str
-    ) -> ApprovalDecision:
+    async def approve(self, spec: ToolSpec, use: ToolUse, *, rendered: str) -> ApprovalDecision:
         del spec, use, rendered
         return ApprovalDecision(approved=True, reason="demo policy")
 
@@ -188,8 +187,7 @@ async def main() -> int:
                     subagent_type="explore",
                 ),
                 says(
-                    "Two: handler in src/app.py and helper in src/util.py. "
-                    "I'd start with handler.",
+                    "Two: handler in src/app.py and helper in src/util.py. I'd start with handler.",
                     tokens=1500,
                 ),
             ],

@@ -25,6 +25,7 @@ This module reads files and imports nothing from Ronin. The declaration mapping
 arrives as an argument precisely so that ``ronin.context`` (which owns RONIN.md
 parsing) is not a dependency of ``verify``.
 """
+
 from __future__ import annotations
 
 import json
@@ -292,9 +293,7 @@ def from_declaration(declared: Mapping[str, object], *, source: str = "RONIN.md"
             continue
         spec = spec.with_command(
             kind,
-            DetectedCommand(
-                argv=argv, source=source, evidence=f"declared explicitly as {key!r}"
-            ),
+            DetectedCommand(argv=argv, source=source, evidence=f"declared explicitly as {key!r}"),
         )
     return spec
 
@@ -339,8 +338,9 @@ def _declares_dependency(data: Mapping[str, object], needle: str) -> bool:
             stack.extend(node.values())
         elif isinstance(node, str):
             token = node.strip().lower()
-            if token == needle or token.startswith((f"{needle}>", f"{needle}=", f"{needle}[",
-                                                    f"{needle}<", f"{needle}~", f"{needle} ")):
+            if token == needle or token.startswith(
+                (f"{needle}>", f"{needle}=", f"{needle}[", f"{needle}<", f"{needle}~", f"{needle} ")
+            ):
                 return True
         elif isinstance(node, Sequence) and not isinstance(node, (bytes, bytearray)):
             stack.extend(node)

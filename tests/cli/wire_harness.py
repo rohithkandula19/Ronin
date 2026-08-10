@@ -11,6 +11,7 @@ else is the real object against a real ``tmp_path`` — a mocked filesystem here
 test the mock, since reading a workspace off disk is exactly what ``load_workspace``
 does.
 """
+
 from __future__ import annotations
 
 import json
@@ -83,9 +84,7 @@ ROUTER_CONFIG = RouterConfig(
 )
 
 
-def fake_router(
-    config: RouterConfig = ROUTER_CONFIG, model: ModelClient | None = None
-) -> Router:
+def fake_router(config: RouterConfig = ROUTER_CONFIG, model: ModelClient | None = None) -> Router:
     """A real ``Router`` whose factory hands back one scripted client for every spec."""
     client = model if model is not None else ScriptedModel()
 
@@ -121,9 +120,7 @@ def workspace(root: Path, *, home: Path | None = None, cwd: Path | None = None) 
     """A ``Paths`` rooted in ``root``, with a home that is never the real one."""
     home_dir = home if home is not None else root / "home"
     home_dir.mkdir(parents=True, exist_ok=True)
-    return Paths(
-        workspace_root=root, home=home_dir, cwd=cwd if cwd is not None else root
-    )
+    return Paths(workspace_root=root, home=home_dir, cwd=cwd if cwd is not None else root)
 
 
 def write(root: Path, relative: str, content: str) -> Path:
@@ -179,10 +176,7 @@ def full_workspace(root: Path) -> Paths:
     write(
         root,
         ".ronin/hooks.json",
-        json.dumps(
-            {"PreToolUse": [{"matcher": "bash", "hooks": [{"command": "true"}]}]}
-        )
-        + "\n",
+        json.dumps({"PreToolUse": [{"matcher": "bash", "hooks": [{"command": "true"}]}]}) + "\n",
     )
     write(root, ".ronin/agents/sweeper.md", AGENT_DEFINITION)
     write(root, ".ronin/commands/ship.md", "Ship $ARGUMENTS to staging.\n")
@@ -237,12 +231,8 @@ class FakeMcpTransport:
             name = str(request.params.get("name", ""))
             args = request.params.get("arguments", {})
             self.calls.append((name, args if isinstance(args, Mapping) else {}))
-            return Response(
-                id=request.id, result={"content": [{"type": "text", "text": "ok"}]}
-            )
-        return Response(
-            id=request.id, error=JsonRpcError(-32601, f"no method {request.method!r}")
-        )
+            return Response(id=request.id, result={"content": [{"type": "text", "text": "ok"}]})
+        return Response(id=request.id, error=JsonRpcError(-32601, f"no method {request.method!r}"))
 
     async def notify(self, request: Request) -> None:
         del request

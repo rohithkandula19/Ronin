@@ -13,6 +13,7 @@ The three things this adapter knows that no other one does:
   next turn or the continuation is rejected. It travels on
   ``ronin.core.types.Thinking.signature`` and is never edited.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Mapping, Sequence

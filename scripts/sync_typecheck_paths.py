@@ -31,6 +31,7 @@ Usage::
     python scripts/sync_typecheck_paths.py           # rewrite in place
     python scripts/sync_typecheck_paths.py --check    # exit 1 if stale (for CI)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -124,19 +125,14 @@ def assert_no_collisions() -> None:
     if collisions:
         raise SystemExit(
             "duplicate module basenames in non-package directories pytest collects; "
-            "the second import silently resolves to the first:\n  "
-            + "\n  ".join(collisions)
+            "the second import silently resolves to the first:\n  " + "\n  ".join(collisions)
         )
 
 
 def test_modules() -> list[str]:
     """Every ``tests/*`` module basename, for the mypy override list."""
     assert_no_collisions()
-    return sorted(
-        path.stem
-        for name in test_dirs()
-        for path in (TESTS / name).glob("*.py")
-    )
+    return sorted(path.stem for name in test_dirs() for path in (TESTS / name).glob("*.py"))
 
 
 def render() -> str:

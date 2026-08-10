@@ -33,6 +33,7 @@ inside the call and raises :class:`ParserUnavailable` when it is not installed.
 
 Token counts are ``len(text) / 4`` estimates — a rule of thumb, not a measurement.
 """
+
 from __future__ import annotations
 
 import ast
@@ -284,9 +285,7 @@ def _class_end(pattern: str, start: int) -> int | None:
     return None
 
 
-def walk_repo(
-    root: Path, *, extra_ignores: GitIgnore | None = None
-) -> tuple[Path, ...]:
+def walk_repo(root: Path, *, extra_ignores: GitIgnore | None = None) -> tuple[Path, ...]:
     """Every non-ignored file under ``root``, sorted by repo-relative posix path.
 
     Directories are pruned rather than filtered per-file, which is both faster and
@@ -297,9 +296,7 @@ def walk_repo(
     and a repo map is not worth a hang.
     """
     found: list[tuple[str, Path]] = []
-    stack: list[tuple[Path, str, GitIgnore]] = [
-        (root, "", extra_ignores or GitIgnore())
-    ]
+    stack: list[tuple[Path, str, GitIgnore]] = [(root, "", extra_ignores or GitIgnore())]
     while stack:
         directory, rel, inherited = stack.pop()
         ignore = inherited
@@ -415,9 +412,7 @@ class PythonAstParser:
         self._collect(tree.body, out, parent="")
         return tuple(out)
 
-    def _collect(
-        self, body: Sequence[ast.stmt], out: list[Signature], *, parent: str
-    ) -> None:
+    def _collect(self, body: Sequence[ast.stmt], out: list[Signature], *, parent: str) -> None:
         for node in body:
             if isinstance(node, ast.ClassDef):
                 if not self._visible(node.name):
@@ -441,9 +436,7 @@ class PythonAstParser:
                     Signature(
                         kind=SignatureKind.METHOD if parent else SignatureKind.FUNCTION,
                         name=node.name,
-                        text=_clip(
-                            f"{prefix} {node.name}({ast.unparse(node.args)}){returns}"
-                        ),
+                        text=_clip(f"{prefix} {node.name}({ast.unparse(node.args)}){returns}"),
                         line=node.lineno,
                         parent=parent,
                     )
@@ -570,9 +563,7 @@ _TS_DEFINITIONS: Mapping[str, SignatureKind] = {
 }
 
 #: Definitions whose children are not descended into. Nested closures are noise.
-_TS_OPAQUE: frozenset[SignatureKind] = frozenset(
-    {SignatureKind.FUNCTION, SignatureKind.METHOD}
-)
+_TS_OPAQUE: frozenset[SignatureKind] = frozenset({SignatureKind.FUNCTION, SignatureKind.METHOD})
 
 
 def default_tree_sitter_loader(language: str) -> TSParser:
@@ -600,9 +591,7 @@ def default_tree_sitter_loader(language: str) -> TSParser:
     try:
         return cast(TSParser, get_parser(language))
     except Exception as exc:  # the grammar pack raises its own exception types
-        raise ParserUnavailable(
-            f"tree-sitter has no grammar for {language!r}: {exc}"
-        ) from exc
+        raise ParserUnavailable(f"tree-sitter has no grammar for {language!r}: {exc}") from exc
 
 
 class TreeSitterParser:
@@ -738,9 +727,7 @@ def python_imports(tree: ast.Module) -> tuple[ImportRef, ...]:
     refs: list[ImportRef] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            refs.extend(
-                ImportRef(kind=RefKind.PYTHON, target=alias.name) for alias in node.names
-            )
+            refs.extend(ImportRef(kind=RefKind.PYTHON, target=alias.name) for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
             refs.append(
                 ImportRef(
@@ -842,9 +829,7 @@ def _resolve_python(
     return None
 
 
-def _resolve_relative_python(
-    source_path: str, ref: ImportRef, nodes: set[str]
-) -> str | None:
+def _resolve_relative_python(source_path: str, ref: ImportRef, nodes: set[str]) -> str | None:
     """``from ..core.types import X`` against the importer's own directory.
 
     Exact, unlike the dotted-name lookup: a relative import is defined by position
@@ -1059,9 +1044,7 @@ def build_repo_map(
     if top_n <= 0:
         raise ValueError("build_repo_map: top_n must be positive")
     active = parser or PythonAstParser()
-    files = [
-        path for path in walk_repo(root) if path.suffix in CODE_SUFFIXES
-    ]
+    files = [path for path in walk_repo(root) if path.suffix in CODE_SUFFIXES]
     cache = _load_cache(cache_dir, root, active.name)
     scanned: dict[str, _Scanned] = {}
     reused = 0
@@ -1198,9 +1181,7 @@ class _Scanned:
     parse_error: str = ""
 
 
-def _scan_file(
-    path: Path, rel: str, mtime_ns: int, size: int, parser: Parser
-) -> _Scanned:
+def _scan_file(path: Path, rel: str, mtime_ns: int, size: int, parser: Parser) -> _Scanned:
     """Read once, extract signatures and imports together.
 
     One read and (for Python) one ``ast.parse`` serves both, so there is no reason
@@ -1258,9 +1239,7 @@ def cache_path(cache_dir: Path, root: Path) -> Path:
     return cache_dir / f"repomap-{digest}.json"
 
 
-def _load_cache(
-    cache_dir: Path | None, root: Path, parser_name: str
-) -> dict[str, _Scanned]:
+def _load_cache(cache_dir: Path | None, root: Path, parser_name: str) -> dict[str, _Scanned]:
     if cache_dir is None:
         return {}
     path = cache_path(cache_dir, root)
@@ -1283,9 +1262,7 @@ def _load_cache(
             out[rel] = _Scanned(
                 mtime_ns=int(entry["mtime_ns"]),
                 size=int(entry["size"]),
-                signatures=tuple(
-                    Signature.from_json(item) for item in entry.get("signatures", [])
-                ),
+                signatures=tuple(Signature.from_json(item) for item in entry.get("signatures", [])),
                 refs=tuple(ImportRef.from_json(item) for item in entry.get("refs", [])),
                 parse_error=str(entry.get("parse_error", "")),
             )

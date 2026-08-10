@@ -1,4 +1,5 @@
 """The headless path: the JSON schema contract, exit codes, and the deny policy."""
+
 from __future__ import annotations
 
 import json

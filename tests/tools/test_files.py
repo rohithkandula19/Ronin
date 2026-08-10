@@ -5,6 +5,7 @@ the wrong thing, so the tests spend their effort on the cases where a sloppier
 implementation would succeed *incorrectly*: two matches, near-miss whitespace, CRLF
 against LF, and identical repeated blocks.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

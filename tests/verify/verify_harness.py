@@ -8,6 +8,7 @@ The samples below are the real shape of the output the repair loop has to reason
 about, including the parts that differ between two runs of the *same* failure. If
 these ever get "cleaned up" the signature tests stop testing anything.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence

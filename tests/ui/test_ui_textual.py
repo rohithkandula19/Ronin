@@ -5,6 +5,7 @@ tested without it, and this file is the only one that needs it. No terminal is
 required: ``App.run_test()`` runs the app headless and ``Pilot`` presses keys, so
 this is still an offline, no-network test.
 """
+
 from __future__ import annotations
 
 import asyncio

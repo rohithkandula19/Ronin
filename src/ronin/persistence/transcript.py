@@ -43,6 +43,7 @@ and a lone surrogate in model output — a real product of a truncated provider
 stream — is escaped instead of raising ``UnicodeEncodeError`` and losing the line
 we were trying to record.
 """
+
 from __future__ import annotations
 
 import json
@@ -168,9 +169,7 @@ def decode_meta(record: Mapping[str, Any]) -> SessionMeta:
     """Inverse of :func:`encode_meta`; version-checked like every other record."""
     check_version(record)
     if record_type(record) != HEADER_TAG:
-        raise TranscriptError(
-            f"expected a {HEADER_TAG!r} record, got {record.get(TYPE_KEY)!r}"
-        )
+        raise TranscriptError(f"expected a {HEADER_TAG!r} record, got {record.get(TYPE_KEY)!r}")
     return SessionMeta(
         session_id=str(record["session_id"]),
         cwd=str(record.get("cwd", ".")),
@@ -190,9 +189,7 @@ def decode_meta(record: Mapping[str, Any]) -> SessionMeta:
 def _dumps(record: Mapping[str, Any], what: str) -> str:
     """One record as one line, or a loud failure naming what would not serialize."""
     try:
-        return json.dumps(
-            record, ensure_ascii=True, separators=(",", ":"), allow_nan=False
-        )
+        return json.dumps(record, ensure_ascii=True, separators=(",", ":"), allow_nan=False)
     except (TypeError, ValueError) as exc:
         raise TranscriptError(
             f"cannot record {what}: {exc}. Tool arguments and message metadata must "
@@ -384,9 +381,7 @@ class Transcript:
                 checkpoints = meta.checkpoint_ids
                 if state.checkpoint_id and state.checkpoint_id not in checkpoints:
                     checkpoints = (*checkpoints, state.checkpoint_id)
-                meta = replace(
-                    meta, cost_usd=state.budget.spent_usd, checkpoint_ids=checkpoints
-                )
+                meta = replace(meta, cost_usd=state.budget.spent_usd, checkpoint_ids=checkpoints)
         self._meta = meta
 
     def _sync(self) -> None:

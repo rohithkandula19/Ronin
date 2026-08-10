@@ -4,6 +4,7 @@ Every error case asserts that the message names the offending *server* and *key*
 because a config error whose message says only "invalid" leaves the operator
 diffing JSON by hand.
 """
+
 from __future__ import annotations
 
 import json
@@ -159,11 +160,7 @@ def test_requires_approval_false_without_a_danger_level_is_refused() -> None:
 @pytest.mark.parametrize("level", ["destructive", "irreversible"])
 def test_a_destructive_server_cannot_opt_out_of_the_gate(level: str) -> None:
     (config,) = parse_mcp_config(
-        {
-            "mcpServers": {
-                "x": {"command": "x", "danger_level": level, "requires_approval": False}
-            }
-        }
+        {"mcpServers": {"x": {"command": "x", "danger_level": level, "requires_approval": False}}}
     )
     assert config.effective_requires_approval is True
 
@@ -205,9 +202,7 @@ def test_a_declared_read_only_server_still_defaults_to_gated() -> None:
         ({"command": "x", "cwd": 7}, "'cwd'"),
     ],
 )
-def test_every_rejection_names_the_server_and_the_key(
-    body: dict[str, Any], needle: str
-) -> None:
+def test_every_rejection_names_the_server_and_the_key(body: dict[str, Any], needle: str) -> None:
     with pytest.raises(ConfigError) as caught:
         parse_mcp_config({"mcpServers": {"docs": body}})
     message = str(caught.value)
@@ -240,11 +235,7 @@ def test_an_unset_environment_reference_is_refused_rather_than_blanked() -> None
     """An empty bearer token produces a 401 three layers from the typo."""
     with pytest.raises(ConfigError) as caught:
         parse_mcp_config(
-            {
-                "mcpServers": {
-                    "r": {"transport": "http", "url": "u", "headers": {"a": "${NOPE}"}}
-                }
-            },
+            {"mcpServers": {"r": {"transport": "http", "url": "u", "headers": {"a": "${NOPE}"}}}},
             environ={},
         )
     assert "${NOPE}" in str(caught.value)

@@ -40,14 +40,12 @@ repos:
   # hook and CI disagreed about whether the tree was clean. That is the same failure the
   # mypy hook below avoids by not passing filenames.
   #
-  # `ruff-format` is deliberately ABSENT. `ruff format --check` reports **207 of 209
-  # files would be reformatted** — this tree is lint-clean but has never been
-  # format-clean. Enabling the formatter here would mean the next person to touch any
-  # file gets a whole-file reformat mixed into their diff, which is precisely the review
-  # noise the whitespace hooks above exist to remove. Adopting it is a real option, but
-  # it costs one commit that rewrites the entire tree and needs the suite re-verified
-  # against it; that is a decision to take deliberately, not a side effect of adding
-  # pre-commit.
+  # `ruff-format` is enabled, and the commit that enabled it reformatted **207 of 209
+  # files** — this tree was lint-clean but had never been format-clean. That sweep was
+  # deliberately its own commit, whitespace-only, with the full suite re-verified against
+  # it, so that `git log --follow` on any file shows one mechanical commit rather than a
+  # formatting change smuggled inside a behavioural one. From here the formatter keeps
+  # diffs to what actually changed, which is the whole point.
   #
   # `files` is not optional here, and this was found the hard way. pre-commit hands ruff
   # explicit paths, and explicit paths BYPASS the `include` list in pyproject.toml — so
@@ -62,6 +60,10 @@ repos:
     hooks:
       - id: ruff
         args: [--fix]
+        files: '^(src/ronin|tests|scripts)/.*\.py$'
+      # Same `files` scope as the linter, and for the same reason: unrestricted, the
+      # formatter would rewrite the ~300-module v1 tree and every example app too.
+      - id: ruff-format
         files: '^(src/ronin|tests|scripts)/.*\.py$'
 
   - repo: local

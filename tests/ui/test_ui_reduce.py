@@ -1,4 +1,5 @@
 """The reducer: the module the whole interface layer rests on."""
+
 from __future__ import annotations
 
 import pytest
@@ -80,9 +81,7 @@ def test_a_reset_discards_the_reasoning_of_the_same_span() -> None:
 
 
 def test_thinking_is_tracked_apart_from_the_answer() -> None:
-    state = reduce_all(
-        (TextDelta(text="reason", thinking=True), TextDelta(text="answer"))
-    )
+    state = reduce_all((TextDelta(text="reason", thinking=True), TextDelta(text="answer")))
     assert state.thinking == "reason"
     assert state.text == "answer"
 
@@ -239,9 +238,8 @@ def test_turn_end_without_agent_state_keeps_what_the_ui_already_had() -> None:
 
 
 def test_a_live_todo_list_can_be_pushed_in_without_the_reducer_knowing_tool_names() -> None:
-    mid_turn = (
-        ViewState()
-        .with_todos((Todo(id="1", subject="in flight", status=TodoStatus.IN_PROGRESS),))
+    mid_turn = ViewState().with_todos(
+        (Todo(id="1", subject="in flight", status=TodoStatus.IN_PROGRESS),)
     )
     assert mid_turn.todos[0].status is TodoStatus.IN_PROGRESS
 

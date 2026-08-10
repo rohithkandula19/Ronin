@@ -1,4 +1,5 @@
 """Replay: the reset rule, the reconciliation, and the post-crash repair."""
+
 from __future__ import annotations
 
 import os
@@ -76,7 +77,7 @@ def test_a_stream_reset_discards_reasoning_too() -> None:
 
 
 def test_a_stream_reset_does_not_un_run_a_tool() -> None:
-    """"A tool that already ran has already had its effect, and no event can undo
+    """ "A tool that already ran has already had its effect, and no event can undo
     that" — the reset's scope is text only."""
     events = (
         TurnStart(turn_index=0),
@@ -147,9 +148,7 @@ def test_a_recorded_agent_state_is_preferred_and_carries_what_events_cannot() ->
 
 
 def test_without_any_recorded_state_the_fold_is_used_and_says_what_it_lost() -> None:
-    events = tuple(
-        event for event in two_turn_session() if not isinstance(event, TurnEnd)
-    )
+    events = tuple(event for event in two_turn_session() if not isinstance(event, TurnEnd))
     result = replay(events)
     assert result.source is StateSource.FOLDED
     assert any("folded from events alone" in note for note in result.notes)
@@ -295,9 +294,7 @@ def test_a_checkpoint_with_an_unpaired_call_is_repaired_from_the_recorded_result
     events = (
         TurnStart(turn_index=0),
         ToolStart(tool_use_id=use.id, name="write", arguments=use.arguments),
-        ToolEnd(
-            tool_use_id=use.id, name="write", result=ToolResult(ok=True, content="wrote 2")
-        ),
+        ToolEnd(tool_use_id=use.id, name="write", result=ToolResult(ok=True, content="wrote 2")),
         TurnEnd(turn_index=0, state=TurnState.INTERRUPTED, agent_state=unpaired),
     )
     result = replay(events)
@@ -435,9 +432,7 @@ def test_a_tool_result_recorded_as_an_error_stays_an_error(tmp_path: Path) -> No
     events = (
         TurnStart(turn_index=0),
         ToolStart(tool_use_id="t1", name="read"),
-        ToolEnd(
-            tool_use_id="t1", name="read", result=ToolResult(ok=False, error="ENOENT")
-        ),
+        ToolEnd(tool_use_id="t1", name="read", result=ToolResult(ok=False, error="ENOENT")),
     )
     result = replay(events)
     block = result.state.messages[-1].content_blocks[0]
@@ -447,9 +442,13 @@ def test_a_tool_result_recorded_as_an_error_stays_an_error(tmp_path: Path) -> No
 
 def test_the_read_results_artifacts_do_not_leak_into_the_transcript() -> None:
     """Artifacts are metadata for the picker, not content for the model."""
-    result = replay((TurnStart(turn_index=0),
-                     ToolStart(tool_use_id=READ_USE.id, name="read"),
-                     ToolEnd(tool_use_id=READ_USE.id, name="read", result=READ_RESULT)))
+    result = replay(
+        (
+            TurnStart(turn_index=0),
+            ToolStart(tool_use_id=READ_USE.id, name="read"),
+            ToolEnd(tool_use_id=READ_USE.id, name="read", result=READ_RESULT),
+        )
+    )
     block = result.state.messages[-1].content_blocks[0]
     assert isinstance(block, ToolResultBlock)
     assert block.content == READ_RESULT.content

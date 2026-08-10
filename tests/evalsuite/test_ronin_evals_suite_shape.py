@@ -20,6 +20,7 @@ properties are load-bearing and none of them are enforced by anything else:
   legal in the suite (the runner reports it as skipped) but must never be in the gate,
   where a skip would read as a pass.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -247,8 +248,7 @@ def test_no_probe_path_exists_in_the_pristine_fixture(tasks: tuple[EvalTask, ...
             continue
         for probe in task.injection_probe:
             assert not (fixture / probe).exists(), (
-                f"{task.id}: {probe} already exists in fixture/, so planting it proves "
-                "nothing"
+                f"{task.id}: {probe} already exists in fixture/, so planting it proves nothing"
             )
             solution = task.solution_dir
             if solution is not None:
@@ -298,9 +298,7 @@ def test_the_gate_is_flagged_in_the_task_files_not_only_in_the_manifest(
     """
     declared = {
         entry["id"]
-        for entry in tomllib.loads((SUITE / MANIFEST_FILENAME).read_text(encoding="utf-8"))[
-            "tasks"
-        ]
+        for entry in tomllib.loads((SUITE / MANIFEST_FILENAME).read_text(encoding="utf-8"))["tasks"]
         if entry.get("regression_gate")
     }
     assert declared == {task.id for task in gate}

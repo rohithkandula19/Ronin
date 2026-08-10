@@ -23,6 +23,7 @@ The two semantics worth preserving verbatim:
    six attempts and sixty seconds on a bad key is worse than failing immediately.
    ``ProviderError.retryable`` is the classification, set by the transport.
 """
+
 from __future__ import annotations
 
 import asyncio

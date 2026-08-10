@@ -27,6 +27,7 @@ The app never approves anything by itself. It renders
 ``on_approval`` callback the caller injected; a UI that answered on its own
 behalf would be exactly the auto-approval this codebase refuses.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -114,9 +115,7 @@ def initial_state(session: Session) -> ViewState:
     )
 
 
-def panels_for(
-    state: ViewState, *, styles: Styles = MARKUP, show_thinking: bool = False
-) -> Panels:
+def panels_for(state: ViewState, *, styles: Styles = MARKUP, show_thinking: bool = False) -> Panels:
     """The five regions for one state. The app's entire rendering decision."""
     return render_panels(state, styles=styles, show_thinking=show_thinking)
 
@@ -216,9 +215,7 @@ def _build_app(session: Session) -> Any:
                 self._paint()
 
         def _paint(self) -> None:
-            panels = panels_for(
-                self.state, show_thinking=self.session.show_thinking
-            )
+            panels = panels_for(self.state, show_thinking=self.session.show_thinking)
             for region, text in (
                 (TRANSCRIPT_ID, panels.transcript),
                 (TOOLS_ID, panels.tools),

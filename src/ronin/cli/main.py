@@ -30,6 +30,7 @@ tool registry down to read-only and then *re-derives* that property from the spe
 A model told not to edit edits three turns later; a model with no ``write`` in its
 registry cannot.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -96,9 +97,7 @@ NO_TUI = (
     "line-oriented session; type a request, or 'exit' to leave."
 )
 
-REPL_BANNER = (
-    "ronin — line session. type a request, /help for commands, 'exit' to leave."
-)
+REPL_BANNER = "ronin — line session. type a request, /help for commands, 'exit' to leave."
 
 
 class Command(StrEnum):
@@ -295,86 +294,205 @@ def build_parser() -> _Parser:
     )
     parser.add_argument("-h", "--help", action="store_true", help="show this help")
     parser.add_argument("words", nargs="*", help="the prompt, as bare words")
-    parser.add_argument("-p", "--print", dest="print_prompt", metavar="PROMPT",
-                        help="run PROMPT without a terminal and exit")
-    parser.add_argument("--output-format", choices=[fmt.value for fmt in OutputFormat],
-                        default=None, help="headless output: text, json or stream-json")
-    parser.add_argument("--mode", choices=[mode.value for mode in Mode], default=None,
-                        help="permission mode; plan removes every mutating tool")
-    parser.add_argument("--yolo", action="store_true",
-                        help="stop asking; the unconditional deny list still applies")
-    parser.add_argument("--sandbox", action="store_true",
-                        help="run commands in a sandbox when one is available")
-    parser.add_argument("--cwd", default=".", metavar="PATH",
-                        help="the directory to work in (default: .)")
-    parser.add_argument("--resume", nargs="?", const="", default=None, metavar="ID",
-                        help="resume a recorded session, newest in this directory if "
-                             "no ID is given")
-    parser.add_argument("-c", "--continue", dest="continue_latest", action="store_true",
-                        help="resume the newest session in this directory")
-    parser.add_argument("--no-verify", dest="verify", action="store_false",
-                        help="do not run the verify pass after a mutating turn")
-    parser.add_argument("--no-record", dest="record", action="store_false",
-                        help="do not write a transcript for this session")
-    parser.add_argument("--no-mcp", dest="connect_mcp", action="store_false",
-                        help="do not connect the configured MCP servers")
-    parser.add_argument("--no-wizard", dest="wizard", action="store_false",
-                        help="skip the first-run setup prompt")
-    parser.add_argument("--no-tui", dest="tui", action="store_false",
-                        help="use the line-oriented session even if Textual is present")
-    parser.add_argument("--max-turns", type=int, default=DEFAULT_MAX_ITERATIONS,
-                        metavar="N", help="iterations one turn may take")
-    parser.add_argument("--max-tokens", type=int, default=None, metavar="N",
-                        help="token ceiling for the session")
-    parser.add_argument("--max-usd", type=float, default=None, metavar="USD",
-                        help="dollar ceiling for the session")
-    parser.add_argument("--max-seconds", type=float, default=None, metavar="S",
-                        help="wall-clock ceiling for the session")
-    parser.add_argument("--format", dest="export_format",
-                        choices=[fmt.value for fmt in ExportFormat],
-                        default=ExportFormat.MARKDOWN.value,
-                        help="export format (export only)")
-    parser.add_argument("-o", "--out", dest="export_out", default=None, metavar="FILE",
-                        help="write the export here instead of stdout (export only)")
+    parser.add_argument(
+        "-p",
+        "--print",
+        dest="print_prompt",
+        metavar="PROMPT",
+        help="run PROMPT without a terminal and exit",
+    )
+    parser.add_argument(
+        "--output-format",
+        choices=[fmt.value for fmt in OutputFormat],
+        default=None,
+        help="headless output: text, json or stream-json",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=[mode.value for mode in Mode],
+        default=None,
+        help="permission mode; plan removes every mutating tool",
+    )
+    parser.add_argument(
+        "--yolo", action="store_true", help="stop asking; the unconditional deny list still applies"
+    )
+    parser.add_argument(
+        "--sandbox", action="store_true", help="run commands in a sandbox when one is available"
+    )
+    parser.add_argument(
+        "--cwd", default=".", metavar="PATH", help="the directory to work in (default: .)"
+    )
+    parser.add_argument(
+        "--resume",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="ID",
+        help="resume a recorded session, newest in this directory if no ID is given",
+    )
+    parser.add_argument(
+        "-c",
+        "--continue",
+        dest="continue_latest",
+        action="store_true",
+        help="resume the newest session in this directory",
+    )
+    parser.add_argument(
+        "--no-verify",
+        dest="verify",
+        action="store_false",
+        help="do not run the verify pass after a mutating turn",
+    )
+    parser.add_argument(
+        "--no-record",
+        dest="record",
+        action="store_false",
+        help="do not write a transcript for this session",
+    )
+    parser.add_argument(
+        "--no-mcp",
+        dest="connect_mcp",
+        action="store_false",
+        help="do not connect the configured MCP servers",
+    )
+    parser.add_argument(
+        "--no-wizard", dest="wizard", action="store_false", help="skip the first-run setup prompt"
+    )
+    parser.add_argument(
+        "--no-tui",
+        dest="tui",
+        action="store_false",
+        help="use the line-oriented session even if Textual is present",
+    )
+    parser.add_argument(
+        "--max-turns",
+        type=int,
+        default=DEFAULT_MAX_ITERATIONS,
+        metavar="N",
+        help="iterations one turn may take",
+    )
+    parser.add_argument(
+        "--max-tokens", type=int, default=None, metavar="N", help="token ceiling for the session"
+    )
+    parser.add_argument(
+        "--max-usd", type=float, default=None, metavar="USD", help="dollar ceiling for the session"
+    )
+    parser.add_argument(
+        "--max-seconds",
+        type=float,
+        default=None,
+        metavar="S",
+        help="wall-clock ceiling for the session",
+    )
+    parser.add_argument(
+        "--format",
+        dest="export_format",
+        choices=[fmt.value for fmt in ExportFormat],
+        default=ExportFormat.MARKDOWN.value,
+        help="export format (export only)",
+    )
+    parser.add_argument(
+        "-o",
+        "--out",
+        dest="export_out",
+        default=None,
+        metavar="FILE",
+        help="write the export here instead of stdout (export only)",
+    )
     parser.add_argument("--version", action="store_true", help="print the version")
 
     # eval / duel. In this parser rather than a subparser so `--help` stays one page
     # and so a flag cannot be defined twice with two different meanings.
-    parser.add_argument("--suite", default=None, metavar="PATH",
-                        help="eval suite root (default: tests/evals under the "
-                             "workspace)")
-    parser.add_argument("--model", dest="models", action="append", default=None,
-                        metavar="NAME",
-                        help="a model named in your router config; pass twice for duel")
-    parser.add_argument("--parallel", type=int, default=1, metavar="N",
-                        help="tasks to run concurrently (eval/duel)")
-    parser.add_argument("--category", dest="categories", action="append", default=None,
-                        metavar="C", help="only tasks in this category (repeatable)")
-    parser.add_argument("--tag", dest="eval_tags", action="append", default=None,
-                        metavar="T", help="only tasks carrying this tag (repeatable)")
-    parser.add_argument("--task", dest="task_ids", action="append", default=None,
-                        metavar="ID", help="only this task id (repeatable)")
-    parser.add_argument("--regression-gate", action="store_true",
-                        help="only the tasks flagged regression_gate")
-    parser.add_argument("--limit", type=int, default=None, metavar="N",
-                        help="stop after N tasks")
-    parser.add_argument("--seed", type=int, default=0, metavar="N",
-                        help="duel seed; the same seed is used for both sides")
-    parser.add_argument("--json", dest="eval_json", default=None, metavar="FILE",
-                        help="write the report as json here")
-    parser.add_argument("--markdown", dest="eval_markdown", default=None,
-                        metavar="FILE", help="write the report as markdown here")
-    parser.add_argument("--workspaces", dest="workspace_root", default=None,
-                        metavar="DIR",
-                        help="create task workspaces here instead of a temp dir")
-    parser.add_argument("--keep-workspaces", action="store_true",
-                        help="do not delete task workspaces after the run")
-    parser.add_argument("--record", dest="eval_record", action="store_true",
-                        help="write a transcript per task (what the harvest reads)")
-    parser.add_argument("--allow-network", action="store_true",
-                        help="turn a git_sha task from skipped into a hard error")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="list what would run; opens no model, needs no key")
+    parser.add_argument(
+        "--suite",
+        default=None,
+        metavar="PATH",
+        help="eval suite root (default: tests/evals under the workspace)",
+    )
+    parser.add_argument(
+        "--model",
+        dest="models",
+        action="append",
+        default=None,
+        metavar="NAME",
+        help="a model named in your router config; pass twice for duel",
+    )
+    parser.add_argument(
+        "--parallel", type=int, default=1, metavar="N", help="tasks to run concurrently (eval/duel)"
+    )
+    parser.add_argument(
+        "--category",
+        dest="categories",
+        action="append",
+        default=None,
+        metavar="C",
+        help="only tasks in this category (repeatable)",
+    )
+    parser.add_argument(
+        "--tag",
+        dest="eval_tags",
+        action="append",
+        default=None,
+        metavar="T",
+        help="only tasks carrying this tag (repeatable)",
+    )
+    parser.add_argument(
+        "--task",
+        dest="task_ids",
+        action="append",
+        default=None,
+        metavar="ID",
+        help="only this task id (repeatable)",
+    )
+    parser.add_argument(
+        "--regression-gate", action="store_true", help="only the tasks flagged regression_gate"
+    )
+    parser.add_argument("--limit", type=int, default=None, metavar="N", help="stop after N tasks")
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        metavar="N",
+        help="duel seed; the same seed is used for both sides",
+    )
+    parser.add_argument(
+        "--json",
+        dest="eval_json",
+        default=None,
+        metavar="FILE",
+        help="write the report as json here",
+    )
+    parser.add_argument(
+        "--markdown",
+        dest="eval_markdown",
+        default=None,
+        metavar="FILE",
+        help="write the report as markdown here",
+    )
+    parser.add_argument(
+        "--workspaces",
+        dest="workspace_root",
+        default=None,
+        metavar="DIR",
+        help="create task workspaces here instead of a temp dir",
+    )
+    parser.add_argument(
+        "--keep-workspaces", action="store_true", help="do not delete task workspaces after the run"
+    )
+    parser.add_argument(
+        "--record",
+        dest="eval_record",
+        action="store_true",
+        help="write a transcript per task (what the harvest reads)",
+    )
+    parser.add_argument(
+        "--allow-network",
+        action="store_true",
+        help="turn a git_sha task from skipped into a hard error",
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="list what would run; opens no model, needs no key"
+    )
     return parser
 
 
@@ -382,9 +500,14 @@ def parse(argv: Sequence[str]) -> Options | Usage:
     """argv to options, or to the usage text that explains why not. Pure."""
     tokens = list(argv)
     command = Command.RUN
-    if tokens and tokens[0] in {Command.DOCTOR.value, Command.EXPORT.value,
-                                Command.SESSIONS.value, Command.EVAL.value,
-                                Command.DUEL.value, Command.TELEMETRY.value}:
+    if tokens and tokens[0] in {
+        Command.DOCTOR.value,
+        Command.EXPORT.value,
+        Command.SESSIONS.value,
+        Command.EVAL.value,
+        Command.DUEL.value,
+        Command.TELEMETRY.value,
+    }:
         command = Command(tokens.pop(0))
 
     parser = build_parser()
@@ -416,9 +539,7 @@ def parse(argv: Sequence[str]) -> Options | Usage:
     else:
         chosen = OutputFormat.TEXT
     if headless and not prompt.strip():
-        return Usage(
-            f"{PROGRAM}: error: --print needs a prompt, or pass one as bare words"
-        )
+        return Usage(f"{PROGRAM}: error: --print needs a prompt, or pass one as bare words")
 
     resume = namespace.resume
     if namespace.continue_latest:
@@ -461,9 +582,7 @@ def _export_options(namespace: argparse.Namespace, words: str) -> Options | Usag
     )
 
 
-def _bench_options(
-    namespace: argparse.Namespace, command: Command, words: str
-) -> Options | Usage:
+def _bench_options(namespace: argparse.Namespace, command: Command, words: str) -> Options | Usage:
     """``eval``/``duel`` argv into :class:`BenchOptions`, carried on :class:`Options`.
 
     ``--suite`` stays ``None`` here rather than being defaulted to ``tests/evals``:
@@ -525,12 +644,8 @@ def _bench_options(
         limit=namespace.limit,
         seed=int(namespace.seed),
         json_out=Path(namespace.eval_json) if namespace.eval_json else None,
-        markdown_out=(
-            Path(namespace.eval_markdown) if namespace.eval_markdown else None
-        ),
-        workspace_root=(
-            Path(namespace.workspace_root) if namespace.workspace_root else None
-        ),
+        markdown_out=(Path(namespace.eval_markdown) if namespace.eval_markdown else None),
+        workspace_root=(Path(namespace.workspace_root) if namespace.workspace_root else None),
         keep_workspaces=bool(namespace.keep_workspaces),
         record=bool(namespace.eval_record),
         allow_network=bool(namespace.allow_network),
@@ -575,10 +690,7 @@ def _budget(namespace: argparse.Namespace) -> Budget | None:
     ``None`` rather than an unbounded ``Budget()`` so "the user set no limit" and
     "the user set a limit that happens to be unbounded" stay distinguishable.
     """
-    if all(
-        getattr(namespace, name) is None
-        for name in ("max_tokens", "max_usd", "max_seconds")
-    ):
+    if all(getattr(namespace, name) is None for name in ("max_tokens", "max_usd", "max_seconds")):
         return None
     return Budget(
         max_tokens=namespace.max_tokens,
@@ -673,8 +785,7 @@ async def _bench(
     """
     bench = options.bench
     if bench is None:  # pragma: no cover - parse always supplies one for these
-        streams.err(f"{PROGRAM}: internal error: {options.command.value} without "
-                    "options\n")
+        streams.err(f"{PROGRAM}: internal error: {options.command.value} without options\n")
         return EXIT_ERROR
     if not options.suite_given:
         bench = replace(bench, suite=default_suite(paths))
@@ -915,9 +1026,7 @@ async def _repl(options: Options, agent: Agent, streams: Streams) -> int:
         exit_code = await _one_turn(options, agent, streams, request)
 
 
-async def _one_turn(
-    options: Options, agent: Agent, streams: Streams, request: str
-) -> int:
+async def _one_turn(options: Options, agent: Agent, streams: Streams, request: str) -> int:
     """Stream one turn to the terminal, and report what it exited as."""
     state = ViewState()
     # See ApprovalTracker: counting raw requests made every approved gated call exit 2.
@@ -988,8 +1097,7 @@ async def _slash(line: str, agent: Agent, streams: Streams) -> bool | None:
     elif name == "undo":
         checkpoints = agent.conversation.checkpoints
         if not checkpoints:
-            streams.err("no checkpoint was taken this session, so there is nothing "
-                        "to undo.\n")
+            streams.err("no checkpoint was taken this session, so there is nothing to undo.\n")
         else:
             restored = await agent.runtime.checkpoints.restore(checkpoints[-1].id)
             streams.out(
@@ -1049,8 +1157,7 @@ def _sessions(options: Options, *, streams: Streams) -> int:
     for meta in rows:
         mark = " (stale)" if meta.stale else ""
         streams.out(
-            f"{meta.session_id}  {meta.turns:>4} turn(s)  ${meta.cost_usd:.4f}  "
-            f"{meta.cwd}{mark}\n"
+            f"{meta.session_id}  {meta.turns:>4} turn(s)  ${meta.cost_usd:.4f}  {meta.cwd}{mark}\n"
         )
     return EXIT_OK
 

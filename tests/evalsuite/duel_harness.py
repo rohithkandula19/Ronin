@@ -14,6 +14,7 @@ Two levels of fake live here, and the split is the point:
 * :func:`report` and :func:`row` build report values directly, for the unit tests of
   pairing and scoreboard arithmetic where running anything would be noise.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence

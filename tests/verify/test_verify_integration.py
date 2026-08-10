@@ -4,6 +4,7 @@ Real detection, a real shadow git repo, a real plan, the real repair loop and th
 real critique gate. The only fakes are the two seams that would otherwise reach
 outside the process: the command runner (a subprocess) and the model.
 """
+
 from __future__ import annotations
 
 import shutil

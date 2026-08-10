@@ -3,6 +3,7 @@
 The CRLF test is the one worth reading: a tracker that hashes decoded text calls a
 whole-file line-ending rewrite "unchanged", and the model then clobbers it.
 """
+
 from __future__ import annotations
 
 import os

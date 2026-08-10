@@ -6,6 +6,7 @@ section runs real ``/bin/sh`` one-liners — local, offline, no keys — because
 construction, stdin delivery and exit-code propagation are precisely what a mock
 would paper over.
 """
+
 from __future__ import annotations
 
 import json
@@ -48,9 +49,7 @@ WORKED_EXAMPLE = {
             ],
         }
     ],
-    "PostToolUse": [
-        {"matcher": "edit|write", "hooks": [{"command": "npx prettier --write ."}]}
-    ],
+    "PostToolUse": [{"matcher": "edit|write", "hooks": [{"command": "npx prettier --write ."}]}],
     "SessionStart": [{"hooks": [{"command": "git rev-parse --abbrev-ref HEAD"}]}],
 }
 
@@ -150,9 +149,7 @@ def test_a_block_reason_carries_the_hook_stderr_to_the_model() -> None:
         tool_name="write",
         runs=(
             HookRun(
-                spec=HookSpec(
-                    event=HookEvent.PRE_TOOL_USE, command="c", name="no-migrations"
-                ),
+                spec=HookSpec(event=HookEvent.PRE_TOOL_USE, command="c", name="no-migrations"),
                 completion=HookCompletion(exit_code=2, stderr="migrations are owned by the DBA"),
             ),
         ),

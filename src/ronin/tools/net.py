@@ -17,6 +17,7 @@ Two consequences worth stating:
 Both tools take injected callables for the network and the model, so the tests never
 open a socket.
 """
+
 from __future__ import annotations
 
 import hashlib

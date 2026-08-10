@@ -4,6 +4,7 @@ If ``parse_command`` misses a segment, the deny list never sees the command that
 mattered and the allowlist happily approves it. So these tests are about *coverage of
 what runs*, not about pretty output.
 """
+
 from __future__ import annotations
 
 import pytest

@@ -59,6 +59,7 @@ the two agree and that every member of the ``Event`` union appears.
 itself: ``AgentState`` contains provider-opaque values that are not portable JSON,
 and a consumer that wants to resume uses the session store, not this stream.
 """
+
 from __future__ import annotations
 
 import json
@@ -404,9 +405,7 @@ class HeadlessPolicy:
     denials: list[tuple[str, str]] = field(default_factory=list)
     _cancelled: bool = False
 
-    async def approve(
-        self, spec: ToolSpec, use: ToolUse, *, rendered: str
-    ) -> ApprovalDecision:
+    async def approve(self, spec: ToolSpec, use: ToolUse, *, rendered: str) -> ApprovalDecision:
         """Always deny. There is no code path here that returns ``approved=True``."""
         self.denials.append((spec.name, rendered))
         return DENY_UNATTENDED

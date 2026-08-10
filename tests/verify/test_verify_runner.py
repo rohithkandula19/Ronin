@@ -1,4 +1,5 @@
 """The runner: real argv plumbing, computed relevance, failures as observations."""
+
 from __future__ import annotations
 
 import sys
@@ -141,9 +142,7 @@ def test_a_source_with_no_test_reports_what_it_looked_for(tmp_path: Path) -> Non
 
 def test_a_changed_test_file_is_its_own_target(tmp_path: Path) -> None:
     make_python_project(tmp_path)
-    targets = resolve_test_targets(
-        "tests/pkg/test_thing.py", root=tmp_path, rules=PYTHON_RULES
-    )
+    targets = resolve_test_targets("tests/pkg/test_thing.py", root=tmp_path, rules=PYTHON_RULES)
     assert targets.matched == ("tests/pkg/test_thing.py",)
 
 
@@ -174,9 +173,7 @@ def test_an_unknown_extension_has_no_rules() -> None:
         (("tsc", "--noEmit"), "typescript"),
     ],
 )
-def test_owning_rules_looks_past_the_environment_prefix(
-    argv: tuple[str, ...], name: str
-) -> None:
+def test_owning_rules_looks_past_the_environment_prefix(argv: tuple[str, ...], name: str) -> None:
     owner = owning_rules(DetectedCommand(argv=argv, source="s", evidence="e"))
     assert owner is not None and owner.name == name
 
@@ -237,9 +234,7 @@ def test_the_full_suite_and_build_only_appear_in_the_end_of_task_pass(tmp_path: 
         CommandKind.BUILD, DetectedCommand(argv=("python", "-m", "build"), source="s", evidence="e")
     )
 
-    plan = plan_for_changes(
-        spec, ["src/pkg/thing.py"], root=tmp_path, include_full_suite=True
-    )
+    plan = plan_for_changes(spec, ["src/pkg/thing.py"], root=tmp_path, include_full_suite=True)
 
     scopes = [(step.kind, step.scope) for step in plan.steps]
     assert scopes[-2:] == [
@@ -285,9 +280,7 @@ def test_a_python_linter_is_not_handed_typescript_files(tmp_path: Path) -> None:
 
 def test_a_whole_project_typechecker_is_never_narrowed_to_one_file(tmp_path: Path) -> None:
     (tmp_path / "app.ts").write_text("export const x = 1;\n", encoding="utf-8")
-    spec = VerifySpec(
-        typecheck=DetectedCommand(argv=("tsc", "--noEmit"), source="s", evidence="e")
-    )
+    spec = VerifySpec(typecheck=DetectedCommand(argv=("tsc", "--noEmit"), source="s", evidence="e"))
 
     plan = plan_for_changes(spec, ["app.ts"], root=tmp_path, rules=[TYPESCRIPT_RULES])
 

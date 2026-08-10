@@ -6,6 +6,7 @@ asserted directly, and :func:`ronin.cli.main.dispatch` is driven with an injecte
 done, 1 error, 2 needs approval — are reachable from a test rather than only from a
 shell.
 """
+
 from __future__ import annotations
 
 import json
@@ -206,11 +207,28 @@ def test_a_prompt_that_looks_like_a_subcommand_word_is_still_a_prompt() -> None:
 def test_eval_collects_every_selection_flag() -> None:
     parsed = options(
         [
-            "eval", "--model", "qwen-local", "--parallel", "8",
-            "--category", "single-file", "--category", "multi-file",
-            "--tag", "quick", "--task", "single-file/x",
-            "--limit", "12", "--json", "r.json", "--markdown", "r.md",
-            "--keep-workspaces", "--record", "--allow-network",
+            "eval",
+            "--model",
+            "qwen-local",
+            "--parallel",
+            "8",
+            "--category",
+            "single-file",
+            "--category",
+            "multi-file",
+            "--tag",
+            "quick",
+            "--task",
+            "single-file/x",
+            "--limit",
+            "12",
+            "--json",
+            "r.json",
+            "--markdown",
+            "r.md",
+            "--keep-workspaces",
+            "--record",
+            "--allow-network",
         ]
     )
     assert parsed.command is Command.EVAL
@@ -255,8 +273,10 @@ def test_eval_refuses_two_models_and_names_duel() -> None:
 
 
 def test_duel_requires_exactly_two_models() -> None:
-    for argv in (["duel", "--model", "a"], ["duel", "--model", "a", "--model", "b",
-                                            "--model", "c"]):
+    for argv in (
+        ["duel", "--model", "a"],
+        ["duel", "--model", "a", "--model", "b", "--model", "c"],
+    ):
         usage = parse(argv)
         assert isinstance(usage, Usage), argv
         assert "two models" in usage.message
@@ -331,9 +351,7 @@ def agent_for(
 
 
 async def run(argv: Sequence[str], agent: Agent, capture: Captured) -> int:
-    return await dispatch(
-        options(argv), streams=capture.streams(), environ={}, agent=agent
-    )
+    return await dispatch(options(argv), streams=capture.streams(), environ={}, agent=agent)
 
 
 async def test_a_finished_turn_exits_zero(tmp_path: Path) -> None:
@@ -391,9 +409,7 @@ async def test_a_denied_approval_exits_two(tmp_path: Path) -> None:
 
 async def test_stream_json_emits_one_valid_json_object_per_line(tmp_path: Path) -> None:
     capture = Captured()
-    agent = agent_for(
-        tmp_path, [h.call("read", {"file_path": "a.py"}), h.say("the answer")]
-    )
+    agent = agent_for(tmp_path, [h.call("read", {"file_path": "a.py"}), h.say("the answer")])
 
     code = await run(
         ["--no-wizard", "--output-format", "stream-json", "-p", "go", "--cwd", str(tmp_path)],
@@ -415,9 +431,7 @@ async def test_stream_json_emits_one_valid_json_object_per_line(tmp_path: Path) 
 
 async def test_text_output_carries_the_answer_and_nothing_else(tmp_path: Path) -> None:
     capture = Captured()
-    agent = agent_for(
-        tmp_path, [h.call("read", {"file_path": "a.py"}), h.say("just the answer")]
-    )
+    agent = agent_for(tmp_path, [h.call("read", {"file_path": "a.py"}), h.say("just the answer")])
 
     await run(["--no-wizard", "-p", "go", "--cwd", str(tmp_path)], agent, capture)
 

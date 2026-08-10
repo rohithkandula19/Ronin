@@ -5,6 +5,7 @@ must print the new directory, because with a subprocess per command it would pri
 old one — and a model that cannot rely on its own ``cd`` re-derives its environment on
 every call and eventually gets it wrong.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -174,9 +175,7 @@ async def test_a_hanging_command_times_out_and_is_killed(
     assert "run_in_background" in result.error, "point at the right tool for long jobs"
 
 
-async def test_the_timeout_kills_child_processes_too(
-    session: ShellSession, tmp_path: Path
-) -> None:
+async def test_the_timeout_kills_child_processes_too(session: ShellSession, tmp_path: Path) -> None:
     """A command that spawned children leaves them holding the pipe; killing only
     bash waits forever on a read that will never finish."""
     marker = tmp_path / "child_still_running"
@@ -219,7 +218,7 @@ async def test_huge_output_is_capped_keeping_head_and_tail(
     session: ShellSession, tmp_path: Path
 ) -> None:
     """The tail is where the traceback is; a head-only cap throws away the reason."""
-    command = "for i in $(seq 1 20000); do echo \"line $i of output padding here\"; done"
+    command = 'for i in $(seq 1 20000); do echo "line $i of output padding here"; done'
     result = await call(
         BashTool(session), context(tmp_path), command=command, description="Print a lot", timeout=60
     )
@@ -284,15 +283,11 @@ async def test_bash_output_tails_a_background_command(
     assert "still running" in result.content
 
 
-async def test_bash_output_returns_only_what_is_new(
-    session: ShellSession, tmp_path: Path
-) -> None:
+async def test_bash_output_returns_only_what_is_new(session: ShellSession, tmp_path: Path) -> None:
     bash = BashTool(session)
     tail = BashOutputTool(session)
     ctx = context(tmp_path)
-    await call(
-        bash, ctx, command="echo first; sleep 30", description="Job", run_in_background=True
-    )
+    await call(bash, ctx, command="echo first; sleep 30", description="Job", run_in_background=True)
     for _ in range(50):
         first = await call(tail, ctx, handle="bg_1")
         if "first" in first.content:

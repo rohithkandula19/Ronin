@@ -12,6 +12,7 @@ that does not exist is worse than no example, so every long flag those files use
 checked against ``ronin.cli.main.build_parser`` and every config they ship is fed to the
 real loader.
 """
+
 from __future__ import annotations
 
 import json
@@ -39,9 +40,7 @@ WORKFLOWS = REPO_ROOT / "examples" / "workflows"
 def test_every_generated_page_matches_the_live_code() -> None:
     module = load_docsite_generator()
     drifted = module.stale()
-    assert drifted == [], (
-        f"docs/site pages are stale: {drifted}. Run: python docs/site/generate.py"
-    )
+    assert drifted == [], f"docs/site pages are stale: {drifted}. Run: python docs/site/generate.py"
 
 
 @pytest.mark.parametrize(
@@ -137,14 +136,14 @@ def test_the_config_reference_lists_the_layers_in_loader_order() -> None:
     from ronin.safety.settings import LAYER_NAMES
 
     page = (SITE / "config.md").read_text(encoding="utf-8")
-    positions = [page.index(f"| {index + 1} | `{name}`")
-                 for index, name in enumerate(LAYER_NAMES)]
+    positions = [page.index(f"| {index + 1} | `{name}`") for index, name in enumerate(LAYER_NAMES)]
     assert positions == sorted(positions)
 
 
 # --------------------------------------------------------------------------- #
 # the examples: every flag exists
 # --------------------------------------------------------------------------- #
+
 
 #: Every long option the parser accepts, taken from the parser rather than a list.
 def _known_long_options() -> set[str]:
@@ -157,11 +156,25 @@ def _known_long_options() -> set[str]:
 #: Long options that appear in the examples' shell/yaml but are *not* Ronin's — they
 #: belong to git, gh, pip, jq or actions. Enumerated so a genuine typo in a Ronin flag
 #: still fails, instead of the check being switched off.
-FOREIGN_LONG_OPTIONS: frozenset[str] = frozenset({
-    "--cached", "--quiet", "--exit-code", "--unified=3", "--no-color", "--show-toplevel",
-    "--porcelain", "--log-failed", "--draft", "--title", "--body", "--no-verify",
-    "--abbrev-ref", "--recursive", "--write",
-})
+FOREIGN_LONG_OPTIONS: frozenset[str] = frozenset(
+    {
+        "--cached",
+        "--quiet",
+        "--exit-code",
+        "--unified=3",
+        "--no-color",
+        "--show-toplevel",
+        "--porcelain",
+        "--log-failed",
+        "--draft",
+        "--title",
+        "--body",
+        "--no-verify",
+        "--abbrev-ref",
+        "--recursive",
+        "--write",
+    }
+)
 
 
 @pytest.mark.parametrize(
@@ -177,15 +190,16 @@ def test_every_ronin_flag_used_by_an_example_exists(relative: str) -> None:
     known = _known_long_options()
     used = set(re.findall(r"(?<![\w-])--[a-z][a-z0-9-]*(?:=[^\s\"']+)?", text))
     unknown = {flag for flag in used if flag not in known and flag not in FOREIGN_LONG_OPTIONS}
-    assert unknown == set(), (
-        f"{relative} uses flags the parser does not have: {sorted(unknown)}"
-    )
+    assert unknown == set(), f"{relative} uses flags the parser does not have: {sorted(unknown)}"
 
 
 @pytest.mark.parametrize(
     "relative",
-    ["pre-commit-reviewer/pre-commit", "repo-onboarding-explainer/onboard.sh",
-     "ci-failure-fixer/ronin-fix.yml"],
+    [
+        "pre-commit-reviewer/pre-commit",
+        "repo-onboarding-explainer/onboard.sh",
+        "ci-failure-fixer/ronin-fix.yml",
+    ],
 )
 def test_no_example_invokes_the_v1_console_script(relative: str) -> None:
     """``ronin`` is ``packages/cli``'s entry point, not this application's. An example
@@ -199,10 +213,15 @@ def test_no_example_invokes_the_v1_console_script(relative: str) -> None:
 
 @pytest.mark.parametrize(
     "relative",
-    ["pre-commit-reviewer/pre-commit", "repo-onboarding-explainer/onboard.sh",
-     "ci-failure-fixer/ronin-fix.yml", "ci-failure-fixer/README.md",
-     "pre-commit-reviewer/README.md", "repo-onboarding-explainer/README.md",
-     "README.md"],
+    [
+        "pre-commit-reviewer/pre-commit",
+        "repo-onboarding-explainer/onboard.sh",
+        "ci-failure-fixer/ronin-fix.yml",
+        "ci-failure-fixer/README.md",
+        "pre-commit-reviewer/README.md",
+        "repo-onboarding-explainer/README.md",
+        "README.md",
+    ],
 )
 def test_no_example_reaches_for_yolo(relative: str) -> None:
     """``--yolo`` waives the deny list itself. An example is a thing people copy without

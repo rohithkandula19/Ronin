@@ -12,6 +12,7 @@ No ML stack is imported anywhere below. ``LocalAdapterClient`` takes a ``generat
 seam, and construction is otherwise lazy, so the whole route → config → client path is
 covered on a machine with neither ``mlx_lm`` nor ``transformers`` — which is what CI is.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -289,9 +290,7 @@ def test_the_cli_resolves_the_model_name_against_a_local_config(tmp_path: Path) 
     ronin_dir.mkdir()
     (ronin_dir / "models.toml").write_text(LOCAL_TOML, encoding="utf-8")
 
-    built = router_for(
-        BenchOptions(suite=tmp_path), Paths.discover(tmp_path), {}, LOCAL_MODEL_NAME
-    )
+    built = router_for(BenchOptions(suite=tmp_path), Paths.discover(tmp_path), {}, LOCAL_MODEL_NAME)
     assert not isinstance(built, Failed), built
     assert built.spec_for(Role.MAIN).provider == LOCAL_PROVIDER
     assert built.spec_for(Role.MAIN).priced is False

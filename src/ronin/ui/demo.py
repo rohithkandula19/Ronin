@@ -20,6 +20,7 @@ What it proves, in order:
    code of 2, because an unattended run **denies** approval;
 7. slash commands parse, including one loaded from a temp ``.ronin/commands``.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -233,8 +234,10 @@ async def main() -> int:
             write=sink.append,
             write_error=lambda _text: None,
         )
-        print(f"{name} stream, --output-format=text → exit {other.exit_code}, "
-              f"stdout {''.join(sink)!r}")
+        print(
+            f"{name} stream, --output-format=text → exit {other.exit_code}, "
+            f"stdout {''.join(sink)!r}"
+        )
 
     section("8. slash commands, including one from .ronin/commands")
     with tempfile.TemporaryDirectory() as tmp:

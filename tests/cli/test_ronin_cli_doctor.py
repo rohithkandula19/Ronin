@@ -5,6 +5,7 @@ check: a non-``ok`` :class:`~ronin.cli.doctor.Check` cannot be constructed witho
 remedy, and the exit code is non-zero only when something is genuinely broken. A
 diagnostic that fails on the normal case gets ``|| true``'d and then nobody reads it.
 """
+
 from __future__ import annotations
 
 import json
@@ -236,11 +237,7 @@ async def test_a_remote_mcp_server_is_reported_without_being_contacted(
         tmp_path,
         ".ronin/mcp.json",
         json.dumps(
-            {
-                "mcpServers": {
-                    "remote": {"transport": "http", "url": "https://mcp.internal/rpc"}
-                }
-            }
+            {"mcpServers": {"remote": {"transport": "http", "url": "https://mcp.internal/rpc"}}}
         ),
     )
     loaded = load_workspace(paths)

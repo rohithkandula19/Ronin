@@ -35,6 +35,7 @@ Two scope decisions worth stating rather than burying:
   temp files legitimately go. Denying it would push every real workflow into asking for
   a waiver, and a waiver people always grant protects nothing.
 """
+
 from __future__ import annotations
 
 import os
@@ -185,8 +186,7 @@ DENY_REASONS: Mapping[DenyCode, DenyReason] = {
             "reviewed in a diff, reverted with a checkout, or seen by the user at all"
         ),
         alternative=(
-            "keep writes inside the workspace, or under /tmp if the file is genuinely "
-            "temporary"
+            "keep writes inside the workspace, or under /tmp if the file is genuinely temporary"
         ),
     ),
     DenyCode.FORK_BOMB: DenyReason(

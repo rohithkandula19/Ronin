@@ -47,6 +47,7 @@ resume, it is a delayed crash.
 on cwd because "the most recent session" almost never means the one from another
 checkout.
 """
+
 from __future__ import annotations
 
 import os
@@ -148,9 +149,7 @@ class _TurnBuilder:
 
     def finish(self) -> ReplayTurn:
         order = {call.id: position for position, call in enumerate(self.calls)}
-        results = sorted(
-            self.results, key=lambda block: order.get(block.tool_use_id, len(order))
-        )
+        results = sorted(self.results, key=lambda block: order.get(block.tool_use_id, len(order)))
         return ReplayTurn(
             index=self.index,
             text="".join(self.text),
@@ -371,9 +370,7 @@ def replay(events: Sequence[Event]) -> ReplayResult:
     else:
         source = StateSource.RECORDED
         position, recorded = checkpoint
-        mismatches = _reconcile(
-            _folded_messages(turns[: position + 1]), recorded.messages
-        )
+        mismatches = _reconcile(_folded_messages(turns[: position + 1]), recorded.messages)
         tail = _folded_messages(turns[position + 1 :])
         state = replace(recorded, messages=(*recorded.messages, *tail))
         if tail:

@@ -8,6 +8,7 @@ The two distinctions under test are the ones that make a budget trustworthy:
 Collapsing either one gives a session summary that reads as "$0.00, 0 tokens" for a
 run that in fact spent real money on a model nobody priced.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -227,9 +228,7 @@ def test_the_role_breakdown_shows_which_role_spent_the_money(tmp_path: Path) -> 
 
 def test_a_role_with_no_requests_is_absent_from_the_breakdown(tmp_path: Path) -> None:
     book = ledger(tmp_path)
-    book.record(
-        session_id="s1", request_id="r1", role=Role.MAIN, spec=PRICED, usage=Usage()
-    )
+    book.record(session_id="s1", request_id="r1", role=Role.MAIN, spec=PRICED, usage=Usage())
     assert Role.PLAN not in book.role_totals("s1")
 
 
@@ -291,9 +290,7 @@ def test_a_stable_prefix_shows_as_one_fingerprint_reused(tmp_path: Path) -> None
 
 def test_rows_with_no_fingerprint_are_omitted_from_the_breakdown(tmp_path: Path) -> None:
     book = ledger(tmp_path)
-    book.record(
-        session_id="s1", request_id="r1", role=Role.MAIN, spec=PRICED, usage=Usage()
-    )
+    book.record(session_id="s1", request_id="r1", role=Role.MAIN, spec=PRICED, usage=Usage())
     assert book.prefix_fingerprints("s1") == {}
 
 

@@ -1,4 +1,5 @@
 """The repair loop, and the noise stripping the whole thing rests on."""
+
 from __future__ import annotations
 
 import pytest
@@ -205,9 +206,7 @@ async def test_three_identical_signatures_stop_the_loop_and_report_honestly() ->
 
 
 async def test_a_changing_failure_uses_the_whole_cap_then_reports_exhausted() -> None:
-    script = _Script(
-        [PYTEST_TWO_FAILURES, PYTEST_OTHER_FAILURE, RUFF_ONE_ERROR, MYPY_TWO_ERRORS]
-    )
+    script = _Script([PYTEST_TWO_FAILURES, PYTEST_OTHER_FAILURE, RUFF_ONE_ERROR, MYPY_TWO_ERRORS])
 
     report = await repair_loop(verify=script.verify, fix=script.fix)
 

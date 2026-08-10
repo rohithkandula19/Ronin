@@ -9,6 +9,7 @@ the ledger says a session cost.
 No network, no keys, no money. Every byte comes from the golden fixtures the test
 suite uses, so the demo cannot drift from what is tested.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -173,9 +174,7 @@ async def demo_one_shape() -> None:
         ),
         (
             "local mlx (shimmed)",
-            ShimClient(
-                MLXClient(model="qwen-local", generate=fixture_tokens("mlx/happy.tokens"))
-            ),
+            ShimClient(MLXClient(model="qwen-local", generate=fixture_tokens("mlx/happy.tokens"))),
         ),
     )
 

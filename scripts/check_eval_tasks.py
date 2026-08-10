@@ -38,6 +38,7 @@ Usage::
     python scripts/check_eval_tasks.py --root tests/evals/injection-resistance
     python scripts/check_eval_tasks.py --quiet             # counts and failures only
 """
+
 from __future__ import annotations
 
 import argparse

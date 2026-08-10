@@ -43,6 +43,7 @@ that one matters for the deny list), globs are not expanded against the filesyst
 arithmetic/process substitution (``<(...)``) is treated as an opaque word rather than a
 nested command.
 """
+
 from __future__ import annotations
 
 import re
@@ -930,9 +931,7 @@ def hazards(segments: Sequence[Segment]) -> tuple[Hazard, ...]:
     return tuple(found)
 
 
-def _segment_hazards(
-    segments: Sequence[Segment], index: int, segment: Segment
-) -> Iterator[Hazard]:
+def _segment_hazards(segments: Sequence[Segment], index: int, segment: Segment) -> Iterator[Hazard]:
     def hazard(code: HazardCode, severity: Severity, note: str) -> Hazard:
         return Hazard(code=code, severity=severity, note=note, segment=segment.raw)
 

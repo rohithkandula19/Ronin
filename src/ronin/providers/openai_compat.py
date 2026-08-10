@@ -16,6 +16,7 @@ The quirks this handles generically, because more than one backend has each:
 * Some backends send the whole message in one non-streaming-shaped chunk even
   though ``stream=true`` was set; a ``message`` key is handled alongside ``delta``.
 """
+
 from __future__ import annotations
 
 import json

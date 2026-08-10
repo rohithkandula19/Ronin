@@ -33,6 +33,7 @@ emptier than it is by exactly the size of the repo map plus RONIN.md, which is t
 one part of the prompt that never shrinks. Two callers computing it separately is
 two chances to forget.
 """
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -177,8 +178,7 @@ class Paths:
             ("local settings", self.local_settings),
         )
         return tuple(
-            f"{label:<17} {path}{'' if path.exists() else '  (absent)'}"
-            for label, path in rows
+            f"{label:<17} {path}{'' if path.exists() else '  (absent)'}" for label, path in rows
         )
 
 
@@ -388,8 +388,7 @@ def sandbox_note(sandbox: Sandbox | Unavailable) -> Note | None:
         return Note(
             subject="sandbox",
             detail=(
-                f"{sandbox.describe()} — commands run unsandboxed, gated only by the "
-                "policy engine"
+                f"{sandbox.describe()} — commands run unsandboxed, gated only by the policy engine"
             ),
         )
     return None

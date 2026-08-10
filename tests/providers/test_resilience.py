@@ -8,6 +8,7 @@ to emit a reset first.
 Every test injects ``sleep``, so a six-attempt sixty-second ladder runs instantly
 and the slept seconds are asserted rather than waited out.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Sequence

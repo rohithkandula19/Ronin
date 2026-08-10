@@ -4,6 +4,7 @@ Two behaviours here are load-bearing and easy to lose in a refactor: a collision
 between two servers cannot be *expressed*, and a server's own annotations can raise
 its danger level but never lower it.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping

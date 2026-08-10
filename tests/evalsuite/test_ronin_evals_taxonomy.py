@@ -1,4 +1,5 @@
 """Each of the six classes, from real evidence — and the honest seventh state."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -53,9 +54,7 @@ def test_one_overlapping_edit_is_enough_to_clear_wrong_file() -> None:
     ("expected", "edited"),
     [(["src/app.py"], ["./src/app.py"]), (["./a/b.py"], ["a/b.py"])],
 )
-def test_path_spelling_does_not_create_a_wrong_file(
-    expected: list[str], edited: list[str]
-) -> None:
+def test_path_spelling_does_not_create_a_wrong_file(expected: list[str], edited: list[str]) -> None:
     assert classify_wrong_file(record(files_expected=expected, edited_paths=edited)) is None
 
 
@@ -203,8 +202,7 @@ def test_a_task_that_now_passes_never_broke_tests() -> None:
 def test_broke_tests_needs_a_baseline() -> None:
     """Without a pre-run probe the class is unavailable, and says so by not firing."""
     assert (
-        classify_broke_tests(record(verify_before=probe(ran=False), verify_after=probe(1)))
-        is None
+        classify_broke_tests(record(verify_before=probe(ran=False), verify_after=probe(1))) is None
     )
 
 

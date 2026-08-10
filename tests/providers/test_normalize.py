@@ -5,6 +5,7 @@ and any granularity, then hand back frozen ``ToolUse`` values with ids that are
 unique within the response and stable across replays. Everything here is testing
 one of those two words — *unique* or *stable*.
 """
+
 from __future__ import annotations
 
 import pytest

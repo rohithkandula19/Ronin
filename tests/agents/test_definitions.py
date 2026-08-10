@@ -1,4 +1,5 @@
 """subagent definitions: the frontmatter parser, the path lane, and dispatch."""
+
 from __future__ import annotations
 
 import re
@@ -84,7 +85,7 @@ def test_a_comma_separated_scalar_is_accepted_as_a_list() -> None:
         ("---\nname: a\ntool: [read]\n---\nb\n", 3, "unknown key 'tool'"),
         ("---\nname: a\nname: b\n---\nb\n", 3, "duplicate key 'name'"),
         ("---\nname: a\ndescription\n---\nb\n", 3, "expected 'key: value'"),
-        ("---\nname: a\ndescription: \"oops\n---\nb\n", 3, "unterminated quote"),
+        ('---\nname: a\ndescription: "oops\n---\nb\n', 3, "unterminated quote"),
         ("---\nname: a\ndescription: >\n---\nb\n", 3, "block scalars"),
         ("---\nname: a\ntools: [read, grep\n---\nb\n", 3, "unclosed inline list"),
         ("---\nname: a\ntools: [read,, grep]\n---\nb\n", 3, "empty entry"),
@@ -261,9 +262,7 @@ async def test_the_test_writer_can_write_a_test(tmp_path: Path) -> None:
 async def test_the_restriction_also_covers_edit_and_multi_edit(tmp_path: Path) -> None:
     seed(tmp_path)
     lane = build_subagent_registry(registry(tmp_path), BUILTIN_AGENTS["test-writer"])
-    edit = await lane.execute(
-        use("edit", path="src/app.py", old_string="None", new_string="1")
-    )
+    edit = await lane.execute(use("edit", path="src/app.py", old_string="None", new_string="1"))
     multi = await lane.execute(
         use("multi_edit", path="src/app.py", edits=[{"old_string": "None", "new_string": "1"}])
     )
@@ -366,6 +365,4 @@ def test_rank_is_explainable_and_ordered_best_first() -> None:
         subagent_catalogue(dict(BUILTIN_AGENTS), include_tool_builtins=False),
     )
     assert scores[0][0] == "test-writer"
-    assert [score for _, score in scores] == sorted(
-        (score for _, score in scores), reverse=True
-    )
+    assert [score for _, score in scores] == sorted((score for _, score in scores), reverse=True)

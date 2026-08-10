@@ -15,6 +15,7 @@ Two things in here carry more weight than their size suggests:
   in these strings, so the shape of them is enforced here rather than left to each
   tool's discretion.
 """
+
 from __future__ import annotations
 
 import os
@@ -210,8 +211,7 @@ def _truncate(result: ToolResult) -> ToolResult:
     return ToolResult(
         ok=result.ok,
         content=(
-            f"{head}\n…[truncated: {cut} chars cut, result exceeded "
-            f"{MAX_RESULT_CHARS} chars]"
+            f"{head}\n…[truncated: {cut} chars cut, result exceeded {MAX_RESULT_CHARS} chars]"
         ),
         error=result.error,
         artifacts=result.artifacts,

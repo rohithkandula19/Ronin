@@ -28,6 +28,7 @@ hand-edited:
     model = "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit"
     native_tools = false
 """
+
 from __future__ import annotations
 
 import os
@@ -209,8 +210,7 @@ def parse_config(data: Mapping[str, Any]) -> RouterConfig:
                 role = Role(str(key))
             except ValueError as exc:
                 raise ProviderError(
-                    f"unknown role {key!r} in [fallbacks] — roles are "
-                    f"{[r.value for r in Role]}"
+                    f"unknown role {key!r} in [fallbacks] — roles are {[r.value for r in Role]}"
                 ) from exc
             if isinstance(value, str):
                 # A single backup written without brackets is what people type.

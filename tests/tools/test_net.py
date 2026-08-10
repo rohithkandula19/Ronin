@@ -4,6 +4,7 @@ No socket is opened. The point under test is the *shape* of the tool — that it
 an extraction rather than the page, that it caches, and that it refuses to fetch this
 machine — none of which needs a real HTTP request to verify.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

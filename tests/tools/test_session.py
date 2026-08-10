@@ -8,6 +8,7 @@ naive test.
 The model is a scripted fake and the shell/network are absent, so nothing here opens
 a socket or spends money.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -141,9 +142,7 @@ CONFIG = RouterConfig(
 def router_with(models: Mapping[str, ModelClient]) -> Router:
     """A router whose factory hands back the named scripted clients."""
 
-    def build(
-        spec: ModelSpec, *, transport: object = None, env: object = None
-    ) -> ModelClient:
+    def build(spec: ModelSpec, *, transport: object = None, env: object = None) -> ModelClient:
         del transport, env
         return models[spec.name]
 
@@ -375,9 +374,7 @@ async def test_a_partial_answer_is_labelled_partial(tmp_path: Path) -> None:
 async def test_a_type_naming_a_missing_tool_reports_a_config_error(tmp_path: Path) -> None:
     fast = ScriptedModel([says("x")])
     subagents, _ = session_for(tmp_path, fast)
-    broken = SubagentType(
-        name="shelly", description="d", tools=("read", "bash"), system_prompt="x"
-    )
+    broken = SubagentType(name="shelly", description="d", tools=("read", "bash"), system_prompt="x")
     answer = await subagents.run("q", broken)
     assert "could not start" in answer
     assert "bash" in answer
@@ -414,9 +411,7 @@ async def test_an_interrupt_propagates_rather_than_being_swallowed(tmp_path: Pat
 async def test_only_the_final_text_escapes_the_child(tmp_path: Path) -> None:
     """Tool results and intermediate turns stay inside; that is the entire point."""
     write_file(tmp_path, "secret.py", "TOKEN = 'do-not-leak-this-into-the-parent'\n")
-    fast = ScriptedModel(
-        [calls("read", path="secret.py"), says("secret.py defines one constant.")]
-    )
+    fast = ScriptedModel([calls("read", path="secret.py"), says("secret.py defines one constant.")])
     subagents, _ = session_for(tmp_path, fast)
     answer = await subagents.run("what is in secret.py?", EXPLORE)
 
@@ -507,9 +502,7 @@ async def test_the_main_client_is_the_main_model(tmp_path: Path) -> None:
         ctx,
         base_tools=build_registry(ctx),
     )
-    chunks = [
-        chunk async for chunk in session.main.stream(system="s", messages=(), tools=())
-    ]
+    chunks = [chunk async for chunk in session.main.stream(system="s", messages=(), tools=())]
     assert chunks
     assert len(big.requests) == 1
     assert fast.requests == []
@@ -634,8 +627,13 @@ async def test_an_unknown_role_name_falls_back_to_fast_rather_than_crashing(
 
 @pytest.mark.parametrize(
     ("declared", "expected"),
-    [("", ModelRole.FAST), ("fast", ModelRole.FAST), ("main", ModelRole.MAIN),
-     ("plan", ModelRole.PLAN), ("nonsense", ModelRole.FAST)],
+    [
+        ("", ModelRole.FAST),
+        ("fast", ModelRole.FAST),
+        ("main", ModelRole.MAIN),
+        ("plan", ModelRole.PLAN),
+        ("nonsense", ModelRole.FAST),
+    ],
 )
 def test_role_for_maps_every_declared_value(
     tmp_path: Path, declared: str, expected: ModelRole
@@ -671,8 +669,12 @@ async def test_the_default_policy_still_refuses_every_gated_call(tmp_path: Path)
     """Unchanged behaviour when nothing is injected: deny, with a reason to report."""
     policy = SubagentPolicy(Budget(max_tokens=1000))
     decision = await policy.approve(
-        ToolSpec(name="bash", description="d", danger_level=DangerLevel.DESTRUCTIVE,
-                 requires_approval=True),
+        ToolSpec(
+            name="bash",
+            description="d",
+            danger_level=DangerLevel.DESTRUCTIVE,
+            requires_approval=True,
+        ),
         use("bash", command="pytest -q"),
         rendered="pytest -q",
     )
@@ -717,8 +719,7 @@ async def test_an_injected_policy_lets_a_child_act_on_standing_permission(
     # A file the model has not read: `write`'s own guard refuses to clobber one it
     # has, and that guard is not what this test is about.
     fast = ScriptedModel(
-        [says_and_calls("writing", "write", path="fixed.txt", content="after\n"),
-         says("done")]
+        [says_and_calls("writing", "write", path="fixed.txt", content="after\n"), says("done")]
     )
     router = router_with({"small": fast, "big": ScriptedModel([says("m")], "big")})
     _, subagents = build_subagent_runner(router, base, policy_for=Standing)

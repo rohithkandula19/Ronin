@@ -6,6 +6,7 @@ site changes. It is also where the format shim is applied — automatically, fro
 :class:`~ronin.providers.types.Capabilities`, because a human deciding per-model
 whether to wrap in a shim is a human who will eventually forget.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable, Mapping
@@ -75,9 +76,7 @@ def _build_moonshot(
     return MoonshotClient(**kwargs)
 
 
-def _build_mlx(
-    spec: ModelSpec, transport: Transport, env: Mapping[str, str] | None
-) -> ModelClient:
+def _build_mlx(spec: ModelSpec, transport: Transport, env: Mapping[str, str] | None) -> ModelClient:
     del transport, env  # local generation needs neither
     return MLXClient(
         model=spec.model,

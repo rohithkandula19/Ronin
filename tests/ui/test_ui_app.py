@@ -6,6 +6,7 @@ terminal (or its headless pilot). Those are the lines this suite cannot reach, s
 every decision was moved out of them — into ``reduce``, ``render`` and the two
 functions below — and the remainder is assignment statements.
 """
+
 from __future__ import annotations
 
 import ast

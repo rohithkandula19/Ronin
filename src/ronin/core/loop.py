@@ -27,6 +27,7 @@ Three decisions were made here rather than guessed silently — they are recorde
    spec ("cancellable at any await point" *and* "conversation stays well-formed"),
    so this is one design meeting two constraints, not two competing designs.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -122,9 +123,7 @@ class StalledError(RuntimeError):
 # --------------------------------------------------------------------------- #
 
 
-def truncate_for_model(
-    content: str, limit: int = DEFAULT_MAX_TOOL_RESULT_CHARS
-) -> str:
+def truncate_for_model(content: str, limit: int = DEFAULT_MAX_TOOL_RESULT_CHARS) -> str:
     """Deterministically cut ``content`` and say exactly what was removed.
 
     The marker is part of the contract: the model must be able to tell the
@@ -156,8 +155,7 @@ def _all_read_only(specs: Iterable[ToolSpec | None]) -> bool:
     """Parallel execution is only safe when nothing in the batch mutates."""
     resolved = list(specs)
     return bool(resolved) and all(
-        spec is not None and spec.danger_level == DangerLevel.READ_ONLY
-        for spec in resolved
+        spec is not None and spec.danger_level == DangerLevel.READ_ONLY for spec in resolved
     )
 
 
@@ -197,9 +195,7 @@ def _results_message(pairs: Sequence[tuple[ToolUse, ToolResult]], limit: int) ->
     blocks = tuple(
         replace(
             result.as_block(use.id),
-            content=truncate_for_model(
-                result.content if result.ok else result.error, limit
-            ),
+            content=truncate_for_model(result.content if result.ok else result.error, limit),
         )
         for use, result in pairs
     )
@@ -432,9 +428,7 @@ async def _execute_one(tools: ToolRegistry, use: ToolUse) -> ToolResult:
         return ToolResult(ok=False, error=f"{type(exc).__name__}: {exc}")
 
 
-async def _execute_parallel(
-    tools: ToolRegistry, uses: Sequence[ToolUse]
-) -> list[ToolResult]:
+async def _execute_parallel(tools: ToolRegistry, uses: Sequence[ToolUse]) -> list[ToolResult]:
     """Run a read-only batch concurrently, preserving order."""
     gathered = await asyncio.gather(
         *(_execute_one(tools, use) for use in uses), return_exceptions=True
@@ -444,9 +438,7 @@ async def _execute_parallel(
         if isinstance(outcome, asyncio.CancelledError):  # pragma: no cover - see tests
             results.append(_interrupted_result())
         elif isinstance(outcome, BaseException):
-            results.append(
-                ToolResult(ok=False, error=f"{type(outcome).__name__}: {outcome}")
-            )
+            results.append(ToolResult(ok=False, error=f"{type(outcome).__name__}: {outcome}"))
         else:
             results.append(outcome)
     return results

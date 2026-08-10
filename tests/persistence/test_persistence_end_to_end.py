@@ -4,6 +4,7 @@ No fakes at all. This subsystem's only seam is the filesystem, and faking that
 would test nothing that matters here — the failures worth catching (a torn line, a
 lagging sidecar, an unpaired tool call) are properties of real bytes on real disk.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

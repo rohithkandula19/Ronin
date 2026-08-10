@@ -32,6 +32,7 @@ each ``description``, and :data:`SELECTION_FLOOR` below which it returns ``None`
 because a wrong subagent (fresh context, wrong tools, confident answer) is worse
 than no subagent.
 """
+
 from __future__ import annotations
 
 import re
@@ -97,16 +98,85 @@ _WORD_RE = re.compile(r"[a-z0-9_]+")
 
 #: Words that appear in every task description and every agent description, so
 #: counting them would make everything match everything.
-STOPWORDS: frozenset[str] = frozenset({
-    "a", "an", "and", "any", "are", "as", "at", "be", "but", "by", "can", "code",
-    "do", "does", "doing", "file", "files", "find", "for", "from", "get", "has",
-    "have", "how", "in", "into", "is", "it", "its", "make", "new", "not", "of",
-    "on", "one", "only", "or", "other", "same", "see", "should", "some", "than",
-    "that", "the", "their", "them", "then", "there", "these", "they", "thing",
-    "things", "this", "time", "to", "up", "use", "used", "using", "want", "was",
-    "way", "we", "what", "when", "where", "which", "who", "why", "will", "with",
-    "work", "you", "your",
-})
+STOPWORDS: frozenset[str] = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "any",
+        "are",
+        "as",
+        "at",
+        "be",
+        "but",
+        "by",
+        "can",
+        "code",
+        "do",
+        "does",
+        "doing",
+        "file",
+        "files",
+        "find",
+        "for",
+        "from",
+        "get",
+        "has",
+        "have",
+        "how",
+        "in",
+        "into",
+        "is",
+        "it",
+        "its",
+        "make",
+        "new",
+        "not",
+        "of",
+        "on",
+        "one",
+        "only",
+        "or",
+        "other",
+        "same",
+        "see",
+        "should",
+        "some",
+        "than",
+        "that",
+        "the",
+        "their",
+        "them",
+        "then",
+        "there",
+        "these",
+        "they",
+        "thing",
+        "things",
+        "this",
+        "time",
+        "to",
+        "up",
+        "use",
+        "used",
+        "using",
+        "want",
+        "was",
+        "way",
+        "we",
+        "what",
+        "when",
+        "where",
+        "which",
+        "who",
+        "why",
+        "will",
+        "with",
+        "work",
+        "you",
+        "your",
+    }
+)
 
 
 class FrontmatterError(ValueError):
@@ -208,9 +278,7 @@ def parse_frontmatter(
 
         match = _KEY_RE.match(stripped)
         if match is None:
-            raise FrontmatterError(
-                source, offset, f"expected 'key: value', got {stripped!r}"
-            )
+            raise FrontmatterError(source, offset, f"expected 'key: value', got {stripped!r}")
         if pending_key is not None:
             fields[pending_key] = tuple(pending_items)
             pending_key, pending_items = None, []
@@ -321,9 +389,7 @@ class AgentDefinition:
         )
 
 
-def _require_list(
-    fields: Mapping[str, FrontmatterValue], key: str, source: str
-) -> tuple[str, ...]:
+def _require_list(fields: Mapping[str, FrontmatterValue], key: str, source: str) -> tuple[str, ...]:
     """A list-valued key, accepting ``a, b`` as well as ``[a, b]`` and a block list."""
     value = fields[key]
     if isinstance(value, tuple):
@@ -336,16 +402,12 @@ def parse_definition(text: str, *, source: str = "<string>") -> AgentDefinition:
     fields, body = parse_frontmatter(text, source=source)
     missing = [key for key in REQUIRED_KEYS if not fields.get(key)]
     if missing:
-        raise FrontmatterError(
-            source, 1, f"frontmatter is missing required key(s): {missing}"
-        )
+        raise FrontmatterError(source, 1, f"frontmatter is missing required key(s): {missing}")
 
     name = fields["name"]
     description = fields["description"]
     if isinstance(name, tuple) or isinstance(description, tuple):
-        raise FrontmatterError(
-            source, 1, "'name' and 'description' must be scalars, not lists"
-        )
+        raise FrontmatterError(source, 1, "'name' and 'description' must be scalars, not lists")
 
     raw_iterations = fields.get("max_iterations", "")
     if isinstance(raw_iterations, tuple):
@@ -421,9 +483,7 @@ def subagent_catalogue(
     session that upgrades to file-defined agents does not lose the two types its
     prompts may already name.
     """
-    catalogue: dict[str, SubagentType] = (
-        dict(BUILTIN_SUBAGENTS) if include_tool_builtins else {}
-    )
+    catalogue: dict[str, SubagentType] = dict(BUILTIN_SUBAGENTS) if include_tool_builtins else {}
     for definition in agents.values():
         catalogue[definition.name] = definition.to_subagent_type()
     return catalogue
@@ -745,9 +805,7 @@ BUILTIN_AGENTS: Mapping[str, AgentDefinition] = {
 
 def _content_words(text: str) -> set[str]:
     return {
-        word
-        for word in _WORD_RE.findall(text.lower())
-        if len(word) > 2 and word not in STOPWORDS
+        word for word in _WORD_RE.findall(text.lower()) if len(word) > 2 and word not in STOPWORDS
     }
 
 

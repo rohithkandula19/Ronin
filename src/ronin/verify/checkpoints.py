@@ -32,6 +32,7 @@ directory that is not a git repo, degrade to :class:`Availability` with a reason
 human can act on, and the session continues without checkpoints rather than
 dying at the first mutating turn.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -350,9 +351,7 @@ class CheckpointStore:
         for line in listed.output.splitlines():
             parts = line.split(_UNIT_SEP)
             if len(parts) == 3 and parts[0]:
-                checkpoints.append(
-                    Checkpoint(id=parts[0], label=parts[1], created_at=parts[2])
-                )
+                checkpoints.append(Checkpoint(id=parts[0], label=parts[1], created_at=parts[2]))
         return tuple(checkpoints)
 
     async def restore(self, checkpoint_id: str) -> RestoreResult:
@@ -365,9 +364,7 @@ class CheckpointStore:
         """
         availability = await self.ensure()
         if not availability.available:
-            return RestoreResult(
-                ok=False, reason=availability.reason, detail=availability.detail
-            )
+            return RestoreResult(ok=False, reason=availability.reason, detail=availability.detail)
         if not checkpoint_id:
             return RestoreResult(
                 ok=False,
@@ -418,8 +415,7 @@ class CheckpointStore:
                 ok=False,
                 reason=CheckpointReason.NO_CHECKPOINTS,
                 detail=(
-                    "no checkpoint has been made this session, so there is no base "
-                    "to diff against"
+                    "no checkpoint has been made this session, so there is no base to diff against"
                 ),
             )
         staged = await self._git_args("add", "-A", "--", ".")

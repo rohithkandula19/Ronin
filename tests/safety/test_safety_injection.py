@@ -6,6 +6,7 @@ three have to hold for the defense to mean anything: it is flagged, the content 
 preserved byte-for-byte, and a follow-up tool call derived from it escalates to ``ask``
 even though the same command is on the allowlist.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

@@ -4,6 +4,7 @@ The todo tests are mostly about the invariants — exactly one thing in progress
 never zero while work remains — because a plan that says nothing is in progress while
 five items are pending is a plan the user cannot read and the model is not following.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -137,9 +138,7 @@ def test_the_description_says_three_or_more_steps() -> None:
 async def test_a_subagent_receives_the_prompt_and_its_type(tmp_path: Path) -> None:
     runner = RecordingRunner("found it at src/x.py:12")
     tool = TaskTool(runner)
-    result = await call(
-        tool, context(tmp_path), prompt="Find the parser", subagent_type="explore"
-    )
+    result = await call(tool, context(tmp_path), prompt="Find the parser", subagent_type="explore")
     assert result.ok
     assert result.content == "found it at src/x.py:12"
     assert len(runner.calls) == 1

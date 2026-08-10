@@ -19,6 +19,7 @@ Nothing below ``cli`` may import it. That rule is enforced by
 ``tests/tools/test_boundaries.py``, which walks the import graph with ``ast`` so a
 lazy import inside a function does not slip past.
 """
+
 from __future__ import annotations
 
 from .spine import (
