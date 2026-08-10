@@ -15,7 +15,20 @@ exactly what it showed before. The isolated index is the shadow git-dir's own
 tests by byte-comparing ``.git/index`` across a checkpoint, not by reading the
 code and hoping.
 
-Four pieces of the ambient git environment are neutralized explicitly, because
+The ambient *environment* is neutralized as well, and this is not theoretical.
+``--git-dir`` and ``--work-tree`` do not win against ``GIT_INDEX_FILE``: that
+variable names the index file directly, so a ronin invoked from inside a git hook
+(where git exports it, pointing at the real repo's index) would have every
+``git add`` in here stage into **the user's index**. Measured, before this was
+fixed: a checkpoint turned ``?? brand_new.py`` into ``A  brand_new.py`` in the
+user's own ``git status`` and grew ``.git/index`` from 137 to 217 bytes. So
+:data:`_GIT_LOCATION_VARS` are dropped and ``GIT_INDEX_FILE`` is pinned to the
+shadow index on every invocation, whether or not a caller injected an ``env``.
+``GIT_WORK_TREE`` and ``GIT_COMMON_DIR`` do not corrupt anything but do make
+``init`` fail, which silently costs the session its checkpoints; they are dropped
+for that reason.
+
+Four pieces of the ambient git *config* are neutralized explicitly too, because
 each one is a real way a checkpoint corrupts a working tree:
 
 * ``core.hooksPath`` — a globally configured hooks directory would run the user's
@@ -35,6 +48,7 @@ dying at the first mutating turn.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -51,6 +65,23 @@ CHECKPOINT_DIR: Final[str] = ".ronin/checkpoints"
 #: user's ``.gitignore``, because in a repo that does not ignore ``.ronin/`` the
 #: first checkpoint would otherwise contain the second one.
 SHADOW_EXCLUDES: Final[tuple[str, ...]] = ("/.ronin/", "/.git/")
+
+#: Ambient variables that redirect a git command *even when* ``--git-dir`` and
+#: ``--work-tree`` are passed. Each was checked by running a real checkpoint with
+#: the variable pointed back at the user's own repo: ``GIT_INDEX_FILE`` staged
+#: into the user's index, and ``GIT_WORK_TREE``/``GIT_COMMON_DIR`` made ``init``
+#: fail. ``GIT_DIR``, ``GIT_OBJECT_DIRECTORY`` and
+#: ``GIT_ALTERNATE_OBJECT_DIRECTORIES`` did not corrupt anything in that test, but
+#: they name locations this code is supposed to control and are dropped with the
+#: rest rather than left to a future git version's precedence rules.
+_GIT_LOCATION_VARS: Final[tuple[str, ...]] = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_COMMON_DIR",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_INDEX_FILE",
+)
 
 _IDENTITY: Final[tuple[str, ...]] = (
     "-c",
@@ -171,15 +202,23 @@ class CheckpointStore:
         self._run = run
         self._git = git
         self._timeout = timeout
-        # When an explicit env is injected the index is pinned explicitly too, so
-        # a caller who controls the environment cannot accidentally hand git the
-        # ambient GIT_INDEX_FILE of an outer git command (a real hazard when ronin
-        # itself is invoked from a git hook).
-        self._env: dict[str, str] | None = (
-            {**env, "GIT_INDEX_FILE": str(self._git_dir / "index")} if env is not None else None
-        )
+        self._env: dict[str, str] = self._isolated_env(env)
         self._availability: Availability | None = None
         self._session_base: str | None = None
+
+    def _isolated_env(self, env: Mapping[str, str] | None) -> dict[str, str]:
+        """The environment every shadow git command runs under.
+
+        Always a full mapping, never ``None``: inheriting the ambient environment
+        is what let ``GIT_INDEX_FILE`` through. ``env=None`` still means "inherit
+        the process environment" — it is just materialized here so the redirect
+        variables can be removed from the copy before git sees it.
+        """
+        base = dict(os.environ if env is None else env)
+        for name in _GIT_LOCATION_VARS:
+            base.pop(name, None)
+        base["GIT_INDEX_FILE"] = str(self._git_dir / "index")
+        return base
 
     # ------------------------------------------------------------------ probing
 
@@ -328,6 +367,16 @@ class CheckpointStore:
                 ok=False,
                 reason=CheckpointReason.GIT_FAILED,
                 detail=f"git rev-parse failed: {head.output.strip()}",
+            )
+        if not head.output.strip():
+            # rev-parse exiting 0 with nothing on stdout should not happen, but
+            # every other failure here is a value and this one used to be a
+            # ValueError escaping the store — on a mutating turn, which is the
+            # worst moment to raise.
+            return CheckpointResult(
+                ok=False,
+                reason=CheckpointReason.GIT_FAILED,
+                detail="git rev-parse HEAD succeeded but printed no commit id",
             )
         stamp = await self._git_args("log", "-1", "--format=%cI")
         checkpoint = Checkpoint(
