@@ -303,10 +303,15 @@ def file_path_from_arguments(arguments: Mapping[str, Any]) -> str | None:
 
 
 def _normalize_path(value: str) -> str:
-    normalized = Path(value).as_posix()
-    while normalized.startswith("./"):
-        normalized = normalized[2:]
-    return normalized or value
+    """One retention key per file, whatever spelling the model used to name it.
+
+    ``PurePath`` already collapses ``.`` components, so ``./src/a.py``, ``.//src/a.py``
+    and ``src/a.py`` all arrive here as the same string and there is nothing left to
+    strip afterwards. ``..`` is deliberately *not* collapsed — that would need symlinks
+    resolved — so ``../a.py`` stays a different key from ``a.py``, which is right: on
+    disk they are different files.
+    """
+    return Path(value).as_posix() or value
 
 
 def latest_tool_result_per_path(
@@ -423,7 +428,7 @@ def _avoid_splitting_pairs(messages: Sequence[Message], head_end: int, tail_star
         tail_start = earliest
         if tail_start <= head_end:
             return head_end
-    return tail_start
+    return tail_start  # pragma: no cover - each pass moves the boundary at least one back
 
 
 def _owner_index(

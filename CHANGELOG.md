@@ -80,6 +80,20 @@ All notable changes to this project will be documented here. Format follows [Kee
   than absolute, since the opt-in path now exists.
 
 ### Fixed
+- **`<<<` was parsed as a heredoc, so the next line of a command was invisible to every
+  check in `safety`.** The lexer reads a run of `<` greedily, so `<<<` arrived at the
+  heredoc test already ending in `<<` and was taken for one — which made the *following
+  line* the heredoc body. `cat <<<x` followed by `rm -rf /` therefore produced a single
+  `cat` segment, and the deny list, the hazard scan and every configured rule saw nothing
+  else. The guard meant to prevent exactly this peeked ahead for a fourth `<` after the
+  greedy run had already consumed it, so it could never fire. The operator is now decided
+  from the finished token, `<<<` becomes a redirect whose target is data (never a path to
+  check), and a shell fed by one has its payload parsed as code — `bash <<<"rm -rf /"`
+  runs that word, exactly as a heredoc body does, and is refused on the same grounds.
+- **A `.gitignore` line of only slashes compiled to a rule that matched nothing.** `//`
+  lost one trailing slash and kept an empty pattern; every trailing slash is now stripped,
+  so the line is dropped like the other empty forms instead of sitting in the rule set
+  looking configured.
 - **Fetched web pages reached a model as instructions, not data.** `web_fetch` converts a
   page to markdown and hands it to the fast model with the caller's prompt — and it handed
   it over **bare**, so page text and the caller's own instructions arrived in one
