@@ -33,7 +33,7 @@ from typing import Any, Final
 
 import pytest
 
-from ronin.safety.net import Resolver
+from ronin.safety.net import REDACTED, Resolver, split_host
 from ronin.tools.searcher import (
     BRAVE,
     DEFAULT_LIMIT,
@@ -51,6 +51,10 @@ from ronin.tools.searcher import (
 )
 
 PUBLIC: Final = "93.184.216.34"
+
+#: The host of the self-hosted endpoint these tests configure. A constant so assertions
+#: about it are equality comparisons against a named value rather than string matches.
+ENDPOINT_HOST: Final = "searx.example.com"
 
 #: One response per provider, in the shape its API actually returns. These are the
 #: fixtures the adapters are written against, so a provider changing its schema shows up
@@ -506,7 +510,15 @@ def test_an_endpoint_on_a_private_address_that_does_not_resolve_is_still_attempt
 def test_a_transport_failure_is_reported_with_the_endpoint_redacted() -> None:
     """A dead endpoint is the commonest searxng problem — the instance is not running —
     and the message has to say which endpoint, without leaking a key that a
-    misconfiguration may have put in the URL."""
+    misconfiguration may have put in the URL.
+
+    The host is pulled out of the quoted URL in the message and compared with ``==``
+    rather than matched as a substring. Stronger — it asserts the message names this host
+    as *the host it tried*, not merely that the characters appear somewhere — and it is
+    the form CodeQL's "incomplete URL substring sanitization" rule asks for, which fires
+    on ``in`` and ``endswith`` alike because ``endswith("example.com")`` also matches
+    ``evil-example.com``.
+    """
 
     def exploding(**_kwargs: object) -> object:
         raise OSError("Connection refused")
@@ -519,8 +531,12 @@ def test_a_transport_failure_is_reported_with_the_endpoint_redacted() -> None:
             resolve=resolver(),
             connect=exploding,  # type: ignore[arg-type]
         )
-    assert "SUPERSECRET" not in str(caught.value)
-    assert "searx.example.com" in str(caught.value)
+    message = str(caught.value)
+    assert "SUPERSECRET" not in message, "a key in a config URL must not reach a log"
+    quoted = re.search(r"'(https?://[^']+)'", message)
+    assert quoted is not None, f"the message should quote the endpoint it tried: {message}"
+    assert split_host(quoted.group(1)) == ENDPOINT_HOST
+    assert REDACTED in quoted.group(1), "and the query values are redacted"
 
 
 def test_a_row_with_no_title_falls_back_to_its_url() -> None:
