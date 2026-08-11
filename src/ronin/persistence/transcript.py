@@ -37,6 +37,23 @@ transcript with a hole in it. And re-opening a torn file truncates the torn tail
 before appending: left in place it would stop being the last line and start being
 a mid-file record, which turns a recoverable crash into an unloadable session.
 
+**Why a version mismatch is not corruption either.** A transcript from another
+schema version is *intact*; it is simply not ours to read. Saying "malformed record"
+about it would send a user looking for a broken file, and hiding it from
+:func:`list_sessions` would be worse — the first schema bump is the moment every
+session a user owns is the old version, which is exactly when they need to be told
+the sessions still exist and that the Ronin that wrote them can still export them.
+So :func:`read_events` raises :class:`TranscriptVersionError`, which says so in those
+words; the picker lists the row with the reason in
+:attr:`SessionMeta.unreadable`; and :meth:`Transcript.open` refuses to append rather
+than interleave two builds' records into a file neither can read.
+
+**Why a session id is validated.** An id is interpolated into a filename, and not
+every id comes from :func:`new_session_id` — ``--resume`` takes one from the command
+line and the SDK from its caller. :func:`valid_session_id` is the confinement rule
+every other layer already has, applied at the one place this one turns a caller's
+string into a path.
+
 Records are written with ``ensure_ascii=True``. That is not decoration: it means a
 torn write can never split a UTF-8 sequence in half (so the file always decodes),
 and a lone surrogate in model output — a real product of a truncated provider
@@ -53,13 +70,14 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from secrets import token_hex
-from typing import Any, TextIO
+from typing import Any, Final, TextIO
 
 from ..core.types import Event, ToolEnd, TurnEnd
 from .codec import (
     SCHEMA_VERSION,
     TYPE_KEY,
     VERSION_KEY,
+    SchemaVersionMismatch,
     check_version,
     decode_event,
     encode_event,
@@ -80,17 +98,65 @@ class TranscriptError(RuntimeError):
     """A transcript could not be written, or is corrupt somewhere it must not be."""
 
 
+class TranscriptVersionError(TranscriptError, SchemaVersionMismatch):
+    """A transcript this build cannot read *because of its version*, not its bytes.
+
+    Both bases on purpose. It is a :class:`TranscriptError` so every caller that
+    already handles "this transcript did not load" keeps working — the CLI catches
+    ``RuntimeError`` there, and a version mismatch that arrived as a bare
+    ``ValueError`` would reach the user as a traceback. It is a
+    :class:`~ronin.persistence.codec.SchemaVersionMismatch` so a caller that wants to
+    tell "written by another Ronin" apart from "corrupt" can, which is the whole point
+    of the distinction: one is recoverable by using the other Ronin, the other is not
+    recoverable at all.
+    """
+
+
+#: Characters allowed in a session id. Deliberately narrow: an id is interpolated
+#: straight into a filename, so anything that can mean "somewhere else" is out.
+_ID_ALLOWED: Final = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+
+
+def valid_session_id(session_id: str) -> bool:
+    """Whether ``session_id`` is a bare filename component and nothing else.
+
+    ``session_path`` interpolates the id into a path, and ids do not all come from
+    :func:`new_session_id` — ``--resume <id>`` and ``--export-session <id>`` take one
+    from the command line, and the SDK takes one from its caller. So ``../../../etc/x``
+    would name a file outside ``.ronin/sessions`` and, on the writing side, create one
+    there. Every other layer confines paths (``ToolContext.resolve``, the deny list's
+    ``OUTSIDE_WORKSPACE`` rule); this is that same rule for the one place persistence
+    turns a caller's string into a path.
+
+    ``.`` and ``..`` are rejected by name even though their characters are allowed:
+    they are the two directory entries that always exist.
+    """
+    if not session_id or session_id in {".", ".."}:
+        return False
+    return set(session_id) <= _ID_ALLOWED
+
+
+def _checked_id(session_id: str) -> str:
+    if not valid_session_id(session_id):
+        raise TranscriptError(
+            f"{session_id!r} is not a usable session id: an id becomes a filename, so "
+            f"it may only contain letters, digits, '.', '_' and '-' — no path "
+            f"separators, and not '.' or '..'. `ronin sessions` lists the real ids."
+        )
+    return session_id
+
+
 def sessions_dir(root: Path) -> Path:
     """``<root>/.ronin/sessions``. Not created — writers create it on open."""
     return root / SESSIONS_SUBDIR
 
 
 def session_path(directory: Path, session_id: str) -> Path:
-    return directory / f"{session_id}{SUFFIX}"
+    return directory / f"{_checked_id(session_id)}{SUFFIX}"
 
 
 def meta_path(directory: Path, session_id: str) -> Path:
-    return directory / f"{session_id}{META_SUFFIX}"
+    return directory / f"{_checked_id(session_id)}{META_SUFFIX}"
 
 
 def new_session_id(
@@ -124,6 +190,13 @@ class SessionMeta:
     ``stale`` marks a row whose counters came from the header line because the
     sidecar was missing — a crash before the first turn boundary. The row is still
     shown; it just does not claim the counters are current.
+
+    ``unreadable`` carries *why* a session cannot be loaded by this build, and is the
+    same idea one step further: the row is still listed. A session written by another
+    schema version would otherwise vanish from the picker entirely, which is the worst
+    moment for it to happen — the first schema bump, when every session a user owns is
+    the old version and the codec's advice ("export it with the Ronin that wrote it")
+    is advice they never get to read.
     """
 
     session_id: str
@@ -139,10 +212,16 @@ class SessionMeta:
     files_touched: tuple[str, ...] = ()
     checkpoint_ids: tuple[str, ...] = ()
     stale: bool = False
+    unreadable: str = ""
 
     def __post_init__(self) -> None:
         if not self.session_id:
             raise ValueError("SessionMeta.session_id is required")
+
+    @property
+    def loadable(self) -> bool:
+        """Whether this session can be replayed by this build at all."""
+        return not self.unreadable
 
 
 def encode_meta(meta: SessionMeta) -> dict[str, Any]:
@@ -281,19 +360,34 @@ class Transcript:
         Re-opening an existing session keeps its recorded identity — a session's
         cwd and start time are facts about when it began, not about this process —
         and first truncates a torn final line so the append cannot bury it.
+
+        Refuses a log written by another schema version rather than appending to it:
+        this build's records would interleave with the other build's and the result
+        would be readable by neither.
         """
         directory.mkdir(parents=True, exist_ok=True)
         path = session_path(directory, session_id)
         repairs: tuple[str, ...] = ()
         meta: SessionMeta | None = None
+        existing = False
 
         if path.exists() and path.stat().st_size > 0:
             report = _truncate_torn_tail(path)
             if report is not None:
                 repairs = (report,)
+            existing = path.stat().st_size > 0
             meta = _read_meta(directory, session_id)
+            if meta is not None and meta.unreadable:
+                raise TranscriptVersionError(
+                    f"cannot append to {path}: {meta.unreadable} Appending this "
+                    f"build's records would leave a file neither build can read."
+                )
 
-        fresh = meta is None
+        # A header belongs at the *top* of a file, so it is only written when there is
+        # no file yet. Keying this off "we could not read a header" instead would append
+        # a second one below the events of a log whose header is damaged, turning one
+        # bad line into a mid-file header record.
+        fresh = not existing
         if meta is None:
             now = clock()
             meta = SessionMeta(
@@ -430,11 +524,19 @@ def _read_meta(directory: Path, session_id: str) -> SessionMeta | None:
     Never reads past the first line of the log: this is the function that makes
     :func:`list_sessions` cheap, and it would stop being cheap the moment it
     started scanning for the truth.
+
+    A *version* mismatch is not ``None``. It returns an identity-only row carrying the
+    reason in :attr:`SessionMeta.unreadable`, because a session written by another
+    Ronin exists and the user needs to be told so; ``None`` is reserved for "there is
+    nothing here to describe".
     """
     sidecar = meta_path(directory, session_id)
+    version_problem = ""
     if sidecar.exists():
         try:
             return decode_meta(json.loads(sidecar.read_text(encoding="utf-8")))
+        except SchemaVersionMismatch as exc:
+            version_problem = str(exc)
         except (OSError, TypeError, ValueError, KeyError, TranscriptError):
             pass  # fall through to the header, which cannot have been rewritten
     path = session_path(directory, session_id)
@@ -449,7 +551,13 @@ def _read_meta(directory: Path, session_id: str) -> SessionMeta | None:
         return None
     try:
         return replace(decode_meta(json.loads(first)), stale=True)
+    except SchemaVersionMismatch as exc:
+        return SessionMeta(session_id=session_id, unreadable=str(exc))
     except (TypeError, ValueError, KeyError, TranscriptError):
+        # A stale sidecar can be from another version while the log is fine; only
+        # report unreadable when the *log's* own header says so.
+        if version_problem:
+            return SessionMeta(session_id=session_id, unreadable=version_problem)
         return None
 
 
@@ -522,6 +630,16 @@ def read_events(path: Path) -> ReadResult:
                 header = decode_meta(record)
                 continue
             events.append(decode_event(record))
+        except SchemaVersionMismatch as exc:
+            # Not corruption, and it must not be described as such: the file is intact
+            # and another Ronin can still read it. Raised even for the final line,
+            # where a torn record is normally tolerated, because a whole transcript is
+            # written by one build — a version mismatch on any line is a fact about
+            # the file, not about how it ended.
+            raise TranscriptVersionError(
+                f"{path}:{number + 1}: {exc} The file itself is intact — this is a "
+                f"version mismatch, not corruption."
+            ) from exc
         except (TypeError, ValueError, KeyError, TranscriptError) as exc:
             if partial:
                 skipped.append(
@@ -552,7 +670,12 @@ def list_sessions(directory: Path) -> tuple[SessionMeta, ...]:
         return ()
     found: list[SessionMeta] = []
     for path in sorted(directory.glob(f"*{SUFFIX}")):
-        meta = _read_meta(directory, path.name[: -len(SUFFIX)])
+        session_id = path.name[: -len(SUFFIX)]
+        if not valid_session_id(session_id):
+            # A file someone else put here, named something an id may not be. Skipped
+            # rather than raised: one odd filename must not cost the whole picker.
+            continue
+        meta = _read_meta(directory, session_id)
         if meta is not None:
             found.append(meta)
     found.sort(key=lambda meta: (meta.updated_at, meta.session_id), reverse=True)
@@ -568,6 +691,7 @@ __all__ = [
     "SessionMeta",
     "Transcript",
     "TranscriptError",
+    "TranscriptVersionError",
     "decode_meta",
     "encode_meta",
     "list_sessions",
@@ -576,4 +700,5 @@ __all__ = [
     "read_events",
     "session_path",
     "sessions_dir",
+    "valid_session_id",
 ]

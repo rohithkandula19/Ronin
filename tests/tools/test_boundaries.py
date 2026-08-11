@@ -95,6 +95,22 @@ def modules_under(package: str) -> Iterator[tuple[str, Path]]:
         yield dotted.removesuffix(".__init__"), path
 
 
+def containing_package(path: Path, dotted: str) -> str:
+    """The package a relative import in ``path`` is relative *to*.
+
+    For a module it is the parent; for an ``__init__.py`` it is the package itself,
+    because ``modules_under`` has already stripped the ``.__init__`` suffix. Getting
+    this wrong is not cosmetic: with ``ronin.persistence`` treated as a module inside
+    ``ronin``, ``from ..providers import x`` in a package's ``__init__`` resolved to
+    ``.providers`` — no ``ronin.`` prefix, so the filter below dropped it and the gate
+    saw nothing. A package's ``__init__`` is the most likely file in the tree to import
+    across a layer, since re-exporting is its job.
+    """
+    if path.name == "__init__.py":
+        return dotted
+    return dotted.rsplit(".", 1)[0] if "." in dotted else dotted
+
+
 def imported_modules(path: Path, dotted: str) -> set[str]:
     """Absolute ``ronin.*`` module names this file imports, relative ones resolved.
 
@@ -102,7 +118,7 @@ def imported_modules(path: Path, dotted: str) -> set[str]:
     finds them anywhere in the file, including inside a function body.
     """
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    package = dotted.rsplit(".", 1)[0] if "." in dotted else dotted
+    package = containing_package(path, dotted)
     found: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -275,3 +291,109 @@ def test_telemetry_depends_on_core_only() -> None:
         f"telemetry imports {forbidden}; it may only see ronin.core, because a module "
         "that cannot reach prompts, paths or code cannot transmit them"
     )
+
+
+def test_persistence_depends_on_core_only() -> None:
+    """Stricter than the table above, because the layer's docstring is stricter.
+
+    ``LAYER_RULES`` forbids ``persistence`` the provider, tool, agent, MCP and
+    application layers — but would happily allow it ``ronin.context`` or
+    ``ronin.safety``, while ``persistence/__init__.py`` says "nothing imported from
+    outside ``ronin.core``". A promise a gate does not cover is a promise that holds
+    until someone needs a helper, and the one it would cost is the reason the claim is
+    there: a transcript codec that reaches sideways can no longer be reasoned about as
+    a pure function of ``core`` values, and replaying an old session starts depending
+    on what some other layer does today.
+    """
+    offenders: list[str] = []
+    for dotted, path in modules_under("persistence"):
+        for imported in imported_modules(path, dotted):
+            if imported.startswith("ronin.core") or imported.startswith("ronin.persistence"):
+                continue
+            offenders.append(f"{dotted} imports {imported}")
+    assert offenders == [], offenders
+
+
+#: The documented order of ``persistence``: each module may import the ones before it
+#: and nothing after. ``__init__`` re-exports the whole package and ``demo`` drives it,
+#: so both stand outside the line.
+PERSISTENCE_ORDER: tuple[str, ...] = ("codec", "transcript", "resume", "export")
+
+
+def test_the_persistence_modules_form_a_line() -> None:
+    """``codec → transcript → resume → export``, in that direction only.
+
+    The package docstring states this as a fact about the design, and it is the reason
+    the layer has no cycles to break: ``codec`` cannot know about files, ``transcript``
+    cannot know about replay. Nothing enforced it. The failure it prevents is not
+    hypothetical — the tempting edge is ``codec`` importing ``transcript`` for
+    ``TranscriptError``, which would put the file format in a cycle with the file.
+    """
+    rank = {name: index for index, name in enumerate(PERSISTENCE_ORDER)}
+    offenders: list[str] = []
+    for dotted, path in modules_under("persistence"):
+        leaf = dotted.rsplit(".", 1)[-1]
+        if leaf not in rank:  # __init__ and demo see the whole package by design
+            continue
+        for imported in imported_modules(path, dotted):
+            other = imported.rsplit(".", 1)[-1]
+            if not imported.startswith("ronin.persistence.") or other not in rank:
+                continue
+            if rank[other] >= rank[leaf]:
+                offenders.append(f"{leaf} imports {other}, which is not below it")
+    assert offenders == [], offenders
+
+
+def test_the_persistence_order_lists_every_module_in_the_line() -> None:
+    """Guards the table itself: a new module in the package would otherwise be
+    unconstrained until someone remembered to rank it, and the only signal would be
+    silence."""
+    on_disk = {
+        dotted.rsplit(".", 1)[-1]
+        for dotted, _ in modules_under("persistence")
+        if dotted != "ronin.persistence"
+    }
+    unranked = sorted(on_disk - set(PERSISTENCE_ORDER) - {"demo"})
+    assert unranked == [], (
+        f"{unranked} are in ronin.persistence but not in PERSISTENCE_ORDER; add them "
+        "in dependency order (or to the exemption beside it) so the line stays enforced"
+    )
+
+
+def test_a_relative_import_in_a_package_init_resolves_to_that_package(tmp_path: Path) -> None:
+    """`from .codec import X` in `ronin/persistence/__init__.py` is
+    `ronin.persistence.codec`, not `ronin.codec`.
+
+    `modules_under` reports an `__init__.py` under the package's own dotted name, so
+    treating that name as a *module* and taking its parent walked one level too far up.
+    """
+    init = tmp_path / "__init__.py"
+    init.write_text("from .codec import encode\nfrom . import export\n")
+    assert imported_modules(init, "ronin.persistence") == {
+        "ronin.persistence.codec",
+        "ronin.persistence",
+    }
+
+
+def test_a_cross_layer_relative_import_in_an_init_is_not_invisible(tmp_path: Path) -> None:
+    """The violation the old resolution silently dropped.
+
+    `from ..providers.router import Router` in `ronin/tools/__init__.py` resolved to
+    `.providers.router`, which fails the `ronin.`-prefix filter and so never reached
+    any prohibition. A gate with a blind spot in the file most likely to re-export
+    across a layer is worse than no gate: it reports success.
+    """
+    init = tmp_path / "__init__.py"
+    init.write_text("from ..providers.router import Router\n")
+    assert imported_modules(init, "ronin.tools") == {"ronin.providers.router"}
+
+
+def test_the_resolver_still_reads_a_plain_module_relative_to_its_parent(tmp_path: Path) -> None:
+    """The control: the fix must not shift resolution for ordinary modules, which is
+    where every existing prohibition is enforced."""
+    module = tmp_path / "files.py"
+    module.write_text("from ..core.types import ToolResult\nfrom .base import Tool\n")
+    assert imported_modules(module, "ronin.tools.files") == {
+        "ronin.core.types",
+        "ronin.tools.base",
+    }

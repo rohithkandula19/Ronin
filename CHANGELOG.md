@@ -80,6 +80,44 @@ All notable changes to this project will be documented here. Format follows [Kee
   than absolute, since the opt-in path now exists.
 
 ### Fixed
+- **A session from another schema version was reported as corruption, and hidden.** The
+  codec has a precise error for it — it names both versions and says to export the old
+  session with the Ronin that wrote it — and `read_events` caught it alongside every
+  other decode failure and re-raised it as "malformed record in the middle of the
+  transcript ... refusing to load a transcript with a hole in it". The file has no hole.
+  Meanwhile `list_sessions` dropped the row entirely, so the session was not merely
+  mis-described, it was invisible. Both land at the first schema bump, when *every*
+  session a user owns is the old version.
+  - `read_events` now raises `TranscriptVersionError`, which subclasses both
+    `TranscriptError` and `SchemaVersionMismatch`: the first so the CLI's existing
+    `RuntimeError` handling keeps turning it into a one-line message instead of a
+    traceback, the second so a caller can tell "another Ronin wrote this" (recoverable)
+    from "this is corrupt" (not).
+  - `ronin sessions` lists the row with the reason, via a new `SessionMeta.unreadable`
+    beside the existing `stale` — a row that shows zero turns and zero cost would read
+    as an empty session, which is a different and wrong story. The flag is a judgement
+    by the reading build and is never written to disk.
+  - `Transcript.open` refuses to append to a log it cannot read, rather than interleave
+    two builds' records into a file neither can read.
+- **A session id became a filename with nothing checking it.** `--resume <id>` and
+  `ronin export <id>` take an id from argv and the SDK takes one from its caller, so
+  `session_path(dir, "../../x")` named — and on the writing side created — a file outside
+  `.ronin/sessions`. `valid_session_id` now confines an id to a bare filename component
+  at the one place the layer turns a caller's string into a path, which is the rule
+  `ToolContext.resolve` and the deny list's `OUTSIDE_WORKSPACE` already apply everywhere
+  else.
+- **Re-opening a session whose header was damaged appended a second header mid-file.**
+  "Fresh" was decided by whether a header could be *read*, so a log with a bad first
+  line got a new header written below its events — a header record in the middle, which
+  is the one thing `read_events` refuses to load. One bad line became an unloadable
+  session. A header is now written only when there is no file yet.
+- **The import-boundary gate could not see a cross-layer import in a package's
+  `__init__.py`.** Relative imports were resolved against the *parent* of the dotted
+  name, but `modules_under` reports an `__init__.py` under its own package's name — so
+  `from ..providers import x` in `ronin/tools/__init__.py` resolved to `.providers`,
+  failed the `ronin.`-prefix filter, and reached no prohibition at all. A gate with a
+  blind spot in the file whose job is re-exporting is worse than no gate, because it
+  reports success. No `__init__.py` had such an import, so nothing was being hidden.
 - **`<<<` was parsed as a heredoc, so the next line of a command was invisible to every
   check in `safety`.** The lexer reads a run of `<` greedily, so `<<<` arrived at the
   heredoc test already ending in `<<` and was taken for one — which made the *following
