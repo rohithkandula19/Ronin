@@ -66,11 +66,11 @@ from __future__ import annotations
 import json
 import os
 import time
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from secrets import token_hex
-from typing import Any, Final, TextIO
+from typing import Any, Final, Protocol, TextIO
 
 from ..core.types import Event, ToolEnd, TurnEnd
 from .codec import (
@@ -115,6 +115,24 @@ class TranscriptVersionError(TranscriptError, SchemaVersionMismatch):
 #: Characters allowed in a session id. Deliberately narrow: an id is interpolated
 #: straight into a filename, so anything that can mean "somewhere else" is out.
 _ID_ALLOWED: Final = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+
+
+class Indexer(Protocol):
+    """What a :class:`Transcript` needs from the optional sqlite index.
+
+    A structural protocol, declared *here* rather than importing
+    :class:`ronin.persistence.index.SessionIndex`, for two reasons. It would be a
+    circular import — ``index`` is built on this module's ``SessionMeta``,
+    ``read_events`` and ``list_sessions``. And it states the dependency honestly: the
+    writer needs something that will accept a rollup and a turn's events and *promise
+    not to raise*, which is a much smaller thing than a database.
+
+    ``record_turn`` returns whether the write landed, and takes the turn's raw events
+    so that the folding — which text counts as searchable, and what a ``StreamReset``
+    does to it — stays the index's business and not the log writer's.
+    """
+
+    def record_turn(self, meta: SessionMeta, events: Sequence[Event] = ()) -> bool: ...
 
 
 def valid_session_id(session_id: str) -> bool:
@@ -324,7 +342,17 @@ class Transcript:
     clean exit never relies on the last turn having ended.
     """
 
-    __slots__ = ("_clock", "_closed", "_handle", "_meta", "_path", "_repairs", "_seen_files")
+    __slots__ = (
+        "_clock",
+        "_closed",
+        "_handle",
+        "_index",
+        "_meta",
+        "_path",
+        "_repairs",
+        "_seen_files",
+        "_turn_events",
+    )
 
     def __init__(
         self,
@@ -333,6 +361,7 @@ class Transcript:
         meta: SessionMeta,
         clock: Callable[[], float],
         repairs: tuple[str, ...] = (),
+        index: Indexer | None = None,
     ) -> None:
         self._path = path
         self._handle = handle
@@ -341,6 +370,16 @@ class Transcript:
         self._repairs = repairs
         self._seen_files = dict.fromkeys(meta.files_touched)
         self._closed = False
+        # The optional sqlite index. Injected and defaulting to None so this module
+        # keeps working — and keeps being testable — with no database at all: the
+        # index is a cache, and a cache the writer cannot run without is not one.
+        self._index = index
+        # The *current turn's* events, cleared at every boundary. Only the current
+        # turn, not the session: a long session streams hundreds of thousands of
+        # deltas, and holding them all so the index could re-read text it already has
+        # would be a leak with a docstring. One turn is what the index needs to write
+        # one turn's rows.
+        self._turn_events: list[Event] = []
 
     # ---------------------------------------------------------------- opening
 
@@ -354,6 +393,7 @@ class Transcript:
         cwd: str = ".",
         title: str = "",
         clock: Callable[[], float] = time.time,
+        index: Indexer | None = None,
     ) -> Transcript:
         """Open (or re-open) a session for appending.
 
@@ -402,7 +442,7 @@ class Transcript:
             meta = replace(meta, stale=False)
 
         handle = path.open("a", encoding="utf-8", newline="\n")
-        transcript = cls(path, handle, meta, clock, repairs)
+        transcript = cls(path, handle, meta, clock, repairs, index)
         if fresh:
             # The header goes down before any event so identity survives a crash in
             # the first turn; the sidecar goes down with it so the picker never has
@@ -439,6 +479,8 @@ class Transcript:
         line = _dumps(encode_event(event), f"a {type(event).__name__} event")
         self._handle.write(line + "\n")
         self._note(event)
+        if self._index is not None:
+            self._turn_events.append(event)
         if isinstance(event, TurnEnd):
             self._sync()
 
@@ -479,15 +521,31 @@ class Transcript:
         self._meta = meta
 
     def _sync(self) -> None:
-        """Flush, fsync, then rewrite the sidecar atomically. Order matters.
+        """Flush, fsync, then rewrite the sidecar and the index. Order matters.
 
-        The sidecar is a cache of the log: writing it *after* the log's fsync means
-        a crash can leave it one turn behind, never one turn ahead of a turn that
-        does not exist on disk.
+        Both are caches of the log, so both are written *after* the log's fsync: a
+        crash can then leave them one turn behind, never one turn ahead of a turn that
+        does not exist on disk. The index goes last of the three because it is the
+        most derived and the only one that can be regenerated from the other two.
+
+        Called from three places, which is worth stating because only one of them is a
+        turn: :meth:`open` on a fresh session (so a session appears in the picker from
+        its first moment rather than only after its first turn ends), every
+        :class:`~ronin.core.types.TurnEnd`, and :meth:`close`. The first and last
+        usually carry no events and so update metadata only — but ``close`` *does*
+        carry them when a session ended mid-turn, which is exactly when the abandoned
+        turn's prompt is worth being able to search for.
+
+        ``record_turn`` is contracted not to raise (see :class:`Indexer`), so there is
+        no ``try`` here — swallowing exceptions at this seam would hide a failure the
+        index is supposed to be reporting through its own ``problems`` list.
         """
         self._handle.flush()
         os.fsync(self._handle.fileno())
         _write_meta(self._path.parent, self._meta)
+        if self._index is not None:
+            self._index.record_turn(self._meta, tuple(self._turn_events))
+            self._turn_events.clear()
 
     def close(self) -> None:
         """Flush, fsync, write the sidecar, close. Idempotent."""

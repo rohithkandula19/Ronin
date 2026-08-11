@@ -44,6 +44,7 @@ from ..core.types import (
     TurnState,
 )
 from .export import to_html, to_markdown
+from .index import SessionIndex
 from .resume import replay, resume_latest, sessions_for_cwd
 from .transcript import (
     SessionMeta,
@@ -294,8 +295,43 @@ async def main() -> int:
                 f"{len(continued.state.messages)} messages restored"
             )
 
+        # ----------------------------------------------------- 5b. the index
+        rule("6. the sqlite index: search, cost order, and a rebuild that repairs it")
+        index = SessionIndex.open(directory)
+        print(f"  {index.path.name}, fts5 available: {index.searchable}")
+        report = index.rebuild(directory)
+        print(f"  rebuild from the transcripts on disk: {report.summary()}")
+        for note in report.skipped:
+            print(f"    skipped {note}")
+
+        print("\n  full-text search over what was asked and answered:")
+        for query in ("404", "handler", "does not appear anywhere"):
+            hits = index.search(query)
+            if not hits:
+                print(f"    {query!r} → no match")
+                continue
+            for hit in hits:
+                print(
+                    f"    {query!r} → {hit.session_id} turn {hit.turn} ({hit.role}): {hit.snippet}"
+                )
+
+        print("\n  a query nobody could type safely into fts5 by hand:")
+        for hostile in ("don't", 'a "b', "NOT 404", "*"):
+            print(f"    {hostile!r:12} → {len(index.search(hostile))} hit(s), no exception")
+
+        print("\n  ordered by cost — the ORDER BY the filesystem cannot answer:")
+        for row in index.costliest(limit=3):
+            print(f"    ${row.cost_usd:.4f}  {row.session_id}  {row.turns} turn(s)")
+
+        print("\n  and the property that makes it safe to have: it is a cache.")
+        index.path.write_bytes(b"a killed process left garbage here")
+        healed = SessionIndex.open(directory)
+        print(f"    after corrupting the file, opening it reports: {healed.problems[0][:96]}...")
+        print(f"    rebuild → {healed.rebuild(directory).summary()}")
+        print(f"    search still works: {len(healed.search('404'))} hit(s)")
+
         # ---------------------------------------------------------- 6. export
-        rule("6. export: Markdown, and one self-contained HTML file")
+        rule("7. export: Markdown, and one self-contained HTML file")
         markdown = to_markdown(read.events, header)
         html = to_html(read.events, header)
         md_path = root / "session.md"

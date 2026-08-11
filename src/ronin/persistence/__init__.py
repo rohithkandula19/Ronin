@@ -1,8 +1,8 @@
 """Persistence and replay: the session that survives the process.
 
-Four modules, one direction of dependency (``codec → transcript → resume →
-export``), and nothing imported from outside ``ronin.core`` — this layer never
-learns which provider produced the events it is writing down.
+Five modules, one direction of dependency (``codec → transcript → resume → export →
+index``), and nothing imported from outside ``ronin.core`` — this layer never learns
+which provider produced the events it is writing down.
 
 * :mod:`~ronin.persistence.codec` — every core value ⇄ a versioned, discriminated
   JSON record. Refuses another schema version by name instead of decoding half of
@@ -17,6 +17,11 @@ learns which provider produced the events it is writing down.
 * :mod:`~ronin.persistence.export` — pure ``(events, metadata) -> str`` exporters:
   Markdown, and one self-contained HTML file with the tool calls collapsed and
   everything escaped.
+* :mod:`~ronin.persistence.index` — the sqlite (WAL) index over the transcripts:
+  session metadata for ``ORDER BY cost``, and fts5 over recorded prompts and answers.
+  Strictly *derived* — deleting the file costs a rebuild and loses nothing, which is
+  what keeps the jsonl the single source of truth. Its writes never raise, because it
+  runs at a turn boundary and a cache must not be able to end a session.
 
 The whole layer, run end to end: ``python -m ronin.persistence.demo``.
 """
@@ -42,6 +47,17 @@ from .codec import (
     missing_event_codecs,
 )
 from .export import to_html, to_markdown
+from .index import (
+    INDEX_FILENAME,
+    INDEX_SCHEMA_VERSION,
+    RebuildReport,
+    SearchHit,
+    SessionIndex,
+    SessionIndexError,
+    fts_query,
+    index_path,
+    searchable_turns,
+)
 from .resume import (
     INTERRUPTED_NO_RESULT,
     ReplayError,
@@ -60,6 +76,7 @@ from .resume import (
 from .transcript import (
     HEADER_TAG,
     SESSIONS_SUBDIR,
+    Indexer,
     ReadResult,
     SessionMeta,
     Transcript,
@@ -77,19 +94,26 @@ from .transcript import (
 __all__ = [
     "EVENT_TAGS",
     "HEADER_TAG",
+    "INDEX_FILENAME",
+    "INDEX_SCHEMA_VERSION",
     "INTERRUPTED_NO_RESULT",
     "SCHEMA_VERSION",
     "SESSIONS_SUBDIR",
     "TYPE_KEY",
     "VERSION_KEY",
     "CodecError",
+    "Indexer",
     "MalformedRecord",
     "ReadResult",
+    "RebuildReport",
     "ReplayError",
     "ReplayResult",
     "ReplayTurn",
     "ResumedSession",
     "SchemaVersionMismatch",
+    "SearchHit",
+    "SessionIndex",
+    "SessionIndexError",
     "SessionMeta",
     "StateSource",
     "Transcript",
@@ -104,6 +128,8 @@ __all__ = [
     "encode_event",
     "encode_state",
     "fold_turns",
+    "fts_query",
+    "index_path",
     "list_sessions",
     "load_session",
     "meta_path",
@@ -114,6 +140,7 @@ __all__ = [
     "resume_latest",
     "resume_session",
     "same_cwd",
+    "searchable_turns",
     "session_path",
     "sessions_dir",
     "sessions_for_cwd",

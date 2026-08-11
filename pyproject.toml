@@ -217,6 +217,7 @@ module = [
     "test_persistence_edges",
     "test_persistence_end_to_end",
     "test_persistence_export",
+    "test_persistence_index",
     "test_persistence_resume",
     "test_persistence_transcript",
     "test_persistence_versions",

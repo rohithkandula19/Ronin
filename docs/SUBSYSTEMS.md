@@ -120,6 +120,15 @@ tool call the crash left unanswered — because a transcript with an unpaired to
 is one the provider rejects with a 400. Export is pure `(events, metadata) -> str`:
 Markdown, and one self-contained HTML file with tool calls collapsed.
 
+Beside the logs sits a WAL sqlite index — a row per session for the `ORDER BY cost` the
+filesystem cannot do, and fts5 over recorded prompts and answers for `ronin sessions
+--search`. It is strictly **derived**: deleting it costs a rebuild and loses nothing,
+which is what keeps the jsonl the single source of truth. So its writes never raise (it
+runs at a turn boundary, after the fsync, and a cache must not be able to end a session)
+while its reads do — an empty result from a broken index reads exactly like "you never
+had that session". A typed query is rebuilt into an fts5 expression rather than
+forwarded, because `MATCH` treats `don't` as a syntax error and "not" as an operator.
+
 ### `ui/` — one event stream, three consumers
 
 Textual, committed to (it brings Rich transitively, so it is one dependency tree,

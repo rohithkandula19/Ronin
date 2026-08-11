@@ -74,6 +74,7 @@ from ..mcp.client import TransportProvider, connect_all, default_transport_provi
 from ..mcp.config import McpServerConfig, load_mcp_config
 from ..mcp.jsonrpc import McpError
 from ..mcp.tools import extend_registry
+from ..persistence.index import SessionIndex
 from ..persistence.transcript import Transcript, new_session_id
 from ..providers.router import Role as ModelRole
 from ..providers.router import Router
@@ -647,11 +648,17 @@ async def build_runtime(
 
     transcript: Transcript | None = None
     if record:
+        # The index is opened here and handed to the transcript rather than built
+        # inside it, so the one place that decides a session is recorded is also the
+        # one place that decides it is indexed. `SessionIndex.open` does not raise —
+        # a database it cannot prepare degrades to one that records the problem — so
+        # this cannot be the reason a session fails to start.
         transcript = Transcript.open(
             paths.sessions_dir,
             sid,
             model=router.spec_for(ModelRole.MAIN).model,
             cwd=str(paths.cwd),
+            index=SessionIndex.open(paths.sessions_dir),
         )
 
     return Runtime(

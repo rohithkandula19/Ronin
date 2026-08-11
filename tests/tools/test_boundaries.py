@@ -321,7 +321,14 @@ def test_persistence_depends_on_core_only() -> None:
 #: The documented order of ``persistence``: each module may import the ones before it
 #: and nothing after. ``__init__`` re-exports the whole package and ``demo`` drives it,
 #: so both stand outside the line.
-PERSISTENCE_ORDER: tuple[str, ...] = ("codec", "transcript", "resume", "export")
+#:
+#: ``index`` is last because it is the most derived thing in the package: it reads
+#: ``transcript`` (for ``SessionMeta``, ``read_events`` and ``list_sessions``) and
+#: ``resume`` (for the fold that decides which text is searchable), and nothing reads
+#: it. That direction is what keeps the cache out of a cycle with the log it caches —
+#: the tempting edge is ``transcript`` importing ``SessionIndex`` to update it, which
+#: is why the writer depends on a ``Protocol`` it declares itself instead.
+PERSISTENCE_ORDER: tuple[str, ...] = ("codec", "transcript", "resume", "export", "index")
 
 
 def test_the_persistence_modules_form_a_line() -> None:

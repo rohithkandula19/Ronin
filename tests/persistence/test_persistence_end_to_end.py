@@ -130,3 +130,10 @@ async def test_the_demo_runs_offline_and_proves_what_it_claims(
     assert "synthesized an interrupted, no-result block" in output
     assert "pairing_errors: empty" in output
     assert "external references in the HTML: none" in output
+    # The index scene makes three claims that are only worth printing if they are true:
+    # search finds a session by its recorded prompt, a query nobody could safely type
+    # into fts5 raises nothing, and corrupting the database is recoverable.
+    assert "fts5 available: True" in output
+    assert "no exception" in output
+    assert "search still works: 1 hit(s)" in output
+    assert "no match" in output, "the scene should show a miss as well as hits"

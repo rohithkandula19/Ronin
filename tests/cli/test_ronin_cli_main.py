@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import pytest
@@ -23,6 +23,7 @@ from ronin.cli.main import (
     Command,
     ExportFormat,
     Options,
+    SessionsOptions,
     Streams,
     Usage,
     dispatch,
@@ -45,6 +46,7 @@ from ronin.core.types import (
     TurnStart,
     TurnState,
 )
+from ronin.persistence.index import SessionIndex
 from ronin.persistence.transcript import Transcript
 from ronin.ui.headless import OutputFormat
 
@@ -589,6 +591,161 @@ async def test_sessions_lists_what_is_on_disk(tmp_path: Path) -> None:
 
     assert code == 0
     assert "20240101-000000-aaaaaa" in capture.stdout
+
+
+async def test_sessions_lists_without_needing_the_index_at_all(tmp_path: Path) -> None:
+    """The command people run most often does not depend on the cache.
+
+    ``record_a_session`` attaches no index, so this is the cold case: no
+    ``index.sqlite3`` exists, and the plain listing still works because it reads the
+    sidecars. That is what makes the index safe to have — a broken or absent database
+    costs a user nothing on the path they use daily.
+    """
+    record_a_session(tmp_path, "20240101-000000-aaaaaa")
+    capture = Captured()
+
+    code = await dispatch(
+        options(["sessions", "--cwd", str(tmp_path)]), streams=capture.streams(), environ={}
+    )
+
+    assert code == 0
+    assert "20240101-000000-aaaaaa" in capture.stdout
+    assert not (tmp_path / ".ronin" / "sessions" / "index.sqlite3").exists()
+
+
+async def test_reindex_then_search_finds_a_session_by_its_prompt(tmp_path: Path) -> None:
+    """The end-to-end path a user actually walks: sessions already on disk, no index
+    yet, one ``--reindex``, then find the session by what they remember asking."""
+    record_a_session(tmp_path, "20240101-000000-aaaaaa")
+
+    build = Captured()
+    assert (
+        await dispatch(
+            options(["sessions", "--reindex", "--cwd", str(tmp_path)]),
+            streams=build.streams(),
+            environ={},
+        )
+        == 0
+    )
+    assert "1 session(s) indexed" in build.stdout
+
+    found = Captured()
+    code = await dispatch(
+        options(["sessions", "--search", "widget", "--cwd", str(tmp_path)]),
+        streams=found.streams(),
+        environ={},
+    )
+    assert code == 0
+    assert "20240101-000000-aaaaaa" in found.stdout
+    assert "widget" in found.stdout, "the snippet should show why it matched"
+
+
+async def test_a_search_with_no_index_says_what_to_run(tmp_path: Path) -> None:
+    """ "No match" and "nothing is indexed" are different facts, and conflating them
+    sends someone looking for work they still have."""
+    record_a_session(tmp_path, "20240101-000000-aaaaaa")
+    capture = Captured()
+
+    code = await dispatch(
+        options(["sessions", "--search", "widget", "--cwd", str(tmp_path)]),
+        streams=capture.streams(),
+        environ={},
+    )
+
+    assert code == 0
+    assert "--reindex" in capture.stdout
+
+
+async def test_bare_words_after_sessions_are_a_search(tmp_path: Path) -> None:
+    """``ronin sessions widget`` does the obvious thing, so nobody has to know the
+    flag exists."""
+    record_a_session(tmp_path, "20240101-000000-aaaaaa")
+    await dispatch(
+        options(["sessions", "--reindex", "--cwd", str(tmp_path)]),
+        streams=Captured().streams(),
+        environ={},
+    )
+    capture = Captured()
+
+    code = await dispatch(
+        options(["sessions", "widget", "--cwd", str(tmp_path)]),
+        streams=capture.streams(),
+        environ={},
+    )
+
+    assert code == 0
+    assert "20240101-000000-aaaaaa" in capture.stdout
+
+
+async def test_an_apostrophe_in_a_search_does_not_crash_the_command(tmp_path: Path) -> None:
+    """The one that would have shipped broken: a raw query reaches fts5 as an
+    expression, and ``don't`` raises ``unterminated string`` inside sqlite."""
+    record_a_session(tmp_path, "20240101-000000-aaaaaa")
+    await dispatch(
+        options(["sessions", "--reindex", "--cwd", str(tmp_path)]),
+        streams=Captured().streams(),
+        environ={},
+    )
+    capture = Captured()
+
+    code = await dispatch(
+        options(["sessions", "--search", "don't panic", "--cwd", str(tmp_path)]),
+        streams=capture.streams(),
+        environ={},
+    )
+
+    assert code == 0
+    assert "no match" in capture.stdout
+
+
+async def test_sessions_by_cost_orders_by_the_number_the_filesystem_cannot_sort(
+    tmp_path: Path,
+) -> None:
+    """``--by-cost`` is the reason the index exists at all."""
+    record_a_session(tmp_path, "20240101-000000-cheap0")
+    record_a_session(tmp_path, "20240101-000000-pricey")
+    directory = tmp_path / ".ronin" / "sessions"
+    index = SessionIndex.open(directory)
+    index.rebuild(directory)
+    index.record(
+        replace(
+            index.recent(cwd=str(tmp_path))[0], session_id="20240101-000000-pricey", cost_usd=9.5
+        )
+    )
+    capture = Captured()
+
+    code = await dispatch(
+        options(["sessions", "--by-cost", "--cwd", str(tmp_path)]),
+        streams=capture.streams(),
+        environ={},
+    )
+
+    assert code == 0
+    rows = [line for line in capture.stdout.splitlines() if line.strip()]
+    assert rows[0].startswith("20240101-000000-pricey"), "the expensive session comes first"
+
+
+def test_the_sessions_flags_parse_into_data(tmp_path: Path) -> None:
+    """Parsing stays pure: the flags become a value, and nothing has touched a disk."""
+    parsed = parse(["sessions", "--search", "a b", "--by-cost", "--reindex"])
+    assert isinstance(parsed, Options)
+    assert parsed.sessions is not None
+    assert parsed.sessions.search == "a b"
+    assert parsed.sessions.by_cost is True
+    assert parsed.sessions.reindex is True
+
+    bare = parse(["sessions"])
+    assert isinstance(bare, Options)
+    assert bare.sessions == SessionsOptions()
+
+
+def test_an_explicit_search_flag_beats_bare_words_rather_than_joining_them() -> None:
+    """Concatenating the two would search for a phrase the user never typed, and the
+    empty result would read as a broken index."""
+    parsed = parse(["sessions", "--search", "chosen", "ignored", "words"])
+    assert isinstance(parsed, Options)
+    assert parsed.sessions is not None
+    assert parsed.sessions.search == "chosen"
 
 
 async def test_doctor_reports_the_workspace_without_starting_a_session(
