@@ -72,6 +72,7 @@ from ..ui.headless import (
     run_headless,
 )
 from ..ui.reduce import ViewState, reduce_event, summarize_arguments, summarize_result
+from ..ui.render import strip_controls
 from .bench import BenchOptions, default_suite, run_duel_command, run_eval
 from .doctor import run_doctor
 from .sdk import Agent, load_router
@@ -1050,19 +1051,28 @@ async def _one_turn(options: Options, agent: Agent, streams: Streams, request: s
 
 
 def _print_event(event: Event, streams: Streams) -> None:
-    """One event as terminal output. Prose streams; everything else is one line."""
+    """One event as terminal output. Prose streams; everything else is one line.
+
+    Every string here is model- or tool-derived, so each goes through
+    ``strip_controls`` — this path writes to a terminal without a ``Styles`` map, so it
+    does not inherit the stripping that :meth:`ronin.ui.render.Styles.text` gives every
+    renderer. The approval line matters most: a user is being asked to read a command
+    and say yes, and output able to move the cursor could paint over the thing they are
+    agreeing to.
+    """
     if isinstance(event, TextDelta):
         if not event.thinking:
-            streams.out(event.text)
+            streams.out(strip_controls(event.text))
             streams.flush()
     elif isinstance(event, ToolStart):
-        streams.out(f"\n  · {event.name}({summarize_arguments(event.arguments)})\n")
+        arguments = strip_controls(summarize_arguments(event.arguments))
+        streams.out(f"\n  · {event.name}({arguments})\n")
     elif isinstance(event, ToolEnd):
-        streams.out(f"  → {summarize_result(event.result)}\n")
+        streams.out(f"  → {strip_controls(summarize_result(event.result))}\n")
     elif isinstance(event, ApprovalRequest):
-        streams.out(f"\n  ? approval: {event.rendered}\n")
+        streams.out(f"\n  ? approval: {strip_controls(event.rendered)}\n")
     elif isinstance(event, Error):
-        streams.err(f"\nerror [{event.kind}]: {event.message}\n")
+        streams.err(f"\nerror [{event.kind}]: {strip_controls(event.message)}\n")
 
 
 async def _slash(line: str, agent: Agent, streams: Streams) -> bool | None:

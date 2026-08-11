@@ -73,6 +73,7 @@ from .render import (
     render_todos,
     render_tool_lines,
     render_transcript,
+    strip_controls,
 )
 
 __all__ = [
@@ -126,6 +127,7 @@ __all__ = [
     "render_transcript",
     "run_app",
     "run_headless",
+    "strip_controls",
     "substitute",
     "suggest",
     "textual_available",

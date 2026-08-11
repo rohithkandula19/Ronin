@@ -282,6 +282,8 @@ module = [
     "test_types",
     "test_ui_app",
     "test_ui_commands",
+    "test_ui_controls",
+    "test_ui_demo",
     "test_ui_headless",
     "test_ui_integration",
     "test_ui_keys",

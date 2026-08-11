@@ -80,6 +80,37 @@ All notable changes to this project will be documented here. Format follows [Kee
   than absolute, since the opt-in path now exists.
 
 ### Fixed
+- **Model prose and tool output reached the terminal with control sequences intact.** A
+  terminal is an interpreter, and those two strings are the most outsider-influenced text
+  in the program — a file read out of a repository nobody audited, a compiler's stderr, a
+  fetched page. Left alone, `\x1b]0;…\x07` renames the user's window, `\x1b]52;c;…\x07`
+  writes their clipboard in terminals that allow it, and `\x1b[2K\x1b[A` or a bare `\r`
+  overwrites what is already on screen. The last is why this is a safety fix rather than a
+  cosmetic one: an `ApprovalRequest.rendered` built that way displays `ls -la` while the
+  command awaiting approval is `rm -rf /`, so what the user reads and what they approve
+  stop being the same thing.
+  - `ui.render.strip_controls` removes every C0/C1 control character except tab and
+    newline, and `Styles.text` — the seam every renderer already routes model-derived text
+    through — now applies it for *every* dialect. It previously escaped only Textual's `[`,
+    and `PLAIN`/`ANSI` set `escape=None` on the reasoning that an out-of-band dialect has
+    nothing in its payload that could be mistaken for a control sequence. True of the
+    markup, false of the sink.
+  - The escape *character* is removed and the payload stays, so `\x1b]0;PWNED\x07` shows as
+    `]0;PWNED`: inert, and the attempt still visible. Deleting the sequence would hide the
+    evidence, for the same reason `wrap_untrusted` quotes an injection rather than removing
+    it.
+  - Also applied on the three paths that reach a terminal without a `Styles` map: the
+    `--output-format text` answer, `headless`'s stderr notices (`DENIAL_NOTICE` carries
+    `rendered`), and `cli.main._print_event`, which is the interactive line session. The
+    JSON formats needed no change — encoding already turns an escape into an inert
+    six-character JSON escape — and a test pins that so a later "strip everywhere"
+    cannot corrupt the
+    machine-readable stream.
+  - The cost is a compiler's colour codes in tool output, which is already truncated to a
+    summary line. Stripping everything is deliberate: "no control characters in text we did
+    not write" is one sentence and is tested exhaustively over both ranges, where "no
+    *harmful* control characters" is a list to maintain against every terminal feature
+    anyone adds.
 - **A session from another schema version was reported as corruption, and hidden.** The
   codec has a precise error for it — it names both versions and says to export the old
   session with the Ronin that wrote it — and `read_events` caught it alongside every

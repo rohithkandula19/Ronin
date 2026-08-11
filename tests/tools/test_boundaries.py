@@ -12,6 +12,8 @@ would hide: a lazy import to "avoid the cycle" is how a boundary quietly dissolv
 from __future__ import annotations
 
 import ast
+import importlib.util
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -397,3 +399,104 @@ def test_the_resolver_still_reads_a_plain_module_relative_to_its_parent(tmp_path
         "ronin.core.types",
         "ronin.tools.base",
     }
+
+
+def test_ui_depends_on_core_only() -> None:
+    """Stricter than the table, because ``ui/__init__`` is stricter: "depends on
+    ``ronin.core`` and nothing else — not providers, not tools, not the session".
+
+    ``LEAF_FORBIDDEN`` would allow it ``ronin.context`` or ``ronin.safety``, and the
+    first import of either is the end of the property that makes this layer worth its
+    shape: every surface consumes an ``AsyncIterator[Event]`` somebody else produced,
+    which is why the TUI is testable with no model and no network.
+    """
+    offenders: list[str] = []
+    for dotted, path in modules_under("ui"):
+        for imported in imported_modules(path, dotted):
+            if imported.startswith("ronin.core") or imported.startswith("ronin.ui"):
+                continue
+            offenders.append(f"{dotted} imports {imported}")
+    assert offenders == [], offenders
+
+
+#: The four modules ``ui/__init__`` promises "work on a bare install" — no Textual, and
+#: on the strength of that promise, nothing third-party at all.
+PURE_UI_MODULES: tuple[str, ...] = ("reduce", "render", "commands", "headless")
+
+
+def test_the_pure_ui_modules_import_nothing_third_party() -> None:
+    """ "Zero third-party imports" is what lets the same renderers serve the Textual
+    app, the headless runner and an HTML export — and what lets `ronin -p` work when
+    the ``tui`` extra was never installed. A single convenience import of ``rich`` here
+    would make the bare install fail at startup with an ImportError, which is the worst
+    possible first impression of a tool someone just installed.
+
+    Checked against ``sys.stdlib_module_names`` rather than a list kept here. The list
+    came first and was wrong on its second reading — it omitted ``pathlib`` — which is
+    the whole argument: an enumerated allowlist of the standard library is a thing that
+    fails closed on a legitimate import and has to be edited to make a correct change
+    pass."""
+    offenders: list[str] = []
+    for name in PURE_UI_MODULES:
+        path = SRC / "ui" / f"{name}.py"
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            roots: list[str] = []
+            if isinstance(node, ast.Import):
+                roots = [alias.name.split(".")[0] for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
+                roots = [node.module.split(".")[0]]
+            for root in roots:
+                if root == "ronin" or root in sys.stdlib_module_names:
+                    continue
+                offenders.append(f"ui.{name} imports {root}")
+    assert offenders == [], offenders
+
+
+def test_importing_the_ui_package_does_not_import_textual() -> None:
+    """The bare-install promise, checked the only way that means anything.
+
+    ``ui/__init__`` imports ``.app`` eagerly, so if ``app.py`` ever grew a module-level
+    ``import textual`` the whole package would fail to import without the extra — and
+    **CI would not notice**, because the ``tui`` extra *is* installed here. That is the
+    shape of a test that cannot fail when it should, so the check has to be about what
+    reached ``sys.modules`` rather than about whether the import worked.
+
+    Run in a subprocess: this interpreter has already imported Textual for
+    ``tests/ui/test_ui_textual.py``, and once a module is in ``sys.modules`` no
+    in-process check can tell whether importing ``ronin.ui`` was what put it there.
+    """
+    import subprocess
+
+    probe = (
+        "import sys\n"
+        "import ronin.ui, ronin.ui.reduce, ronin.ui.render, ronin.ui.commands,"
+        " ronin.ui.headless\n"
+        "leaked = sorted(m for m in sys.modules if m.split('.')[0] == 'textual')\n"
+        "print(':'.join(leaked))\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, check=True
+    )
+    assert result.stdout.strip() == "", f"importing ronin.ui pulled in {result.stdout.strip()}"
+
+
+def test_the_textual_probe_would_notice_an_eager_import() -> None:
+    """The control for the test above, which would otherwise pass on a typo.
+
+    Importing ``ronin.ui.app`` and then Textual explicitly must show up, or the probe
+    is measuring nothing. Skipped when the extra is absent, since there would be
+    nothing to detect.
+    """
+    import subprocess
+
+    if importlib.util.find_spec("textual") is None:
+        pytest.skip("the 'tui' extra is not installed, so there is nothing to detect")
+    probe = (
+        "import sys\nimport ronin.ui.app\nimport textual\n"
+        "print(':'.join(sorted(m for m in sys.modules if m.split('.')[0] == 'textual'))[:20])\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, check=True
+    )
+    assert result.stdout.strip() != "", "the probe cannot see Textual even when it is imported"

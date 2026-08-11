@@ -8,12 +8,13 @@ possible:
   asks an injected :class:`Styles` map to wrap a semantic token. ``PLAIN`` (the
   default) is the identity, so every test asserts on text rather than on escape
   codes, and a new front end supplies its own map instead of a new renderer.
-- **Untrusted text is escaped at the same seam.** A front end whose markup is
-  in-band (Textual's ``Static`` parses ``[red]…[/red]``) would otherwise let a
-  diff line containing ``[dim]`` disappear from the screen. :class:`Styles` carries
-  the escape for its own markup dialect, and every renderer routes model-derived
-  text through it, so the escaping cannot be forgotten in one renderer and applied
-  in the others.
+- **Untrusted text is neutralized at the same seam.** :meth:`Styles.text` is the one
+  place model-derived text passes through, so the two hazards are handled once rather
+  than per renderer. Terminal control characters are stripped for every dialect — a
+  terminal is an interpreter, and tool output is the most outsider-influenced text in
+  the program. Markup metacharacters are escaped only where the markup is in-band:
+  Textual's ``Static`` parses ``[red]…[/red]``, so a diff line containing ``[dim]``
+  would otherwise disappear from the screen.
 - **Nothing is discovered at render time.** No ``git`` subprocess for the branch,
   no ``os.getcwd()``, no clock. Every fact arrives as an argument, because a
   renderer that shells out cannot be called from a test or from a hot redraw.
@@ -28,6 +29,7 @@ from __future__ import annotations
 import difflib
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from typing import Final
 
 from ronin.core.types import ApprovalRequest, Todo, TodoStatus
 
@@ -60,6 +62,43 @@ TOKENS: frozenset[str] = frozenset(
 )
 
 
+#: Every C0 control character except tab and newline, plus DEL and the C1 block.
+#: Tab and newline are layout; everything else in these ranges is an instruction to
+#: the terminal rather than something to show a person.
+_CONTROLS: Final = frozenset(
+    chr(code) for code in (*range(0x00, 0x20), 0x7F, *range(0x80, 0xA0))
+) - {"\n", "\t"}
+_CONTROL_TABLE: Final = str.maketrans(dict.fromkeys(_CONTROLS))
+
+
+def strip_controls(text: str) -> str:
+    """Remove terminal control characters from text we did not write.
+
+    A terminal is an interpreter, and model prose and tool output are the two things
+    in this program that an outsider can influence — a file read out of a repository
+    nobody audited, a compiler's stderr, a fetched page. Left intact, ``\\x1b]0;…\\x07``
+    renames the user's window, ``\\x1b]52;c;…\\x07`` writes their clipboard in terminals
+    that allow it, and ``\\x1b[2J`` or a bare ``\\r`` erases or overwrites what is
+    already on screen. The last of those is the one that matters here: this program
+    asks people to approve commands by reading them, and output that can paint over
+    the prompt undermines the only check the user has.
+
+    The escape *character* goes and the rest of the payload stays, so
+    ``hello \\x1b]0;PWNED\\x07 world`` renders as ``hello ]0;PWNED world``: inert, and
+    the attempt is still visible. Deleting the whole sequence would hide the evidence,
+    which is the same reason :func:`ronin.safety.injection.wrap_untrusted` quotes an
+    injection attempt rather than removing it.
+
+    Everything, not a list of the dangerous ones. "No control characters in text we
+    did not write" is a rule that can be stated in a sentence and tested exhaustively;
+    "no *harmful* control characters" is a list that has to be maintained against
+    every terminal feature anyone adds, and a missed entry is a silent hole. The cost
+    is a compiler's colour codes in tool output, which is already truncated to a
+    summary line.
+    """
+    return text.translate(_CONTROL_TABLE)
+
+
 def escape_markup(text: str) -> str:
     """Neutralize console-markup metacharacters in text we did not write.
 
@@ -76,9 +115,15 @@ def escape_markup(text: str) -> str:
 class Styles:
     """A token → ``(prefix, suffix)`` map, plus the escape for its own dialect.
 
-    Absent tokens render unwrapped. ``escape`` is ``None`` for out-of-band dialects
-    (plain text, ANSI), where nothing in the payload can be mistaken for a control
-    sequence, and set for in-band ones (console markup).
+    Absent tokens render unwrapped. ``escape`` is the *markup* escape and is ``None``
+    for dialects that have no markup to escape (plain text, ANSI) and set for in-band
+    ones (console markup).
+
+    Control-character stripping is separate and unconditional — see :meth:`text`. It
+    used to be folded into this same ``escape`` slot, on the reasoning that an
+    out-of-band dialect has nothing in its payload that could be mistaken for a
+    control sequence. That is true of the *markup*, and false of the sink: a terminal
+    reads ``\\x1b`` as an instruction whichever dialect wrapped the text around it.
     """
 
     pairs: Mapping[str, tuple[str, str]] = field(default_factory=dict)
@@ -90,8 +135,18 @@ class Styles:
             raise ValueError(f"unknown style tokens {unknown}; known tokens are {sorted(TOKENS)}")
 
     def text(self, raw: str) -> str:
-        """Make model-derived text safe to embed. Every renderer calls this."""
-        return raw if self.escape is None else self.escape(raw)
+        """Make model-derived text safe to embed. Every renderer calls this.
+
+        Two independent hazards, in order. Control characters are stripped for every
+        dialect, because the danger is the terminal on the other end rather than the
+        markup on this one. Markup metacharacters are then escaped only for dialects
+        that have them.
+
+        Our own colour codes are added by :meth:`wrap` *around* the result of this
+        call, so stripping here never touches them.
+        """
+        stripped = strip_controls(raw)
+        return stripped if self.escape is None else self.escape(stripped)
 
     def wrap(self, token: str, text: str) -> str:
         if token not in TOKENS:
@@ -548,5 +603,6 @@ __all__ = [
     "render_tool_line",
     "render_tool_lines",
     "render_transcript",
+    "strip_controls",
     "truncate_lines",
 ]

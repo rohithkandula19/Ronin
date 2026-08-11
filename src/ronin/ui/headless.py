@@ -95,6 +95,7 @@ from ronin.core.types import (
 )
 
 from .reduce import ViewState, reduce_event
+from .render import strip_controls
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -415,18 +416,31 @@ async def run_headless(
     )
 
     if output_format is OutputFormat.TEXT:
-        if result.text:
-            out(result.text if result.text.endswith("\n") else result.text + "\n")
+        # `text` goes to a terminal as-is, so it gets the same treatment a renderer
+        # would give it. The JSON formats need no equivalent: encoding turns an escape
+        # into its six-character JSON form, which is inert by the time anything prints it.
+        answer = strip_controls(result.text)
+        if answer:
+            out(answer if answer.endswith("\n") else answer + "\n")
     else:
         out(to_line(result_record(result)))
         do_flush()
 
     # Notices never go to stdout: a consumer of `--output-format=text` is piping
     # the model's answer somewhere, and a warning mixed into it corrupts the data.
+    #
+    # Stripped for every format, including the JSON ones. These are prose on stderr
+    # rather than part of the machine-readable stream, so nothing encodes them on the
+    # way out — and `DENIAL_NOTICE` carries `rendered`, the command a human is being
+    # told was refused, which is precisely the string that must not be able to move a
+    # cursor.
     for request in result.approvals:
-        err(DENIAL_NOTICE.format(name=request.name, rendered=request.rendered) + "\n")
+        err(
+            DENIAL_NOTICE.format(name=request.name, rendered=strip_controls(request.rendered))
+            + "\n"
+        )
     for error in current.errors:
-        err(ERROR_NOTICE.format(kind=error.kind, message=error.message) + "\n")
+        err(ERROR_NOTICE.format(kind=error.kind, message=strip_controls(error.message)) + "\n")
     if not current.finished:
         err(NO_TURN_END + "\n")
     return result
