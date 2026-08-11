@@ -5,6 +5,35 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Added
+- **`web_search` has backends: brave, tavily, and a searxng you run yourself.** The last
+  tool in the tree with nothing behind its injected callable. It stayed that way because
+  a searcher needs a *provider*, which is a decision about somebody's account rather than
+  a design question — so `tools/searcher.py` carries all three as a **table**, since the
+  differences are entirely data (an endpoint, an auth header, a response shape).
+  - Chosen with `RONIN_SEARCH_PROVIDER`; the key comes from the provider's own variable
+    (`BRAVE_API_KEY`, `TAVILY_API_KEY`), and `RONIN_SEARCH_ENDPOINT` points at a
+    self-hosted searxng. Unset means `web_search` **does not exist** in the session, which
+    is what `build_registry` is built around: a tool with no backend that errors on every
+    call teaches the model to keep trying it. Half-configured produces a note naming the
+    variable to set, never a silent absence.
+  - Built on `fetcher.request_once`, so a search inherits address pinning, TLS
+    verification against the hostname, the size cap and the timeout from the one place
+    that implements them. A searcher with its own socket code is one that eventually
+    forgets to pin.
+  - **The query cannot move the request.** It is percent-encoded into a parameter or
+    placed in a JSON field, never concatenated into a host or path, so no query a model
+    writes can point the searcher somewhere else.
+  - **A configured endpoint is not a model-chosen URL.** A searxng on `localhost` is
+    reachable — the user put it there, exactly as they configure a local model server —
+    while a bad *scheme* in that same config value is still refused. `safety/net.py` grew
+    `check_scheme` so the config path applies a visible subset of the policy instead of
+    hand-rolling its own check.
+  - No HTML scraping of DuckDuckGo, Google or Bing: against their terms, brittle, and a
+    tool that silently degrades to garbage when a `<div>` moves is worse than one that
+    says it is not configured.
+  - A response in an unexpected shape is an **error naming where the results were meant to
+    be**, not an empty list — a provider changing its schema must not look like "no
+    results for your query" forever.
 - **`web_fetch` is a real tool now, and it resolves before it connects.** Two findings in
   one: the DNS half of the URL policy was missing, and `web_fetch` **did not exist in a
   real session at all**. `Fetcher` was a type alias with no implementation anywhere in

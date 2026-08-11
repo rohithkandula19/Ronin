@@ -301,6 +301,25 @@ def redact_url(url: str) -> str:
     return f"{base}#{REDACTED}" if fragment else base
 
 
+def check_scheme(url: str) -> str:
+    """``url`` stripped, if its scheme is one this program speaks.
+
+    Split out of :func:`check_url` so a caller with a *configured* endpoint — a
+    self-hosted search instance, say — can apply this half without the address half,
+    and be seen to be applying exactly this half. The alternative was for such a caller
+    to hand-roll a scheme check, which is how a second, laxer copy of a security rule
+    gets written. See :mod:`ronin.tools.searcher` for the one caller that wants the
+    subset, and why a configured host is not the case the address rules exist for.
+    """
+    stripped = url.strip()
+    if not stripped.lower().startswith(ALLOWED_SCHEMES):
+        raise UrlNotAllowed(
+            f"{redact_url(stripped)!r} is not an http(s) URL. Only http and https are "
+            "fetched — a file:// path should be read with the read tool."
+        )
+    return stripped
+
+
 def check_url(url: str) -> str:
     """``url`` if it may be fetched, else raise :exc:`UrlNotAllowed`.
 
@@ -309,12 +328,7 @@ def check_url(url: str) -> str:
     refusal is text that gets shown, copied into an issue and written to a log, and a
     secret in a rejected URL is still a secret.
     """
-    stripped = url.strip()
-    if not stripped.lower().startswith(ALLOWED_SCHEMES):
-        raise UrlNotAllowed(
-            f"{redact_url(stripped)!r} is not an http(s) URL. Only http and https are "
-            "fetched — a file:// path should be read with the read tool."
-        )
+    stripped = check_scheme(url)
     reason = host_reason(split_host(stripped))
     if reason:
         raise UrlNotAllowed(
@@ -438,6 +452,7 @@ __all__ = [
     "Resolver",
     "UrlNotAllowed",
     "address_reason",
+    "check_scheme",
     "check_url",
     "host_reason",
     "parse_address",
