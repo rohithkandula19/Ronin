@@ -43,6 +43,7 @@ they already agree.
 ┌─ verification ────────┐   ┌─ persistence ──────────────┐
 │ test runner · lint    │   │ transcripts · checkpoints  │
 │ self-critique · retry │   │ git shadow · undo          │
+│                       │   │ sqlite index · fts5 search │
 └───────────────────────┘   └────────────────────────────┘
 ┌─ flywheel ─────────────────────────────────────────────┐
 │ eval suite → failure mining → LoRA adapter → re-eval   │

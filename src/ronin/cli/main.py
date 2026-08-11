@@ -54,6 +54,7 @@ from ..core.types import (
     ToolStart,
 )
 from ..persistence import export as export_module
+from ..persistence.index import SessionIndex, SessionIndexError
 from ..persistence.resume import ResumedSession, resume_latest, resume_session
 from ..persistence.transcript import list_sessions
 from ..providers.router import Router
@@ -136,6 +137,25 @@ class Usage:
 
 
 @dataclass(frozen=True, slots=True)
+class SessionsOptions:
+    """What ``ronin sessions`` was asked to do. Built by :func:`parse`, which owns argv.
+
+    Three questions over the same rows, so they are three flags on one verb rather
+    than three verbs: list them, search them, or rebuild the index they come from.
+    ``search`` holds a human's words, not fts5 syntax —
+    :func:`ronin.persistence.index.fts_query` converts it, because a raw query with an
+    apostrophe in it makes sqlite raise.
+    """
+
+    search: str = ""
+    reindex: bool = False
+    #: Order the rows come back in. ``cost`` is the reason the index exists: it is an
+    #: ``ORDER BY`` the filesystem cannot answer at any price.
+    by_cost: bool = False
+    limit: int = 50
+
+
+@dataclass(frozen=True, slots=True)
 class Options:
     """Everything the command line decided, as data. No I/O, no defaults resolved
     against the filesystem — that happens in :func:`dispatch`, where it is visible."""
@@ -169,6 +189,8 @@ class Options:
     suite_given: bool = False
     #: Present for ``telemetry`` only, same rule as ``bench``.
     telemetry: TelemetryOptions | None = None
+    #: Present for ``sessions`` only, same rule again.
+    sessions: SessionsOptions | None = None
 
     @property
     def flags(self) -> dict[str, object]:
@@ -274,8 +296,10 @@ def build_parser() -> _Parser:
             "  doctor                     report the workspace: paths, settings, "
             "notes\n"
             "  export [ID] [-o FILE]      write a session as markdown or html\n"
-            "  sessions                   list the sessions recorded in this "
-            "directory\n"
+            "  sessions [TEXT]            list the sessions recorded in this "
+            "directory,\n"
+            "                             or search them (--search/--by-cost/"
+            "--reindex)\n"
             "  eval [--dry-run]           run the task suite in tests/evals and "
             "report\n"
             "  duel --model A --model B   run the same tasks against two models\n"
@@ -399,6 +423,22 @@ def build_parser() -> _Parser:
         default=None,
         metavar="FILE",
         help="write the export here instead of stdout (export only)",
+    )
+    parser.add_argument(
+        "--search",
+        default="",
+        metavar="TEXT",
+        help="full-text search recorded prompts and answers (sessions only)",
+    )
+    parser.add_argument(
+        "--reindex",
+        action="store_true",
+        help="rebuild the sqlite session index from the transcripts (sessions only)",
+    )
+    parser.add_argument(
+        "--by-cost",
+        action="store_true",
+        help="order sessions by cost instead of recency (sessions only)",
     )
     parser.add_argument("--version", action="store_true", help="print the version")
 
@@ -529,6 +569,8 @@ def parse(argv: Sequence[str]) -> Options | Usage:
         return _bench_options(namespace, command, words)
     if command is Command.TELEMETRY:
         return _telemetry_options(namespace, words)
+    if command is Command.SESSIONS:
+        return _sessions_options(namespace, words)
 
     prompt = namespace.print_prompt if namespace.print_prompt is not None else words
     headless = namespace.print_prompt is not None
@@ -580,6 +622,27 @@ def _export_options(namespace: argparse.Namespace, words: str) -> Options | Usag
         export_session=words,
         export_format=ExportFormat(namespace.export_format),
         export_out=Path(namespace.export_out) if namespace.export_out else None,
+    )
+
+
+def _sessions_options(namespace: argparse.Namespace, words: str) -> Options | Usage:
+    """``sessions`` argv into :class:`SessionsOptions`.
+
+    Bare words are taken as the search text, so ``ronin sessions pagination bug`` does
+    the obvious thing without anyone having to know that ``--search`` exists. An
+    explicit ``--search`` wins if both are given rather than being concatenated —
+    silently searching for the two joined together is the kind of result that looks
+    like the index is broken.
+    """
+    search = namespace.search or words
+    return Options(
+        command=Command.SESSIONS,
+        cwd=Path(namespace.cwd),
+        sessions=SessionsOptions(
+            search=search,
+            reindex=bool(namespace.reindex),
+            by_cost=bool(namespace.by_cost),
+        ),
     )
 
 
@@ -1158,8 +1221,23 @@ def _export(options: Options, *, streams: Streams) -> int:
 
 
 def _sessions(options: Options, *, streams: Streams) -> int:
-    """``ronin sessions`` — the picker's rows, newest first."""
+    """``ronin sessions`` — the picker's rows, newest first, or a search, or a reindex.
+
+    The plain listing still reads the sidecars through ``list_sessions`` rather than
+    the index, and that is the point of the index being a cache: the command a user
+    runs most often does not depend on it, so a missing or broken database costs them
+    nothing. ``--search`` and ``--by-cost`` are the two questions the filesystem cannot
+    answer, and those are the ones that go to sqlite.
+    """
     paths = Paths.discover(options.cwd)
+    wanted = options.sessions or SessionsOptions()
+    if wanted.reindex:
+        return _reindex(paths.sessions_dir, streams=streams)
+    if wanted.search:
+        return _search_sessions(paths.sessions_dir, wanted, streams=streams)
+    if wanted.by_cost:
+        return _sessions_by_cost(paths.sessions_dir, wanted, streams=streams)
+
     rows = list_sessions(paths.sessions_dir)
     if not rows:
         streams.out(f"no sessions recorded in {paths.sessions_dir}\n")
@@ -1175,6 +1253,73 @@ def _sessions(options: Options, *, streams: Streams) -> int:
         mark = " (stale)" if meta.stale else ""
         streams.out(
             f"{meta.session_id}  {meta.turns:>4} turn(s)  ${meta.cost_usd:.4f}  {meta.cwd}{mark}\n"
+        )
+    return EXIT_OK
+
+
+def _reindex(directory: Path, *, streams: Streams) -> int:
+    """``ronin sessions --reindex`` — rebuild the index from the transcripts.
+
+    The whole recovery procedure for the index, which is why every error message that
+    mentions the index mentions this flag. Exits 0 even when sessions were skipped: the
+    rebuild did what it could and said what it could not, and a non-zero exit would
+    make one unreadable session look like a failed command.
+    """
+    index = SessionIndex.open(directory)
+    report = index.rebuild(directory)
+    streams.out(f"{report.summary()} in {index.path}\n")
+    for note in report.skipped:
+        streams.err(f"  skipped {note}\n")
+    for problem in index.problems:
+        streams.err(f"  {problem}\n")
+    return EXIT_OK
+
+
+def _search_sessions(directory: Path, wanted: SessionsOptions, *, streams: Streams) -> int:
+    """``ronin sessions --search TEXT`` — fts5 over recorded prompts and answers."""
+    index = SessionIndex.open(directory)
+    try:
+        hits = index.search(wanted.search, limit=wanted.limit)
+    except SessionIndexError as exc:
+        # A read failure is reported, never rendered as "no matches" — see the argument
+        # in `persistence.index`. The fallback is named because it always works.
+        streams.err(f"{PROGRAM}: {exc}\n")
+        streams.err(f"{PROGRAM}: `{PROGRAM} sessions --reindex` rebuilds it.\n")
+        return EXIT_ERROR
+    if not hits:
+        empty = index.count() == 0
+        streams.out(
+            f"no match for {wanted.search!r}"
+            + (
+                f" — nothing is indexed yet; `{PROGRAM} sessions --reindex` indexes the "
+                f"transcripts already on disk\n"
+                if empty
+                else "\n"
+            )
+        )
+        return EXIT_OK
+    for hit in hits:
+        streams.out(f"{hit.session_id}  turn {hit.turn:>3}  {hit.role:<9} {hit.snippet}\n")
+    return EXIT_OK
+
+
+def _sessions_by_cost(directory: Path, wanted: SessionsOptions, *, streams: Streams) -> int:
+    """``ronin sessions --by-cost`` — the ``ORDER BY`` the filesystem cannot do."""
+    index = SessionIndex.open(directory)
+    try:
+        rows = index.costliest(limit=wanted.limit)
+    except SessionIndexError as exc:
+        streams.err(f"{PROGRAM}: {exc}\n")
+        return EXIT_ERROR
+    if not rows:
+        streams.out(
+            f"nothing is indexed yet — `{PROGRAM} sessions --reindex` indexes the "
+            f"transcripts already on disk\n"
+        )
+        return EXIT_OK
+    for meta in rows:
+        streams.out(
+            f"{meta.session_id}  ${meta.cost_usd:>9.4f}  {meta.turns:>4} turn(s)  {meta.cwd}\n"
         )
     return EXIT_OK
 

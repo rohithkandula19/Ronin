@@ -5,6 +5,41 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Added
+- **A sqlite session index, and `ronin sessions --search`.** `persistence/` recorded
+  everything a session needed but could only answer one question about it — "newest
+  first" — because the picker reads one JSON sidecar per session. Two questions it could
+  not answer at any price: *which sessions cost the most*, and *which one was the session
+  where I fixed the pagination bug*. `persistence/index.py` adds a WAL sqlite database
+  beside the transcripts with a row per session and fts5 over recorded prompts and
+  answers, plus `ronin sessions [TEXT] [--search/--by-cost/--reindex]`.
+  - **It is a cache, and everything follows from that.** The jsonl transcript stays the
+    single source of truth; the index is strictly derived, so `rm
+    .ronin/sessions/index.sqlite3` costs a rebuild and loses nothing. A schema version is
+    stamped in `PRAGMA user_version` and a mismatch **drops and rebuilds** instead of
+    migrating. Opening a file sqlite will not read replaces it and says so, which is what
+    lets `--reindex` repair the case it is most needed for — while a *locked* database
+    (`OperationalError`, another Ronin mid-write) is never touched, because deleting a
+    file another process has open would turn contention into two corrupt indexes.
+  - **Writes never raise; reads do.** `record` runs at a turn boundary, *after* the
+    transcript is fsynced, so a full disk or a locked database is recorded in `problems`
+    and the turn continues — a cache must not end a session whose work is already safe.
+    `search`/`recent` raise instead, because `()` from a broken index reads exactly like
+    "you never had that session".
+  - **A typed query is rebuilt, never forwarded.** fts5 `MATCH` is an expression
+    language: `don't` raises `unterminated string`, and a sentence containing "not"
+    silently inverts the search. `fts_query` extracts words and quotes each one, so any
+    string a terminal can produce is a valid AND query.
+  - Prompts are indexed out of `TurnEnd.agent_state` — the user's message is not an event
+    in this system — with `StreamReset` applied via the same fold the exporters use, so
+    retracted text never surfaces a session by a sentence it does not contain. Tool
+    arguments and output are deliberately excluded: they are most of a transcript's bytes
+    and are where fetched pages land.
+  - Wired at the seam that already writes the sidecar, so the cadence is one write per
+    turn rather than per event, and only the current turn's events are held in memory.
+    `Transcript` depends on an `Indexer` protocol it declares itself, which keeps the
+    cache out of an import cycle with the log it caches.
+  - The plain `ronin sessions` listing still reads sidecars and never opens the database:
+    the command people run daily does not depend on the cache.
 - **The repo scaffold's missing half, and the packaging bug it exposed.** `pre-commit`
   (whitespace, ruff, mypy, and four generated-file gates), `.env.example`, three working
   `.ronin/` example configs with a schema README, `make install/run/eval/coverage`, a
