@@ -64,12 +64,14 @@ from .transcript import (
     SessionMeta,
     Transcript,
     TranscriptError,
+    TranscriptVersionError,
     list_sessions,
     meta_path,
     new_session_id,
     read_events,
     session_path,
     sessions_dir,
+    valid_session_id,
 )
 
 __all__ = [
@@ -92,6 +94,7 @@ __all__ = [
     "StateSource",
     "Transcript",
     "TranscriptError",
+    "TranscriptVersionError",
     "UnknownEventType",
     "UnknownRecordType",
     "decode",
@@ -116,4 +119,5 @@ __all__ = [
     "sessions_for_cwd",
     "to_html",
     "to_markdown",
+    "valid_session_id",
 ]

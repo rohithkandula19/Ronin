@@ -1155,6 +1155,13 @@ def _sessions(options: Options, *, streams: Streams) -> int:
         streams.out(f"no sessions recorded in {paths.sessions_dir}\n")
         return EXIT_OK
     for meta in rows:
+        if not meta.loadable:
+            # Listed rather than hidden: the session is on disk and this build cannot
+            # read it, and those are different facts. Its counters are unknown, so the
+            # row shows the reason where the numbers would go instead of printing
+            # zeroes that would read as an empty session.
+            streams.out(f"{meta.session_id}  unreadable: {meta.unreadable}\n")
+            continue
         mark = " (stale)" if meta.stale else ""
         streams.out(
             f"{meta.session_id}  {meta.turns:>4} turn(s)  ${meta.cost_usd:.4f}  {meta.cwd}{mark}\n"
