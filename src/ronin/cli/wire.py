@@ -47,6 +47,7 @@ from __future__ import annotations
 import json
 import shutil
 import sys
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -93,6 +94,7 @@ from ..safety.sandbox import NoSandbox, Sandbox, Unavailable, detect
 from ..safety.settings import Settings, load_settings
 from ..session import SubagentPolicyFactory, build_session
 from ..tools.base import MAX_RESULT_CHARS, ToolContext
+from ..tools.fetcher import pinned_fetcher
 from ..tools.registry import ToolRegistry, build_registry
 from ..tools.shell import PersistentShell, ShellSession
 from ..ui.commands import Registry as CommandRegistry
@@ -110,6 +112,7 @@ from .spine import (
     sandbox_note,
     sequence_note,
 )
+from .stream import extractor_for
 
 #: Context window assumed when the caller does not say. Deliberately smaller than the
 #: largest window any shipped provider offers: compacting earlier than necessary costs
@@ -613,7 +616,23 @@ async def build_runtime(
         # and closing someone else's shell kills their background jobs.
         closers.append(shell_session.close)
 
-    base_tools = build_registry(ctx, shell=shell_session)
+    # `web_fetch` exists from here on. It did not before: `Fetcher` was a type alias
+    # with no implementation, so the tool was assembled only by demos and tests handing
+    # in a fake, and every real session had no way to read a URL at all. The client is
+    # `tools.fetcher.pinned_fetcher`, which resolves, vets every address the name
+    # answers with, and connects to *those* rather than to the name — see that module
+    # for why the second half is what makes the first half more than advisory.
+    #
+    # `web_search` is still absent, and that is honest rather than an oversight: a
+    # searcher needs a search provider and a key, and a `web_search` that exists and
+    # always errors teaches the model to keep trying it.
+    base_tools = build_registry(
+        ctx,
+        shell=shell_session,
+        fetch=pinned_fetcher(),
+        extract=extractor_for(router),
+        clock=time.monotonic,
+    )
     session = build_session(
         router,
         ctx,

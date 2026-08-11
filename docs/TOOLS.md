@@ -211,6 +211,17 @@ changelog four times in one task is normal and paying for it four times is not.
 The result names the URL and the content hash, because a summary can be wrong and a
 caller who needs exact wording should ask for it in the prompt.
 
+**Where it is allowed to go.** The client (`tools/fetcher.py`) asks `safety/net.py` twice:
+once about the URL as written, and once about what the hostname *resolves to*. The second
+question is the one that matters, because `https://docs.example.com/` is a perfectly
+well-formed URL and publishing an `A` record that points at `169.254.169.254` is the
+ordinary way to reach a cloud metadata endpoint from someone else's network. The vetted
+addresses come back and the connection uses **them**, with the hostname kept in the `Host`
+header and the TLS handshake so certificate verification still means something — a client
+that vetted a name and then dialled the name asked DNS twice and trusted the second
+answer. Redirects are followed here rather than inside the library so each hop goes
+through the same two questions.
+
 The HTML→markdown reduction is deliberately small and is *not* a parser: it deletes
 scripts, styles, comments and tags while keeping headings and list structure, since
 those are what let the fast model find the section that answers the question. A real
@@ -281,9 +292,18 @@ split showed a single row on a session where the main model had plainly just run
 
 - ~~`task`'s runner is a stub outside tests.~~ **Done** — `ronin.session` wires it to a
   real nested `run_turn` on `router.for_subagent()`. See below.
-- **`web_fetch`/`web_search` take injected callables** and nothing supplies real ones
-  yet. There is no HTTP client and no search backend wired in; `providers.base.HttpTransport`
-  is the obvious source for the first, and the second needs a provider decision.
+- ~~`web_fetch`/`web_search` take injected callables and nothing supplies real ones.~~
+  **Half done.** `tools/fetcher.py` is a real HTTP client on `http.client` + `socket` +
+  `ssl`, wired in `cli/wire.py`, so `web_fetch` exists in a real session. It resolves the
+  hostname, vets every address it answers with, and **connects to the vetted address**
+  while keeping the name in the `Host` header and the TLS handshake — vetting a name and
+  then dialling it asks DNS twice and trusts the second answer. Redirects are followed by
+  hand so every hop is re-vetted. `web_search` is still absent and still needs a provider
+  decision; it stays absent rather than existing and always erroring.
+  - Two limits, on purpose: an HTTP proxy cannot be used (pinning an address and letting a
+    proxy resolve the name are mutually exclusive, so `HTTPS_PROXY` is ignored — inject a
+    `Fetcher` via `build_registry` in that environment), and a hostname the resolver cannot
+    answer for is allowed through rather than refused.
 - **`read` returns images as an artifact string**, not as a provider-native image block.
   The provider layer has no image-block rendering yet either (`Capabilities.vision` is
   declared and unused), so this is consistent but incomplete.

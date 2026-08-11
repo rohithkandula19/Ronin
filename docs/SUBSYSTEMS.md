@@ -207,8 +207,11 @@ The fork-bomb pattern is textual, not structural, and is kept byte-identical to
 only for shell binaries. A long *shared command prefix* taints: two
 `curl -fsSL https://…` lines overlap by 19 characters, and this is not special-cased.
 
-**Named gaps, elsewhere.** `web_fetch` and `web_search` have no real backends — the
-search one needs a provider decision. `read` returns images as an artifact string
+**Named gaps, elsewhere.** `web_search` has no real backend and needs a provider
+decision; it stays absent from the registry rather than present and always failing.
+(`web_fetch` now has one: `tools/fetcher.py`, which resolves, vets every address the name
+answers with, connects to the vetted address rather than the name, and re-vets every
+redirect hop.) `read` returns images as an artifact string
 rather than a provider-native image block. The two `ModelClient` protocols are
 bridged by `providers.bridge.LoopClient` rather than unified. The test trees under
 `tests/` are deliberately not packages, so every module there is importable by bare
