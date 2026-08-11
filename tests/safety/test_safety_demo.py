@@ -24,6 +24,11 @@ import pytest
 
 from ronin.safety import demo
 
+#: The name the demo resolves to an internal address. A constant so the assertion below
+#: is an equality comparison against a named value rather than a string literal matched
+#: against a line — see the comment at its use site.
+INWARD_POINTING_NAME = "harmless-looking.example.com"
+
 
 async def test_the_demo_runs_offline_and_reaches_every_scene(
     capsys: pytest.CaptureFixture[str],
@@ -98,19 +103,20 @@ async def test_the_url_scene_refuses_every_address_it_lists(
     # The resolved check is the half a literal check cannot do, so the scene has to show
     # a name that looks fine being refused for where it points.
     #
-    # The host is split out of the line and compared with `==`, rather than matched with
-    # `in`/`endswith` against the whole line. Two reasons, and they agree. It is a
-    # stronger assertion: it rules out the demo printing this name as *allowed*, which is
-    # the one outcome the test exists to catch, and it cannot pass on a longer name that
-    # merely ends the same way. And it is the shape CodeQL's "incomplete URL substring
-    # sanitization" rule asks for — that rule fires on `in` *and* on `endswith`, because
-    # `endswith("example.com")` also matches `evil-example.com`; here the string is demo
-    # output rather than a URL being authorized, but parse-then-compare is the right
-    # habit either way.
-    blocked = {
+    # The host is split out of the line and compared for *equality* with a named
+    # constant — no substring match against the output anywhere. It is the stronger
+    # assertion: it rules out the demo printing this name as *allowed*, which is the one
+    # outcome this test exists to catch, and unlike `endswith` it cannot pass on a longer
+    # name ending the same way. It is also the form CodeQL's "incomplete URL substring
+    # sanitization" rule asks for; that rule fires on `in` and on `endswith` alike,
+    # because `endswith("example.com")` matches `evil-example.com` too. The string here is
+    # captured demo output rather than a URL being authorized, so the vulnerability itself
+    # does not apply — but parse-then-compare is the right habit regardless, which is why
+    # this is rewritten rather than suppressed.
+    blocked = [
         line.split()[-1] for line in scene.splitlines() if line.strip().startswith("blocked")
-    }
-    assert "harmless-looking.example.com" in blocked, (
+    ]
+    assert any(host == INWARD_POINTING_NAME for host in blocked), (
         f"the public-name-pointing-inward case is not shown as blocked; saw {sorted(blocked)}"
     )
     assert "and that is what gets dialled" in scene, "pinning is the point, so it is shown"
