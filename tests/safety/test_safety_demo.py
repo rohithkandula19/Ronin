@@ -99,6 +99,9 @@ async def test_the_url_scene_refuses_every_address_it_lists(
     scene = out[out.index("Where a fetch may go") :]
     for address in ("169.254.169.254", "2130706433", "metadata.google.internal", "100.64.0.1"):
         assert address in scene, f"the scene stopped covering {address}"
+    # The tunnel forms, and ISATAP by name: it is the one an ordinary prefix check cannot
+    # find, so a scene that quietly stopped showing it would stop making the point.
+    assert "ISATAP" in scene, "the IPv4-in-IPv6 half of the scene is missing"
     assert "<redacted>" in scene, "the redaction half of the scene is missing"
     # The resolved check is the half a literal check cannot do, so the scene has to show
     # a name that looks fine being refused for where it points.

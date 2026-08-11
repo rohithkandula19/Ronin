@@ -60,8 +60,10 @@ Known gaps, named rather than papered over:
 
 * **A resolver that cannot answer is allowed through**, not refused — a deliberate
   choice, and the weaker of the two available ones. Argued in :class:`Resolution`.
-* **6to4 and Teredo** are blocked by prefix, not by unwrapping the IPv4 address
-  embedded inside them.
+* **6rd** (RFC 5969) embeds an IPv4 address at a provider-chosen offset in a
+  provider-chosen prefix and cannot be recognised from the address alone. The six other
+  IPv4-in-IPv6 forms — 6to4, Teredo, NAT64, IPv4-compatible, IPv4-mapped and ISATAP —
+  are unwrapped and judged by :func:`embedded_ipv4`.
 * **Resolution is not cached and not shared with the connection's own lookup.** The
   pinned fetcher closes that by connecting to what was vetted, but anything else
   built on :func:`resolve_and_check` alone inherits the rebinding window.
@@ -94,6 +96,13 @@ ALLOWED_SCHEMES: Final = ("http://", "https://")
 #: :func:`address_reason`, because ``100.64.0.1`` reports ``is_private=False``:
 #: carrier-grade NAT is shared address space, and on a home connection behind it
 #: the neighbours are reachable.
+#:
+#: The two IPv6 tunnel prefixes stay here even though :func:`embedded_ipv4` now looks
+#: *inside* those addresses. The two rules answer different questions and the blunt one
+#: is the stricter: this refuses every 6to4 and Teredo address, including the ones
+#: wrapping a perfectly public IPv4, while the unwrapping only adds refusals for tunnel
+#: forms that no prefix identifies. Deleting these would turn ``2002:5db8:d822::`` from
+#: refused into allowed, which is not a change this module should make quietly.
 EXTRA_BLOCKED: Final = tuple(
     ipaddress.ip_network(cidr)
     for cidr in (
@@ -106,6 +115,17 @@ EXTRA_BLOCKED: Final = tuple(
         "2001::/32",  # Teredo, same
     )
 )
+
+#: The well-known NAT64 prefix (RFC 6052). The low 32 bits are an IPv4 address that a
+#: NAT64 gateway on the path will translate to and connect to on this machine's behalf.
+NAT64_PREFIX: Final = ipaddress.IPv6Network("64:ff9b::/96")
+
+#: The interface identifiers that mark an ISATAP address (RFC 5214 §6.1):
+#: ``<prefix>:0:5efe:<ipv4>``, with ``0200:5efe`` the same thing spelled with the
+#: EUI-64 universal bit set. Unlike 6to4 and Teredo, the *prefix* of an ISATAP address
+#: is whatever the site uses — ordinary global unicast — so no prefix test can find one,
+#: which is why this looks at bytes 8..12 instead.
+ISATAP_INTERFACE_IDS: Final = (b"\x00\x00\x5e\xfe", b"\x02\x00\x5e\xfe")
 
 #: Hostname suffixes that mean "inside", by convention rather than by address.
 #: ``.internal`` is what GCP's metadata server answers to, and mDNS ``.local``
@@ -197,12 +217,75 @@ def parse_address(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | 
     return address
 
 
-def address_reason(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> str:
-    """Why this address is not a fetch target, or ``""`` if it is fine.
+@dataclass(frozen=True, slots=True)
+class Embedded:
+    """An IPv4 address carried inside an IPv6 address, and the form carrying it.
 
-    Property lookups on the stdlib type rather than a table of CIDRs, so the ranges
-    stay correct as :mod:`ipaddress` tracks the RFCs — with :data:`EXTRA_BLOCKED` for
-    the ones it does not classify the way this check needs.
+    ``kind`` is a noun phrase written to be dropped into a refusal message, because
+    "this is an ISATAP address" is the part of the explanation the reader cannot work
+    out from the hex. ``role`` names *which* embedded address this is for the forms that
+    carry more than one, and is empty for the forms that carry exactly one.
+    """
+
+    address: ipaddress.IPv4Address
+    kind: str
+    role: str = ""
+
+
+def embedded_ipv4(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> tuple[Embedded, ...]:
+    """Every IPv4 address ``address`` carries inside it, in transition-form order.
+
+    Six IPv6 forms exist to carry an IPv4 address through IPv6 syntax, and each is a
+    way to write a v4 destination that a v6-shaped check does not read: 6to4
+    (``2002::/16``), Teredo (``2001::/32``, which embeds *two* — the relay's and the
+    client's), NAT64 (:data:`NAT64_PREFIX`), IPv4-compatible (``::a.b.c.d``),
+    IPv4-mapped (``::ffff:a.b.c.d``) and ISATAP (:data:`ISATAP_INTERFACE_IDS`).
+
+    All but the last are refused before their payload is read — the first four by prefix,
+    IPv4-mapped because :func:`parse_address` unwraps it — so for those this only improves
+    the *message*. ISATAP is the one that matters: its prefix is the site's own global
+    unicast prefix, so ``2001:db8:1:2:0:5efe:c0a8:0101`` looks like an ordinary public
+    IPv6 address and, on a host with an ISATAP interface up, routes to ``192.168.1.1``.
+    Nothing in the property chain sees it, because there is nothing in the prefix to see.
+
+    Returns every carried address rather than the first, so a caller judges all of them.
+    ``()`` for an IPv4 address, and for an IPv6 address carrying nothing.
+
+    Not covered: **6rd** (RFC 5969) embeds an IPv4 address at a provider-chosen bit
+    offset inside a provider-chosen prefix, so recognising one requires the provider's
+    configuration. It is undetectable from the address alone, and guessing an offset
+    would refuse public addresses at random. Left as a known gap rather than approximated.
+    """
+    if not isinstance(address, ipaddress.IPv6Address):
+        return ()
+    found: list[Embedded] = []
+    packed = address.packed
+    if address.ipv4_mapped is not None:
+        found.append(Embedded(address.ipv4_mapped, "an IPv4-mapped address"))
+    if address.sixtofour is not None:
+        found.append(Embedded(address.sixtofour, "a 6to4 tunnel address"))
+    if address.teredo is not None:
+        server, client = address.teredo
+        found.append(Embedded(server, "a Teredo tunnel address", role="relay "))
+        found.append(Embedded(client, "a Teredo tunnel address", role="client "))
+    if address in NAT64_PREFIX:
+        found.append(Embedded(ipaddress.IPv4Address(packed[12:16]), "a NAT64 address"))
+    if packed[:12] == bytes(12) and int.from_bytes(packed[12:16], "big") > 1:
+        # `::a.b.c.d`, the deprecated IPv4-compatible form. `::` and `::1` are excluded
+        # because they are the unspecified and loopback addresses, not a wrapped
+        # `0.0.0.0` and `0.0.0.1` — both are refused on their own properties anyway, and
+        # reporting a wrapped address for them would be a lie in the message.
+        found.append(Embedded(ipaddress.IPv4Address(packed[12:16]), "an IPv4-compatible address"))
+    if packed[8:12] in ISATAP_INTERFACE_IDS:
+        found.append(Embedded(ipaddress.IPv4Address(packed[12:16]), "an ISATAP tunnel address"))
+    return tuple(found)
+
+
+def _direct_reason(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> str:
+    """:func:`address_reason` for the address as written, ignoring what it wraps.
+
+    Split out because :func:`address_reason` needs to apply this same chain to an
+    embedded address, and a second copy of the ranges is a second thing to keep right.
     """
     if address.is_unspecified:
         return "the unspecified address (0.0.0.0 / ::), which routes to this machine"
@@ -219,6 +302,33 @@ def address_reason(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> st
     if any(address in network for network in EXTRA_BLOCKED):
         return "shared or reserved address space, not a public host"
     return ""
+
+
+def address_reason(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> str:
+    """Why this address is not a fetch target, or ``""`` if it is fine.
+
+    Property lookups on the stdlib type rather than a table of CIDRs, so the ranges
+    stay correct as :mod:`ipaddress` tracks the RFCs — with :data:`EXTRA_BLOCKED` for
+    the ones it does not classify the way this check needs.
+
+    Then the same chain again on any IPv4 address the outer one *wraps*
+    (:func:`embedded_ipv4`), under one rule: **unwrapping may add a refusal and may
+    improve a message, never grant permission.** An address already disqualified by its
+    own properties stays disqualified whatever it carries — which is why
+    ``2002:5db8:d822::``, a 6to4 address wrapping a public IPv4, is still refused. Read
+    the other way round it would be a downgrade dressed as a feature: judging tunnels by
+    their payload alone would open every 6to4 and Teredo address whose payload is public,
+    and the outer form is itself a reason not to go there.
+
+    What the unwrapping genuinely closes is ISATAP, whose prefix is ordinary global
+    unicast — see :func:`embedded_ipv4`.
+    """
+    direct = _direct_reason(address)
+    for carried in embedded_ipv4(address):
+        inner = _direct_reason(carried.address)
+        if inner:
+            return f"{carried.kind}, and the {carried.role}{carried.address} it wraps is {inner}"
+    return direct
 
 
 def host_reason(host: str) -> str:
@@ -447,13 +557,17 @@ __all__ = [
     "BLOCKED_NAMES",
     "BLOCKED_SUFFIXES",
     "EXTRA_BLOCKED",
+    "ISATAP_INTERFACE_IDS",
+    "NAT64_PREFIX",
     "REDACTED",
+    "Embedded",
     "Resolution",
     "Resolver",
     "UrlNotAllowed",
     "address_reason",
     "check_scheme",
     "check_url",
+    "embedded_ipv4",
     "host_reason",
     "parse_address",
     "redact_url",

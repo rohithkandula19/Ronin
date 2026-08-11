@@ -206,6 +206,10 @@ The fork-bomb pattern is textual, not structural, and is kept byte-identical to
 `tools/shell.py`'s so the two cannot disagree. Heredoc bodies are parsed as commands
 only for shell binaries. A long *shared command prefix* taints: two
 `curl -fsSL https://…` lines overlap by 19 characters, and this is not special-cased.
+The URL policy unwraps the IPv4-in-IPv6 forms — 6to4, Teredo, NAT64, `::a.b.c.d`,
+`::ffff:a.b.c.d` and ISATAP, the last of which wears an ordinary public prefix and was
+reachable before that — but **6rd** hides its IPv4 at a provider-chosen offset inside a
+provider-chosen prefix and cannot be recognised from the address alone.
 
 **Named gaps, elsewhere.** Both web tools now have real backends. `tools/fetcher.py`
 resolves, vets every address the name answers with, connects to the vetted address rather

@@ -222,6 +222,13 @@ that vetted a name and then dialled the name asked DNS twice and trusted the sec
 answer. Redirects are followed here rather than inside the library so each hop goes
 through the same two questions.
 
+Both questions read the IPv4 address an IPv6 address can *carry*: 6to4, Teredo, NAT64,
+`::a.b.c.d`, `::ffff:a.b.c.d` and **ISATAP** (`<prefix>:0:5efe:<ipv4>`). ISATAP is the one
+worth naming, because its prefix is ordinary public address space — nothing about
+`2001:470:1f0b:1:0:5efe:a9fe:a9fe` looks internal until you read the last 32 bits, where
+169.254.169.254 is sitting. Unwrapping only ever *adds* a refusal: a 6to4 address wrapping
+a public IPv4 is still refused for being 6to4.
+
 The HTML→markdown reduction is deliberately small and is *not* a parser: it deletes
 scripts, styles, comments and tags while keeping headings and list structure, since
 those are what let the fast model find the section that answers the question. A real
