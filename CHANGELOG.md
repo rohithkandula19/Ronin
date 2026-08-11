@@ -5,6 +5,31 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Added
+- **The URL policy reads the IPv4 address hidden inside an IPv6 one — and ISATAP was a
+  real hole.** The gap note said 6to4 and Teredo were blocked by prefix rather than by
+  unwrapping. Checking each form first found that unwrapping those two would have
+  *weakened* the policy, and that a form nobody had listed was getting through:
+  - **ISATAP** (`<prefix>:0:5efe:<ipv4>`, RFC 5214) wears the **site's own global unicast
+    prefix**, so `2001:470:1f0b:1:0:5efe:a9fe:a9fe` looks like an ordinary public address
+    to every property in `ipaddress` and to every entry in `EXTRA_BLOCKED` — and on a host
+    with an ISATAP interface up it routes to `169.254.169.254`. It was **allowed** before
+    this change. No prefix test can find one, which is why `embedded_ipv4` reads the
+    interface identifier instead.
+  - `embedded_ipv4` also unwraps 6to4, Teredo (both halves — the client's IPv4 is XORed
+    with all ones, so `5601:5601` *is* 169.254.169.254), NAT64, IPv4-compatible and
+    IPv4-mapped. Those five were already refused by prefix, so there the unwrapping buys a
+    better *message*: "a 6to4 tunnel address, and the 169.254.169.254 it wraps is a
+    link-local address" instead of "a private address", which no reader can act on without
+    converting hex by hand.
+  - **Unwrapping adds refusals and never grants permission.** `2002:5db8:d822::` wraps a
+    public IPv4 and stays refused on its prefix: judging a tunnel by its payload alone
+    would open every 6to4 and Teredo address whose payload happens to be public, so the
+    two prefixes stay in `EXTRA_BLOCKED` and the payload check only ever adds a reason.
+    An ISATAP address wrapping a public IPv4 is still allowed — it reaches the public
+    internet, and refusing it would be a false positive.
+  - **6rd** (RFC 5969) remains a named gap: its IPv4 sits at a provider-chosen offset in a
+    provider-chosen prefix, so recognising one needs the provider's configuration and
+    guessing an offset would refuse public addresses at random.
 - **`web_search` has backends: brave, tavily, and a searxng you run yourself.** The last
   tool in the tree with nothing behind its injected callable. It stayed that way because
   a searcher needs a *provider*, which is a decision about somebody's account rather than

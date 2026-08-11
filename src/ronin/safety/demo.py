@@ -256,6 +256,28 @@ async def demo_url_policy() -> None:
         print(f"    ok       {check_url(url)}")
 
     print()
+    print("  Six IPv6 forms exist to carry an IPv4 address, and each is a way to write")
+    print("  an IPv4 destination that a check reading the prefix does not see. The last")
+    print("  one is the interesting one: its prefix is ordinary public address space, so")
+    print("  only the interface identifier gives it away.")
+    for url in (
+        "http://[2002:a9fe:a9fe::]/",
+        "http://[64:ff9b::a9fe:a9fe]/",
+        "http://[2001:470:1f0b:1:0:5efe:a9fe:a9fe]/",
+    ):
+        try:
+            check_url(url)
+        except UrlNotAllowed as exc:
+            print(f"    blocked  {url}")
+            print(f"             {str(exc).split(': it points at ')[-1].split('. If')[0]}")
+        else:  # pragma: no cover - a leak here is a failing test, not a demo branch
+            print(f"    LEAKED   {url}")
+    print()
+    print("  Unwrapping adds refusals; it never grants permission. A 6to4 address that")
+    print("  wraps a *public* IPv4 stays refused on its prefix, because judging a tunnel")
+    print("  by its payload alone would open every one whose payload looks fine.")
+
+    print()
     print("  Now the half a literal check cannot do. Nothing is wrong with the URL")
     print("  below — the A record is the attack, and the victim's own resolver runs it:")
     zone = {

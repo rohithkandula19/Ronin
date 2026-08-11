@@ -26,12 +26,14 @@ from typing import Final
 import pytest
 
 from ronin.safety.net import (
+    EXTRA_BLOCKED,
     REDACTED,
     Resolution,
     Resolver,
     UrlNotAllowed,
     address_reason,
     check_url,
+    embedded_ipv4,
     host_reason,
     parse_address,
     redact_url,
@@ -87,6 +89,15 @@ MUST_BLOCK: tuple[tuple[str, str], ...] = (
     ("http://999.1.1.1/", "an octet out of range"),
     ("http://10.16777216/", "a final part too large for the octets it has to fill"),
     ("http://[4000::1]/", "IPv6 space the RFCs reserve and nothing has assigned"),
+    # An IPv4 destination written in IPv6, so a v6-shaped check does not read it.
+    ("http://[2002:a9fe:a9fe::]/latest/meta-data/", "6to4 wrapping the metadata endpoint"),
+    ("http://[2002:7f00:1::]/", "6to4 wrapping loopback"),
+    ("http://[2001:0:53aa:64c::5601:5601]/", "Teredo whose client half is the metadata endpoint"),
+    ("http://[64:ff9b::a9fe:a9fe]/", "NAT64 wrapping the metadata endpoint"),
+    ("http://[::a9fe:a9fe]/", "the deprecated IPv4-compatible form"),
+    ("http://[2001:470:1f0b:1:0:5efe:a9fe:a9fe]/", "ISATAP under a public prefix"),
+    ("http://[2606:4700::5efe:a00:5]/", "ISATAP wrapping a private address"),
+    ("http://[2001:470:1f0b:1:200:5efe:c0a8:101]/", "ISATAP with the universal bit set"),
 )
 
 #: The public internet, which must keep working. A false positive here is how a
@@ -104,6 +115,9 @@ MUST_PASS: tuple[str, ...] = (
     "https://[2606:4700::1]/",
     "HTTPS://Example.COM/Mixed-Case",
     "https://user@example.com/userinfo-on-a-public-host",
+    # A tunnel form carrying a *public* IPv4 address reaches the public internet, so
+    # unwrapping it must not turn into a refusal. The boundary of the rule below.
+    "https://[2606:4700::5efe:5db8:d822]/",
 )
 
 
@@ -167,6 +181,113 @@ def test_each_disqualifying_property_gives_its_own_reason() -> None:
     assert "multicast" in address_reason(ipaddress.ip_address("224.0.0.1"))
     assert "unspecified" in address_reason(ipaddress.ip_address("0.0.0.0"))
     assert address_reason(ipaddress.ip_address("93.184.216.34")) == ""
+
+
+# --------------------------------------------------------------------------- #
+# an IPv4 address wearing IPv6
+# --------------------------------------------------------------------------- #
+
+#: The transition forms that carry an IPv4 address through IPv6 syntax, each written the
+#: way someone reaching for a metadata endpoint would write it. Third field is the word
+#: the refusal has to contain for a reader to understand what they are looking at: the
+#: hex says nothing, and "a private address" alone does not explain where the IPv4 came
+#: from.
+EMBEDDING: tuple[tuple[str, str, str], ...] = (
+    ("2002:a9fe:a9fe::", "169.254.169.254", "6to4"),
+    ("2002:c0a8:101::", "192.168.1.1", "6to4"),
+    ("2001:0:53aa:64c::5601:5601", "169.254.169.254", "Teredo"),
+    ("64:ff9b::a9fe:a9fe", "169.254.169.254", "NAT64"),
+    ("::a9fe:a9fe", "169.254.169.254", "IPv4-compatible"),
+    ("2001:470:1f0b:1:0:5efe:a9fe:a9fe", "169.254.169.254", "ISATAP"),
+    ("2606:4700::5efe:a00:5", "10.0.0.5", "ISATAP"),
+    ("2001:470:1f0b:1:200:5efe:c0a8:101", "192.168.1.1", "ISATAP"),
+)
+
+
+@pytest.mark.parametrize(
+    ("outer", "inner", "form"), EMBEDDING, ids=[f"{f[2]}-{f[1]}" for f in EMBEDDING]
+)
+def test_the_ipv4_address_inside_an_ipv6_address_is_unwrapped_and_named(
+    outer: str, inner: str, form: str
+) -> None:
+    """Six IPv6 forms exist to carry a v4 address, and each is a spelling of a v4
+    destination that a check reading only the v6 prefix does not see. The refusal names
+    the form and the address inside it, because otherwise the reader has to know that
+    ``2002:a9fe:a9fe::`` is 169.254.169.254 in hex to understand the answer."""
+    address = parse_address(outer)
+    assert address is not None
+    carried = [str(item.address) for item in embedded_ipv4(address)]
+    assert inner in carried, f"{outer} carries {inner}"
+    reason = address_reason(address)
+    assert form in reason and inner in reason, reason
+
+
+def test_isatap_is_the_form_no_prefix_test_can_find() -> None:
+    """The one this unwrapping actually closes, and the reason it was worth writing.
+
+    6to4, Teredo, NAT64 and ``::a.b.c.d`` all sit in prefixes the property chain already
+    refuses, so unwrapping them only improves the message. An ISATAP address wears the
+    *site's own* global unicast prefix — every property below is false and the address is
+    not in :data:`EXTRA_BLOCKED` — and on a host with an ISATAP interface up it routes to
+    the IPv4 address in its interface identifier. Nothing in a prefix test can see it.
+    """
+    address = ipaddress.IPv6Address("2001:470:1f0b:1:0:5efe:a9fe:a9fe")
+    assert not any(
+        (
+            address.is_private,
+            address.is_loopback,
+            address.is_link_local,
+            address.is_multicast,
+            address.is_reserved,
+            address.is_unspecified,
+        )
+    ), "indistinguishable from a public address by every property"
+    assert not any(address in network for network in EXTRA_BLOCKED), "and by prefix"
+    assert "169.254.169.254" in address_reason(address), "and refused anyway"
+
+
+def test_unwrapping_adds_refusals_and_never_grants_permission() -> None:
+    """The direction of the rule, which is the whole design.
+
+    ``2002:5db8:d822::`` is a 6to4 address wrapping 93.184.216.34 — a public IPv4. Read
+    payload-first it looks fine, and judging tunnels by their payload alone would open
+    every 6to4 and Teredo address whose payload happens to be public. The outer form is
+    itself a reason not to go there, so the prefix verdict stands and the unwrapping only
+    ever *adds* a reason.
+    """
+    for outer in ("2002:5db8:d822::", "2001:0:53aa:64c::a2ff:2922", "64:ff9b::5db8:d822"):
+        address = parse_address(outer)
+        assert address is not None
+        assert address_reason(address) != "", outer
+
+
+def test_a_teredo_address_carries_two_and_the_client_half_is_deobfuscated() -> None:
+    """Teredo embeds the relay's IPv4 in the prefix and the client's in the last 32 bits,
+    XORed with all ones (RFC 4380 §4) — so ``5601:5601`` *is* 169.254.169.254 and a check
+    reading those bytes literally sees 86.1.86.1. :mod:`ipaddress` undoes the XOR, which
+    is the argument for asking the stdlib rather than slicing bytes here."""
+    carried = embedded_ipv4(ipaddress.IPv6Address("2001:0:53aa:64c::5601:5601"))
+    assert [str(item.address) for item in carried] == ["83.170.6.76", "169.254.169.254"]
+    assert [item.role for item in carried] == ["relay ", "client "]
+
+
+def test_a_mapped_address_reports_what_it_wraps_even_though_the_parser_unwraps_it() -> None:
+    """``parse_address`` turns ``::ffff:127.0.0.1`` into 127.0.0.1 before the classifier
+    sees it, so this form never reaches ``address_reason`` by that route. Handled anyway,
+    because a caller holding an ``IPv6Address`` from somewhere else — a resolver answer
+    parsed by other code, a future call site — must get the same verdict."""
+    address = ipaddress.IPv6Address("::ffff:127.0.0.1")
+    assert [str(item.address) for item in embedded_ipv4(address)] == ["127.0.0.1"]
+    assert "loopback" in address_reason(address)
+
+
+def test_an_address_that_wraps_nothing_says_so() -> None:
+    """``::`` and ``::1`` are not a wrapped ``0.0.0.0`` and ``0.0.0.1``; they are the
+    unspecified and loopback addresses, refused on their own properties. Reporting a
+    wrapped address for them would put a false statement in a refusal message. An IPv4
+    address wraps nothing by construction."""
+    for text in ("::", "::1", "2606:4700:4700::1111", "10.0.0.1", "93.184.216.34"):
+        assert embedded_ipv4(ipaddress.ip_address(text)) == (), text
 
 
 def test_an_unclassifiable_host_fails_closed() -> None:
@@ -351,6 +472,18 @@ def test_every_hostile_answer_is_refused_whatever_the_name_looked_like(
     there is one classifier and not two that can drift."""
     with pytest.raises(UrlNotAllowed):
         resolve_and_check("https://a.example.com/", resolve=resolver({"a.example.com": answer}))
+
+
+def test_a_name_resolving_to_a_tunnel_address_is_refused_too() -> None:
+    """The two halves compose: the resolved answer goes through the same classifier, so a
+    name with an ``AAAA`` record pointing at an ISATAP address gets the same verdict as
+    the literal. This is the shape the attack would actually take — nobody types hex into
+    a prompt when they can publish a record."""
+    resolve = resolver({"docs.example.com": ("2001:470:1f0b:1:0:5efe:a9fe:a9fe",)})
+    with pytest.raises(UrlNotAllowed) as caught:
+        resolve_and_check("https://docs.example.com/x", resolve=resolve)
+    assert "ISATAP" in str(caught.value)
+    assert "169.254.169.254" in str(caught.value)
 
 
 def test_a_mixed_answer_is_refused_rather_than_partially_trusted() -> None:
