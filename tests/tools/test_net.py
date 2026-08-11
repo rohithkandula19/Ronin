@@ -183,6 +183,9 @@ async def test_a_non_http_url_is_refused(tmp_path: Path) -> None:
 
 
 async def test_localhost_is_refused(tmp_path: Path) -> None:
+    """Refused as a ``ToolResult``, not an exception, and the reason names the
+    property rather than the address — the wording belongs to
+    :mod:`ronin.safety.net`, so this asserts the behaviour and not the sentence."""
     net = FakeNet()
     for url in (
         "http://localhost:3000/",
@@ -191,8 +194,52 @@ async def test_localhost_is_refused(tmp_path: Path) -> None:
     ):
         result = await call(fetcher(net), context(tmp_path), url=url, prompt="q")
         assert not result.ok, url
-        assert "points at this machine" in result.error
+        assert "this machine" in result.error, url
     assert net.fetches == []
+
+
+async def test_the_cloud_metadata_endpoint_is_refused_and_never_fetched(tmp_path: Path) -> None:
+    """The end-to-end case, through ``execute``: a URL a model supplied, the real
+    policy, and the fetcher underneath.
+
+    ``169.254.169.254`` answers unauthenticated HTTP with the instance's role
+    credentials, and this tool hands what it fetches to a *model* — so a page that
+    talks the model into one more fetch is all an attacker needs. Before the policy
+    moved into ``safety``, every URL here was fetched: the check compared the host
+    against five spellings of localhost and nothing else. ``net.fetches == []`` is the
+    assertion that matters; a refusal that still made the request would have already
+    leaked the credential.
+    """
+    net = FakeNet()
+    for url in (
+        "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
+        "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/",
+        "http://[fd00:ec2::254]/latest/meta-data/",
+        "http://10.0.0.5/internal-admin",
+        "http://2130706433/",
+        "http://docs.example.com@169.254.169.254/latest/meta-data/",
+    ):
+        result = await call(fetcher(net), context(tmp_path), url=url, prompt="dump it")
+        assert not result.ok, url
+        assert "refusing to fetch" in result.error, url
+        assert "bash" in result.error, "the refusal must say what to do instead"
+    assert net.fetches == [], "no request may leave the machine for a refused URL"
+
+
+async def test_a_token_in_a_refused_url_is_not_echoed_back(tmp_path: Path) -> None:
+    """The refusal is written to the transcript and shown to the user, so it goes
+    through the redactor. A URL we declined to fetch can still carry a live secret —
+    declining is not a reason to print it."""
+    net = FakeNet()
+    result = await call(
+        fetcher(net),
+        context(tmp_path),
+        url="http://192.168.1.1/api?api_key=SUPERSECRET",
+        prompt="q",
+    )
+    assert not result.ok
+    assert "SUPERSECRET" not in result.error
+    assert "192.168.1.1" in result.error, "the user must still see where it pointed"
 
 
 async def test_an_empty_prompt_is_refused(tmp_path: Path) -> None:

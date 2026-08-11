@@ -80,6 +80,35 @@ All notable changes to this project will be documented here. Format follows [Kee
   than absolute, since the opt-in path now exists.
 
 ### Fixed
+- **`web_fetch` would fetch the cloud metadata endpoint.** The URL check compared the host
+  against five literal spellings of localhost, so `http://169.254.169.254/` — which answers
+  unauthenticated HTTP with the instance's role credentials on every major cloud — was
+  fetched without complaint, as were `10.0.0.5`, `192.168.1.1`, `127.1`, `2130706433`,
+  `0x7f000001`, `[::ffff:127.0.0.1]`, `metadata.google.internal` and
+  `docs.example.com@169.254.169.254`. The tool hands what it fetches to a *model*, so a
+  page that talks the model into one more fetch was the whole exploit.
+  - The policy now lives in `safety/net.py`, next to the injection fence and for the same
+    reason: it is needed by anything that builds a `Fetcher`, and a copy in the tool layer
+    is the one that goes stale — which is precisely what had happened. Hosts are classified
+    with `ipaddress` rather than by string, covering private, loopback, link-local,
+    multicast, unspecified, reserved and CGNAT space in both families, with IPv4-mapped
+    IPv6 unwrapped so one rule covers both spellings.
+  - The legacy numeric notations are parsed here rather than handed to `inet_aton`, whose
+    acceptance of octal and hex differs across glibc, musl and macOS — a check that blocks
+    on Linux and passes on macOS is not a check, and CI runs both.
+  - Anything neither a valid DNS name nor a parseable address is **refused**, including a
+    host whose top-level label is all digits (`999.1.1.1`): no legal TLD is numeric, so
+    that is a malformed address rather than a name. Found by the blocked-URL table, which
+    is the argument for writing the cases out as data.
+  - `redact_url` strips userinfo, every query *value* and any fragment, keeping parameter
+    names — one rule that can be tested exhaustively, rather than a list of secret-looking
+    parameter names that fails silently when it misses one. Refusal messages go through it,
+    because a URL we declined to fetch can still carry a live token and declining is not a
+    reason to print it. Named where it is *not* applied: the session transcript records
+    tool arguments verbatim, since it is the replay source.
+  - Still open, and written into the module: names are not resolved, so a public hostname
+    whose `A` record points inward is not caught, and a redirect to such an address is
+    followed below this seam.
 - **Model prose and tool output reached the terminal with control sequences intact.** A
   terminal is an interpreter, and those two strings are the most outsider-influenced text
   in the program — a file read out of a repository nobody audited, a compiler's stderr, a

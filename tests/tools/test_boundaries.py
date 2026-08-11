@@ -75,10 +75,12 @@ LAYER_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     # it. They still may not know which model is calling them.
     ("agents", ("ronin.providers", *ABOVE)),
     ("mcp", ("ronin.providers", *ABOVE)),
-    # The tool layer sits on `core` and, in exactly one place, on `safety`:
-    # `tools/net.py` fences fetched web content with the canonical wrapper from
-    # `safety.injection` rather than growing a second set of markers that could
-    # drift from it. `safety` is a leaf forbidden from importing `ronin.tools`
+    # The tool layer sits on `core` and, in one module, on `safety`: `tools/net.py`
+    # fences fetched web content with the canonical wrapper from `safety.injection`
+    # and asks `safety.net` whether a URL may be fetched at all, rather than growing
+    # a second set of markers and a second URL policy that could drift from them —
+    # the drifting copy is always the one in the layer that merely *uses* the rule.
+    # `safety` is a leaf forbidden from importing `ronin.tools`
     # (see LEAF_FORBIDDEN above), so the edge cannot become a cycle. Listing the
     # tool layer here at all is the point: it was previously unconstrained, so
     # nothing would have noticed a second, less defensible edge appearing.

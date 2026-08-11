@@ -1,7 +1,7 @@
 """See the gate work: ``PYTHONPATH=src uv run python -m ronin.safety.demo``.
 
 Offline, in a throwaway temp directory, with real settings files on disk and the real
-policy engine. Five things are demonstrated, chosen because each is a claim that is easy
+policy engine. Six things are demonstrated, chosen because each is a claim that is easy
 to make and hard to believe without seeing it:
 
 1. a layered config resolving, with provenance for every rule and scalar,
@@ -10,7 +10,9 @@ to make and hard to believe without seeing it:
 3. a refusal carrying feedback the model can act on,
 4. an injected page flagged rather than obeyed, and the follow-up call it inspired
    escalated to ``ask`` even though the same command is on the allowlist,
-5. the sandbox reporting what it can actually do on *this* machine.
+5. every notation of the cloud metadata endpoint refused while the public internet
+   keeps working, and a URL redacted for a log,
+6. the sandbox reporting what it can actually do on *this* machine.
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from ..core.types import ApprovalRequest, DangerLevel, ToolSpec, ToolUse
 from .command import hazards, parse_command
 from .denylist import Denylist
 from .injection import TaintTracker, wrap_and_scan
+from .net import UrlNotAllowed, check_url, redact_url
 from .policy import (
     Answer,
     Outcome,
@@ -218,8 +221,53 @@ async def demo_injection(engine: PolicyEngine, taint: TaintTracker) -> None:
     print(f"    decision={verdict.decision.value}  (taint: {verdict.taint is not None})")
 
 
+async def demo_url_policy() -> None:
+    rule("6. Where a fetch may go — and what a URL says in a log")
+    print("  A URL the *model* chose is a request made from inside the network the user")
+    print("  trusts. The address that matters is not secret: 169.254.169.254 answers")
+    print("  unauthenticated HTTP with the instance's cloud credentials.")
+    print()
+    for url in (
+        "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
+        "http://metadata.google.internal/computeMetadata/v1/",
+        "http://2130706433/",
+        "http://[::ffff:127.0.0.1]/",
+        "http://docs.example.com@169.254.169.254/",
+        "http://10.0.0.5/admin",
+        "http://100.64.0.1/",
+        "http://999.1.1.1/",
+    ):
+        try:
+            check_url(url)
+        except UrlNotAllowed as exc:
+            print(f"    blocked  {url}")
+            print(f"             {str(exc).split(': it points at ')[-1].split('. If')[0]}")
+        else:  # pragma: no cover - a leak here is a failing test, not a demo branch
+            print(f"    LEAKED   {url}")
+    print()
+    print("  Every one of those was fetched before this policy existed: the check it")
+    print("  replaced compared the host against five spellings of localhost, so loopback")
+    print("  in decimal, loopback wearing IPv6 and the metadata endpoint all passed.")
+    print()
+    print("  The public internet is untouched, because a policy that blocks real work")
+    print("  gets switched off and then protects nothing:")
+    for url in ("https://example.com/CHANGELOG.md", "https://api.github.com/repos/o/r"):
+        print(f"    ok       {check_url(url)}")
+    print()
+    print("  And the same string, ready to be written down. Every query value goes and")
+    print("  every name stays, so a log keeps the shape of the call and none of the")
+    print("  secret — one rule, rather than a list of parameter names to maintain:")
+    for url in (
+        "https://api.example.com/v1/send?api_key=live_9f3a&page=2",
+        "https://user:pw@example.com/private",
+        "https://example.com/callback#access_token=ya29.a0Af",
+    ):
+        print(f"    {url}")
+        print(f"      → {redact_url(url)}")
+
+
 async def demo_sandbox() -> None:
-    rule("6. Sandbox: honest about this machine")
+    rule("7. Sandbox: honest about this machine")
     backend = detect(which=shutil.which, platform=sys.platform)
     print(f"  detect() on {sys.platform}: {backend.describe()}")
     print(f"  isolates={backend.isolates}")
@@ -271,6 +319,7 @@ async def main() -> int:
         await demo_feedback(engine, asker)
         await demo_remember(engine)
         await demo_injection(engine, taint)
+        await demo_url_policy()
         await demo_sandbox()
 
         rule("What the audit log recorded")

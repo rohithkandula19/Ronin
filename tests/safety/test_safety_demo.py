@@ -14,7 +14,8 @@ makes a specific promise:
 3. a refusal carries a reason the model can act on ("use staging instead")
 4. "remember this" is a request, never a self-granted authorization
 5. injected text is flagged rather than obeyed, and the follow-up call escalates
-6. the sandbox reports what *this* machine can actually enforce
+6. the cloud metadata endpoint is refused in every notation, and a URL is redacted
+7. the sandbox reports what *this* machine can actually enforce
 """
 
 from __future__ import annotations
@@ -35,6 +36,7 @@ async def test_the_demo_runs_offline_and_reaches_every_scene(
         "use staging instead",
         "Remember is a request",
         "Injection: flagged, not obeyed",
+        "Where a fetch may go",
         "Sandbox: honest about this machine",
     ):
         assert heading in out, f"scene missing: {heading}"
@@ -74,6 +76,26 @@ async def test_the_injection_scene_flags_rather_than_obeys(
     out = capsys.readouterr().out
     assert "Injection: flagged, not obeyed" in out
     assert "escalate" in out.lower()
+
+
+async def test_the_url_scene_refuses_every_address_it_lists(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The scene prints one line per URL, and the word on that line is the claim.
+
+    `LEAKED` is what it prints when `check_url` lets something through, so asserting
+    its absence is asserting the scene is telling the truth rather than merely running
+    — the same reason `tests/cli/test_ronin_cli_demo.py` looks for `FAILED:` instead of
+    trusting the exit code.
+    """
+    await demo.main()
+    out = capsys.readouterr().out
+    assert "LEAKED" not in out, "the demo printed a URL its own policy failed to block"
+    scene = out[out.index("Where a fetch may go") :]
+    for address in ("169.254.169.254", "2130706433", "metadata.google.internal", "100.64.0.1"):
+        assert address in scene, f"the scene stopped covering {address}"
+    assert "<redacted>" in scene, "the redaction half of the scene is missing"
+    assert "live_9f3a" not in scene.split("→", 1)[1], "a secret survived into the redacted form"
 
 
 async def test_the_sandbox_scene_reports_this_machine_rather_than_an_ideal_one(
