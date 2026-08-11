@@ -52,7 +52,7 @@ every command and eventually gets it wrong.
 | `todo_write` | read-only | | the model's plan, rendered in the UI |
 | `task` | read-only | | nested loop, fresh context, returns only a summary |
 | `web_fetch` | read-only | | fetch → markdown → fast model → the answer, cached 15 min |
-| `web_search` | read-only | | titles, URLs, snippets |
+| `web_search` | read-only | | titles, URLs, snippets — brave/tavily/searxng, off unless configured |
 
 ---
 

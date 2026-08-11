@@ -38,6 +38,7 @@ from ronin.cli.wire import (
     build_runtime,
     load_workspace,
     rule_to_json,
+    searcher_from_env,
     subagent_policy_factory,
     system_prompt,
 )
@@ -579,6 +580,90 @@ async def test_connect_mcp_false_skips_the_servers_entirely(tmp_path: Path) -> N
         assert runtime.registry.get("mcp__docs__lookup") is None
     finally:
         await runtime.aclose()
+
+
+def test_no_search_provider_configured_means_no_web_search_and_no_note() -> None:
+    """The default, and it is silence rather than a warning: a user who never asked for
+    search does not need to be told they do not have it."""
+    searcher, note = searcher_from_env({})
+    assert searcher is None
+    assert note is None
+
+
+@pytest.mark.parametrize(
+    ("env", "expected"),
+    [
+        ({"RONIN_SEARCH_PROVIDER": "brave"}, "BRAVE_API_KEY"),
+        ({"RONIN_SEARCH_PROVIDER": "tavily"}, "TAVILY_API_KEY"),
+        ({"RONIN_SEARCH_PROVIDER": "searxng"}, "RONIN_SEARCH_ENDPOINT"),
+        ({"RONIN_SEARCH_PROVIDER": "gooogle"}, "no search provider named"),
+    ],
+)
+def test_a_provider_asked_for_but_unusable_is_a_note_naming_what_is_missing(
+    env: dict[str, str], expected: str
+) -> None:
+    """Asking for search and silently not getting it is the worst outcome, so each way
+    it can be half-configured produces a note that names the variable to set. A note and
+    not an exception: a mistyped provider must not stop a session that had nothing to do
+    with searching."""
+    searcher, note = searcher_from_env(env)
+    assert searcher is None
+    assert note is not None
+    assert expected in note.detail
+    assert note.fatal is False
+
+
+@pytest.mark.parametrize(
+    "env",
+    [
+        {"RONIN_SEARCH_PROVIDER": "brave", "BRAVE_API_KEY": "k"},
+        {"RONIN_SEARCH_PROVIDER": "tavily", "TAVILY_API_KEY": "k"},
+        {
+            "RONIN_SEARCH_PROVIDER": "searxng",
+            "RONIN_SEARCH_ENDPOINT": "https://searx.example.com/search",
+        },
+    ],
+)
+def test_a_fully_configured_provider_yields_a_searcher_and_says_nothing(
+    env: dict[str, str],
+) -> None:
+    """All three providers reach a working searcher from environment alone — no config
+    file to write, which is the convention `.env.example` already describes."""
+    searcher, note = searcher_from_env(env)
+    assert searcher is not None
+    assert note is None
+
+
+async def test_web_search_appears_only_when_a_provider_is_configured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The join, end to end. ``build_registry`` is opt-in by dependency, so a session with
+    no configured provider has no ``web_search`` at all rather than one that always
+    errors — and a configured one has it.
+
+    Driven with ``monkeypatch.setenv`` because ``ToolContext.env`` defaults to the real
+    process environment, which is also why the first half explicitly *unsets* the
+    variables: a developer with ``BRAVE_API_KEY`` exported would otherwise see this test
+    pass for the wrong reason.
+    """
+    paths = workspace(git_repo(tmp_path))
+    loaded = load_workspace(paths)
+    for name in ("RONIN_SEARCH_PROVIDER", "RONIN_SEARCH_ENDPOINT", "BRAVE_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+
+    bare = await build_runtime(loaded, fake_router())
+    try:
+        assert "web_search" not in {spec.name for spec in bare.registry.specs()}
+    finally:
+        await bare.aclose()
+
+    monkeypatch.setenv("RONIN_SEARCH_PROVIDER", "brave")
+    monkeypatch.setenv("BRAVE_API_KEY", "test-key")
+    with_search = await build_runtime(loaded, fake_router())
+    try:
+        assert "web_search" in {spec.name for spec in with_search.registry.specs()}
+    finally:
+        await with_search.aclose()
 
 
 async def test_web_fetch_exists_in_a_wired_session(tmp_path: Path) -> None:

@@ -274,6 +274,7 @@ module = [
     "test_safety_suites",
     "test_search",
     "test_search_edges",
+    "test_searcher",
     "test_session",
     "test_shell",
     "test_shell_failures",

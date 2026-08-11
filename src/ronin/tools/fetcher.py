@@ -48,7 +48,7 @@ import asyncio
 import http.client
 import socket
 import ssl
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from email.message import Message as _Headers
 from typing import Final, Protocol
@@ -130,7 +130,13 @@ class Connection(Protocol):
     module, and it is not observable from the outside any other way.
     """
 
-    def request(self, method: str, url: str, *, headers: dict[str, str]) -> None: ...
+    def request(
+        self,
+        method: str,
+        url: str,
+        body: bytes | None = ...,
+        headers: Mapping[str, str] = ...,
+    ) -> None: ...
 
     def getresponse(self) -> RawResponse: ...
 
@@ -266,19 +272,28 @@ def _decode(body: bytes, content_type: str) -> str:
         return body.decode("utf-8", errors="replace")
 
 
-def fetch_once(
+def request_once(
     url: str,
     resolution: Resolution,
     *,
     connect: Connector,
     timeout: float,
     max_bytes: int,
+    method: str = "GET",
+    headers: Mapping[str, str] | None = None,
+    body: bytes | None = None,
 ) -> Response:
     """One request, to a vetted address, with the hostname preserved.
 
     ``resolution`` is passed in rather than computed here so the caller — which is the
     thing that loops over redirects — cannot accidentally connect to a hop it has not
     vetted. The type makes the order the only possible one.
+
+    ``method``, ``headers`` and ``body`` exist for :mod:`ronin.tools.searcher`, which
+    talks to JSON APIs that want an auth header and sometimes a POST. They live here
+    rather than in a second connection helper so there is exactly one place in the tree
+    that decides what a pinned connection is — a searcher with its own socket code
+    would be a searcher that eventually forgets to pin.
     """
     tls, host, port, path = _target(url)
     # An unpinnable resolution means the resolver could not answer and the policy let it
@@ -287,19 +302,35 @@ def fetch_once(
     # resolver look like a security failure. See `safety.net.Resolution`.
     address = resolution.addresses[0] if resolution.pinnable else host
     connection = connect(host=host, port=port, address=address, tls=tls, timeout=timeout)
+    sent = {"User-Agent": USER_AGENT, "Accept": "*/*", **(headers or {})}
     try:
-        connection.request("GET", path, headers={"User-Agent": USER_AGENT, "Accept": "*/*"})
+        if body is None:
+            connection.request(method, path, headers=sent)
+        else:
+            connection.request(method, path, body=body, headers=sent)
         raw = connection.getresponse()
-        body = raw.read(max_bytes + 1)
-        truncated = len(body) > max_bytes
+        read = raw.read(max_bytes + 1)
+        truncated = len(read) > max_bytes
         return Response(
             status=raw.status,
             headers=raw.headers,
-            body=body[:max_bytes],
+            body=read[:max_bytes],
             truncated=truncated,
         )
     finally:
         connection.close()
+
+
+def fetch_once(
+    url: str,
+    resolution: Resolution,
+    *,
+    connect: Connector,
+    timeout: float,
+    max_bytes: int,
+) -> Response:
+    """A plain ``GET`` through :func:`request_once`. Kept as the fetch path's own name."""
+    return request_once(url, resolution, connect=connect, timeout=timeout, max_bytes=max_bytes)
 
 
 def fetch_sync(
@@ -419,4 +450,5 @@ __all__ = [
     "fetch_once",
     "fetch_sync",
     "pinned_fetcher",
+    "request_once",
 ]

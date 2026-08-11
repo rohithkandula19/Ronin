@@ -23,7 +23,9 @@ from __future__ import annotations
 import email.message
 import re
 import ssl
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Final
 
 import pytest
@@ -94,6 +96,8 @@ class Dialled:
     tls: bool
     path: str = ""
     user_agent: str = ""
+    method: str = ""
+    body: bytes | None = None
 
 
 @dataclass
@@ -116,8 +120,16 @@ class FakeNetwork:
         network: FakeNetwork
         record: Dialled
 
-        def request(self, method: str, url: str, *, headers: dict[str, str]) -> None:
+        def request(
+            self,
+            method: str,
+            url: str,
+            body: bytes | None = None,
+            headers: Mapping[str, str] = MappingProxyType({}),
+        ) -> None:
+            self.record.method = method
             self.record.path = url
+            self.record.body = body
             self.record.user_agent = headers.get("User-Agent", "")
 
         def getresponse(self) -> FakeRaw:

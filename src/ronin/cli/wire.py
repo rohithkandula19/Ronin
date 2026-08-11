@@ -95,7 +95,9 @@ from ..safety.settings import Settings, load_settings
 from ..session import SubagentPolicyFactory, build_session
 from ..tools.base import MAX_RESULT_CHARS, ToolContext
 from ..tools.fetcher import pinned_fetcher
+from ..tools.net import Searcher
 from ..tools.registry import ToolRegistry, build_registry
+from ..tools.searcher import SearchError, provider_named, provider_searcher
 from ..tools.shell import PersistentShell, ShellSession
 from ..ui.commands import Registry as CommandRegistry
 from ..ui.commands import load_registry
@@ -623,14 +625,19 @@ async def build_runtime(
     # answers with, and connects to *those* rather than to the name — see that module
     # for why the second half is what makes the first half more than advisory.
     #
-    # `web_search` is still absent, and that is honest rather than an oversight: a
-    # searcher needs a search provider and a key, and a `web_search` that exists and
-    # always errors teaches the model to keep trying it.
+    # `web_search` appears only when a provider is configured (RONIN_SEARCH_PROVIDER).
+    # Absent otherwise, deliberately: a search tool with no backend that errors on every
+    # call teaches the model to keep trying it, and `build_registry` is built around
+    # exactly this — every group is opt-in by supplying its dependency.
+    searcher, search_note = searcher_from_env(ctx.env)
+    if search_note is not None:
+        notes.append(search_note)
     base_tools = build_registry(
         ctx,
         shell=shell_session,
         fetch=pinned_fetcher(),
         extract=extractor_for(router),
+        search=searcher,
         clock=time.monotonic,
     )
     session = build_session(
@@ -694,6 +701,60 @@ async def build_runtime(
         transcript=transcript,
         closers=tuple(closers),
     )
+
+
+#: Names the search provider ``web_search`` uses. Unset means no ``web_search`` at all,
+#: which is the honest default: a search tool with no backend that errors on every call
+#: teaches the model to keep trying it.
+SEARCH_PROVIDER_ENV = "RONIN_SEARCH_PROVIDER"
+
+#: Overrides the provider's default endpoint. Required in practice for ``searxng``,
+#: since the instance is yours and this build cannot guess where you run it.
+SEARCH_ENDPOINT_ENV = "RONIN_SEARCH_ENDPOINT"
+
+
+def searcher_from_env(env: Mapping[str, str]) -> tuple[Searcher | None, Note | None]:
+    """``(searcher, note)`` for the configured search provider, or ``(None, …)``.
+
+    Reading configuration is this layer's job, not the tool layer's:
+    :mod:`ronin.tools.searcher` takes a provider, a key and an endpoint as arguments and
+    stays pure, which is what lets its tests run with no environment and no network.
+
+    Every failure is a :class:`~ronin.cli.spine.Note` and ``None`` rather than an
+    exception — a mistyped provider name must not stop a session that has nothing to do
+    with searching, and a user who set ``RONIN_SEARCH_PROVIDER`` and got no
+    ``web_search`` needs to be told which of the two reasons applies.
+    """
+    name = env.get(SEARCH_PROVIDER_ENV, "").strip()
+    if not name:
+        return None, None
+    try:
+        provider = provider_named(name)
+    except SearchError as exc:
+        return None, Note(subject="web_search", detail=str(exc))
+
+    endpoint = env.get(SEARCH_ENDPOINT_ENV, "").strip()
+    key = env.get(provider.key_env, "").strip() if provider.needs_key else ""
+    if provider.needs_key and not key:
+        return None, Note(
+            subject="web_search",
+            detail=(
+                f"provider {provider.name!r} is selected but {provider.key_env} is empty, "
+                f"so web_search is not offered. Set it, or unset "
+                f"{SEARCH_PROVIDER_ENV} to stop asking for it."
+            ),
+        )
+    if provider.name == "searxng" and not endpoint:
+        return None, Note(
+            subject="web_search",
+            detail=(
+                f"provider 'searxng' needs {SEARCH_ENDPOINT_ENV} pointing at your own "
+                f"instance (its JSON API must be enabled); web_search is not offered "
+                f"until it is set."
+            ),
+        )
+    searcher = provider_searcher(provider, key=key, endpoint=endpoint)
+    return searcher, None
 
 
 def system_prompt(loaded: Loaded, *, base: str = BASE_SYSTEM_PROMPT) -> str:
