@@ -20,18 +20,24 @@ makes about the allowlist being cheap to say yes to.
 from __future__ import annotations
 
 import ipaddress
+import re
+from typing import Final
 
 import pytest
 
 from ronin.safety.net import (
     REDACTED,
+    Resolution,
+    Resolver,
     UrlNotAllowed,
     address_reason,
     check_url,
     host_reason,
     parse_address,
     redact_url,
+    resolve_and_check,
     split_host,
+    system_resolver,
 )
 
 #: Every one of these reached the fetcher before this change. The second field is what
@@ -265,6 +271,192 @@ def test_the_refusal_says_what_to_do_instead() -> None:
 # --------------------------------------------------------------------------- #
 # the seam
 # --------------------------------------------------------------------------- #
+
+
+# --------------------------------------------------------------------------- #
+# resolution: the half `check_url` cannot do
+# --------------------------------------------------------------------------- #
+
+
+def resolver(answers: dict[str, tuple[str, ...]]) -> Resolver:
+    """A fake DNS. Every test injects one, so the suite never resolves a real name.
+
+    A name that is not in ``answers`` raises ``OSError``, which is what the system
+    resolver does for NXDOMAIN — the case the policy deliberately lets through.
+    """
+
+    def resolve(host: str) -> tuple[str, ...]:
+        if host not in answers:
+            raise OSError(f"Name or service not known: {host}")
+        return answers[host]
+
+    return resolve
+
+
+PUBLIC: Final = ("93.184.216.34",)
+
+
+def test_a_public_name_pointing_at_the_metadata_endpoint_is_refused() -> None:
+    """The attack `check_url` cannot see, and the reason this function exists.
+
+    Nothing about ``https://docs.example.com/`` is malformed, so every literal check in
+    the module passes it. Publishing an ``A`` record that points at 169.254.169.254 is
+    the ordinary way to reach a metadata endpoint from someone else's network — the
+    victim's own resolver does the work.
+    """
+    resolve = resolver({"docs.example.com": ("169.254.169.254",)})
+    with pytest.raises(UrlNotAllowed) as caught:
+        resolve_and_check("https://docs.example.com/x", resolve=resolve)
+    message = str(caught.value)
+    # The whole clause, not a bare substring. Stronger, because the claim is that the
+    # refusal *explains itself* — name, address and property in one sentence — and a
+    # substring check passes on a message that merely happens to contain the name
+    # somewhere. (CodeQL also reads `"host" in some_string` as URL sanitization, which
+    # is the right instinct on a real authorization check and wrong here; this phrasing
+    # is both more precise and not that shape.)
+    assert "the name 'docs.example.com' resolves to 169.254.169.254" in message
+    assert "link-local" in message
+    assert "internal address" in message, "and says why that matters"
+
+
+def test_a_public_name_pointing_at_a_public_address_is_allowed_and_pinnable() -> None:
+    """The control. A policy that blocked this would be switched off within a day."""
+    found = resolve_and_check(
+        "https://docs.example.com/x", resolve=resolver({"docs.example.com": PUBLIC})
+    )
+    assert isinstance(found, Resolution)
+    assert found.host == "docs.example.com"
+    assert found.addresses == PUBLIC
+    assert found.resolved is True
+    assert found.pinnable is True
+
+
+@pytest.mark.parametrize(
+    ("answer", "why"),
+    [
+        (("127.0.0.1",), "loopback"),
+        (("10.0.0.5",), "private"),
+        (("169.254.169.254",), "the metadata endpoint"),
+        (("::1",), "loopback over IPv6"),
+        (("::ffff:10.0.0.1",), "a mapped private address"),
+        (("100.64.0.1",), "carrier-grade NAT"),
+        (("0.0.0.0",), "the unspecified address"),
+    ],
+    ids=lambda value: value if isinstance(value, str) else "",
+)
+def test_every_hostile_answer_is_refused_whatever_the_name_looked_like(
+    answer: tuple[str, ...], why: str
+) -> None:
+    """The resolved address is judged by exactly the same rules as a literal one, so
+    there is one classifier and not two that can drift."""
+    with pytest.raises(UrlNotAllowed):
+        resolve_and_check("https://a.example.com/", resolve=resolver({"a.example.com": answer}))
+
+
+def test_a_mixed_answer_is_refused_rather_than_partially_trusted() -> None:
+    """One public address and one loopback address is not half safe.
+
+    It is a name whose answer depends on which address the client happens to try, and
+    an attacker who controls the record controls the mix. Refusing on *any* bad address
+    is the only reading that does not depend on connection-ordering luck.
+    """
+    resolve = resolver({"mixed.example.com": ("93.184.216.34", "127.0.0.1")})
+    with pytest.raises(UrlNotAllowed, match=re.escape("127.0.0.1")):
+        resolve_and_check("https://mixed.example.com/", resolve=resolve)
+
+
+def test_both_address_families_are_checked() -> None:
+    """A harmless ``A`` record with a loopback ``AAAA`` record reaches this machine on
+    any client that prefers IPv6, which is most of them."""
+    resolve = resolver({"dual.example.com": ("93.184.216.34", "::1")})
+    with pytest.raises(UrlNotAllowed):
+        resolve_and_check("https://dual.example.com/", resolve=resolve)
+
+
+def test_a_url_that_fails_the_literal_check_never_reaches_the_resolver() -> None:
+    """Order matters: the cheap, offline, certain check runs first. Resolving a URL we
+    were always going to refuse is a DNS query made on an attacker's behalf."""
+    asked: list[str] = []
+
+    def spy(host: str) -> tuple[str, ...]:
+        asked.append(host)
+        return PUBLIC
+
+    with pytest.raises(UrlNotAllowed):
+        resolve_and_check("http://169.254.169.254/latest/meta-data/", resolve=spy)
+    with pytest.raises(UrlNotAllowed):
+        resolve_and_check("file:///etc/passwd", resolve=spy)
+    assert asked == []
+
+
+def test_a_literal_address_is_pinnable_without_asking_dns() -> None:
+    """``http://93.184.216.34/`` has nothing to resolve. It still returns a pinnable
+    resolution so a fetcher has one code path for both shapes rather than two."""
+    asked: list[str] = []
+
+    def spy(host: str) -> tuple[str, ...]:
+        asked.append(host)
+        return ()
+
+    found = resolve_and_check("http://93.184.216.34/", resolve=spy)
+    assert found.addresses == ("93.184.216.34",)
+    assert found.pinnable is True
+    assert asked == [], "an address is already an address"
+
+
+def test_an_unresolvable_name_is_allowed_through_and_says_so() -> None:
+    """The deliberate weakness, pinned so it cannot change by accident.
+
+    Refusing here would make every fetch on a machine with a flaky resolver a security
+    refusal, which reads as a bug and gets the check disabled. The accepted cost is
+    written into ``Resolution``: someone who can make resolution fail for a name they
+    control gets the same pass as a name that does not exist. What limits it is
+    ``pinnable`` being ``False`` — there is nothing to pin, so a fetcher connects by
+    name and a name that truly does not resolve fails there.
+    """
+    found = resolve_and_check("https://nope.example.com/", resolve=resolver({}))
+    assert found.resolved is False
+    assert found.pinnable is False
+    assert found.addresses == ()
+    assert "Name or service not known" in found.note
+
+
+def test_a_resolver_that_answers_with_nothing_is_treated_as_a_failure() -> None:
+    """An empty tuple is not "no addresses are bad" — it is "we learned nothing", and
+    it must not read as a clean bill of health."""
+    found = resolve_and_check(
+        "https://empty.example.com/", resolve=resolver({"empty.example.com": ()})
+    )
+    assert found.resolved is False
+    assert found.pinnable is False
+    assert "no addresses" in found.note
+
+
+def test_an_answer_that_is_not_an_address_at_all_is_refused() -> None:
+    """Fail closed on nonsense from the resolver, the same way the literal check fails
+    closed on a host it cannot classify."""
+    resolve = resolver({"weird.example.com": ("not-an-address",)})
+    with pytest.raises(UrlNotAllowed, match="classify"):
+        resolve_and_check("https://weird.example.com/", resolve=resolve)
+
+
+def test_a_token_in_the_url_is_redacted_in_a_resolution_refusal_too() -> None:
+    """Same rule as every other refusal in this module: the message gets shown, logged
+    and pasted into issues, and the URL we declined can still carry a live secret."""
+    resolve = resolver({"docs.example.com": ("10.0.0.1",)})
+    with pytest.raises(UrlNotAllowed) as caught:
+        resolve_and_check("https://docs.example.com/api?token=SUPERSECRET", resolve=resolve)
+    assert "SUPERSECRET" not in str(caught.value)
+    assert REDACTED in str(caught.value)
+
+
+def test_the_system_resolver_is_the_only_thing_that_touches_dns() -> None:
+    """A named default, not an inline call — which is what makes every test above
+    offline. Asserted by identity so a refactor cannot quietly inline it."""
+    import inspect
+
+    signature = inspect.signature(resolve_and_check)
+    assert signature.parameters["resolve"].default is system_resolver
 
 
 def test_the_policy_is_reachable_from_the_package_root() -> None:

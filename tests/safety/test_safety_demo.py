@@ -24,6 +24,11 @@ import pytest
 
 from ronin.safety import demo
 
+#: The name the demo resolves to an internal address. A constant so the assertion below
+#: is an equality comparison against a named value rather than a string literal matched
+#: against a line — see the comment at its use site.
+INWARD_POINTING_NAME = "harmless-looking.example.com"
+
 
 async def test_the_demo_runs_offline_and_reaches_every_scene(
     capsys: pytest.CaptureFixture[str],
@@ -95,7 +100,34 @@ async def test_the_url_scene_refuses_every_address_it_lists(
     for address in ("169.254.169.254", "2130706433", "metadata.google.internal", "100.64.0.1"):
         assert address in scene, f"the scene stopped covering {address}"
     assert "<redacted>" in scene, "the redaction half of the scene is missing"
-    assert "live_9f3a" not in scene.split("→", 1)[1], "a secret survived into the redacted form"
+    # The resolved check is the half a literal check cannot do, so the scene has to show
+    # a name that looks fine being refused for where it points.
+    #
+    # The host is split out of the line and compared for *equality* with a named
+    # constant — no substring match against the output anywhere. It is the stronger
+    # assertion: it rules out the demo printing this name as *allowed*, which is the one
+    # outcome this test exists to catch, and unlike `endswith` it cannot pass on a longer
+    # name ending the same way. It is also the form CodeQL's "incomplete URL substring
+    # sanitization" rule asks for; that rule fires on `in` and on `endswith` alike,
+    # because `endswith("example.com")` matches `evil-example.com` too. The string here is
+    # captured demo output rather than a URL being authorized, so the vulnerability itself
+    # does not apply — but parse-then-compare is the right habit regardless, which is why
+    # this is rewritten rather than suppressed.
+    blocked = [
+        line.split()[-1] for line in scene.splitlines() if line.strip().startswith("blocked")
+    ]
+    assert any(host == INWARD_POINTING_NAME for host in blocked), (
+        f"the public-name-pointing-inward case is not shown as blocked; saw {sorted(blocked)}"
+    )
+    assert "and that is what gets dialled" in scene, "pinning is the point, so it is shown"
+    # The *redacted* lines only — the ones the scene prints as `→ <result>`. Splitting on
+    # the first arrow in the scene used to work and no longer does, because the resolution
+    # block above prints arrows too; the un-redacted "before" line legitimately contains
+    # the secret, so a looser match would fail on the scene telling the truth.
+    redacted = [line for line in scene.splitlines() if line.strip().startswith("→")]
+    assert redacted, "the redaction examples print one `→ result` line each"
+    assert all("live_9f3a" not in line for line in redacted), "a secret survived redaction"
+    assert all("ya29." not in line for line in redacted), "an OAuth fragment survived"
 
 
 async def test_the_sandbox_scene_reports_this_machine_rather_than_an_ideal_one(

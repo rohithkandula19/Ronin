@@ -11,7 +11,8 @@ to make and hard to believe without seeing it:
 4. an injected page flagged rather than obeyed, and the follow-up call it inspired
    escalated to ``ask`` even though the same command is on the allowlist,
 5. every notation of the cloud metadata endpoint refused while the public internet
-   keeps working, and a URL redacted for a log,
+   keeps working — including a *public hostname* whose A record points inward, which
+   no amount of reading the URL can catch — and a URL redacted for a log,
 6. the sandbox reporting what it can actually do on *this* machine.
 """
 
@@ -28,7 +29,7 @@ from ..core.types import ApprovalRequest, DangerLevel, ToolSpec, ToolUse
 from .command import hazards, parse_command
 from .denylist import Denylist
 from .injection import TaintTracker, wrap_and_scan
-from .net import UrlNotAllowed, check_url, redact_url
+from .net import UrlNotAllowed, check_url, redact_url, resolve_and_check
 from .policy import (
     Answer,
     Outcome,
@@ -253,6 +254,38 @@ async def demo_url_policy() -> None:
     print("  gets switched off and then protects nothing:")
     for url in ("https://example.com/CHANGELOG.md", "https://api.github.com/repos/o/r"):
         print(f"    ok       {check_url(url)}")
+
+    print()
+    print("  Now the half a literal check cannot do. Nothing is wrong with the URL")
+    print("  below — the A record is the attack, and the victim's own resolver runs it:")
+    zone = {
+        "docs.example.com": ("93.184.216.34",),
+        "harmless-looking.example.com": ("169.254.169.254",),
+        "half-honest.example.com": ("93.184.216.34", "127.0.0.1"),
+    }
+
+    def fake_dns(host: str) -> tuple[str, ...]:
+        """Injected, because a demo that resolves real names is a demo with a network."""
+        if host not in zone:
+            raise OSError(f"Name or service not known: {host}")
+        return zone[host]
+
+    for host in (*zone, "does-not-resolve.example.com"):
+        url = f"https://{host}/page"
+        try:
+            found = resolve_and_check(url, resolve=fake_dns)
+        except UrlNotAllowed as exc:
+            print(f"    blocked  {host}")
+            print(f"             → {zone[host]} — {str(exc).split(', which is ')[-1][:60]}")
+            continue
+        if found.pinnable:
+            print(f"    ok       {host} → {found.addresses[0]}, and that is what gets dialled")
+        else:
+            print(f"    allowed  {host} — unresolvable, so nothing to pin ({found.note[:34]}…)")
+    print()
+    print("  The addresses come back so the *connection* can use them. A fetcher that")
+    print("  vetted a name and then handed the name to a socket asked DNS twice and")
+    print("  trusted the second answer — which is the rebinding window this closes.")
     print()
     print("  And the same string, ready to be written down. Every query value goes and")
     print("  every name stays, so a log keeps the shape of the call and none of the")

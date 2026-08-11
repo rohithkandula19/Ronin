@@ -5,6 +5,38 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Added
+- **`web_fetch` is a real tool now, and it resolves before it connects.** Two findings in
+  one: the DNS half of the URL policy was missing, and `web_fetch` **did not exist in a
+  real session at all**. `Fetcher` was a type alias with no implementation anywhere in
+  `src/`, and `cli/wire.py` never passed one — the tool was assembled only by demos and
+  tests handing in a fake, so the SSRF hole and the missing tool were the same gap seen
+  from two sides.
+  - `safety/net.py` gains `resolve_and_check`, which runs the literal checks and then the
+    same address rules again on **what the hostname resolves to**. `https://docs.example.com/`
+    passes every literal test and is the ordinary way to reach a metadata endpoint:
+    publish an `A` record pointing at `169.254.169.254` and let the victim's own resolver
+    do the work. Refuses if **any** returned address is disqualified — a name answering
+    with one public and one loopback address is not half safe, it is a name whose answer
+    depends on which address the client tries.
+  - `tools/fetcher.py` is the HTTP client that was missing, built on `http.client` +
+    `socket` + `ssl` (no new dependency). It **pins**: it connects to the vetted address
+    and keeps the hostname only in the `Host` header and the TLS handshake, so
+    certificate verification still happens against the name. Vetting an address and then
+    handing the *name* to a socket asks DNS twice and trusts the second answer, which is
+    the rebinding window — the point of the whole exercise.
+  - **Redirects are followed by hand**, so each hop is re-vetted from scratch;
+    `302 Location: http://169.254.169.254/` dies at the hop, and the tests assert no
+    connection to it was ever opened. Bounded response size, socket timeout, and a
+    finite redirect chain, because a fetch is remote input.
+  - Wired in `cli/wire.py` with an extractor on the **fast** model, built on first use so
+    a session that never fetches constructs no client. `web_search` is still absent, and
+    deliberately so: it needs a search provider and a key, and a tool that exists and
+    always errors teaches the model to keep trying it.
+  - Known, and written into the module: a resolver that *cannot* answer lets the URL
+    through rather than refusing (the weaker of the two options, chosen deliberately —
+    refusing would make a flaky resolver look like a security failure and get the check
+    switched off), and pinning is incompatible with an HTTP proxy, so `HTTPS_PROXY` is
+    ignored rather than half-honoured.
 - **A sqlite session index, and `ronin sessions --search`.** `persistence/` recorded
   everything a session needed but could only answer one question about it — "newest
   first" — because the picker reads one JSON sidecar per session. Two questions it could

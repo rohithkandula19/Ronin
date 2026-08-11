@@ -43,20 +43,28 @@ every API anyone integrates, and a missed name is silent. The cost is that
 ``?page=2`` is redacted too; parameter *names* stay visible, so the shape of a URL
 survives for debugging.
 
+**Two checks, because a URL has two truths.** :func:`check_url` judges the URL as
+written; :func:`resolve_and_check` also judges what the hostname *resolves to*, and
+returns those addresses so the caller can connect to them instead of to the name. The
+second is not optional politeness: publishing an ``A`` record that points at
+``169.254.169.254`` is the ordinary way to reach a metadata endpoint, and such a URL
+passes every literal test here because nothing about it is malformed.
+
+Pinning is what makes the resolved check real rather than advisory. A fetcher that
+vets an address and then hands the *name* to a socket has checked one DNS answer and
+connected on another — the rebinding window. :class:`Resolution` therefore carries
+the vetted addresses, and :func:`ronin.tools.fetcher.pinned_fetcher` dials them while
+keeping the hostname in the ``Host`` header and the TLS handshake.
+
 Known gaps, named rather than papered over:
 
-* **No name resolution.** ``metadata.google.internal`` is caught by name suffix, but
-  a public hostname whose ``A`` record points at ``169.254.169.254`` is not. Closing
-  that means resolving before the fetch and handing the vetted address to the
-  connection — a bigger change with a TOCTOU of its own, and a decision that is
-  pending rather than made.
-* **No redirect check.** A public URL that answers ``302 Location:
-  http://169.254.169.254/`` defeats this, because the redirect is followed inside the
-  injected fetcher, below this seam. A fetcher that follows redirects must call
-  :func:`check_url` again on each hop; the one in this repo is injected and has no
-  default, so there is nothing here to fix yet — but it is written down.
+* **A resolver that cannot answer is allowed through**, not refused — a deliberate
+  choice, and the weaker of the two available ones. Argued in :class:`Resolution`.
 * **6to4 and Teredo** are blocked by prefix, not by unwrapping the IPv4 address
   embedded inside them.
+* **Resolution is not cached and not shared with the connection's own lookup.** The
+  pinned fetcher closes that by connecting to what was vetted, but anything else
+  built on :func:`resolve_and_check` alone inherits the rebinding window.
 
 Depends on :mod:`ipaddress` and :mod:`re` from the standard library, and nothing
 else. No new dependency: the classification is a property lookup on a stdlib type.
@@ -66,7 +74,16 @@ from __future__ import annotations
 
 import ipaddress
 import re
+import socket
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from typing import Final
+
+#: Turns a hostname into the addresses it points at. Injected everywhere it is used:
+#: DNS is the one thing in this module that touches the network, and a test suite that
+#: is required to be offline cannot be allowed to depend on what a real resolver says
+#: about a real name today.
+Resolver = Callable[[str], Sequence[str]]
 
 #: Schemes a fetch may use. ``file://`` is a read, not a fetch, and ``gopher://``
 #: and friends are request-smuggling primitives in a URL parser's clothing.
@@ -308,17 +325,124 @@ def check_url(url: str) -> str:
     return stripped
 
 
+def system_resolver(host: str) -> tuple[str, ...]:
+    """Every address ``host`` currently resolves to, via the system resolver.
+
+    The only function in this package that touches the network, which is why it is a
+    named default rather than an inline call: everything that resolves takes a
+    :data:`Resolver`, so every test injects one and the suite stays offline.
+
+    ``AF_UNSPEC`` on purpose — both families, because a name with a harmless ``A``
+    record and a loopback ``AAAA`` record is a name that reaches this machine on any
+    client that prefers IPv6, which is most of them. Deduplicated with order kept so
+    an error message reads the way the resolver answered.
+    """
+    try:
+        found = socket.getaddrinfo(host, 80, proto=socket.IPPROTO_TCP)
+    except UnicodeError as exc:  # an IDNA name the encoder rejects
+        raise OSError(f"cannot encode the hostname {host!r}: {exc}") from exc
+    return tuple(dict.fromkeys(str(entry[4][0]) for entry in found))
+
+
+@dataclass(frozen=True, slots=True)
+class Resolution:
+    """Where a hostname actually points, as far as we were able to find out.
+
+    ``addresses`` is what a fetcher should **pin**: connecting to a name it resolves
+    again is how a check gets bypassed between the check and the connection, since the
+    second answer need not match the first (DNS rebinding). A fetcher that dials
+    ``addresses`` and carries ``host`` in the ``Host`` header and TLS SNI is doing the
+    only version of this that is not advisory.
+
+    ``resolved`` is ``False`` when the resolver could not answer — and the URL is then
+    **allowed** through, which is a deliberate choice with a real cost:
+
+        A resolver that fails open is a resolver an attacker can arrange to fail.
+        Someone who can make resolution fail for a name they control gets the same
+        pass as someone whose name simply does not exist.
+
+    The reason for accepting that: refusing would make every fetch on a machine with a
+    flaky or absent resolver a security refusal, which reads as a bug and teaches
+    people to disable the check. The mitigation is that ``addresses`` is empty, so a
+    pinning fetcher has nothing to pin and must resolve at connect time — where the
+    connection itself fails for a name that genuinely does not resolve.
+    """
+
+    host: str
+    addresses: tuple[str, ...] = ()
+    resolved: bool = True
+    note: str = ""
+
+    @property
+    def pinnable(self) -> bool:
+        """Whether a fetcher can connect by address instead of by name."""
+        return bool(self.addresses)
+
+
+def resolve_and_check(url: str, *, resolve: Resolver = system_resolver) -> Resolution:
+    """:func:`check_url`, then the same check again on what the name resolves to.
+
+    This is the half :func:`check_url` cannot do. ``http://evil.example.com/`` passes
+    every literal test in this module and is the standard way to reach a metadata
+    endpoint anyway: publish an ``A`` record pointing at ``169.254.169.254`` and let
+    the victim's own resolver do the work. Nothing about the URL looks wrong, because
+    nothing about it *is* wrong — the address is.
+
+    Refuses if **any** returned address is disqualified, not merely if all of them
+    are. A name that answers with one public address and one loopback address is not
+    a name that is half safe; it is a name whose answer depends on which address the
+    client happens to try, and an attacker choosing the mix gets to pick.
+
+    Raises :exc:`UrlNotAllowed` for a literal-form failure (via :func:`check_url`) or
+    for a hostile address. Returns a :class:`Resolution` otherwise, including for the
+    case where resolution failed — see that class for why that is not a refusal.
+    """
+    checked = check_url(url)
+    host = split_host(checked).lower()
+    literal = parse_address(host)
+    if literal is not None:
+        # Already an address, already vetted by `check_url`. Returned as pinnable so a
+        # fetcher has one path for both shapes rather than two.
+        return Resolution(host=host, addresses=(str(literal),))
+    try:
+        found = tuple(resolve(host))
+    except OSError as exc:
+        return Resolution(host=host, resolved=False, note=str(exc))
+    if not found:
+        return Resolution(host=host, resolved=False, note="the resolver returned no addresses")
+    for text in found:
+        address = parse_address(text)
+        if address is None:
+            raise UrlNotAllowed(
+                f"refusing to fetch {redact_url(checked)!r}: its host resolved to "
+                f"{text!r}, which is not an address this program can classify"
+            )
+        reason = address_reason(address)
+        if reason:
+            raise UrlNotAllowed(
+                f"refusing to fetch {redact_url(checked)!r}: the name {host!r} resolves "
+                f"to {text}, which is {reason}. A public hostname pointing at an "
+                f"internal address is how a fetch tool is turned into a request from "
+                f"inside your network — the URL looks fine, and that is the point."
+            )
+    return Resolution(host=host, addresses=found)
+
+
 __all__ = [
     "ALLOWED_SCHEMES",
     "BLOCKED_NAMES",
     "BLOCKED_SUFFIXES",
     "EXTRA_BLOCKED",
     "REDACTED",
+    "Resolution",
+    "Resolver",
     "UrlNotAllowed",
     "address_reason",
     "check_url",
     "host_reason",
     "parse_address",
     "redact_url",
+    "resolve_and_check",
     "split_host",
+    "system_resolver",
 ]

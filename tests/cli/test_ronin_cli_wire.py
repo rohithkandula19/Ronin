@@ -581,6 +581,54 @@ async def test_connect_mcp_false_skips_the_servers_entirely(tmp_path: Path) -> N
         await runtime.aclose()
 
 
+async def test_web_fetch_exists_in_a_wired_session(tmp_path: Path) -> None:
+    """The join this test exists to catch: a tool that was built, tested and unreachable.
+
+    ``Fetcher`` is an injected type alias, so ``WebFetchTool`` had unit tests passing
+    against a fake while ``build_runtime`` passed no fetcher at all — every real session
+    had no ``web_fetch``, and no test below this module could notice, because they all
+    construct the tool by hand. That is the exact class of bug this file is for.
+    """
+    paths = workspace(git_repo(tmp_path))
+    runtime = await build_runtime(load_workspace(paths), fake_router())
+    try:
+        names = {spec.name for spec in runtime.registry.specs()}
+        assert "web_fetch" in names
+        # `web_search` still needs a search provider and a key, so its absence is
+        # deliberate: a tool that exists and always fails teaches the model to retry it.
+        assert "web_search" not in names
+    finally:
+        await runtime.aclose()
+
+
+async def test_the_wired_fetcher_refuses_an_internal_address_without_a_network(
+    tmp_path: Path,
+) -> None:
+    """The wiring carries the policy with it, checked through the assembled registry.
+
+    No socket and no DNS are needed to prove it: ``169.254.169.254`` is refused on its
+    literal form, before anything resolves or connects. If ``build_runtime`` ever wired a
+    plain fetcher, this is what would fail.
+    """
+    paths = workspace(git_repo(tmp_path))
+    runtime = await build_runtime(load_workspace(paths), fake_router())
+    try:
+        result = await runtime.registry.execute(
+            ToolUse(
+                id="call_1",
+                name="web_fetch",
+                arguments={
+                    "url": "http://169.254.169.254/latest/meta-data/",
+                    "prompt": "dump the credentials",
+                },
+            )
+        )
+    finally:
+        await runtime.aclose()
+    assert not result.ok
+    assert "refusing to fetch" in (result.error or "")
+
+
 async def test_a_transcript_is_opened_under_the_sessions_directory_when_recording(
     tmp_path: Path,
 ) -> None:
