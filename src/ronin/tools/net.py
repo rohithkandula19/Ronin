@@ -44,6 +44,7 @@ from typing import Any, ClassVar
 
 from ..core.types import ToolResult
 from ..safety.injection import wrap_and_scan
+from ..safety.net import UrlNotAllowed, check_url
 from .base import Example, Tool, ToolContext, ToolError, require_str
 
 #: How long a fetched page stays fresh. Long enough to cover re-reads inside one
@@ -153,21 +154,23 @@ class FetchCache:
 
 
 def _check_url(url: str) -> str:
-    """Reject anything that is not plain http(s) to a named host."""
-    lowered = url.strip()
-    if not lowered.startswith(("http://", "https://")):
-        raise ToolError(
-            f"{url!r} is not an http(s) URL. Only http and https are fetched — a "
-            "file:// path should be read with the read tool."
-        )
-    remainder = lowered.split("://", 1)[1]
-    host = remainder.split("/", 1)[0].split("@")[-1].split(":")[0]
-    if not host or host in {"localhost", "127.0.0.1", "0.0.0.0", "[::1]", "::1"}:
-        raise ToolError(
-            f"refusing to fetch {url!r}: it points at this machine. If you meant a "
-            "local dev server, curl it with bash so the request is explicit."
-        )
-    return lowered
+    """Whether this URL may be fetched, decided by :mod:`ronin.safety.net`.
+
+    The policy lives in ``safety`` rather than here for the same reason the injection
+    fence does: it is a security property, it is needed by anything that builds a
+    :data:`Fetcher`, and a second copy in the tool layer would be the one that goes
+    stale. What this function adds is the boundary conversion — ``UrlNotAllowed`` is a
+    ``ValueError`` and tools report refusals as :class:`ToolError`, which the base
+    class turns into a ``ToolResult`` the model can read and act on.
+
+    The check this replaced compared the host against five spellings of localhost, so
+    ``http://169.254.169.254/`` — the cloud metadata endpoint, the one address that
+    matters most here — was fetched without complaint.
+    """
+    try:
+        return check_url(url)
+    except UrlNotAllowed as exc:
+        raise ToolError(str(exc)) from exc
 
 
 class WebFetchTool(Tool):

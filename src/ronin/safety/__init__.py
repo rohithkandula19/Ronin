@@ -5,7 +5,7 @@ A gate that prompts on ``ls -la`` gets switched off inside a day, and a switched
 protects nothing at all. So the allowlist is broad on purpose, the refusals explain
 themselves, and "no" carries feedback the model can act on instead of ending the turn.
 
-Six modules, in dependency order:
+Seven modules, in dependency order:
 
 * :mod:`~ronin.safety.command` — parses a command line into segments and resolves each
   segment's real binary. Everything else is built on it, because a regex over a raw
@@ -16,6 +16,11 @@ Six modules, in dependency order:
 * :mod:`~ronin.safety.injection` — all tool output is data; content is flagged, never
   silently stripped; and any call whose arguments quote freshly fetched content
   escalates to ``ask`` regardless of the allowlist.
+* :mod:`~ronin.safety.net` — where a fetch may go, and what a URL may say in a log.
+  A URL the *model* chose is a request made from inside the network the user trusts,
+  so private, loopback and link-local targets are refused in every notation — the
+  cloud metadata endpoint is the one that matters — and unclassifiable hosts fail
+  closed rather than being handed to a resolver.
 * :mod:`~ronin.safety.sandbox` — off by default, and honest: :func:`~ronin.safety.sandbox.detect`
   returns a configured backend or a reason, never a fallback that pretends to isolate.
 * :mod:`~ronin.safety.policy` — rules, a documented precedence order, and the four
@@ -38,6 +43,9 @@ Known gaps, named rather than papered over:
 * Variables other than ``$HOME`` are not expanded, so ``rm -rf "$TARGET"`` is judged on
   the literal text. The deny list therefore cannot see through indirection a shell
   would resolve at runtime.
+* The URL check classifies the host as written and does **not** resolve names, so a
+  public hostname whose ``A`` record points inward is not caught, and a redirect to
+  such an address is followed below this seam. Argued in :mod:`~ronin.safety.net`.
 """
 
 from __future__ import annotations
@@ -81,6 +89,19 @@ from .injection import (
     scan,
     wrap_and_scan,
     wrap_untrusted,
+)
+from .net import (
+    ALLOWED_SCHEMES,
+    BLOCKED_NAMES,
+    BLOCKED_SUFFIXES,
+    REDACTED,
+    UrlNotAllowed,
+    address_reason,
+    check_url,
+    host_reason,
+    parse_address,
+    redact_url,
+    split_host,
 )
 from .policy import (
     BUILTIN_SOURCE,
@@ -132,6 +153,9 @@ from .settings import (
 )
 
 __all__ = [
+    "ALLOWED_SCHEMES",
+    "BLOCKED_NAMES",
+    "BLOCKED_SUFFIXES",
     "BUILTIN_SOURCE",
     "CLOSE_MARKER",
     "CODE_INTERPRETERS",
@@ -146,6 +170,7 @@ __all__ = [
     "OPEN_MARKER",
     "PATH_ARGUMENTS",
     "PROJECT_SETTINGS",
+    "REDACTED",
     "SANDBOX_AUTO_APPROVES",
     "SECRET_DIRECTORIES",
     "SHELL_EXECUTORS",
@@ -193,18 +218,25 @@ __all__ = [
     "TaintTracker",
     "UnattendedAsker",
     "Unavailable",
+    "UrlNotAllowed",
     "Verdict",
+    "address_reason",
     "builtin_rules",
     "builtin_ruleset",
+    "check_url",
     "detect",
     "glob_to_regex",
     "hazards",
+    "host_reason",
     "load_settings",
     "most_restrictive",
+    "parse_address",
     "parse_command",
     "parse_rule",
+    "redact_url",
     "resolve_binary",
     "scan",
+    "split_host",
     "worst_severity",
     "wrap_and_scan",
     "wrap_untrusted",
