@@ -96,12 +96,22 @@ async def test_the_url_scene_refuses_every_address_it_lists(
         assert address in scene, f"the scene stopped covering {address}"
     assert "<redacted>" in scene, "the redaction half of the scene is missing"
     # The resolved check is the half a literal check cannot do, so the scene has to show
-    # a name that looks fine being refused for where it points. Asserted on the *blocked*
-    # line rather than anywhere in the scene: the weaker check would pass if the demo
-    # printed that name as allowed, which is the one outcome this is here to rule out.
-    blocked = [line.strip() for line in scene.splitlines() if line.strip().startswith("blocked")]
-    assert any(line.endswith("harmless-looking.example.com") for line in blocked), (
-        f"the public-name-pointing-inward case is not shown as blocked; saw {blocked}"
+    # a name that looks fine being refused for where it points.
+    #
+    # The host is split out of the line and compared with `==`, rather than matched with
+    # `in`/`endswith` against the whole line. Two reasons, and they agree. It is a
+    # stronger assertion: it rules out the demo printing this name as *allowed*, which is
+    # the one outcome the test exists to catch, and it cannot pass on a longer name that
+    # merely ends the same way. And it is the shape CodeQL's "incomplete URL substring
+    # sanitization" rule asks for — that rule fires on `in` *and* on `endswith`, because
+    # `endswith("example.com")` also matches `evil-example.com`; here the string is demo
+    # output rather than a URL being authorized, but parse-then-compare is the right
+    # habit either way.
+    blocked = {
+        line.split()[-1] for line in scene.splitlines() if line.strip().startswith("blocked")
+    }
+    assert "harmless-looking.example.com" in blocked, (
+        f"the public-name-pointing-inward case is not shown as blocked; saw {sorted(blocked)}"
     )
     assert "and that is what gets dialled" in scene, "pinning is the point, so it is shown"
     # The *redacted* lines only — the ones the scene prints as `→ <result>`. Splitting on
