@@ -308,9 +308,15 @@ def test_a_public_name_pointing_at_the_metadata_endpoint_is_refused() -> None:
     with pytest.raises(UrlNotAllowed) as caught:
         resolve_and_check("https://docs.example.com/x", resolve=resolve)
     message = str(caught.value)
-    assert "docs.example.com" in message
-    assert "169.254.169.254" in message, "the address is the evidence; it has to be shown"
+    # The whole clause, not a bare substring. Stronger, because the claim is that the
+    # refusal *explains itself* — name, address and property in one sentence — and a
+    # substring check passes on a message that merely happens to contain the name
+    # somewhere. (CodeQL also reads `"host" in some_string` as URL sanitization, which
+    # is the right instinct on a real authorization check and wrong here; this phrasing
+    # is both more precise and not that shape.)
+    assert "the name 'docs.example.com' resolves to 169.254.169.254" in message
     assert "link-local" in message
+    assert "internal address" in message, "and says why that matters"
 
 
 def test_a_public_name_pointing_at_a_public_address_is_allowed_and_pinnable() -> None:
