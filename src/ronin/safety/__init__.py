@@ -35,9 +35,13 @@ what lets the whole package be tested offline with no repo, no terminal and no b
 
 Known gaps, named rather than papered over:
 
-* Path checks use ``normpath``, not ``resolve``, so a **symlink** pointing out of the
-  workspace is not caught. Resolving would need the path to exist and would make every
-  decision depend on the disk.
+* The deny list's path classification uses ``normpath``, not ``resolve``, so it does not
+  follow a **symlink**: ``rm -rf ./link`` is judged by the literal ``./link``, not by where
+  the link points. This is deliberate, not a hole in the write boundary — the deny list
+  analyses bash *command text* and must never touch the disk (see :meth:`Denylist.resolve`).
+  The actual file-write confinement is ``ToolContext.resolve`` in the tools layer, which
+  *does* resolve symlinks and refuses any target outside the workspace, so ``read``/
+  ``write``/``edit`` cannot escape the tree through a symlink.
 * Taint tracking is substring matching over fetched spans: it catches a copied span and
   misses a paraphrase. The tradeoff is argued in :mod:`~ronin.safety.injection`.
 * Variables other than ``$HOME`` are not expanded, so ``rm -rf "$TARGET"`` is judged on
