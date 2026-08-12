@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 import stream_harness as h
 
+from ronin.cli.approve import Handoff, PromptAsker
 from ronin.cli.main import (
     EXIT_USAGE,
     WIZARD_QUESTION,
@@ -26,11 +27,15 @@ from ronin.cli.main import (
     SessionsOptions,
     Streams,
     Usage,
+    _app_session,
+    _asker,
+    _wants_modal,
     dispatch,
     main,
     parse,
 )
 from ronin.cli.sdk import Agent
+from ronin.cli.status import current_branch
 from ronin.cli.stream import Conversation
 from ronin.core.protocols import TextChunk
 from ronin.core.types import (
@@ -48,6 +53,7 @@ from ronin.core.types import (
 )
 from ronin.persistence.index import SessionIndex
 from ronin.persistence.transcript import Transcript
+from ronin.ui.app import textual_available
 from ronin.ui.headless import OutputFormat
 
 
@@ -918,3 +924,93 @@ def test_the_console_script_returns_an_int_rather_than_exiting() -> None:
     without catching SystemExit, which is why the contract is a return value.
     """
     assert isinstance(main(["--help"]), int)
+
+
+# --------------------------------------------------------------------------- #
+# who answers an approval, and what the Textual view is actually wired to
+# --------------------------------------------------------------------------- #
+
+
+def test_a_terminal_gets_an_asker_and_a_pipe_does_not() -> None:
+    """The choice that decides whether anyone *can* approve anything.
+
+    A pipe gets ``None``, which means ``UnattendedAsker`` — every gated call refused. That
+    is not a limitation to work around: an approval prompt written to a stream nobody is
+    reading is an approval nobody gave.
+    """
+    piped = Captured()
+    assert _asker(None, piped.streams()) is None
+
+    terminal = Captured(isatty=True)
+    assert isinstance(_asker(None, terminal.streams()), PromptAsker)
+
+    handoff = Handoff()
+    assert _asker(handoff, terminal.streams()) is handoff, "the modal wins over the prompt"
+
+
+@pytest.mark.parametrize(
+    ("argv", "isatty", "expected"),
+    [
+        (["fix it"], True, True),
+        (["fix it"], False, False),
+        (["--no-tui", "fix it"], True, False),
+        ([], True, False),
+    ],
+    ids=["tty-with-prompt", "piped", "tui-disabled", "no-prompt"],
+)
+def test_the_modal_is_offered_exactly_when_the_textual_view_will_run(
+    argv: Sequence[str], isatty: bool, expected: bool
+) -> None:
+    """``_wants_modal`` and ``_interactive`` must agree, or a run shows a modal nobody
+    collects an answer from — or attaches an answer path to a session that never asks.
+    The Textual condition is checked here against the same inputs the view uses."""
+    capture = Captured(isatty=isatty)
+    wants = _wants_modal(options(argv), capture.streams())
+    assert wants == (expected and textual_available())
+
+
+def test_the_textual_session_is_wired_to_the_live_policy(tmp_path: Path) -> None:
+    """The defect this change fixes, asserted at the wiring rather than through a terminal.
+
+    Every callback below was ``None`` in the shipped CLI: the app accepted them and this
+    call site never passed them, so ``esc`` and ``shift+tab`` moved the status line and
+    nothing else. Each assertion is "this key now reaches the thing it names".
+    """
+    handoff = Handoff()
+    agent = agent_for(tmp_path, [])
+    session = _app_session(options(["fix it"]), agent, handoff)
+    policy = agent.runtime.policy
+
+    assert session.on_interrupt is not None
+    assert not policy.cancelled()
+    session.on_interrupt()
+    assert policy.cancelled(), "esc did not reach the policy engine"
+
+    assert session.on_mode_change is not None
+    session.on_mode_change(Mode.PLAN)
+    assert policy.mode is Mode.PLAN, "shift+tab did not reach the policy engine"
+
+    assert session.on_attach is not None, "nothing could ask the human"
+    assert session.on_status is not None, "the status line had no source for context %"
+    assert 0.0 <= session.on_status() <= 1.0
+
+
+def test_the_textual_session_reports_the_model_and_branch_it_is_running_under(
+    tmp_path: Path,
+) -> None:
+    """Both rendered as their empty defaults before this change, because nothing supplied
+    them — a status bar that said ``(no branch)`` inside a git repository."""
+    session = _app_session(options(["fix it"]), agent_for(tmp_path, []), None)
+
+    assert session.model, "the status line had no model name"
+    assert session.cwd == str(tmp_path)
+    # The workspace here is a bare temp directory, so there is genuinely no branch; the
+    # claim is that the value comes from the workspace rather than from a placeholder.
+    assert session.branch == current_branch(tmp_path)
+
+
+def test_without_a_handoff_the_textual_session_cannot_approve_anything(tmp_path: Path) -> None:
+    """A run that fell back from Textual, or an injected agent whose consent path somebody
+    else chose, must not be handed an answer path this function invented."""
+    session = _app_session(options(["fix it"]), agent_for(tmp_path, []), None)
+    assert session.on_attach is None

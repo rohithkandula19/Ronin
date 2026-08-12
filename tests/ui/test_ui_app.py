@@ -174,8 +174,39 @@ def test_the_session_is_data_the_orchestrator_injects() -> None:
 
 
 def test_the_app_never_answers_an_approval_itself() -> None:
-    # There is no ApprovalDecision anywhere in app.py: the UI shows the request and
-    # hands it to the caller. A UI that could construct a decision could approve.
-    source = inspect.getsource(app_module)
-    assert "ApprovalDecision" not in source
-    assert "approved=True" not in source
+    """The app may *carry* a decision and may not *make* one.
+
+    This used to assert the string ``ApprovalDecision`` appeared nowhere in the module,
+    which held while the app could not answer at all. Now that an approval is a modal,
+    the app names the type twice — once as the callback's parameter type, once to check
+    what the modal handed back — and neither is the thing worth forbidding. What must
+    stay impossible is *construction*: the keystroke-to-decision mapping belongs to
+    ``ui.reduce.decision_for``, where it is a table with unit tests, and an app that
+    could call ``ApprovalDecision(approved=True)`` could approve an edit nobody saw.
+    So the check is now on the syntax tree — every call in the module, by name — which
+    is both stricter than the substring (it cannot be satisfied by a rename) and immune
+    to a type annotation looking like a violation.
+    """
+    tree = ast.parse(inspect.getsource(app_module))
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "ApprovalDecision"
+    ]
+    # It builds exactly one, for a modal that vanished without an answer, and refusing is
+    # the only safe reading of that. Every construction here must be a refusal.
+    assert calls, "expected the dismissal fallback; if it is gone, drop this test with it"
+    for call in calls:
+        approved = next((kw.value for kw in call.keywords if kw.arg == "approved"), None)
+        assert isinstance(approved, ast.Constant) and approved.value is False, (
+            "the app built an ApprovalDecision that was not a refusal"
+        )
+
+    named = {
+        node.func.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert "Answer" not in named, "nor may it build the policy layer's answer type"

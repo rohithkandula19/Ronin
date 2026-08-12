@@ -31,6 +31,7 @@ from enum import StrEnum
 from typing import Any
 
 from ronin.core.types import (
+    ApprovalDecision,
     ApprovalRequest,
     Compaction,
     Error,
@@ -472,8 +473,66 @@ def press_escape(
     return EscapeState(last_press=now), EscapeAction.INTERRUPT
 
 
+# --------------------------------------------------------------------------- #
+# Answering an approval — pure, so the modal has no decision of its own to make
+# --------------------------------------------------------------------------- #
+
+#: The keys that answer an :class:`~ronin.core.types.ApprovalRequest`, and what each
+#: one means. Data rather than a branch in the widget, for the reason the rest of this
+#: module exists: the mapping from a keystroke to "this edit may run" is the most
+#: consequential decision the UI makes, and it is unit-tested with no terminal.
+#:
+#: ``y`` and ``a`` are the only approving keys, and neither is bound to ``enter`` or
+#: ``space`` on purpose. A held-down key or a stray newline arriving while an approval
+#: is on screen must not be able to approve anything — the accidental-yes is the failure
+#: mode that matters here, and there is no accidental-no.
+APPROVAL_KEYS: Mapping[str, bool] = {
+    "y": True,
+    "a": True,
+    "n": False,
+    "escape": False,
+}
+
+#: The key that approves *and* asks for the decision to be remembered. The prompt the
+#: human reads is :data:`ronin.ui.render.APPROVAL_PROMPT`, which already names these
+#: three keys — one spelling of the keymap for the renderer and another for the widget
+#: is how the two drift, so this module owns the meaning and that one owns the words.
+REMEMBER_KEY = "a"
+
+#: Why a denial happened, in the words the model is shown. A refusal the model cannot
+#: read as deliberate reads as a malfunction, and it retries.
+DENIED_BY_HUMAN = "the user declined this action"
+
+#: What a remembered approval asks for, in the model's words.
+APPROVED_AND_REMEMBERED = "approved, and remembered for the rest of this session"
+
+
+def decision_for(key: str) -> ApprovalDecision | None:
+    """The decision a keypress means, or ``None`` if the key answers nothing.
+
+    ``None`` is not a denial: an unrecognised key must leave the request standing so
+    the human can still answer it. Returning a denial for every stray keystroke would
+    turn a typo into a refused edit, and returning an approval for one would be
+    indefensible — so the only two outcomes here are "answered" and "not an answer".
+    """
+    approved = APPROVAL_KEYS.get(key)
+    if approved is None:
+        return None
+    if not approved:
+        return ApprovalDecision(approved=False, reason=DENIED_BY_HUMAN)
+    remember = key == REMEMBER_KEY
+    return ApprovalDecision(
+        approved=True,
+        reason=APPROVED_AND_REMEMBERED if remember else "",
+        remember=remember,
+    )
+
+
 __all__ = [
+    "APPROVAL_KEYS",
+    "APPROVED_AND_REMEMBERED",
     "ARGUMENT_SUMMARY_LIMIT",
+    "DENIED_BY_HUMAN",
     "DOUBLE_ESCAPE_WINDOW_SECONDS",
     "ELLIPSIS",
     "ERROR_PREFIX",
@@ -482,6 +541,7 @@ __all__ = [
     "MODE_LABELS",
     "OK_SUMMARY",
     "PRIMARY_ARGUMENT_KEYS",
+    "REMEMBER_KEY",
     "RESULT_ARROW",
     "RESULT_SUMMARY_LIMIT",
     "RUNNING_MARKER",
@@ -490,6 +550,7 @@ __all__ = [
     "EscapeState",
     "ToolLine",
     "ViewState",
+    "decision_for",
     "mode_label",
     "next_mode",
     "press_escape",

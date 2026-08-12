@@ -43,6 +43,7 @@ from types import TracebackType
 from ..context.compaction import Summarizer
 from ..core.types import AgentState, Budget, Event, Mode
 from ..providers.router import Router, load_config
+from ..safety.policy import Asker
 from ..ui.headless import ApprovalTracker, exit_code_for
 from ..ui.reduce import ViewState, reduce_event
 from .spine import Loaded, Note, Paths, Runtime
@@ -169,6 +170,7 @@ class Agent:
         connect_mcp: bool = True,
         resume: AgentState | None = None,
         conversation: Conversation | None = None,
+        asker: Asker | None = None,
     ) -> Agent:
         """Load the workspace at ``path`` and assemble a runtime for it.
 
@@ -177,6 +179,14 @@ class Agent:
         edit, rather than a prompt asking it not to. ``resume`` seeds the conversation
         from a state replayed by ``ronin.persistence.resume``.
 
+        ``asker`` is who gets asked when policy says a call needs a human. Omitting it
+        means :class:`~ronin.safety.policy.UnattendedAsker` — every gated call refused,
+        which is the only safe default for a caller that never said who is watching.
+        Passing one is how an interactive front end (the TUI's
+        :class:`~ronin.cli.approve.Handoff`) or an embedder with its own consent flow
+        answers instead. It is a constructor argument rather than something settable
+        later because the policy engine is built here: an agent's approval authority
+        cannot change under a turn that is already running.
         """
         paths = Paths.discover(path, home=home)
         flags: dict[str, object] = {} if mode is None else {"mode": mode.value}
@@ -188,6 +198,7 @@ class Agent:
             session_id=session_id,
             record=record,
             connect_mcp=connect_mcp,
+            asker=asker,
         )
         if loaded.mode is Mode.PLAN:
             runtime = plan_runtime(runtime)

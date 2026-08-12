@@ -140,6 +140,15 @@ user-defined ones from `.ronin/commands/*.md` with `$ARGUMENTS`. `headless.py` o
 the `--output-format=stream-json` schema and the exit codes **0 done / 1 error /
 2 needs approval**.
 
+An approval takes the whole screen as a modal, and it is raised by the *policy's question*
+rather than by the `ApprovalRequest` event: the loop emits that event for every tool whose
+spec requires approval and only then asks the policy, which in auto-accept mode allows the
+call itself — so a UI driven by the event would interrupt for every edit in the one mode
+that exists to stop interrupting. `cli/approve.py` is the join, and it answers *no* until a
+UI attaches, so a script, a subagent or a dead front end refuses rather than waits. Which
+keystrokes approve is a table in `reduce.py` (`decision_for`) shared by the modal and the
+line prompt; the widget decides nothing.
+
 ### `mcp/` — both directions
 
 JSON-RPC 2.0 over the standard library rather than a dependency: it is a few hundred
@@ -211,7 +220,11 @@ The URL policy unwraps the IPv4-in-IPv6 forms — 6to4, Teredo, NAT64, `::a.b.c.
 reachable before that — but **6rd** hides its IPv4 at a provider-chosen offset inside a
 provider-chosen prefix and cannot be recognised from the address alone.
 
-**Named gaps, elsewhere.** Both web tools now have real backends. `tools/fetcher.py`
+**Named gaps, elsewhere.** `esc esc` (rewind to an earlier turn) is bound, reaches
+`ui.reduce.press_escape`, and is **not wired to anything** — the callback is deliberately
+left unset rather than pointed at an approximation, because restoring a conversation to a
+state it has already left needs a decision about where snapshots live and what "undo"
+means next to `/undo`'s checkpoints. Both web tools now have real backends. `tools/fetcher.py`
 resolves, vets every address the name answers with, connects to the vetted address rather
 than the name, and re-vets every redirect hop. `tools/searcher.py` carries three search
 providers (brave, tavily, self-hosted searxng) as a table, on the same pinned transport;

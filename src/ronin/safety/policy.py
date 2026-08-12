@@ -879,6 +879,19 @@ class PolicyEngine:
         """Ask the loop to stop. Idempotent, and never un-set from inside a turn."""
         self._cancelled = True
 
+    def set_mode(self, mode: Mode) -> None:
+        """Change the permission mode mid-session — what the TUI's mode key calls.
+
+        A method rather than a poked attribute so that the mode has one writer, the same
+        arrangement ``cancel`` has. It is also the honest place to record what this does
+        *not* do: the mode gates what policy allows, and it does not narrow the registry
+        the model is offered. Entering plan mode this way stops every mutating call at
+        the gate; it does not take the edit tools off the table, which is what
+        ``--mode plan`` does at startup through ``plan_runtime``. Nothing here can do
+        that, because the registry is already built and handed to the loop.
+        """
+        self.mode = mode
+
     # -- inspection --------------------------------------------------------- #
 
     @property
@@ -1196,15 +1209,22 @@ class PolicyEngine:
         if isinstance(command, str) and command.strip():
             matcher: Matcher = Exact(argument=COMMAND_ARGUMENT, value=command)
         else:
-            path = next(
+            # The *argument's own name*, not the canonical "path". `Exact` is matched by
+            # `MatchTarget.argument`, which is a literal lookup in the call's arguments —
+            # so a rule written against "path" could never match a call that spells it
+            # `file_path`, which is how every file tool here spells it. The effect was
+            # that "approve for this session" matched nothing and the human was asked
+            # again on the very next identical edit. Recording the real key keeps the
+            # rule as specific as it reads and makes it match what was approved.
+            found = next(
                 (
-                    value
+                    (key, value)
                     for key in sorted(PATH_ARGUMENTS)
                     for value in _as_paths(use.arguments.get(key))
                 ),
                 None,
             )
-            matcher = Exact(argument="path", value=path) if path is not None else AnyUse()
+            matcher = Exact(argument=found[0], value=found[1]) if found is not None else AnyUse()
         return Rule(
             tool=spec.name,
             matcher=matcher,
