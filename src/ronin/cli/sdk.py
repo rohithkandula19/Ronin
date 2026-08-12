@@ -1,16 +1,27 @@
 """The programmatic surface: ``Agent``. Ten lines should be enough to be useful.
 
-::
+Import it from the package root — ``from ronin import Agent`` — which is where the
+documentation points and what :mod:`ronin` re-exports lazily::
 
     import asyncio
-    from ronin.cli.sdk import Agent
+    from ronin import Agent, AgentConfig
 
     async def main() -> None:
+        # Await a run for the folded result...
         async with await Agent.open(".") as agent:
             result = await agent.run("what does src/ronin/core/loop.py do?")
             print(result.text, result.exit_code)
 
+        # ...or iterate the same run for typed events. One implementation, two shapes.
+        agent = Agent(AgentConfig(path=".", tools=[MyTool()]))
+        async for event in agent.run("fix the failing test"):
+            print(type(event).__name__)
+        await agent.aclose()
+
     asyncio.run(main())
+
+``examples/sdk_quickstart.py`` is this, runnable, with a scripted provider so it needs
+no model and no network.
 
 Deliberately small, because every method here is a compatibility promise: open on a
 directory, run a prompt, or stream the events. Everything else is reachable through
@@ -35,15 +46,17 @@ anything. :meth:`Agent.reset` is the explicit way to start over.
 from __future__ import annotations
 
 import os
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Generator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
+from typing import Any
 
 from ..context.compaction import Summarizer
 from ..core.types import AgentState, Budget, Event, Mode
 from ..providers.router import Router, load_config
 from ..safety.policy import Asker
+from ..tools.base import Tool
 from ..ui.headless import ApprovalTracker, exit_code_for
 from ..ui.reduce import ViewState, reduce_event
 from .spine import Loaded, Note, Paths, Runtime
@@ -141,16 +154,125 @@ class AgentResult:
         return self.state.stop_reason
 
 
+@dataclass(frozen=True, slots=True)
+class AgentConfig:
+    """Everything :meth:`Agent.open` takes, as one value.
+
+    Exists so ``Agent(config)`` works — a synchronously-constructible agent that opens
+    its workspace on first use. Assembling a runtime means reading files, resolving a
+    router and possibly connecting to MCP servers, none of which can happen in
+    ``__init__`` without an event loop, so the work is deferred rather than pretended
+    away: ``Agent(config)`` is cheap and the first ``run`` is where the cost lands.
+
+    Every field means exactly what the same-named argument to :meth:`Agent.open` means.
+    """
+
+    path: str | Path = "."
+    router: Router | None = None
+    mode: Mode | None = None
+    home: Path | None = None
+    environ: Mapping[str, str] | None = None
+    session_id: str | None = None
+    record: bool = True
+    connect_mcp: bool = True
+    asker: Asker | None = None
+    #: Tools to add to the ones this workspace builds. Gated like every builtin — see
+    #: :func:`ronin.cli.wire.build_runtime`, which folds them in below the gate.
+    tools: Sequence[Tool] = ()
+
+
+class Run:
+    """One prompt in flight. Await it for the result, or iterate it for the events.
+
+    Both, from one implementation, because both are the same run: ``await`` folds the
+    stream that ``async for`` yields. The alternative — two methods with two bodies —
+    is how a fix to one silently misses the other::
+
+        result = await agent.run("fix the failing test")     # AgentResult
+        async for event in agent.run("fix the failing test"): # typed events
+            ...
+
+    Not reusable: a :class:`Run` is one prompt, and awaiting it twice would run the
+    prompt twice against a conversation that has already moved on. Call ``run`` again.
+    """
+
+    def __init__(
+        self,
+        agent: Agent,
+        prompt: str,
+        *,
+        budget: Budget | None = None,
+        max_iterations: int = DEFAULT_MAX_ITERATIONS,
+        summarizer: Summarizer | None = None,
+        verify: bool = True,
+    ) -> None:
+        self._agent = agent
+        self._prompt = prompt
+        self._budget = budget
+        self._max_iterations = max_iterations
+        self._summarizer = summarizer
+        self._verify = verify
+
+    def __aiter__(self) -> AsyncIterator[Event]:
+        return self._events()
+
+    def __await__(self) -> Generator[Any, None, AgentResult]:
+        return self._fold().__await__()
+
+    async def _events(self) -> AsyncIterator[Event]:
+        runtime = await self._agent._opened()
+        async for event in self._agent.conversation.run_prompt(
+            runtime,
+            self._prompt,
+            budget=self._budget,
+            max_iterations=self._max_iterations,
+            summarizer=self._summarizer,
+            verify=self._verify,
+        ):
+            yield event
+
+    async def _fold(self) -> AgentResult:
+        """Every event, folded into one result. The ``await`` half of this class."""
+        events: list[Event] = []
+        # Requests are counted through the tracker, never directly: `core.loop` emits
+        # ApprovalRequest before the policy answers, so a raw count reports a granted
+        # call as denied and exits 2 on a clean run.
+        tracker = ApprovalTracker()
+        state = ViewState()
+        conversation = self._agent.conversation
+        before = len(conversation.notes)
+        async for event in self:
+            events.append(event)
+            state = reduce_event(state, event)
+            tracker.observe(event)
+        return AgentResult(
+            text=state.text,
+            exit_code=exit_code_for(state, tracker.resolve()),
+            state=state,
+            events=tuple(events),
+            notes=tuple(conversation.notes[before:]),
+        )
+
+
 class Agent:
     """One workspace, one conversation, one set of live objects.
 
     Mutable because a conversation is: :attr:`conversation` accumulates messages
     across :meth:`run` calls, and that accumulation is the point (see the module
     docstring). Everything else it holds is frozen.
+
+    Two ways in, and they are the same object either way. ``await Agent.open(path)``
+    assembles the runtime immediately and hands back a ready agent; ``Agent(config)``
+    is synchronous and assembles on the first run. The second exists because
+    ``Agent(config).run(prompt)`` is the shape callers expect from an SDK, and it would
+    otherwise need an ``await`` in a constructor.
     """
 
-    def __init__(self, runtime: Runtime, *, conversation: Conversation | None = None) -> None:
-        self._runtime = runtime
+    def __init__(
+        self, target: Runtime | AgentConfig, *, conversation: Conversation | None = None
+    ) -> None:
+        self._runtime: Runtime | None = target if isinstance(target, Runtime) else None
+        self._config: AgentConfig | None = None if isinstance(target, Runtime) else target
         self._conversation = Conversation() if conversation is None else conversation
         self._closed = False
 
@@ -171,6 +293,7 @@ class Agent:
         resume: AgentState | None = None,
         conversation: Conversation | None = None,
         asker: Asker | None = None,
+        tools: Sequence[Tool] = (),
     ) -> Agent:
         """Load the workspace at ``path`` and assemble a runtime for it.
 
@@ -199,6 +322,7 @@ class Agent:
             record=record,
             connect_mcp=connect_mcp,
             asker=asker,
+            extra_tools=tools,
         )
         if loaded.mode is Mode.PLAN:
             runtime = plan_runtime(runtime)
@@ -211,6 +335,18 @@ class Agent:
 
     @property
     def runtime(self) -> Runtime:
+        """The assembled objects. Raises if this agent has not opened yet.
+
+        An agent built from an :class:`AgentConfig` has no runtime until its first run,
+        and assembling one needs an event loop that a property does not have. Raising a
+        named error is better than a lazily-synthesized half-runtime, or than ``None``
+        threading through every caller that has one already.
+        """
+        if self._runtime is None:
+            raise RuntimeError(
+                "this agent was built from an AgentConfig and has not opened yet. "
+                "`await agent.ready()` first, or use `await Agent.open(path)`."
+            )
         return self._runtime
 
     @property
@@ -219,7 +355,41 @@ class Agent:
 
     @property
     def loaded(self) -> Loaded:
-        return self._runtime.loaded
+        return self.runtime.loaded
+
+    async def ready(self) -> Agent:
+        """Open the workspace if it is not open, and return self.
+
+        The explicit form of what the first ``run`` does implicitly. Useful when a caller
+        wants :attr:`runtime` or :attr:`loaded` before running anything — inspecting the
+        tool list, reading the notes — and for a test that wants the assembly to fail
+        where it can see it.
+        """
+        await self._opened()
+        return self
+
+    async def _opened(self) -> Runtime:
+        """This agent's runtime, assembling it from the config on first use."""
+        self._check_open()
+        if self._runtime is not None:
+            return self._runtime
+        config = self._config
+        assert config is not None, "an agent has either a runtime or a config"
+        opened = await Agent.open(
+            config.path,
+            router=config.router,
+            mode=config.mode,
+            home=config.home,
+            environ=config.environ,
+            session_id=config.session_id,
+            record=config.record,
+            connect_mcp=config.connect_mcp,
+            asker=config.asker,
+            tools=config.tools,
+            conversation=self._conversation,
+        )
+        self._runtime = opened._runtime
+        return self.runtime
 
     @property
     def notes(self) -> tuple[Note, ...]:
@@ -230,7 +400,7 @@ class Agent:
         handing the caller two shapes to switch on.
         """
         return (
-            *self._runtime.loaded.notes,
+            *self.runtime.loaded.notes,
             *(Note(subject="session", detail=note) for note in self._conversation.notes),
         )
 
@@ -261,8 +431,8 @@ class Agent:
         a session that can hand itself back the write tools is one keystroke away from
         undoing the guarantee it was put into plan mode for. Restart to leave.
         """
-        self._runtime = plan_runtime(self._runtime)
-        self._runtime.policy.set_mode(Mode.PLAN)
+        self._runtime = plan_runtime(self.runtime)
+        self.runtime.policy.set_mode(Mode.PLAN)
 
     def use_model(self, name: str) -> str:
         """Point the *next* turn at a different configured model — what ``/model`` calls.
@@ -276,10 +446,10 @@ class Agent:
         nested agent more expensive as well. The conversation keeps its transcript, so this
         is a change of who answers next, not a new session.
         """
-        router = self._runtime.session.router
+        router = self.runtime.session.router
         client = router.client_for_name(name)
         spec = router.config.models[name]
-        self._conversation.model = self._runtime.session.main.with_model(client, model=spec.model)
+        self._conversation.model = self.runtime.session.main.with_model(client, model=spec.model)
         return spec.model
 
     # ------------------------------------------------------------------ running
@@ -295,21 +465,23 @@ class Agent:
     ) -> AsyncIterator[Event]:
         """The event stream for one prompt, continuing this agent's conversation.
 
+        The same thing as iterating :meth:`run` — this is the spelling that says so at the
+        call site, and it is one line over the same :class:`Run` rather than a second
+        implementation.
+
         Not ``async def``: an async generator function's return type already *is*
         ``AsyncIterator``, and declaring both would force callers to write
         ``await agent.stream(...)`` before iterating.
         """
-        self._check_open()
-        return self._conversation.run_prompt(
-            self._runtime,
+        return self.run(
             prompt,
             budget=budget,
             max_iterations=max_iterations,
             summarizer=summarizer,
             verify=verify,
-        )
+        ).__aiter__()
 
-    async def run(
+    def run(
         self,
         prompt: str,
         *,
@@ -317,31 +489,25 @@ class Agent:
         max_iterations: int = DEFAULT_MAX_ITERATIONS,
         summarizer: Summarizer | None = None,
         verify: bool = True,
-    ) -> AgentResult:
-        """Run one prompt to completion and fold the stream into a result."""
-        events: list[Event] = []
-        # Requests are counted through the tracker, never directly: `core.loop` emits
-        # ApprovalRequest before the policy answers, so a raw count reports a granted
-        # call as denied and exits 2 on a clean run.
-        tracker = ApprovalTracker()
-        state = ViewState()
-        before = len(self._conversation.notes)
-        async for event in self.stream(
+    ) -> Run:
+        """One prompt, as something you can await *or* iterate.
+
+        ``await agent.run(p)`` folds the stream into an :class:`AgentResult`, exactly as
+        it always has. ``async for event in agent.run(p)`` yields the typed events. Not
+        ``async def``, because an awaited coroutine cannot also be iterated — see
+        :class:`Run`.
+
+        A closed agent raises *here*, at the call, rather than later at the first
+        iteration. Deferring it would move the traceback off the line that has the bug.
+        """
+        self._check_open()
+        return Run(
+            self,
             prompt,
             budget=budget,
             max_iterations=max_iterations,
             summarizer=summarizer,
             verify=verify,
-        ):
-            events.append(event)
-            state = reduce_event(state, event)
-            tracker.observe(event)
-        return AgentResult(
-            text=state.text,
-            exit_code=exit_code_for(state, tracker.resolve()),
-            state=state,
-            events=tuple(events),
-            notes=tuple(self._conversation.notes[before:]),
         )
 
     # ------------------------------------------------------------------ closing
@@ -356,7 +522,10 @@ class Agent:
         if self._closed:
             return
         self._closed = True
-        await self._runtime.aclose()
+        # `None` when an AgentConfig-built agent is closed before it ever ran: there is
+        # nothing to close, and that is not an error.
+        if self._runtime is not None:
+            await self._runtime.aclose()
 
     async def __aenter__(self) -> Agent:
         return self

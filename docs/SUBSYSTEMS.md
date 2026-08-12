@@ -36,6 +36,14 @@ disagree, the docstring is right and this file is stale.
 | `session.py` | The orchestrator seat: the only module importing all three of `core`/`providers`/`tools`. | all three |
 | `cli/` | The application, and the only place the joins exist. | anything |
 
+The package root re-exports the SDK — `from ronin import Agent, AgentConfig` — lazily,
+through a PEP 562 `__getattr__`: reaching `Agent` pulls in the whole application layer, and
+`import ronin` must not. `agent.run(p)` returns one object that is both awaitable (folds to
+an `AgentResult`) and async-iterable (yields typed events), so the two shapes cannot drift.
+A caller's own tools go in through `AgentConfig.tools` and are folded in *below* the gate,
+which is what makes them gated like a builtin rather than the one thing in the process that
+escapes policy. `examples/sdk_quickstart.py` runs the whole surface offline.
+
 ### `context/` — the model never sees the whole repo
 
 Five modules, each answering one way a long session dies. A pagerank over the
