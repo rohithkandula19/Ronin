@@ -71,6 +71,10 @@ LAYER_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("verify", LEAF_FORBIDDEN),
     ("persistence", LEAF_FORBIDDEN),
     ("ui", LEAF_FORBIDDEN),
+    # `obs` is an observer: it takes events and usage in and emits logs, timings and
+    # metrics. It imports only `core` (for the Event union it folds) and stdlib —
+    # stricter than LEAF_FORBIDDEN, and pinned exactly by `test_obs_depends_on_core_only`.
+    ("obs", LEAF_FORBIDDEN),
     # These two sit above the tool layer: they produce Tools, so they may import
     # it. They still may not know which model is calling them.
     ("agents", ("ronin.providers", *ABOVE)),
@@ -321,6 +325,25 @@ def test_persistence_depends_on_core_only() -> None:
     for dotted, path in modules_under("persistence"):
         for imported in imported_modules(path, dotted):
             if imported.startswith("ronin.core") or imported.startswith("ronin.persistence"):
+                continue
+            offenders.append(f"{dotted} imports {imported}")
+    assert offenders == [], offenders
+
+
+def test_obs_depends_on_core_only() -> None:
+    """An observer reaches for nothing. Stricter than the ``LEAF_FORBIDDEN`` row above.
+
+    ``ronin.obs`` folds the ``core`` Event union into logs, timings and metrics, and that
+    is the *only* layer it may see. If it could import the tool, provider or session
+    layers, "observability" would quietly become a second path by which prompts, paths
+    or file contents leave the loop — so the observer is kept unable to reach them.
+    """
+    if not (SRC / "obs").is_dir():
+        pytest.skip("obs/ not present")
+    offenders: list[str] = []
+    for dotted, path in modules_under("obs"):
+        for imported in imported_modules(path, dotted):
+            if imported.startswith("ronin.core") or imported.startswith("ronin.obs"):
                 continue
             offenders.append(f"{dotted} imports {imported}")
     assert offenders == [], offenders
