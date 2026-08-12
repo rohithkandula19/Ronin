@@ -66,6 +66,70 @@ All notable changes to this project will be documented here. Format follows [Kee
     suite runs the script. Writing it found the gap it now covers: `Tool`, `ToolContext`
     and `ToolSpec` were unexported, so a caller could be told to bring a tool and had no
     way to declare one.
+- **Skills — a directory of saved workflows that cost one line each until used.** A skill
+  is a `SKILL.md` (frontmatter + body) on disk. Only each skill's name and one-line
+  description enters the prompt at session start; the body loads on demand — via the new
+  `skill(name=…)` tool or by typing `/name` — and comes back as a *tool result*, so the
+  output gate truncates it deterministically like everything else the model reads. A
+  hundred skills cost ~a hundred lines in the cached prefix, not their full text.
+  - **Discovery precedence is "local wins", and a shadow is a note, never a silent
+    override.** `installed < ~/.ronin/skills < ./.ronin/skills`; when two tiers define one
+    name the project copy is used and the shadow is recorded where a human will read it.
+  - `allowed-tools` and `model` are advisory — surfaced in the loaded body, not enforced
+    at the gate — and documented as advisory rather than pretended otherwise. Frontmatter
+    reuses `agents.definitions.parse_frontmatter`, now parameterised with `known_keys` so
+    one grammar serves both agents and skills.
+- **Role workflows ship in the box.** Nine builtin skills — `autoplan`, `office-hours`,
+  `design-review`, `eng-review`, `review`, `ship`, `qa`, `retro`, `investigate` — load as
+  the lowest discovery tier, so a bare workspace already answers `/review` and a project
+  can shadow any of them. `review` and `investigate` drive the real `reviewer`/`fixer`
+  subagents through `task`; each carries an `adapted-from:` line where it borrows a shape.
+- **Plugins — a bundle a stranger wrote, and a consent gate in front of it.** `ronin plugin
+  add <path>` installs a directory carrying any of skills, MCP servers, subagents, slash
+  commands, hooks and assets, declared in a `plugin.json` (`.ronin-plugin/` or the
+  `.codex-plugin` alias). Surfaces merge into the workspace with the plugin *losing* every
+  collision, because a bundle must not be able to redefine a builtin out from under you.
+  - **A community bundle's hooks are `/bin/sh -c` that fire on the model's actions — so
+    installing one is arbitrary code execution the moment it is enabled.** Trust tiers
+    `builtin < official < trusted < community` gate that: an `official`/`trusted` bundle
+    installs silently, a `community` one (or any unrecognised tier) prints exactly what it
+    would run — the shell commands verbatim, the MCP servers, the agents and commands it
+    adds — and installs nothing until a human says yes. A malformed surface is omitted from
+    the summary *and* from what loads, so what is approved is exactly what runs. A
+    programmatic `install(...)` with no approver keeps its existing contract: the caller
+    owns the trust decision.
+  - Hooks arriving from a plugin are normalised through `HookConfig.normalize`, which now
+    accepts the flat, per-entry `event` shape as well as the nested one, so a bundle
+    authored against either the Ronin or the OpenAI hook schema loads without translation.
+- **`ronin acp` — Zed, JetBrains or any ACP editor can drive the loop over stdio.** The
+  Agent Client Protocol server speaks `initialize` / `session/new` / `session/prompt` /
+  `session/cancel` as JSON-RPC over the same framing the MCP server already uses
+  (`mcp.transport`), and maps the loop's event stream to `session/update` notifications. As
+  with `mcp-serve`, nothing but frames reaches stdout — the writer that would corrupt the
+  wire is refused at parse time.
+- **`ronin api` — an OpenAI- and Anthropic-shaped `/v1` in front of the agentic loop.** A
+  stdlib `http.server` exposes `/v1/chat/completions` and `/v1/messages`; each request runs
+  a real turn and returns the provider-native response shape, so an existing SDK client can
+  point its base URL here and get an agent instead of a single completion. Defaults to
+  `127.0.0.1:8080`; SSE streaming is a documented non-goal for now, named rather than
+  half-built.
+- **First-run wizard and `ronin doctor` detection.** On a first interactive run Ronin now
+  detects provider keys in the environment and any local model server it can reach
+  (`ollama`, `lmstudio`, `vllm`), proposes a config, writes it only after asking, and runs
+  a bounded 10-second smoke so "configured" means "answered once". `ronin doctor` reports
+  the same detection. Probing is gated behind an interactive TTY, so a pipe or a test never
+  opens a socket — the whole path stays offline-testable with an injected probe.
+- **`obs/` — an observer that cannot become a second exfiltration path.** A new
+  `SessionObserver.observe(event)` folds the loop's event stream into structured logs,
+  turn timings and counters. It imports **only** `ronin.core` and stdlib, pinned by a
+  dedicated boundary test — if it could reach the tool, provider or session layers,
+  "observability" would quietly become a channel by which prompts, paths or file contents
+  leave the loop.
+- **`evals/harvest.py` — turning real runs into training data, honestly.** `harvest()`
+  takes recorded `TaskOutcome`s, applies a `TrajectoryQualityBar`, and emits ShareGPT
+  (SFT), preference-pair (DPO) and RLVR datasets from the trajectories that clear it —
+  offline, from transcripts, with the bar that dropped a row recorded rather than the row
+  silently vanishing.
 
 ### Fixed
 - **A command you wrote yourself could not be run.** `.ronin/commands/*.md` has always

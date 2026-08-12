@@ -33,6 +33,8 @@ disagree, the docstring is right and this file is stale.
 | `persistence/` | The session that survives the process. | `core` |
 | `ui/` | One event stream, three consumers: TUI, headless, and the reducer they share. | `core` |
 | `mcp/` | Ronin as a client of other servers, and as a server itself. | `core`, `tools` |
+| `ext/` | What a user or a stranger adds: skills, plugins, and the trust gate in front of them. | `core`, `agents`, `mcp`, `tools`, `ui` |
+| `obs/` | An observer that folds the event stream into logs, timings and metrics — and can reach nothing else. | `core` |
 | `session.py` | The orchestrator seat: the only module importing all three of `core`/`providers`/`tools`. | all three |
 | `cli/` | The application, and the only place the joins exist. | anything |
 
@@ -203,6 +205,64 @@ written, tested and documented, and **nothing in production ever constructed one
 the tests and the demo supplied a `NestedRunner`. So "Claude Desktop, Cursor or another
 Ronin can drive this one" was true in the suite and false on a machine.
 
+### `ext/` — what a user or a stranger adds
+
+Three things a session can grow: skills, plugins, and the trust decision in front of a
+plugin. Each is a *discovered surface*, wired the same way every other one is — a constant,
+a `Paths` property, a `Loaded` field, a `_load_*` in `wire.py`, a registration — so adding
+the next surface is the same five edits and not a new architecture.
+
+* **Skills cost one line each until used.** A skill is a `SKILL.md` on disk; only its name
+  and one-line description enter the cached system prefix, and the body loads on demand —
+  through the `skill(name)` tool or a `/name` slash — and returns *as a tool result*, so the
+  same output clamp truncates it as truncates a file read. That is the whole point:
+  a large catalog is priced at its index, not its contents. Discovery is
+  `installed < ~/.ronin/skills < ./.ronin/skills` and a shadow is recorded as a note, never
+  a silent override. Nine role workflows (`review`, `ship`, `qa`, `investigate`, …) ship as
+  the lowest tier, so a bare workspace already answers `/review` and a project can replace
+  any of them.
+* **A plugin is a bundle someone else wrote, and its hooks are `sh -c`.** So the surfaces a
+  plugin contributes — skills, MCP servers, subagents, commands, hooks, assets — merge into
+  the workspace with the plugin *losing every collision*: a bundle cannot redefine a builtin
+  out from under the user. Installing one is arbitrary code execution the moment it is
+  enabled, which is why trust is not advisory.
+* **Trust tiers gate the install, not the load.** `builtin < official < trusted <
+  community`. An `official`/`trusted` bundle installs silently; a `community` one (or any
+  tier the loader does not recognise) is inspected first and the human is shown *exactly*
+  what it would run — the shell commands verbatim, the servers, the agents and commands —
+  and nothing is written until they agree. A surface that will not parse is shown in neither
+  the consent summary nor the loaded set, so what a human approves is precisely what runs.
+  Hooks from either the Ronin or the OpenAI schema normalise through one
+  `HookConfig.normalize` rather than two readers that could disagree.
+
+The layer rule for `ext/` is that it may compose the things above the tool line
+(`agents`, `mcp`, `ui`, `tools`) but must never see `providers` or `cli` —
+`tests/tools/test_boundaries.py` walks the import graph and fails on a lazy import that
+would slip past it.
+
+### `cli/` protocol surfaces — one loop, four front doors
+
+The agentic loop now has four ways in besides the terminal, and every one of them reuses a
+part rather than re-implementing it. `ronin acp` (Zed, JetBrains, any Agent Client Protocol
+editor) and `ronin2 mcp-serve` speak JSON-RPC over the *same* `mcp.transport` framing, and
+both refuse the stdout writer that would corrupt the wire at parse time, because over stdio
+the protocol *is* stdin and stdout. `ronin api` puts an OpenAI-shaped `/v1/chat/completions`
+and an Anthropic-shaped `/v1/messages` in front of the loop on the standard-library
+`http.server`, so an existing SDK client gets an agent where it expected a single
+completion; SSE streaming is named as a non-goal rather than half-built. The first-run
+wizard and `ronin doctor` share one `detect()` — provider keys in the environment, local
+model servers (`ollama`/`lmstudio`/`vllm`) it can reach — and the wizard writes a config
+only after asking and a bounded ten-second smoke, with probing gated behind an interactive
+TTY so a pipe or a test never opens a socket.
+
+### `obs/` — an observer that can reach nothing
+
+`SessionObserver.observe(event)` folds the loop's event stream into structured logs, turn
+timings and counters. Its whole design is a *negative* dependency: it imports `core` and
+stdlib and nothing else, pinned by `test_obs_depends_on_core_only`. If it could reach the
+tool, provider or session layers, "observability" would quietly become a second path by
+which prompts, paths or file contents leave the loop — so it is kept unable to reach them.
+
 ---
 
 ## 2. The joins — where a correct part becomes a wrong whole
@@ -223,6 +283,9 @@ whole reason `cli/` exists and the reason it is the thinnest package in the tree
 | `PolicyEngine.approve` ← a tool call that arrives without a loop | The gated registry does hooks, taint and the clamp but not approval, so a served `bash` reaches the shell with the unconditional deny list never consulted. | `cli/serve.py` (`ExposedTool`) |
 | Settings project layer → git | `.gitignore` ignored all of `.ronin/`, and git does not descend into an ignored directory, so the committed layer of a four-layer config was untrackable. Fixed by default-deny plus an allowlist. | `.gitignore` |
 | System prompt ← `system_suffix()` | RONIN.md and the repo map land outside the provider's cached stable prefix, so the expensive, never-changing part of every request is re-billed every turn. | `cli/wire.py` |
+| Skill catalog → the cached system prefix | Names and descriptions folded into the *stable* prefix, not the suffix — otherwise either the model cannot see a skill exists, or the catalog is re-billed every turn like the gap above. One home reads it for both `/name` and the `skill` tool. | `cli/spine.py` + `cli/wire.py` |
+| Plugin surfaces → the workspace, plugin losing every collision | Merge the naïve way and a community bundle silently redefines a builtin agent or command out from under the user; the intended tool is quietly gone. | `cli/wire.py` (`collect_surfaces`, `_merge_servers`) |
+| Consent asker ← `install()` of a community bundle | Skip the asker and a stranger's `sh -c` hooks install with nobody shown what they run — the trust tier is decorative. The gate lives between `inspect_for_consent` and the write. | `cli/main.py` (`ConsentAsker`) |
 
 The rule this table encodes: **a join is made in exactly one place.** Two callers
 computing `pinned_prefix_tokens` separately is two chances to forget.
@@ -271,6 +334,9 @@ basename and two directories cannot share one; `scripts/sync_typecheck_paths.py`
 fails loudly on a collision, and `test_ronin_*` is the one prefix that cannot
 collide with the ~280 generically-named modules in `packages/cli/tests/`.
 
-**Not decided.** Whether the v2 CLI takes over the shipped `ronin` console script
-(currently `ronin = "ronin_cli.main:app"` in `packages/cli`). Until someone decides,
-the v2 application is reached as `python -m ronin` and the v1 command is untouched.
+**Decided since.** The v2 CLI *does* take over the `ronin` console script — `ronin` and
+`ronin2` both point here, and v1's entry point is renamed `ronin1` (explicitly, not
+removed, so an existing user still has something to type). Console scripts are not
+namespaced, so the two-letter `ro` alias is gone and a test asserts no two distributions
+in this workspace claim one command, because the next collision would be silent — whichever
+distribution installed second wins.
