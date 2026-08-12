@@ -81,13 +81,16 @@ async def test_the_body_is_absent_from_the_assembled_system_prompt(tmp_path: Pat
     ``load_workspace`` → ``Loaded.system_suffix`` → ``system_prompt`` is the exact path a
     live session's stable prefix takes, so this is the claim as the model would meet it.
     """
-    write_skill(tmp_path / ".ronin" / "skills", "review", description="Review a diff.")
+    write_skill(tmp_path / ".ronin" / "skills", "myreview", description="Review a diff.")
     paths = Paths(workspace_root=tmp_path, home=tmp_path / "home", cwd=tmp_path)
     loaded = load_workspace(paths, environ={})
     prompt = system_prompt(loaded)
-    assert "review: Review a diff." in prompt
+    assert "myreview: Review a diff." in prompt
     assert BODY_MARKER not in prompt
-    assert loaded.skills.names() == ("review",)
+    # The project skill loads alongside the built-in role workflows, which `wire` adds
+    # as the lowest tier — so the set is "mine plus the builtins", not "mine alone".
+    assert "myreview" in loaded.skills.names()
+    assert "autoplan" in loaded.skills.names(), "built-in role skills ship by default"
 
 
 # --------------------------------------------------------------------------- #

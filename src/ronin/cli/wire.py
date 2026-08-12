@@ -71,7 +71,8 @@ from ..context.repomap import (
 )
 from ..core.protocols import Policy
 from ..core.types import Budget
-from ..ext.skills import SkillSet, SkillTool, load_skills
+from ..ext.plugins import PluginSurfaces, collect_surfaces, load_installed
+from ..ext.skills import BUILTIN_SKILLS_DIR, SkillSet, SkillSource, SkillTool, load_skills
 from ..mcp.client import TransportProvider, connect_all, default_transport_provider
 from ..mcp.config import McpServerConfig, load_mcp_config
 from ..mcp.jsonrpc import McpError
@@ -229,8 +230,28 @@ def load_workspace(
     if commands_note is not None:
         notes.append(commands_note)
 
-    skills, skills_notes = _load_skills(paths)
+    # Installed plugins are the lowest tier of every surface. Loaded before skills so
+    # their `skills/` join the discovery precedence as an even lower tier than the
+    # built-in role workflows; merged into the rest just below.
+    surfaces, plugin_notes = _load_plugins(paths, environ)
+    notes.extend(plugin_notes)
+
+    skill_extra = (
+        SkillSource(root=BUILTIN_SKILLS_DIR, label="builtin"),
+        *surfaces.skill_sources,
+    )
+    skills, skills_notes = _load_skills(paths, extra=skill_extra)
     notes.extend(skills_notes)
+
+    # Fold plugin-contributed surfaces in, plugins losing every collision: a name a
+    # plugin defines never displaces the same name from the project or a builtin.
+    agents = {**{d.name: d for d in surfaces.agents}, **dict(agents)}
+    servers = _merge_servers(surfaces.mcp_servers, servers)
+    commands = commands.with_user((*commands.user, *surfaces.commands))
+    if surfaces.hooks:
+        # Hooks are additive, not shadowing — every matching hook runs — so plugin hooks
+        # are appended after the workspace's, which only sets execution order.
+        hooks = HookConfig(hooks=(*hooks.hooks, *surfaces.hooks))
 
     sandbox = _load_sandbox(settings, which=which, platform=platform)
     note = sandbox_note(sandbox)
@@ -251,6 +272,21 @@ def load_workspace(
         sandbox=sandbox,
         notes=tuple(notes),
     )
+
+
+def _merge_servers(
+    plugin_servers: Sequence[McpServerConfig], workspace_servers: Sequence[McpServerConfig]
+) -> tuple[McpServerConfig, ...]:
+    """Workspace MCP servers plus plugin ones, workspace winning a name clash.
+
+    Names become the ``mcp__<server>__<tool>`` namespace, so two servers of one name
+    cannot coexist — and a plugin must not be able to shadow a server the project
+    configured. Workspace servers are kept; a plugin server whose name is already taken
+    is dropped.
+    """
+    taken = {config.name for config in workspace_servers}
+    kept = [config for config in plugin_servers if config.name not in taken]
+    return (*kept, *workspace_servers)
 
 
 def _load_memory(paths: Paths) -> tuple[Memory, Note | None]:
@@ -376,22 +412,45 @@ def _load_commands(paths: Paths) -> tuple[CommandRegistry, Note | None]:
         )
 
 
-def _load_skills(paths: Paths) -> tuple[SkillSet, tuple[Note, ...]]:
-    """Discover skills from the project and the user home. Every problem is a note.
+def _load_skills(
+    paths: Paths, *, extra: Sequence[SkillSource] = ()
+) -> tuple[SkillSet, tuple[Note, ...]]:
+    """Discover skills from every tier, lowest first. Every problem is a note.
 
-    A malformed or missing skill never stops a session — one bad ``SKILL.md`` is one
-    workflow unavailable, not a dead workspace — so :func:`load_skills` returns its
-    complaints as strings and they become notes here, the same treatment the command
-    loader gets. Installed-plugin skills are added later by the plugin layer; this loads
-    the two on-disk tiers a bare workspace has.
+    ``extra`` is the lowest-precedence tiers — the built-in role workflows shipped inside
+    Ronin, then any installed plugin's ``skills/`` — so the two on-disk tiers a user
+    controls (``~/.ronin/skills`` then ``./.ronin/skills``) shadow them. A malformed or
+    missing skill never stops a session: one bad ``SKILL.md`` is one workflow
+    unavailable, not a dead workspace, so :func:`load_skills` returns its complaints as
+    strings and they become notes here.
     """
     try:
-        skillset, messages = load_skills(paths.workspace_root, paths.home)
+        skillset, messages = load_skills(paths.workspace_root, paths.home, extra=extra)
     except OSError as exc:
         return SkillSet(), (
             Note(subject="skills", detail=f"{paths.skills_dir} could not be read ({exc})"),
         )
     return skillset, tuple(Note(subject="skills", detail=message) for message in messages)
+
+
+def _load_plugins(
+    paths: Paths, environ: Mapping[str, str] | None
+) -> tuple[PluginSurfaces, list[Note]]:
+    """Every installed plugin's surfaces, and a note for each one that could not load.
+
+    Installed plugins live under ``~/.ronin/plugins``. Each contributes skills, MCP
+    servers, subagents, commands and hooks, and every one of those is the **lowest**
+    precedence tier — a plugin can add a ``review`` command, but a ``review`` you wrote
+    in your own project still wins. A plugin that fails to load, or a surface inside one
+    that is malformed, becomes a note and the rest still load: an ecosystem where one bad
+    third-party bundle bricks the session is an ecosystem nobody enables.
+    """
+    plugins, plugin_notes = load_installed(paths.home)
+    surfaces = collect_surfaces(plugins, environ=environ)
+    notes = [
+        Note(subject="plugins", detail=message) for message in (*plugin_notes, *surfaces.notes)
+    ]
+    return surfaces, notes
 
 
 def _load_sandbox(

@@ -30,14 +30,17 @@ patch attached. The user applies it.
 
 from __future__ import annotations
 
+import asyncio
 import json
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from ..context.memory import RONIN_FILENAME, discover_commands, propose_bootstrap
 from ..safety.settings import RULES_KEY
+from .detect import Detection
 from .doctor import GITIGNORE_PATCH
-from .spine import Paths
+from .spine import RONIN_DIRNAME, Paths
 
 #: The committed project layer, as created. Every key is the builtin default, so the
 #: file changes nothing on its own — it exists to be the place a team edits, and an
@@ -216,10 +219,244 @@ def apply_plan(plan: WizardPlan) -> tuple[Path, ...]:
     return tuple(sorted(written))
 
 
+# --------------------------------------------------------------------------- #
+# Detection-driven model config
+# --------------------------------------------------------------------------- #
+
+#: The router config file the wizard writes, and the name ``load_router`` looks for
+#: first (``.ronin/models.toml``). Kept as a bare name here so this module owns the
+#: one place it is spelled, rather than importing it from ``cli.sdk`` and pulling the
+#: whole SDK into the light first-run path.
+MODELS_CONFIG_FILENAME = "models.toml"
+
+
+@dataclass(frozen=True, slots=True)
+class _ProviderStanza:
+    """How to write a working ``[models.*]`` block for a detected provider key.
+
+    ``provider`` must be a value ``ronin.providers.registry.ADAPTERS`` resolves —
+    ``gemini`` and ``cerebras`` have no first-class adapter but speak the OpenAI wire
+    protocol, so they are written as ``openai-compatible`` with an explicit ``base_url``.
+    """
+
+    provider: str
+    model: str
+    api_key_env: str
+    base_url: str = ""
+
+
+#: One stanza per provider :data:`ronin.cli.detect.PROVIDER_KEYS` can detect. The model
+#: id is a current, sensible default and nothing more — the generated file names it on
+#: its own line precisely so a first-run user changes it in one edit. No price is
+#: written: Ronin invents none, and the ledger records an unpriced model as *unpriced*,
+#: not as free, so an omitted price is honest where a guessed one would be a wrong
+#: number in someone's cost report.
+_PROVIDER_STANZAS: dict[str, _ProviderStanza] = {
+    "anthropic": _ProviderStanza("anthropic", "claude-sonnet-4-6", "ANTHROPIC_API_KEY"),
+    "openai": _ProviderStanza("openai", "gpt-4o", "OPENAI_API_KEY"),
+    "gemini": _ProviderStanza(
+        "openai-compatible",
+        "gemini-2.0-flash",
+        "GEMINI_API_KEY",
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+    ),
+    "groq": _ProviderStanza("groq", "llama-3.3-70b-versatile", "GROQ_API_KEY"),
+    "cerebras": _ProviderStanza(
+        "openai-compatible",
+        "llama-3.3-70b",
+        "CEREBRAS_API_KEY",
+        base_url="https://api.cerebras.ai/v1",
+    ),
+    "openrouter": _ProviderStanza(
+        "openrouter", "anthropic/claude-sonnet-4.5", "OPENROUTER_API_KEY"
+    ),
+}
+
+#: The default local-server model, per server name. Every provider here is a first-class
+#: adapter whose base URL comes from ``KNOWN_BASE_URLS``, so no ``base_url`` is needed.
+#: ``native_tools = false`` routes the model through the tool-call shim automatically —
+#: local models rarely have native tool calling, and the example config makes the same
+#: choice for its ollama entry.
+_LOCAL_STANZAS: dict[str, tuple[str, str]] = {
+    "ollama": ("ollama", "qwen2.5-coder:7b"),
+    "lmstudio": ("lmstudio", "qwen2.5-coder-7b-instruct"),
+    "vllm": ("vllm", "Qwen/Qwen2.5-Coder-7B-Instruct"),
+}
+
+
+def _render_config(*, header: Sequence[str], model_name: str, model_lines: Sequence[str]) -> str:
+    """Assemble a models.toml pointing all three roles at one model.
+
+    All three because a first run has exactly one thing that works, and pointing ``plan``
+    and ``fast`` at it too is what makes ``/doctor`` report a mapped config rather than
+    warning that mechanical work will be billed at the main model's price. It is also the
+    shape ``examples/models.toml`` calls the "fully-free configuration".
+    """
+    lines = [f"# {line}" for line in header]
+    lines += [
+        "",
+        "[roles]",
+        f'main = "{model_name}"',
+        f'plan = "{model_name}"',
+        f'fast = "{model_name}"',
+        "",
+        f"[models.{model_name}]",
+        *model_lines,
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def plan_config(detection: Detection) -> str | None:
+    """Propose a ``models.toml`` body that works with what :func:`detect` found.
+
+    The rule, from the "clean container with only ollama" case up: a provider whose key
+    is set is preferred when there is one — a hosted key usually names a stronger model
+    than a laptop runs — and a reachable local server is used when there is no key, so a
+    container with nothing but ``ollama serve`` still gets a config that runs. Returns
+    ``None`` when there is neither: a first run with no model at all cannot be configured
+    into having one, and inventing a provider would write a file that 401s on turn one.
+
+    Pure text. Nothing here opens a socket or writes a file — :func:`write_config` does
+    the writing, and only when a caller asks.
+    """
+    for name in detection.keys:
+        stanza = _PROVIDER_STANZAS.get(name)
+        if stanza is None:
+            continue
+        model_lines = [
+            f'provider = "{stanza.provider}"',
+            f'model = "{stanza.model}"',
+            f'api_key_env = "{stanza.api_key_env}"',
+        ]
+        if stanza.base_url:
+            model_lines.append(f'base_url = "{stanza.base_url}"')
+        return _render_config(
+            header=[
+                f"Generated by `ronin` first-run setup: ${stanza.api_key_env} is set.",
+                "Check the model line names a model you can access, and add price_in /",
+                "price_out if you want this model in the cost ledger — Ronin invents none.",
+            ],
+            model_name=name,
+            model_lines=model_lines,
+        )
+
+    for name in detection.local_servers:
+        local = _LOCAL_STANZAS.get(name)
+        if local is None:
+            continue
+        provider, model = local
+        return _render_config(
+            header=[
+                f"Generated by `ronin` first-run setup: {name} is reachable locally.",
+                f"Change the model line to one you have pulled (e.g. `{name} list`).",
+                "A local server needs no API key, so none is named — that is correct.",
+            ],
+            model_name=name,
+            model_lines=[
+                f'provider = "{provider}"',
+                f'model = "{model}"',
+                "native_tools = false",
+                "max_context = 32768",
+            ],
+        )
+
+    return None
+
+
+def write_config(paths: Paths, body: str, *, user_layer: bool = False) -> Path | None:
+    """Write a ``models.toml`` ``body`` and return its path, or ``None`` if one exists.
+
+    Never overwrites, for the same reason the rest of the wizard does not: an existing
+    ``models.toml`` is the user's chosen models, and clobbering it to point at a
+    freshly-detected ollama is data loss with a friendly banner. A present file is left
+    untouched and ``None`` is returned so the caller reports "kept" rather than "wrote".
+
+    Writes the project layer (``<workspace>/.ronin/models.toml``) by default and the
+    user layer (``~/.ronin/models.toml``) when ``user_layer`` is set — the cross-project
+    home layer, opt-in like everything else the wizard puts in a home directory.
+    """
+    root = (paths.home / RONIN_DIRNAME) if user_layer else paths.ronin_dir
+    target = root / MODELS_CONFIG_FILENAME
+    if target.exists():
+        return None
+    target.parent.mkdir(parents=True, exist_ok=True)
+    # LF endings, like every other file the wizard writes: a config read back on a
+    # machine that translated newlines is a needless diff, and tests read it as bytes.
+    target.write_text(body, encoding="utf-8", newline="\n")
+    return target
+
+
+# --------------------------------------------------------------------------- #
+# The 10-second smoke task
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True, slots=True)
+class SmokeResult:
+    """Whether the first-run smoke task ran, whether it passed, and why.
+
+    ``ran`` is false only when no smoke was wired: a smoke that was never supplied did
+    not *fail*, and reporting it as a failure would tell a first-run user their model is
+    broken when the truth is nobody asked it a question.
+    """
+
+    ran: bool
+    ok: bool
+    detail: str
+
+    def line(self) -> str:
+        if not self.ran:
+            return f"smoke: skipped — {self.detail}"
+        return f"smoke: {'passed' if self.ok else 'FAILED'} — {self.detail}"
+
+
+async def run_smoke(
+    smoke: Callable[[], Awaitable[bool]] | None,
+    *,
+    timeout: float = 10.0,
+) -> SmokeResult:
+    """Run the injected 10-second smoke task and report pass/fail. Never raises.
+
+    The seam is a callable so the wizard has no opinion about *what* the smoke does — the
+    real caller (``main`` on the first-run path) passes one that opens the freshly-written
+    config and asks the model a trivial scripted question; a test passes one that returns
+    ``True``. Either way this owns only the timing and the reporting, and turns any outcome
+    — a false, a timeout, or a raised exception — into a :class:`SmokeResult`, because a
+    setup step that crashes the wizard is worse than one that says "could not verify".
+
+    ``smoke`` is ``None`` when no task was wired; the result is *skipped*, not failed.
+    """
+    if smoke is None:
+        return SmokeResult(ran=False, ok=False, detail="no smoke task was supplied")
+    try:
+        ok = await asyncio.wait_for(smoke(), timeout)
+    except TimeoutError:
+        return SmokeResult(
+            ran=True, ok=False, detail=f"the smoke task did not finish within {timeout:g}s"
+        )
+    # Deliberately broad: the smoke is caller-supplied and may reach a real provider, so
+    # any failure it raises is a failed smoke to report, not a traceback out of setup.
+    except Exception as exc:
+        return SmokeResult(ran=True, ok=False, detail=f"the smoke task raised {exc!r}")
+    return SmokeResult(
+        ran=True,
+        ok=ok,
+        detail=(
+            "the configured model completed a task" if ok else "the smoke task reported failure"
+        ),
+    )
+
+
 __all__ = [
+    "MODELS_CONFIG_FILENAME",
     "STARTER_PROJECT_SETTINGS",
     "PlannedFile",
+    "SmokeResult",
     "WizardPlan",
     "apply_plan",
+    "plan_config",
     "plan_first_run",
+    "run_smoke",
+    "write_config",
 ]

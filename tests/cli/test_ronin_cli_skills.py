@@ -87,8 +87,12 @@ async def test_the_catalog_is_in_the_system_prompt_but_the_body_is_not(tmp_path:
         await agent.aclose()
 
 
-async def test_no_skill_tool_when_there_are_no_skills(tmp_path: Path) -> None:
-    """A skill tool over an empty catalog would deny every call — so it is absent."""
+async def test_a_bare_workspace_still_ships_the_builtin_role_skills(tmp_path: Path) -> None:
+    """No project/user skills, yet the built-in role workflows load, so the tool is here.
+
+    `wire` adds `ext/role_skills/` as the lowest tier, so even an empty workspace has a
+    non-empty catalog — and the `skill` tool with it.
+    """
     router, _provider = h.scripted_router([h.provider_says("done.")])
     empty = tmp_path / "empty"
     empty.mkdir()
@@ -102,9 +106,36 @@ async def test_no_skill_tool_when_there_are_no_skills(tmp_path: Path) -> None:
         connect_mcp=False,
     )
     try:
-        assert agent.runtime.registry.get("skill") is None
+        assert agent.runtime.registry.get("skill") is not None
+        assert "autoplan" in agent.runtime.loaded.skills.names()
     finally:
         await agent.aclose()
+
+
+async def test_no_skill_tool_when_the_skillset_is_genuinely_empty(tmp_path: Path) -> None:
+    """The wiring invariant, tested at the one point it still holds.
+
+    Builtins mean a normal `open` always has skills, so the "no always-denying tool over
+    an empty catalog" branch is exercised directly: a `Loaded` with its skills replaced
+    by an empty set builds a runtime with no `skill` tool.
+    """
+    from dataclasses import replace
+
+    from ronin.cli.spine import Paths
+    from ronin.cli.wire import build_runtime, load_workspace
+    from ronin.ext.skills import SkillSet
+
+    router, _provider = h.scripted_router([h.provider_says("done.")])
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    loaded = load_workspace(Paths(workspace_root=empty, home=tmp_path / "home", cwd=empty))
+    runtime = await build_runtime(
+        replace(loaded, skills=SkillSet()), router, connect_mcp=False, record=False
+    )
+    try:
+        assert runtime.registry.get("skill") is None
+    finally:
+        await runtime.aclose()
 
 
 async def test_a_human_can_invoke_a_skill_by_slash_name(tmp_path: Path) -> None:

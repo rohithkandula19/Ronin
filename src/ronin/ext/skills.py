@@ -55,6 +55,13 @@ SKILL_FILENAME = "SKILL.md"
 #: Where project- and user-level skills live, relative to their respective roots.
 SKILLS_SUBDIR = Path(".ronin") / "skills"
 
+#: The role-workflow skills that ship *inside* Ronin (``ext/role_skills/*/SKILL.md``).
+#: Discovered as the lowest-precedence tier, below installed plugins, so a user or a
+#: project can always override a built-in workflow with one of their own. Packaged as
+#: data files — see the wheel ``force-include`` in ``pyproject.toml``, without which
+#: they load from a source tree but vanish from a ``pip install``.
+BUILTIN_SKILLS_DIR = Path(__file__).resolve().parent / "role_skills"
+
 #: The frontmatter keys a ``SKILL.md`` may set. ``allowed-tools`` and ``model`` are
 #: optional hints; ``adapted-from`` and ``license`` exist for workflows ported from
 #: another pack, so attribution travels with the file rather than living in a commit
@@ -439,6 +446,7 @@ def _as_tuple(value: Any) -> tuple[str, ...]:
 
 
 __all__ = [
+    "BUILTIN_SKILLS_DIR",
     "SKILLS_SUBDIR",
     "SKILL_FILENAME",
     "SKILL_KEYS",
