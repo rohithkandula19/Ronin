@@ -1551,12 +1551,14 @@ def _app_session(options: Options, agent: Agent, handoff: Handoff | None) -> App
     prompt — so this adds follow-ups without deciding the separate "start with an empty
     TUI" question. ``ctrl+c`` still quits, cancelling the worker that awaits the queue.
 
-    ``on_rewind`` is deliberately still absent. Rewinding to an earlier turn means
-    restoring the conversation to a state it has already left, and the only honest
-    mechanisms for that — snapshot every turn's ``AgentState``, or replay the transcript
-    — are a design decision with consequences for cost and for what "undo" means next to
-    ``/undo``'s checkpoints. Wiring it to something approximate would make ``esc esc``
-    silently lose work. It stays unwired, and says so, until that is decided.
+    ``on_rewind`` is ``esc esc``, unified with ``/undo``. One turn back per double-press,
+    destructive: :meth:`~ronin.cli.stream.Conversation.rewind` truncates the transcript
+    to before the turn *and* restores that turn's checkpoint through the same
+    ``CheckpointStore`` ``/undo`` uses, so the conversation and the work tree move
+    together. It degrades cleanly — a read-only turn rewinds the conversation only, and a
+    mutating turn with no git rewinds the conversation and says the files remain — and the
+    one-line outcome is returned for the TUI to show. The ``index`` the app computes is
+    advisory: v1 always steps one turn back rather than seeking to an arbitrary one.
     """
     policy = agent.runtime.policy
     submissions: asyncio.Queue[str | None] = asyncio.Queue()
@@ -1569,6 +1571,11 @@ def _app_session(options: Options, agent: Agent, handoff: Handoff | None) -> App
             verify=options.verify,
         )
 
+    async def on_rewind(index: int) -> str:
+        del index  # advisory; v1 rewinds exactly one turn (see the docstring)
+        outcome = await agent.conversation.rewind(agent.runtime)
+        return outcome.detail
+
     return AppSession(
         events=multi_turn_events(options.prompt, submissions, run_turn),
         model=agent.runtime.session.router.spec_for(ModelRole.MAIN).model,
@@ -1576,6 +1583,7 @@ def _app_session(options: Options, agent: Agent, handoff: Handoff | None) -> App
         branch=current_branch(agent.loaded.paths.workspace_root),
         mode=agent.loaded.mode,
         on_interrupt=policy.cancel,
+        on_rewind=on_rewind,
         on_mode_change=policy.set_mode,
         on_attach=handoff.attach if handoff is not None else None,
         on_status=lambda: context_share(agent.conversation.messages, agent.runtime.compaction),

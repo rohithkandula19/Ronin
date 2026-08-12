@@ -264,19 +264,28 @@ async def test_shift_tab_cycles_the_mode_and_repaints_the_status_line() -> None:
 async def test_escape_interrupts_and_a_second_escape_rewinds() -> None:
     interrupts: list[int] = []
     rewinds: list[int] = []
+
+    async def on_rewind(index: int) -> str:
+        rewinds.append(index)
+        return f"rewound to turn {index}"
+
     app = _build_app(
         Session(
             events=stream(()),
             on_interrupt=lambda: interrupts.append(1),
-            on_rewind=rewinds.append,
+            on_rewind=on_rewind,
         )
     )
     async with app.run_test() as pilot:
         await pilot.press("escape")
+        await pilot.pause()
         assert interrupts == [1]
         assert rewinds == []
         # inside the double-press window, so this escalates rather than interrupting
         await pilot.press("escape")
+        # the rewind runs on a worker (it restores files and truncates the transcript),
+        # so wait for it rather than reading the list on the next line
+        await app.workers.wait_for_complete()
         assert interrupts == [1]
         assert rewinds == [0]
 
@@ -285,19 +294,41 @@ async def test_a_slow_double_press_interrupts_twice() -> None:
     interrupts: list[int] = []
     rewinds: list[int] = []
     ticks = iter([0.0, 100.0])
+
+    async def on_rewind(index: int) -> str:
+        rewinds.append(index)
+        return "rewound"
+
     app = _build_app(
         Session(
             events=stream(()),
             on_interrupt=lambda: interrupts.append(1),
-            on_rewind=rewinds.append,
+            on_rewind=on_rewind,
         )
     )
     async with app.run_test() as pilot:
         app.keys.clock = lambda: next(ticks)
         await pilot.press("escape")
         await pilot.press("escape")
+        await app.workers.wait_for_complete()
         assert interrupts == [1, 1]
-        assert rewinds == []
+        assert rewinds == [], "outside the window, both presses interrupt and neither rewinds"
+
+
+async def test_a_rewind_notice_is_shown_to_the_user() -> None:
+    # The user-visible half: what `on_rewind` returns is surfaced as a notification, so
+    # the user learns their files and transcript moved back rather than guessing.
+    async def on_rewind(index: int) -> str:
+        return "rewound one turn and restored the work tree"
+
+    app = _build_app(Session(events=stream(()), on_rewind=on_rewind))
+    async with app.run_test() as pilot:
+        await pilot.press("escape")
+        await pilot.press("escape")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        messages = [note.message for note in app._notifications]
+    assert "rewound one turn and restored the work tree" in messages
 
 
 async def test_the_app_never_constructs_an_approval_decision() -> None:

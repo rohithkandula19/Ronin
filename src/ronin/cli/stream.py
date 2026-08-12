@@ -346,6 +346,54 @@ class _Recorder:
 
 
 # --------------------------------------------------------------------------- #
+# Rewind
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True, slots=True)
+class TurnMark:
+    """Where a turn began, so a rewind can land on the state before it.
+
+    ``messages_before`` and ``checkpoints_before`` are list *lengths* captured at the
+    top of :meth:`Conversation.run_prompt`, before the user's prompt is appended —
+    truncating back to them is the conversation as it was before the turn.
+    ``checkpoint_id`` is filled in when the turn takes its first checkpoint (the
+    snapshot of the tree *before* its edits) and stays ``None`` for a read-only turn,
+    or when checkpoints are unavailable. All three name one instant: the one a rewind
+    of this turn restores.
+    """
+
+    messages_before: int
+    checkpoints_before: int
+    checkpoint_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RewindOutcome:
+    """What a :meth:`Conversation.rewind` did, in the words the user should be shown.
+
+    ``ok`` is whether there was a turn to rewind at all. ``files_restored`` is whether
+    the work tree was actually put back — false on a read-only turn (nothing to
+    restore) and on the degraded no-git path (nothing that *could* be restored).
+    ``detail`` is always set: a rewind that said nothing would leave the user unsure
+    whether their files moved.
+    """
+
+    ok: bool
+    messages_dropped: int = 0
+    files_restored: bool = False
+    restored_to: str = ""
+    detail: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.detail:
+            raise ValueError(
+                "a RewindOutcome must explain itself — a silent rewind is how a user "
+                "loses track of what their files hold"
+            )
+
+
+# --------------------------------------------------------------------------- #
 # The conversation
 # --------------------------------------------------------------------------- #
 
@@ -394,6 +442,11 @@ class Conversation:
     _mutated: bool = False
     _checkpointed: bool = False
     _turn_base: str | None = None
+    #: One entry per turn, appended at ``run_prompt`` start — the boundaries a rewind
+    #: (``esc esc``) pops one at a time. Not part of ``AgentState``: a resumed session
+    #: cannot rewind into turns it never ran, and pretending it could is worse than
+    #: saying there is nothing to rewind.
+    _turn_marks: list[TurnMark] = field(default_factory=list)
 
     # ------------------------------------------------------------------ state
 
@@ -441,6 +494,12 @@ class Conversation:
         # reports the previous turn's repair failure a second time.
         self._mutated = False
         self._turn_base = None
+        # Mark where this turn begins so `esc esc` can drop exactly its messages and no
+        # earlier turn's. Captured before the user prompt is appended, which is the
+        # state a rewind of this turn restores the conversation to.
+        self._turn_marks.append(
+            TurnMark(messages_before=len(self.messages), checkpoints_before=len(self.checkpoints))
+        )
 
         self.messages = (*self.messages, Message(role=Role.USER, content_blocks=(Text(prompt),)))
 
@@ -544,6 +603,80 @@ class Conversation:
             self._adopt_compaction(result)
         return result
 
+    async def rewind(self, runtime: Runtime) -> RewindOutcome:
+        """Undo the most recent turn: drop its messages and restore its checkpoint.
+
+        The orchestrator half of ``esc esc`` in the TUI, and the same restore primitive
+        ``/undo`` uses (:meth:`~ronin.verify.checkpoints.CheckpointStore.restore`) — a
+        rewind is an ``/undo`` that also truncates the transcript back to before the
+        turn, so the conversation and the work tree move together rather than the files
+        rewinding under a transcript that still describes the turn that touched them.
+
+        One turn per call and destructive: there is no redo. The turn's messages are the
+        ones appended since the mark taken at its start, and the checkpoint is the one
+        taken before its first mutating call; both name the state *before* the turn, so
+        restoring them lands on the same instant.
+
+        Degrades honestly. A read-only turn has no checkpoint and needs none, so only the
+        conversation rewinds. A mutating turn on a tree with no ``git`` has no checkpoint
+        either, and there the files it changed cannot be put back — the conversation
+        still rewinds and the outcome says the files remain, so the user is never told a
+        restore happened that did not.
+
+        Spend is not refunded: :attr:`budget` counts tokens actually billed, and rewinding
+        a turn does not un-bill them. Only the transcript and the work tree move.
+        """
+        if not self._turn_marks:
+            return RewindOutcome(ok=False, detail="nothing to rewind: no turn has run yet.")
+        mark = self._turn_marks.pop()
+        dropped = len(self.messages) - mark.messages_before
+        self.messages = self.messages[: mark.messages_before]
+        del self.checkpoints[mark.checkpoints_before :]
+        # A following turn must start from a clean per-turn slate; these are otherwise
+        # only reset at the top of run_prompt, which a rewind does not pass through.
+        self._mutated = False
+        self._turn_base = None
+        if mark.checkpoint_id is None:
+            availability = await runtime.checkpoints.ensure()
+            if availability.available:
+                return RewindOutcome(
+                    ok=True,
+                    messages_dropped=dropped,
+                    detail=(
+                        f"rewound one turn, dropping {dropped} message(s); no checkpoint "
+                        "was taken for this turn, so no files were restored."
+                    ),
+                )
+            return RewindOutcome(
+                ok=True,
+                messages_dropped=dropped,
+                detail=(
+                    f"rewound the conversation, dropping {dropped} message(s) — but "
+                    f"checkpoints are off ({availability.reason.value}), so any files "
+                    f"this turn changed remain as they are. {availability.detail}"
+                ),
+            )
+        restore = await runtime.checkpoints.restore(mark.checkpoint_id)
+        if restore.ok:
+            return RewindOutcome(
+                ok=True,
+                messages_dropped=dropped,
+                files_restored=True,
+                restored_to=restore.restored_to,
+                detail=(
+                    f"rewound one turn: dropped {dropped} message(s) and restored the "
+                    f"work tree to {restore.restored_to[:10]}."
+                ),
+            )
+        return RewindOutcome(
+            ok=True,
+            messages_dropped=dropped,
+            detail=(
+                f"rewound the conversation, dropping {dropped} message(s), but could not "
+                f"restore the files: {restore.detail}"
+            ),
+        )
+
     def _summarizer(self, runtime: Runtime) -> Summarizer:
         """The default summarizer, built on first use.
 
@@ -646,6 +779,13 @@ class Conversation:
         if outcome.ok and outcome.checkpoint is not None:
             self.checkpoints.append(outcome.checkpoint)
             self._turn_base = outcome.checkpoint.id
+            if self._turn_marks and self._turn_marks[-1].checkpoint_id is None:
+                # The first checkpoint of the turn is the tree before its edits, which is
+                # exactly what a rewind of this turn restores; a repair attempt's later
+                # checkpoint is intermediate and must not become the rewind target.
+                self._turn_marks[-1] = replace(
+                    self._turn_marks[-1], checkpoint_id=outcome.checkpoint.id
+                )
             content = (
                 f"checkpoint {outcome.checkpoint.short} taken before {before}; "
                 "/undo restores the work tree to it"
@@ -844,6 +984,8 @@ __all__ = [
     "VERIFY_STEP",
     "CompactionPairingError",
     "Conversation",
+    "RewindOutcome",
+    "TurnMark",
     "extractor_for",
     "plan_runtime",
     "run_prompt",

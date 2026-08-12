@@ -156,19 +156,26 @@ def test_the_key_controller_double_press_uses_an_injected_clock() -> None:
     assert keys.press_escape() is EscapeAction.INTERRUPT
 
 
-def test_the_session_is_data_the_orchestrator_injects() -> None:
+async def test_the_session_is_data_the_orchestrator_injects() -> None:
     calls: list[str] = []
+
+    async def rewind(index: int) -> str:
+        calls.append(f"rewind:{index}")
+        return f"rewound to turn {index}"
+
     session = Session(
         events=stream(()),
         on_interrupt=lambda: calls.append("interrupt"),
-        on_rewind=lambda index: calls.append(f"rewind:{index}"),
+        on_rewind=rewind,
         on_mode_change=lambda mode: calls.append(f"mode:{mode.value}"),
         on_approval=lambda request: calls.append(f"approval:{request.name}"),
     )
     assert session.on_interrupt is not None
     session.on_interrupt()
     assert session.on_rewind is not None
-    session.on_rewind(3)
+    # on_rewind is async and returns the one-line notice the app shows — unlike the
+    # other callbacks, which are fire-and-forget.
+    assert await session.on_rewind(3) == "rewound to turn 3"
     assert session.on_mode_change is not None
     session.on_mode_change(Mode.PLAN)
     assert session.on_approval is not None

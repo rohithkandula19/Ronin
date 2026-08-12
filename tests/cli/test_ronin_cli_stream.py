@@ -10,6 +10,7 @@ that the repair loop stops and says so, and that a cancel gets out.
 from __future__ import annotations
 
 import asyncio
+import shutil
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,7 @@ from ronin.cli.stream import (
     VERIFY_STEP,
     CompactionPairingError,
     Conversation,
+    RewindOutcome,
     plan_runtime,
     run_prompt,
 )
@@ -38,6 +40,7 @@ from ronin.core.types import (
 )
 from ronin.persistence.transcript import Transcript, read_events
 from ronin.verify.repair import RepairVerdict
+from ronin.verify.runner import run_command
 
 # The five-section shape ``context.compaction`` requires of a summary. Returned by
 # the fake summarizer so ``missing_sections`` stays empty and the test is about
@@ -524,3 +527,177 @@ async def test_plan_mode_removes_every_mutating_tool_from_the_registry(
     assert "write" not in names and "edit" not in names and "bash" not in names
     assert all(spec.danger_level.value == 0 for spec in planning.registry.specs())
     assert "PLAN MODE" in planning.system
+
+
+# --------------------------------------------------------------------------- #
+# Rewind (esc esc) — truncate the conversation and restore the turn's checkpoint
+# --------------------------------------------------------------------------- #
+
+
+async def test_rewind_with_no_turn_yet_reports_nothing_to_do(tmp_path: Path) -> None:
+    root = h.git_repo(tmp_path)
+    runtime = h.build_runtime(
+        h.build_loaded(root), tools=h.ScriptedTools([h.reader()]), git=h.FakeGit()
+    )
+
+    outcome = await Conversation().rewind(runtime)
+
+    assert isinstance(outcome, RewindOutcome)
+    assert outcome.ok is False
+    assert outcome.messages_dropped == 0
+    assert "nothing to rewind" in outcome.detail
+
+
+async def test_rewind_of_a_mutating_turn_truncates_messages_and_restores(
+    tmp_path: Path,
+) -> None:
+    root = h.git_repo(tmp_path)
+    git = h.FakeGit()
+    runtime = h.build_runtime(
+        h.build_loaded(root), tools=h.ScriptedTools([h.writer(root)]), git=git
+    )
+    model = h.ScriptedModel([h.call("edit", {"file_path": "a.py", "content": "1"}), h.say("done")])
+    conversation = Conversation(model=model)
+
+    await h.collect(conversation.run_prompt(runtime, "edit it", verify=False))
+    assert conversation.messages, "the turn left messages to truncate"
+    assert len(conversation.checkpoints) == 1
+    checkpoints_before = git.checkpoints_taken
+
+    outcome = await conversation.rewind(runtime)
+
+    assert outcome.ok is True and outcome.files_restored is True
+    # Back to before the (only) turn: both the transcript and the checkpoint list.
+    assert conversation.messages == ()
+    assert conversation.checkpoints == []
+    # A restore is a reset+clean, not another checkpoint commit.
+    assert git.checkpoints_taken == checkpoints_before
+    assert any("reset" in " ".join(args) for args in git.argv_log)
+    assert any("clean" in " ".join(args) for args in git.argv_log)
+
+
+async def test_rewind_of_a_read_only_turn_drops_messages_and_restores_nothing(
+    tmp_path: Path,
+) -> None:
+    root = h.git_repo(tmp_path)
+    git = h.FakeGit()
+    runtime = h.build_runtime(h.build_loaded(root), tools=h.ScriptedTools([h.reader()]), git=git)
+    model = h.ScriptedModel([h.call("read", {"file_path": "a.py"}), h.say("done")])
+    conversation = Conversation(model=model)
+
+    await h.collect(conversation.run_prompt(runtime, "look", verify=False))
+    assert conversation.messages
+    assert conversation.checkpoints == [], "a read-only turn takes no checkpoint"
+
+    outcome = await conversation.rewind(runtime)
+
+    assert outcome.ok is True and outcome.files_restored is False
+    assert conversation.messages == ()
+    assert "no checkpoint was taken" in outcome.detail
+    # Nothing to restore, so no reset/clean was ever issued.
+    assert not any("reset" in " ".join(args) for args in git.argv_log)
+
+
+async def test_rewind_degrades_to_conversation_only_without_git(tmp_path: Path) -> None:
+    # No ``.git`` at all: a mutating turn cannot checkpoint, so its files cannot be put
+    # back — the conversation still rewinds and the outcome says the files remain.
+    runtime = h.build_runtime(h.build_loaded(tmp_path), tools=h.ScriptedTools([h.writer(tmp_path)]))
+    model = h.ScriptedModel([h.call("edit", {"file_path": "a.py", "content": "1"}), h.say("ok")])
+    conversation = Conversation(model=model)
+
+    await h.collect(conversation.run_prompt(runtime, "edit", verify=False))
+    assert conversation.checkpoints == []
+    assert (tmp_path / "a.py").read_text(encoding="utf-8") == "1"
+
+    outcome = await conversation.rewind(runtime)
+
+    assert outcome.ok is True and outcome.files_restored is False
+    assert conversation.messages == ()
+    assert "checkpoints are off" in outcome.detail
+    # The file the turn wrote is untouched: an honest degradation restores nothing.
+    assert (tmp_path / "a.py").read_text(encoding="utf-8") == "1"
+
+
+async def test_rewind_is_one_turn_back_and_stacks_to_the_start(tmp_path: Path) -> None:
+    root = h.git_repo(tmp_path)
+    git = h.FakeGit()
+    runtime = h.build_runtime(h.build_loaded(root), tools=h.ScriptedTools([h.reader()]), git=git)
+    model = h.ScriptedModel(
+        [
+            h.call("read", {"file_path": "a.py"}),
+            h.say("one"),
+            h.call("read", {"file_path": "b.py"}),
+            h.say("two"),
+        ]
+    )
+    conversation = Conversation(model=model)
+
+    await h.collect(conversation.run_prompt(runtime, "first", verify=False))
+    after_first = conversation.messages
+    await h.collect(conversation.run_prompt(runtime, "second", verify=False))
+    assert len(conversation.messages) > len(after_first)
+
+    second = await conversation.rewind(runtime)
+    assert second.ok is True
+    assert conversation.messages == after_first, "exactly one turn back, not the whole session"
+
+    first = await conversation.rewind(runtime)
+    assert first.ok is True
+    assert conversation.messages == (), "a second rewind lands on the start"
+
+    exhausted = await conversation.rewind(runtime)
+    assert exhausted.ok is False, "and a third has nothing left to rewind"
+
+
+async def test_a_turn_after_a_rewind_continues_from_the_truncated_transcript(
+    tmp_path: Path,
+) -> None:
+    # The point of truncating rather than view-only: the model's next turn must not see
+    # the rewound turn's messages, or the rewind changed nothing it can act on.
+    root = h.git_repo(tmp_path)
+    runtime = h.build_runtime(
+        h.build_loaded(root), tools=h.ScriptedTools([h.reader()]), git=h.FakeGit()
+    )
+    model = h.ScriptedModel([h.say("one"), h.say("two")])
+    conversation = Conversation(model=model)
+
+    await h.collect(conversation.run_prompt(runtime, "first", verify=False))
+    await conversation.rewind(runtime)
+    await h.collect(conversation.run_prompt(runtime, "second", verify=False))
+
+    # The second turn's request carried exactly one user message — the rewound "first"
+    # is gone from what the model was handed.
+    second_request = model.calls[-1].messages
+    user_texts = [
+        block.text
+        for message in second_request
+        if message.role is Role.USER
+        for block in message.content_blocks
+        if isinstance(block, Text)
+    ]
+    assert user_texts == ["second"]
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="uses a real local git")
+async def test_rewind_really_reverts_a_file_on_disk(tmp_path: Path) -> None:
+    # The integration proof: a real shadow git repo, a real file, a real restore. The
+    # unit tests above use FakeGit for the branching; this one shows the bytes move.
+    root = tmp_path
+    await run_command(["git", "init", "--quiet"], cwd=root)
+    target = root / "poem.txt"
+    target.write_text("before\n", encoding="utf-8")
+    runtime = h.build_runtime(h.build_loaded(root), tools=h.ScriptedTools([h.writer(root)]))
+    model = h.ScriptedModel(
+        [h.call("edit", {"file_path": "poem.txt", "content": "after\n"}), h.say("done")]
+    )
+    conversation = Conversation(model=model)
+
+    await h.collect(conversation.run_prompt(runtime, "rewrite the poem", verify=False))
+    assert target.read_text(encoding="utf-8") == "after\n"
+    assert len(conversation.checkpoints) == 1
+
+    outcome = await conversation.rewind(runtime)
+
+    assert outcome.ok is True and outcome.files_restored is True
+    assert target.read_text(encoding="utf-8") == "before\n", "the edit is gone from disk"
+    assert conversation.messages == ()

@@ -153,7 +153,13 @@ class Session:
     mode: Mode = Mode.ASK
     show_thinking: bool = False
     on_interrupt: Callable[[], None] | None = None
-    on_rewind: Callable[[int], None] | None = None
+    #: ``esc esc``: rewind to an earlier turn. Async and returning a one-line notice,
+    #: because a rewind restores files (a ``git`` call) and truncates the transcript —
+    #: the app runs it on a worker and shows the sentence it returns. What a rewind *is*
+    #: (truncate, restore, or degrade to conversation-only) is entirely this callback's
+    #: decision; the app carries the outcome and chooses nothing. Unset (demo, replay)
+    #: leaves ``esc esc`` inert.
+    on_rewind: Callable[[int], Awaitable[str | None]] | None = None
     on_mode_change: Callable[[Mode], None] | None = None
     on_approval: Callable[[ApprovalRequest], None] | None = None
     on_attach: Callable[[Asking], None] | None = None
@@ -393,10 +399,28 @@ def _build_app(session: Session) -> Any:
         def action_escape(self) -> None:
             action = self.keys.press_escape()
             if action is EscapeAction.REWIND:
-                if self.session.on_rewind:
-                    self.session.on_rewind(max(self.state.turn_index - 1, 0))
+                if self.session.on_rewind is not None:
+                    # Rewind restores files (a git call) and truncates the conversation,
+                    # so it is async and runs on a worker rather than blocking the key
+                    # handler. Non-exclusive, so it does not cancel the event consumer.
+                    self.run_worker(self._rewind(max(self.state.turn_index - 1, 0)))
             elif self.session.on_interrupt:
                 self.session.on_interrupt()
+
+        async def _rewind(self, index: int) -> None:
+            """Ask the orchestrator to rewind, and surface the one-line outcome.
+
+            The app decides nothing here: what a rewind *is* — truncate the transcript,
+            restore the checkpoint, or degrade to conversation-only — is the injected
+            ``on_rewind``'s call, and this only shows the sentence it returns. The
+            transcript already on screen is left as the log of what happened; the notice
+            is how the user learns the underlying state moved back.
+            """
+            if self.session.on_rewind is None:  # pragma: no cover - guarded by the caller
+                return
+            notice = await self.session.on_rewind(index)
+            if notice:
+                self.notify(notice)
 
         def action_cycle_mode(self) -> None:
             mode = self.keys.cycle_mode()
