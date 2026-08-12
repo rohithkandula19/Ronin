@@ -264,6 +264,12 @@ async def main() -> int:
             else:
                 summary = outcome.body.strip() or f"builtin, argument={outcome.argument!r}"
                 print(f"{line:<28} ✓ {summary}")
+        print()
+        print("the two outcomes are different things to the session: a builtin *acts*, and")
+        print("a user command is a *prompt* — the body above is what the model is asked, so")
+        print("it runs as an ordinary turn with the same budget and verification.")
+        print("all thirteen builtins are wired; the dispatcher reads this registry, so a")
+        print("file dropped into .ronin/commands is invokable without restarting anything.")
 
     section("9. answering an approval — which keys grant what, and which grant nothing")
     print("the request above is answered by a keystroke, and the mapping is a pure")

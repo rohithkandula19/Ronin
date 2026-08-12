@@ -5,6 +5,27 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Fixed
+- **A command you wrote yourself could not be run.** `.ronin/commands/*.md` has always
+  been parsed, validated (`$ARGUMENTS`, `$1..$n`, `$$`, builtin-shadow refusal) and loaded
+  onto `Loaded.commands` at startup — and the dispatcher handed the parser
+  `BUILTIN_REGISTRY` instead, so the one place a user could type their command answered
+  *unknown command*. Dispatch is now against the workspace's registry, and a user command
+  runs as an ordinary turn: same budget, same verification, same transcript.
+- **Seven of the thirteen slash commands were declared and not wired**, all falling into
+  one shared "not wired into this line session" branch. All seven now work:
+  - `/compact` folds the transcript on demand via a new `Conversation.compact_now` and
+    reports both token counts, because the ratio is the only honest measure of whether
+    compacting bought anything.
+  - `/model` lists the configured models and switches the one that answers the next turn
+    (new `Router.client_for_name` + `LoopClient.with_model`). **Only the main model moves** —
+    subagents and compaction keep their own roles, so asking for a stronger model to finish
+    one hard turn does not quietly make every summary more expensive.
+  - `/plan` enters real plan mode through the same `plan_runtime` as `--mode plan`: the
+    model is handed a registry with no tool that can mutate, not a sentence asking it not
+    to. One-way, and it says so.
+  - `/resume`, `/agents`, `/hooks`, `/init` — the replay, the subagent list (grouped with
+    each one's tools), the hooks grouped by firing event, and the first-run wizard made
+    reachable for anyone who skipped it with `--no-wizard`.
 - **A human at the interactive TUI could not approve anything.** Every piece existed and
   nothing was connected: `ui/app.py` has always accepted `on_interrupt`, `on_rewind`,
   `on_mode_change` and `on_approval`, and `cli/main.py` — the only caller of `run_app` —

@@ -43,6 +43,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TextIO
 
+from ..agents.hooks import MATCH_ALL
 from ..core.types import (
     ApprovalRequest,
     Budget,
@@ -64,7 +65,7 @@ from ..safety.policy import Asker
 from ..telemetry import DISCLOSURE
 from ..ui.app import TEXTUAL_MISSING, run_app, textual_available
 from ..ui.app import Session as AppSession
-from ..ui.commands import BUILTIN_REGISTRY, ParseError, is_command, render_help
+from ..ui.commands import ParseError, is_command, render_help
 from ..ui.commands import parse as parse_command
 from ..ui.headless import (
     EXIT_ERROR,
@@ -82,7 +83,7 @@ from .doctor import run_doctor
 from .sdk import Agent, load_router
 from .spine import Paths
 from .status import context_share, current_branch
-from .stream import DEFAULT_MAX_ITERATIONS
+from .stream import DEFAULT_MAX_ITERATIONS, CompactionPairingError
 from .telemetry_cmd import TelemetryOptions, Verb
 from .telemetry_cmd import run as run_telemetry
 from .wire import load_workspace
@@ -138,6 +139,22 @@ class Usage:
     @property
     def to_stdout(self) -> bool:
         return self.exit_code == EXIT_OK
+
+
+@dataclass(frozen=True, slots=True)
+class Slash:
+    """What a slash command asks the session to do next.
+
+    Three outcomes rather than a boolean, because a user-defined command is a *prompt*:
+    ``.ronin/commands/review.md`` expands to text the model should act on, and the
+    dispatcher cannot run a turn itself — it has no budget, no iteration cap and no verify
+    flag. So it returns the request and the session runs it.
+    """
+
+    #: Non-empty: run this as a turn, exactly as if it had been typed.
+    prompt: str = ""
+    #: End the session. Distinct from "nothing to do" so an exit cannot be a fallthrough.
+    leave: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -1150,10 +1167,14 @@ async def _repl(options: Options, agent: Agent, streams: Streams) -> int:
         if request in ("exit", "quit"):
             return exit_code
         if is_command(request):
-            handled = await _slash(request, agent, streams)
-            if handled is None:
+            outcome = await _slash(request, agent, streams)
+            if outcome.leave:
                 return exit_code
-            continue
+            if not outcome.prompt:
+                continue
+            # A user-defined command expanded to a request. It runs as an ordinary turn —
+            # same budget, same verification, same transcript — because that is what it is.
+            request = outcome.prompt
         exit_code = await _one_turn(options, agent, streams, request)
 
 
@@ -1205,20 +1226,30 @@ def _print_event(event: Event, streams: Streams) -> None:
         streams.err(f"\nerror [{event.kind}]: {strip_controls(event.message)}\n")
 
 
-async def _slash(line: str, agent: Agent, streams: Streams) -> bool | None:
-    """Run one slash command. ``None`` means "leave the session".
+async def _slash(line: str, agent: Agent, streams: Streams) -> Slash:
+    """Run one slash command, and say what the session should do next.
 
-    Only the commands this build can actually honour are implemented; the rest say
-    so by name. A command that silently does nothing is worse than one that admits
-    it is not wired.
+    Dispatch is against the *workspace's* registry, not the builtin one. That is the whole
+    of the user-command feature: ``.ronin/commands/review.md`` has always been parsed,
+    validated and loaded onto ``Loaded.commands`` at startup, and this function used to
+    hand ``BUILTIN_REGISTRY`` to the parser — so a command a user had written was
+    unreachable from the only place anyone could type it, and answered "unknown command".
     """
-    parsed = parse_command(line, registry=BUILTIN_REGISTRY)
+    registry = agent.loaded.commands
+    parsed = parse_command(line, registry=registry)
     if isinstance(parsed, ParseError):
         streams.err(parsed.display + "\n")
-        return True
+        return Slash()
+    if parsed.is_user_defined:
+        # A user command is a *prompt*, not an action: the file's body, with its arguments
+        # substituted, is what the model should be asked. Running it here would mean this
+        # function needed the budget, the iteration cap and the verify flag — so it is
+        # handed back to the session, which owns turns.
+        streams.out(f"/{parsed.name} → {parsed.source}\n")
+        return Slash(prompt=parsed.body)
     name = parsed.name
     if name == "help":
-        streams.out(render_help(BUILTIN_REGISTRY) + "\n")
+        streams.out(render_help(registry) + "\n")
     elif name == "doctor":
         report = await run_doctor(agent.loaded, runtime=agent.runtime)
         streams.out(report.render())
@@ -1245,12 +1276,152 @@ async def _slash(line: str, agent: Agent, streams: Streams) -> bool | None:
                 if restored.ok
                 else restored.detail + "\n"
             )
-    else:
+    elif name == "compact":
+        await _compact_command(agent, streams)
+    elif name == "model":
+        _model_command(parsed.argument, agent, streams)
+    elif name == "plan":
+        _plan_command(agent, streams)
+    elif name == "resume":
+        _resume_command(parsed.argument, agent, streams)
+    elif name == "agents":
+        streams.out(_render_agents(agent))
+    elif name == "hooks":
+        streams.out(_render_hooks(agent))
+    elif name == "init":
+        _first_run(agent.loaded.paths, streams)
+    else:  # pragma: no cover - every declared command above is wired
         streams.err(
             f"/{name} is a real command but is not wired into this line session. "
             f"`{PROGRAM} --help` lists what is.\n"
         )
-    return True
+    return Slash()
+
+
+async def _compact_command(agent: Agent, streams: Streams) -> None:
+    """Fold the transcript now, and report what it bought.
+
+    Both numbers, never just the new one: "23,000 tokens" alone cannot tell you whether
+    compacting helped, and the ratio is the only honest measure of that.
+    """
+    try:
+        result = await agent.conversation.compact_now(agent.runtime)
+    except CompactionPairingError as exc:
+        streams.err(f"cannot compact: {exc}\n")
+        return
+    if not result.compacted:
+        streams.out("nothing to compact: the transcript is shorter than the fold needs.\n")
+        return
+    kept = (
+        f", keeping {len(result.retained_paths)} file result(s) in full"
+        if result.retained_paths
+        else ""
+    )
+    streams.out(
+        f"folded {result.folded_messages} message(s): ~{result.token_estimate_before:,} → "
+        f"~{result.token_estimate_after:,} tokens{kept}\n"
+    )
+    for note in agent.conversation.notes[-2:]:
+        streams.err(f"note: {note}\n")
+
+
+def _model_command(argument: str, agent: Agent, streams: Streams) -> None:
+    """Show the models, or switch the one that answers the next turn."""
+    router = agent.runtime.session.router
+    if not argument:
+        active = agent.runtime.session.router.spec_for(ModelRole.MAIN).model
+        streams.out(f"main model: {active}\n")
+        streams.out(f"configured: {', '.join(router.model_names) or 'none'}\n")
+        streams.out(f"switch with `/model <name>`; {PROGRAM} --model sets it at startup.\n")
+        return
+    try:
+        now = agent.use_model(argument)
+    except KeyError:
+        streams.err(
+            f"no model called {argument!r} is configured. "
+            f"known: {', '.join(router.model_names) or 'none'}\n"
+        )
+        return
+    streams.out(f"next turn runs on {now}. subagents and compaction are unchanged.\n")
+
+
+def _plan_command(agent: Agent, streams: Streams) -> None:
+    """Enter plan mode. One-way, and it says so rather than implying otherwise."""
+    if agent.loaded.mode is Mode.PLAN:
+        streams.out("already in plan mode: no tool that can mutate is on the table.\n")
+        return
+    try:
+        agent.enter_plan_mode()
+    except ValueError as exc:
+        # `plan_runtime` refuses to build a registry with nothing in it, and it is right
+        # to: a session with no read-only tool cannot plan, and pretending otherwise would
+        # leave the model with no way to look at anything.
+        streams.err(f"cannot enter plan mode: {exc}\n")
+        return
+    tools = ", ".join(sorted(spec.name for spec in agent.runtime.registry.specs()))
+    streams.out(f"plan mode. the model now has: {tools}\n")
+    streams.out("this is not reversible in this session — restart to get the write tools back.\n")
+
+
+def _resume_command(argument: str, agent: Agent, streams: Streams) -> None:
+    """Seed the conversation from a recorded session, mid-session.
+
+    The same replay ``--resume`` uses, so a resumed transcript carries the same caveats:
+    a session with three synthesized tool results is not the same thing as a clean one,
+    and a user who is not told reads the difference as the model forgetting.
+    """
+    directory = agent.loaded.paths.sessions_dir
+    try:
+        found = (
+            resume_session(directory, argument)
+            if argument
+            else resume_latest(directory, str(agent.loaded.paths.cwd))
+        )
+    except (OSError, RuntimeError) as exc:
+        streams.err(f"cannot resume: {exc}\n")
+        return
+    if found is None:
+        streams.err(f"no recorded session here to continue. `{PROGRAM} sessions` lists what is.\n")
+        return
+    agent.conversation.resume_from(found.state)
+    streams.out(
+        f"resumed {found.meta.session_id}: {len(found.replay.turns)} turn(s), "
+        f"{len(found.state.messages)} message(s)\n"
+    )
+    for caveat in (*found.skipped, *found.replay.repairs, *found.replay.notes):
+        streams.err(f"note: {caveat}\n")
+
+
+def _render_agents(agent: Agent) -> str:
+    """The subagents this workspace can delegate to, and what each is for."""
+    definitions = agent.loaded.agents
+    if not definitions:
+        return "no subagents are defined. add one as .ronin/agents/<name>.md\n"
+    lines = [f"{len(definitions)} subagent(s):"]
+    for name in sorted(definitions):
+        definition = definitions[name]
+        tools = ", ".join(definition.tools) if definition.tools else "every tool"
+        lines.append(f"  {name} [{definition.model}] — {definition.description}")
+        lines.append(f"    tools: {tools}")
+    return "\n".join(lines) + "\n"
+
+
+def _render_hooks(agent: Agent) -> str:
+    """The configured hooks, grouped by the event that fires them.
+
+    Grouped rather than listed flat because the question a human has is "what runs when I
+    edit a file", and a flat list of commands makes them answer it by eye.
+    """
+    hooks = agent.loaded.hooks.hooks
+    if not hooks:
+        return "no hooks are configured. add them in .ronin/hooks.json\n"
+    lines = [f"{len(hooks)} hook(s):"]
+    for event in sorted({spec.event for spec in hooks}, key=str):
+        lines.append(f"  {event}:")
+        for spec in (spec for spec in hooks if spec.event is event):
+            matcher = "" if spec.matcher == MATCH_ALL else f" [{spec.matcher}]"
+            lines.append(f"    {spec.command}{matcher}")
+    return "\n".join(lines) + "\n"
 
 
 def _export(options: Options, *, streams: Streams) -> int:

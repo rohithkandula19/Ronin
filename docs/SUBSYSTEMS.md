@@ -136,7 +136,10 @@ not two) and imported lazily, so the reducer, the renderers, the command parser 
 the headless path all work on a bare install — which is why almost the entire UI
 suite runs with no extra installed. `reduce.py` folds events into a frozen
 `ViewState`; `render.py` turns that into strings; both pure. Slash commands include
-user-defined ones from `.ronin/commands/*.md` with `$ARGUMENTS`. `headless.py` owns
+user-defined ones from `.ronin/commands/*.md` with `$ARGUMENTS` — dispatched against the
+*workspace's* registry, not the builtin one, which is the difference between a command being
+loaded and a command being runnable. A builtin acts; a user command is a prompt, so it is
+handed back to the session and runs as an ordinary turn. `headless.py` owns
 the `--output-format=stream-json` schema and the exit codes **0 done / 1 error /
 2 needs approval**.
 

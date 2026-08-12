@@ -77,6 +77,7 @@ from ronin.safety.settings import load_settings
 from ronin.session import SubagentSession
 from ronin.tools.base import ToolContext
 from ronin.tools.registry import ToolRegistry as RealToolRegistry
+from ronin.ui.commands import load_registry
 from ronin.verify.runner import CommandFailure, CommandOutcome
 from ronin.verify.spec import DetectedCommand, VerifySpec
 
@@ -612,6 +613,10 @@ def build_loaded(
         memory=memory,
         repo_map=RepoMap(token_estimate=repo_map_tokens),
         verify=verify if verify is not None else VerifySpec(),
+        # Read off disk, exactly as `load_workspace` does, so a test that writes a
+        # `.ronin/commands/*.md` file gets a workspace that has it. Empty otherwise, which
+        # is what a bare temp directory should produce.
+        commands=load_registry(paths.workspace_root),
     )
 
 
@@ -633,6 +638,7 @@ def build_runtime(
     context_window: int = 4_000,
     default_decision: Decision = Decision.ALLOW,
     asker: Asker | None = None,
+    session_tools: RealToolRegistry | None = None,
     system: str = "you are ronin (test)",
 ) -> Runtime:
     """A real :class:`~ronin.cli.spine.Runtime` with fakes only at the model, tool
@@ -648,7 +654,10 @@ def build_runtime(
     router, _stub = stub_router()
     context = ToolContext(root=root)
     registry = RealToolRegistry([], context)
-    session_registry = registry
+    # The session registry is empty by default because these tests drive the *gated*
+    # registry (`Runtime.registry`) with `ScriptedTools`. Plan mode is the exception: it
+    # narrows the session registry, so a test about plan mode has to supply a real one.
+    session_registry = registry if session_tools is None else session_tools
     main = LoopClient(router.client_for(ModelRole.MAIN), model="stub-1")
     from ronin.session import Session
 
