@@ -25,6 +25,7 @@ The hyperparameters are the user's, not derived here. Where the user specified a
 range ("2-3 epochs") the config carries a concrete value and the validator enforces
 the range, so a value drifting out of it is an error rather than a surprise.
 """
+
 from __future__ import annotations
 
 import json
@@ -198,6 +199,41 @@ class DPOSpec:
     beta: float = 0.1
 
 
+#: The verifiable rewards a GRPO config may name. There is exactly one today — the
+#: tool-call verifier in :mod:`ronin_training.adapter.reward` — and it is a *set* rather
+#: than a bare string so a config that names anything else fails validation loudly
+#: instead of silently running with no reward function.
+KNOWN_REWARDS: frozenset[str] = frozenset({"verifiable_tool_call"})
+
+
+@dataclass(frozen=True, slots=True)
+class GRPOSpec:
+    """The GRPO pass. No number here was specified by the user or measured by a run.
+
+    The spec listed "GRPO" and nothing numeric, and no GPU in this environment ran it to
+    tune anything, so every value below is ``trl.GRPOConfig``'s documented default —
+    carried *explicitly* so the config file states them rather than inheriting a silent
+    upstream default that can change between trl versions. The one value that is a
+    deliberate choice is :attr:`reward`, and the choice is that there is no learned
+    reward model at all: the reward is the verifier in
+    :mod:`ronin_training.adapter.reward`, which is what lets this pass be defined and
+    unit-tested with no GPU present.
+    """
+
+    #: KL-penalty coefficient. trl's ``GRPOConfig`` default.
+    beta: float = 0.04
+    #: ``G`` — completions sampled per prompt, over which the group-relative advantage
+    #: is computed. trl's default; the validator refuses anything below 2.
+    num_generations: int = 8
+    #: Sampling temperature for the group. trl's default. Zero would make every sample
+    #: identical, so the group would have no spread and no signal.
+    temperature: float = 0.9
+    #: Generation length cap. trl's default.
+    max_completion_length: int = 256
+    #: Which verifiable reward drives the run — must be in :data:`KNOWN_REWARDS`.
+    reward: str = "verifiable_tool_call"
+
+
 # --------------------------------------------------------------------------- #
 # The holdout
 # --------------------------------------------------------------------------- #
@@ -226,6 +262,7 @@ class HoldoutSpec:
 class TrainPass(StrEnum):
     SFT = "sft"
     DPO = "dpo"
+    GRPO = "grpo"
 
 
 class ConfigError(ValueError):
@@ -255,6 +292,7 @@ class AdapterConfig:
     lora: LoRASpec = field(default_factory=LoRASpec)
     train: TrainSpec = field(default_factory=TrainSpec)
     dpo: DPOSpec | None = None
+    grpo: GRPOSpec | None = None
     holdout: HoldoutSpec = field(default_factory=HoldoutSpec)
     dialect_open_tag: str = DIALECT_OPEN_TAG
     dialect_close_tag: str = DIALECT_CLOSE_TAG
@@ -285,6 +323,12 @@ class AdapterConfig:
         iteration count is a run that trains for the wrong length and reports a
         loss curve that looks fine.
         """
+        if self.pass_ is TrainPass.GRPO:
+            raise ConfigError(
+                "GRPO has no mlx-lm projection: mlx_lm.lora trains SFT/DPO, not GRPO. "
+                "Run the GRPO pass on the peft/trl lane via to_peft_kwargs() and "
+                "trl.GRPOTrainer with the reward from ronin_training.adapter.reward"
+            )
         if self.train.iters > 0:
             iters = self.train.iters
         elif train_rows is not None:
@@ -371,6 +415,16 @@ class AdapterConfig:
         }
         if self.pass_ is TrainPass.DPO and self.dpo is not None:
             out["dpo"] = {"beta": self.dpo.beta, **out["train"]}
+        if self.pass_ is TrainPass.GRPO and self.grpo is not None:
+            # trl.GRPOConfig keys. `num_generations` is the one that has no analogue in
+            # SFT/DPO — it is the group size the advantage is computed over.
+            out["grpo"] = {
+                "beta": self.grpo.beta,
+                "num_generations": self.grpo.num_generations,
+                "temperature": self.grpo.temperature,
+                "max_completion_length": self.grpo.max_completion_length,
+                **out["train"],
+            }
         return out
 
 
@@ -390,6 +444,7 @@ _TOP_KEYS = frozenset(
         "lora",
         "train",
         "dpo",
+        "grpo",
         "holdout",
         "dialect_open_tag",
         "dialect_close_tag",
@@ -413,6 +468,9 @@ _TRAIN_KEYS = frozenset(
     }
 )
 _DPO_KEYS = frozenset({"beta"})
+_GRPO_KEYS = frozenset(
+    {"beta", "num_generations", "temperature", "max_completion_length", "reward"}
+)
 _HOLDOUT_KEYS = frozenset({"by", "fraction", "seed"})
 
 
@@ -494,6 +552,21 @@ def parse_config(data: Mapping[str, Any]) -> AdapterConfig:
         _reject_unknown("dpo", dpo_raw, _DPO_KEYS)
         dpo = DPOSpec(beta=float(dpo_raw.get("beta", DPOSpec().beta)))
 
+    grpo: GRPOSpec | None = None
+    if "grpo" in data and data["grpo"] is not None:
+        grpo_raw = _table(data, "grpo")
+        _reject_unknown("grpo", grpo_raw, _GRPO_KEYS)
+        gd = GRPOSpec()
+        grpo = GRPOSpec(
+            beta=float(grpo_raw.get("beta", gd.beta)),
+            num_generations=int(grpo_raw.get("num_generations", gd.num_generations)),
+            temperature=float(grpo_raw.get("temperature", gd.temperature)),
+            max_completion_length=int(
+                grpo_raw.get("max_completion_length", gd.max_completion_length)
+            ),
+            reward=str(grpo_raw.get("reward", gd.reward)),
+        )
+
     holdout_raw = _table(data, "holdout")
     _reject_unknown("holdout", holdout_raw, _HOLDOUT_KEYS)
     hd = HoldoutSpec()
@@ -515,6 +588,7 @@ def parse_config(data: Mapping[str, Any]) -> AdapterConfig:
         lora=lora,
         train=train,
         dpo=dpo,
+        grpo=grpo,
         holdout=holdout,
         dialect_open_tag=str(data.get("dialect_open_tag", DIALECT_OPEN_TAG)),
         dialect_close_tag=str(data.get("dialect_close_tag", DIALECT_CLOSE_TAG)),
@@ -684,9 +758,7 @@ def validate(cfg: AdapterConfig, *, train_rows: int | None = None) -> Validation
             f"{list(REQUIRED_TARGETS)}: attention alone picks the right tool and "
             "still mis-serializes its arguments"
         )
-    unknown_targets = [
-        name for name in cfg.lora.target_modules if name not in _MLX_KEY_PREFIX
-    ]
+    unknown_targets = [name for name in cfg.lora.target_modules if name not in _MLX_KEY_PREFIX]
     if unknown_targets:
         errors.append(
             f"lora.target_modules names {unknown_targets}, which have no mlx-lm key "
@@ -752,16 +824,20 @@ def validate(cfg: AdapterConfig, *, train_rows: int | None = None) -> Validation
             )
         if cfg.dpo is not None:
             errors.append("the SFT pass must not carry a [dpo] block")
+        if cfg.grpo is not None:
+            errors.append("the SFT pass must not carry a [grpo] block")
         if cfg.resume_adapter:
             warnings.append(
                 "the SFT pass declares resume_adapter, so it continues an existing "
                 "adapter rather than starting from the base — intended?"
             )
-    else:
+    elif cfg.pass_ is TrainPass.DPO:
         if cfg.dpo is None:
             errors.append("the DPO pass requires a [dpo] block with beta")
         elif cfg.dpo.beta <= 0:
             errors.append(f"dpo.beta must be positive, got {cfg.dpo.beta}")
+        if cfg.grpo is not None:
+            errors.append("the DPO pass must not carry a [grpo] block")
         if cfg.train.epochs != 1:
             errors.append(
                 f"the DPO pass is specified at 1 epoch, got {cfg.train.epochs} — "
@@ -778,6 +854,44 @@ def validate(cfg: AdapterConfig, *, train_rows: int | None = None) -> Validation
             "`python -m mlx_lm.lora --help` lists a preference/DPO mode before "
             "running the mlx lane, or use the peft/trl lane (trl.DPOTrainer)"
         )
+    else:  # GRPO
+        if cfg.dpo is not None:
+            errors.append("the GRPO pass must not carry a [dpo] block")
+        if cfg.grpo is None:
+            errors.append("the GRPO pass requires a [grpo] block")
+        else:
+            if cfg.grpo.num_generations < 2:
+                errors.append(
+                    f"grpo.num_generations must be >= 2, got {cfg.grpo.num_generations}: "
+                    "GRPO's advantage is computed *within* a group of sampled "
+                    "completions, so a group of one has no signal (advantage is zero)"
+                )
+            if cfg.grpo.beta < 0:
+                errors.append(f"grpo.beta (the KL coefficient) must be >= 0, got {cfg.grpo.beta}")
+            if cfg.grpo.temperature <= 0:
+                errors.append(
+                    f"grpo.temperature must be > 0, got {cfg.grpo.temperature}: a group "
+                    "of identical greedy samples has zero spread and teaches nothing"
+                )
+            if cfg.grpo.max_completion_length <= 0:
+                errors.append("grpo.max_completion_length must be positive")
+            if cfg.grpo.reward not in KNOWN_REWARDS:
+                errors.append(
+                    f"grpo.reward is {cfg.grpo.reward!r}, not one of "
+                    f"{sorted(KNOWN_REWARDS)} — the reward is a verifier in "
+                    "ronin_training.adapter.reward, not a learned model, and an unknown "
+                    "name would leave the run with no reward function"
+                )
+        if not cfg.resume_adapter:
+            warnings.append(
+                "the GRPO pass has no resume_adapter, so it starts from the base model "
+                "— GRPO is usually run on the SFT (or SFT+DPO) checkpoint; confirm this "
+                "is intended"
+            )
+        warnings.append(
+            "GRPO has no mlx-lm lane: run it on the peft/trl lane (trl.GRPOTrainer) "
+            "with the reward from ronin_training.adapter.reward.make_reward_fn"
+        )
 
     # -- the holdout, which is the one that inflates a score if it is wrong
     if cfg.holdout.by != "task":
@@ -787,9 +901,7 @@ def validate(cfg: AdapterConfig, *, train_rows: int | None = None) -> Validation
             "reported score is then partly a memorisation score"
         )
     if not 0.0 < cfg.holdout.fraction < 0.5:
-        errors.append(
-            f"holdout.fraction must be in (0, 0.5), got {cfg.holdout.fraction}"
-        )
+        errors.append(f"holdout.fraction must be in (0, 0.5), got {cfg.holdout.fraction}")
 
     # -- the dialect
     if cfg.dialect_open_tag != DIALECT_OPEN_TAG or cfg.dialect_close_tag != DIALECT_CLOSE_TAG:
@@ -800,14 +912,14 @@ def validate(cfg: AdapterConfig, *, train_rows: int | None = None) -> Validation
             "tool-syntax validity"
         )
 
-    # -- the mlx projection, checked structurally
-    errors.extend(_mlx_projection_problems(cfg, train_rows=train_rows))
+    # -- the mlx projection, checked structurally. GRPO has no mlx lane (to_mlx_config
+    # raises for it), so this check applies only to the passes mlx-lm can actually run.
+    if cfg.pass_ is not TrainPass.GRPO:
+        errors.extend(_mlx_projection_problems(cfg, train_rows=train_rows))
     return Validation(tuple(errors), tuple(warnings))
 
 
-def _mlx_projection_problems(
-    cfg: AdapterConfig, *, train_rows: int | None
-) -> list[str]:
+def _mlx_projection_problems(cfg: AdapterConfig, *, train_rows: int | None) -> list[str]:
     """Check what mlx-lm would be handed, without importing mlx."""
     rows = train_rows if train_rows is not None else 1
     try:
@@ -817,9 +929,7 @@ def _mlx_projection_problems(
     problems: list[str] = []
     unknown = sorted(set(projected) - MLX_CONFIG_KEYS)
     if unknown:
-        problems.append(
-            f"the mlx projection emits key(s) mlx_lm.lora does not read: {unknown}"
-        )
+        problems.append(f"the mlx projection emits key(s) mlx_lm.lora does not read: {unknown}")
     params = projected.get("lora_parameters")
     if not isinstance(params, Mapping):
         problems.append("the mlx projection lost its lora_parameters block")
@@ -838,9 +948,7 @@ def _mlx_projection_problems(
     return problems
 
 
-def dump_mlx_config(
-    cfg: AdapterConfig, path: str | Path, *, train_rows: int | None = None
-) -> Path:
+def dump_mlx_config(cfg: AdapterConfig, path: str | Path, *, train_rows: int | None = None) -> Path:
     """Write the mlx-lm ``-c`` config file. Returns the path written."""
     out = Path(path)
     payload = cfg.to_mlx_config(train_rows=train_rows)
@@ -874,6 +982,7 @@ def with_long_context(cfg: AdapterConfig) -> AdapterConfig:
 #: Where the shipped configs live, relative to the repo root.
 SFT_CONFIG_PATH = "training/config/adapter_sft.yaml"
 DPO_CONFIG_PATH = "training/config/adapter_dpo.yaml"
+GRPO_CONFIG_PATH = "training/config/adapter_grpo.yaml"
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -881,14 +990,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(description="validate an adapter training config")
-    parser.add_argument("configs", nargs="*", default=[SFT_CONFIG_PATH, DPO_CONFIG_PATH])
-    parser.add_argument("--train-rows", type=int, default=None,
-                        help="row count of the training split, for the iters check")
+    parser.add_argument(
+        "configs", nargs="*", default=[SFT_CONFIG_PATH, DPO_CONFIG_PATH, GRPO_CONFIG_PATH]
+    )
+    parser.add_argument(
+        "--train-rows",
+        type=int,
+        default=None,
+        help="row count of the training split, for the iters check",
+    )
     parser.add_argument("--check", action="store_true", help="accepted for symmetry; always on")
     args = parser.parse_args(argv)
     del args.check
 
-    paths = args.configs or [SFT_CONFIG_PATH, DPO_CONFIG_PATH]
+    paths = args.configs or [SFT_CONFIG_PATH, DPO_CONFIG_PATH, GRPO_CONFIG_PATH]
     failed = False
     for raw in paths:
         try:

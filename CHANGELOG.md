@@ -130,6 +130,21 @@ All notable changes to this project will be documented here. Format follows [Kee
   (SFT), preference-pair (DPO) and RLVR datasets from the trajectories that clear it —
   offline, from transcripts, with the bar that dropped a row recorded rather than the row
   silently vanishing.
+- **GRPO with a verifiable reward — the RF.3 training pass (`ronin-training`).** The
+  adapter pipeline had SFT and DPO; this adds the third pass, and the reward is the point.
+  It is **not** a learned reward model: `ronin_training.adapter.reward` is a *verifier*
+  that scores a sampled completion on facts — a call that parses and validates against the
+  v2 registry earns reward, the v1 dialect the runtime can't execute is the one outcome
+  punished below zero — which is exactly what lets an RL pass be defined, validated and
+  unit-tested with **no GPU**. `group_advantages` implements GRPO's group-relative
+  advantage (`(r − mean)/std`, zero for a tied group), and `make_reward_fn` returns the
+  callable `trl.GRPOTrainer` expects — no `torch`/`trl`/`mlx` imported anywhere in the
+  module. `adapter/config.py` gains a validated `grpo` pass and `adapter_grpo.yaml`;
+  `to_mlx_config()` refuses GRPO by name (mlx-lm has no GRPO lane — it is peft/trl only).
+  Every hyperparameter shipped is trl's documented default carried explicitly, not a value
+  tuned by a run that did not happen here. Tests: `test_adapter_reward.py` (17),
+  `test_adapter_grpo.py` (13, incl. the shipped config end to end); `adapter.demo` gains a
+  fifth section that scores five completions in the policy order the weights encode.
 
 ### Fixed
 - **A command you wrote yourself could not be run.** `.ronin/commands/*.md` has always

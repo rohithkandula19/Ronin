@@ -1,0 +1,76 @@
+# ronin-adapter-qwen1.5b — optional pass 3: GRPO with a verifiable reward.
+#
+# Run this AFTER the SFT pass (and optionally after DPO), against that checkpoint. Unlike
+# DPO the validator only *warns* when resume_adapter is empty rather than erroring: GRPO
+# straight onto the base model is a defensible experiment, whereas DPO onto the base is
+# almost never what someone means. It still warns, because "usually the SFT checkpoint"
+# is true.
+#
+# There is NO mlx-lm lane for this pass. mlx_lm.lora trains SFT and (version-dependent)
+# DPO; it does not do GRPO. `to_mlx_config()` raises for a grpo pass on purpose, and the
+# validator says so. GRPO runs on the peft/trl lane (trl.GRPOTrainer) that
+# training/cuda/ already drives on a free T4.
+#
+# The reward is NOT a learned reward model. It is the verifier in
+# ronin_training.adapter.reward: a completion earns reward for emitting a call Ronin's
+# runtime can parse and validate, and is punished for the v1 dialect it must never use.
+# That is what makes this pass definable and testable with no GPU — the reward for a
+# given completion is a fact, not a second network's opinion.
+#
+# Validate:
+#   uv run --package ronin-training python -m ronin_training.adapter.config \
+#       training/config/adapter_grpo.yaml
+#
+# Every number in [grpo] is trl.GRPOConfig's documented default, carried explicitly. No
+# GPU here ran GRPO to tune any of them; presenting a guessed value as tuned is the
+# dishonesty this package refuses.
+
+pass: grpo
+
+base_model: Qwen/Qwen2.5-Coder-1.5B-Instruct
+base_model_mlx: mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit
+base_model_licence: apache-2.0
+
+# Prompts to roll out (one column `prompt`, optional column `expect_tool`), split by task
+# exactly as SFT and DPO are — the same tasks held out of every pass, or a holdout leaks.
+data_dir: training/data/adapter/grpo
+adapter_out: training/adapters/ronin-adapter-qwen1.5b/grpo
+resume_adapter: training/adapters/ronin-adapter-qwen1.5b/sft
+
+lora:
+  rank: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  num_layers: -1
+
+train:
+  # RL passes are short; 1 epoch over the prompt set. The shared optimiser block is
+  # carried over rather than a second learning rate being invented for this pass.
+  epochs: 1
+  learning_rate: 1.0e-6
+  schedule: cosine
+  warmup_ratio: 0.03
+  batch_size: 1
+  grad_accum: 4
+  max_seq_length: 4096
+  grad_checkpoint: true
+  seed: 0
+  steps_per_eval: 50
+  save_every: 100
+  iters: 0
+
+grpo:
+  beta: 0.04
+  num_generations: 8
+  temperature: 0.9
+  max_completion_length: 256
+  reward: verifiable_tool_call
+
+holdout:
+  by: task
+  fraction: 0.10
+  seed: 0
+
+dialect_open_tag: "<ronin:tool_call>"
+dialect_close_tag: "</ronin:tool_call>"
