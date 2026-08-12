@@ -68,7 +68,7 @@ import time
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, field, replace
 
-from ..context.compaction import CompactionResult, Summarizer, maybe_compact
+from ..context.compaction import CompactionResult, Summarizer, compact, maybe_compact
 from ..core.loop import StalledError, run_turn
 from ..core.protocols import FinalMessage, ModelClient, TextChunk
 from ..core.types import (
@@ -474,7 +474,33 @@ class Conversation:
         self.last_compaction = result
         if not result.compacted:
             return
+        self._adopt_compaction(result)
+        step = self._next_step(COMPACT_STEP)
+        arguments = {
+            "tokens_before": result.token_estimate_before,
+            "tokens_after": result.token_estimate_after,
+            "folded_messages": result.folded_messages,
+        }
+        yield ToolStart(tool_use_id=step, name=COMPACT_STEP, arguments=arguments)
+        yield ToolEnd(
+            tool_use_id=step,
+            name=COMPACT_STEP,
+            result=ToolResult(
+                ok=True,
+                content=result.marker,
+                artifacts=result.retained_paths,
+                tokens_estimate=result.token_estimate_after,
+            ),
+        )
 
+    def _adopt_compaction(self, result: CompactionResult) -> None:
+        """Take a fold's messages as the transcript, and record what it cost to get them.
+
+        Shared by the triggered fold and by ``/compact``, so a forced compaction cannot
+        end up with different bookkeeping — the pairing check in particular. A transcript
+        with a tool use whose result was folded away is one the next request cannot even
+        be built from, and that is true however the fold was started.
+        """
         unpaired = unpaired_tool_uses(result.messages)
         if unpaired:
             raise CompactionPairingError(unpaired)
@@ -495,23 +521,28 @@ class Conversation:
                 "themselves bigger than the budget. Compacting again would change "
                 "nothing — bound max_retained_paths or start a fresh session."
             )
-        step = self._next_step(COMPACT_STEP)
-        arguments = {
-            "tokens_before": result.token_estimate_before,
-            "tokens_after": result.token_estimate_after,
-            "folded_messages": result.folded_messages,
-        }
-        yield ToolStart(tool_use_id=step, name=COMPACT_STEP, arguments=arguments)
-        yield ToolEnd(
-            tool_use_id=step,
-            name=COMPACT_STEP,
-            result=ToolResult(
-                ok=True,
-                content=result.marker,
-                artifacts=result.retained_paths,
-                tokens_estimate=result.token_estimate_after,
-            ),
-        )
+
+    async def compact_now(
+        self, runtime: Runtime, summarizer: Summarizer | None = None
+    ) -> CompactionResult:
+        """Fold the middle now, whether or not the trigger says to — what ``/compact`` calls.
+
+        The turn path is deliberately trigger-gated: a turn should not pay for a summary it
+        does not need. A human typing ``/compact`` has decided otherwise — usually because
+        they are about to ask for something long — so this calls ``compact`` rather than
+        ``maybe_compact`` and hands the result back for the caller to report.
+
+        Returns the result rather than events: nothing is streaming, and a command that
+        printed into a transcript nobody is rendering would be shouting into a log.
+        """
+        pinned = runtime.loaded.pinned_prefix_tokens()
+        self.last_pinned_prefix_tokens = pinned
+        summarize = summarizer if summarizer is not None else self._summarizer(runtime)
+        result = await compact(self.messages, policy=runtime.compaction, summarizer=summarize)
+        self.last_compaction = result
+        if result.compacted:
+            self._adopt_compaction(result)
+        return result
 
     def _summarizer(self, runtime: Runtime) -> Summarizer:
         """The default summarizer, built on first use.

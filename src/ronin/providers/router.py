@@ -356,6 +356,30 @@ class Router:
         self._chains[role] = client
         return client
 
+    @property
+    def model_names(self) -> tuple[str, ...]:
+        """Every configured model, by the name the config gave it. Sorted, for a listing."""
+        return tuple(sorted(self._config.models))
+
+    def client_for_name(self, name: str) -> ModelClient:
+        """A retried client for one configured model, by name — what ``/model`` switches to.
+
+        Not a role, and deliberately not a rewrite of the role table: switching the main
+        model mid-session must not change what ``for_subagent`` and ``for_compaction``
+        resolve to, or asking for a stronger model to finish a hard turn would silently
+        make every subagent and every summary more expensive too.
+
+        Retry is applied, failover is not. A failover chain is a property of a *role* —
+        "when main is down, try this instead" — while a model asked for by name is exactly
+        the model that was asked for, and quietly answering from a different one would make
+        the switch a lie.
+
+        Raises :exc:`KeyError` for a name the config does not define; the caller knows the
+        vocabulary (:attr:`model_names`) and can say so better than this layer can.
+        """
+        spec = self._config.models[name]
+        return RetryingClient(self._build_one(spec), policy=self._config.retry, sleep=self._sleep)
+
     def _build_one(self, spec: ModelSpec) -> ModelClient:
         """Build (or reuse) the raw client for one spec, before any wrapping."""
         cached = self._clients.get(spec.name)

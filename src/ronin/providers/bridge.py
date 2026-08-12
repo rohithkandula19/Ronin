@@ -80,6 +80,26 @@ class LoopClient:
         #: rather than recomputed so what is reported is what was actually sent.
         self.last_request: ModelRequest | None = None
 
+    def with_model(self, inner: ModelClient, *, model: str) -> LoopClient:
+        """This sampling configuration, pointed at a different provider client.
+
+        What ``/model`` switches with. Rebuilding a :class:`LoopClient` at the call site
+        would mean re-deriving the repo map and the token ceiling somewhere else, and the
+        copy that drifts is always the one furthest from the assembly that owns it.
+
+        A fresh :class:`CacheStats` comes with it, because prompt-cache hit rate is a
+        property of one model's conversation: carrying the old counters over would report
+        hits against a cache the new model never had.
+        """
+        return LoopClient(
+            inner,
+            model=model,
+            repo_map=self._repo_map,
+            max_tokens=self._max_tokens,
+            temperature=self._temperature,
+            thinking_budget=self._thinking_budget,
+        )
+
     def build_request(
         self,
         *,

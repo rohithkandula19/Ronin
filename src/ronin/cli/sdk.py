@@ -247,6 +247,41 @@ class Agent:
             clock=self._conversation.clock,
         )
 
+    def enter_plan_mode(self) -> None:
+        """Narrow this session to plan mode — what ``/plan`` calls. Not reversible.
+
+        The same :func:`~ronin.cli.stream.plan_runtime` the ``--mode plan`` flag goes
+        through, so mid-session plan mode and startup plan mode are the same thing: the
+        model is handed a registry with no tool that can mutate, rather than a sentence
+        asking it not to. Flipping only ``PolicyEngine.mode`` would leave the edit tools on
+        the table and let the model spend turns being refused, which is the failure
+        ``docs/ARCHITECTURE.md`` cites against the prompt-only version.
+
+        One-way on purpose. Leaving plan mode would mean rebuilding the full registry, and
+        a session that can hand itself back the write tools is one keystroke away from
+        undoing the guarantee it was put into plan mode for. Restart to leave.
+        """
+        self._runtime = plan_runtime(self._runtime)
+        self._runtime.policy.set_mode(Mode.PLAN)
+
+    def use_model(self, name: str) -> str:
+        """Point the *next* turn at a different configured model — what ``/model`` calls.
+
+        Returns the model id now in use. Raises :exc:`KeyError` for a name the config does
+        not define; :attr:`ronin.providers.router.Router.model_names` is the vocabulary.
+
+        Only the main model moves. Subagents and compaction resolve their own roles through
+        the router, and a switch here deliberately leaves those alone: asking for a stronger
+        model to get through one hard turn should not quietly make every summary and every
+        nested agent more expensive as well. The conversation keeps its transcript, so this
+        is a change of who answers next, not a new session.
+        """
+        router = self._runtime.session.router
+        client = router.client_for_name(name)
+        spec = router.config.models[name]
+        self._conversation.model = self._runtime.session.main.with_model(client, model=spec.model)
+        return spec.model
+
     # ------------------------------------------------------------------ running
 
     def stream(
