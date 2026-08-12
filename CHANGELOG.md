@@ -5,6 +5,43 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Added
+- **`ronin2 mcp-serve` — Claude Desktop, Cursor or another Ronin can now actually launch
+  this one.** The MCP server side was written, tested, documented down to its trust model
+  and *never constructed outside the test suite*: no subcommand, no real `NestedRunner`.
+  The capability read as shipped and was unreachable. `cli/serve.py` is the missing
+  constructor and `mcp-serve` is the process that runs it, on this process's own stdin and
+  stdout (`mcp.transport.stdio_streams`).
+  - **The permission mode decides what is published**, because over stdio there is no
+    human to ask — stdin carries the frames. `ask` exposes `read`/`grep`/`glob`,
+    `auto_edit` adds `edit`, `full` adds `bash` and `ronin_task`. Publishing a tool that
+    would refuse every call is the mistake `wire.py` already argues against for a
+    `web_search` with no backend, so what is withheld is named on stderr together with the
+    lowest `--mode` that would expose it. The question is asked of
+    `PolicyEngine.relaxes()` rather than re-derived, so there is no second copy of the
+    mode ladder.
+  - **Nothing reaches stdout but frames.** `mcp-serve` refuses `--print` and
+    `--output-format`, never runs the first-run wizard (it prompts on stdout and reads
+    stdin — both are the protocol), and puts its banner and every note on stderr. A test
+    injects streams whose `out` raises.
+  - **Both halves of the gate travel, and there are two.** `GatedRegistry` does hooks, the
+    stale-edit check, taint and the output clamp; approval is *not* in it, because in a
+    session `core.loop` asks the policy first. A `tools/call` has no loop behind it, so
+    `ExposedTool` asks in the loop's place. That was found the hard way — the first version
+    only went through the registry, and a test that served `rm -rf ~` deleted the
+    directory, because the unconditional deny list lives in the policy engine and nothing
+    else in the path looks at it.
+  - One integration test runs the whole path: argv → `dispatch` → a real `McpClient` over
+    an in-memory pipe → `mcp__self__ronin_task` in a client-side registry → exit 0 when the
+    peer hangs up. `python -m ronin.cli.demo` gained a section that does the same and
+    prints what a client sees.
+- **`ronin` is a console script again, alongside `ronin2`.** Both point at this tree. v1's
+  entry point in `packages/cli` is renamed `ronin1` — explicitly, not removed, so an
+  existing user has something to type — which is what makes the short name safe to take:
+  console scripts are not namespaced, so two distributions declaring one name means
+  whichever was installed second silently wins. A test now checks that no two
+  distributions in this workspace claim the same command, because the next collision will
+  be a package nobody thought about. The two-letter `ro` alias is gone: `ro` resolving to
+  v1 while `ronin` resolves to v2 is the same silent swap in miniature.
 - **`from ronin import Agent` works, and the SDK can be embedded.** The package root was a
   single docstring, so the one import line every doc and example would start with failed.
   It now re-exports `Agent`, `AgentConfig`, `AgentResult`, `Run`, the whole `Event` union,

@@ -211,7 +211,49 @@ model forgetting.
 
 `--no-record` skips the transcript for a run you do not want on disk.
 
-## 9. what to configure next
+## 9. let something else drive it (MCP)
+
+Ronin is an MCP *server* as well as a client, so Claude Desktop, Cursor or a second Ronin
+can launch this one and call its tools:
+
+```sh
+python -m ronin mcp-serve                    # read, grep, glob
+python -m ronin mcp-serve --mode auto_edit   # … and edit
+python -m ronin mcp-serve --mode full        # … and bash, and ronin_task
+```
+
+It speaks JSON-RPC on stdin and stdout, which is why `--mode` decides what is exposed
+rather than a separate flag: **there is no human on the other end of stdin to approve
+anything**, so only the tools this mode does not need one for are published. A gated tool
+that appeared in the list and then refused every call would just teach the client's model
+to keep trying it. Whatever is withheld is named on stderr, with the flag that would
+expose it.
+
+`ronin_task(prompt)` is the interesting one: it runs a full nested Ronin loop — planning,
+searching, editing, verifying — and returns the summary, so the client gets a whole task
+done rather than one file read.
+
+In Claude Desktop's `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "ronin": {
+      "command": "ronin",
+      "args": ["mcp-serve", "--mode", "auto_edit", "--cwd", "/path/to/your/repo"]
+    }
+  }
+}
+```
+
+Everything a served tool does still goes through this session's permission rules, deny
+list, hooks and output budget. `--mode full` waives the *prompt*; it does not waive the
+unconditional refusals.
+
+Ronin as a *client* of other servers is `.ronin/mcp.json`, and its tools arrive named
+`mcp__<server>__<tool>`.
+
+## 10. what to configure next
 
 * `.ronin/settings.json` — permission rules and modes: [config.md](config.md)
 * `.ronin/hooks.json` — shell commands on lifecycle events, and the exit-code-2 block:

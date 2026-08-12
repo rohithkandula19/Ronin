@@ -179,7 +179,29 @@ Three rules carry the weight:
    one bounded reconnect. Everything else keeps working.
 
 The server side exposes read/grep/glob/edit/bash plus one high-level
-`ronin_task(prompt)` that runs a full nested agent loop and returns the summary.
+`ronin_task(prompt)` that runs a full nested agent loop and returns the summary. It is
+launched by `ronin2 mcp-serve`, which is `cli/serve.py` — the whole of that module is
+consequences of one fact, that **over stdio there is no human**, because stdin carries the
+frames:
+
+* **The permission mode decides what is published.** `ask` exposes the read-only tools,
+  `auto_edit` adds `edit`, `full` adds `bash` and `ronin_task`. A gated tool with nobody
+  to approve it would appear in `tools/list` and then refuse every call, which is the same
+  mistake as shipping a `web_search` with no backend. What is withheld is named on stderr
+  along with the flag that would expose it.
+* **Both halves of the gate travel.** `GatedRegistry` is hooks, the stale-edit check,
+  taint and the clamp — approval is *not* in it, because in a session `core.loop` asks the
+  policy before it touches the registry at all. A `tools/call` has no loop, so
+  `cli/serve.ExposedTool` asks in its place. Without that the deny list, which lives in
+  the policy engine and nowhere else, would never see a served command.
+
+### `cli/serve.py` — the constructor that was missing
+
+Worth stating separately because it is the shape of defect this tree keeps producing: the
+MCP server, its trust model, its error codes and its fail-closed approval default were all
+written, tested and documented, and **nothing in production ever constructed one**. Only
+the tests and the demo supplied a `NestedRunner`. So "Claude Desktop, Cursor or another
+Ronin can drive this one" was true in the suite and false on a machine.
 
 ---
 
@@ -197,6 +219,8 @@ whole reason `cli/` exists and the reason it is the thinnest package in the tree
 | `should_compact(pinned_prefix_tokens=…)` ← repo map + RONIN.md | Defaults to 0, so compaction believes the window is emptier than it is by exactly the size of the one part of the prompt that never shrinks. | `cli/spine.py` (`Loaded.pinned_prefix_tokens`) |
 | `FileStateTracker` ← `read`, then → `edit` | Hashes are recorded by nobody and checked by nobody, so the "user edited it in their editor while the model was thinking" guard is inert. | `cli/gate.py` |
 | Verify failures → the transcript | Fed back as a user message instead of a tool result, they read as an instruction from the human rather than an observation — which changes what the model does with them. | `cli/stream.py` |
+| `McpServer` ← a real `Agent` and a real `NestedRunner` | The whole server side is exercised, documented and unreachable: nothing outside the tests builds one, so a client cannot launch Ronin at all. The feature reads as shipped. | `cli/serve.py` + `mcp-serve` |
+| `PolicyEngine.approve` ← a tool call that arrives without a loop | The gated registry does hooks, taint and the clamp but not approval, so a served `bash` reaches the shell with the unconditional deny list never consulted. | `cli/serve.py` (`ExposedTool`) |
 | Settings project layer → git | `.gitignore` ignored all of `.ronin/`, and git does not descend into an ignored directory, so the committed layer of a four-layer config was untrackable. Fixed by default-deny plus an allowlist. | `.gitignore` |
 | System prompt ← `system_suffix()` | RONIN.md and the repo map land outside the provider's cached stable prefix, so the expensive, never-changing part of every request is re-billed every turn. | `cli/wire.py` |
 

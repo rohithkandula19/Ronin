@@ -28,11 +28,12 @@ names, per the SSE spec, because MCP puts more than one message on a stream.
 from __future__ import annotations
 
 import asyncio
+import sys
 from collections import deque
 from collections.abc import AsyncIterator, Iterable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import IO, Any, Protocol
 
 from .jsonrpc import (
     JsonRpcError,
@@ -134,6 +135,59 @@ class PipeWriter:
         return self._closed
 
 
+class FileWriter:
+    """A :class:`ByteWriter` over a binary file object — this process's stdout.
+
+    Two departures from :class:`asyncio.StreamWriter`, both deliberate:
+
+    * **The write is blocking.** The canonical async recipe is
+      ``loop.connect_write_pipe(asyncio.streams.FlowControlMixin, …)``, which reaches
+      into a private class. The cost of not doing that is that a frame larger than the
+      pipe buffer blocks the loop until the client drains it — and a served session is
+      strictly sequential (read a frame, answer it, read the next), so there is nothing
+      the loop could usefully run in the meantime anyway.
+    * **:meth:`close` does not close the file.** The file is the process's stdout, which
+      the rest of the process — logging, a traceback, an exit message — still needs.
+      Closing it would turn a finished MCP session into a process that cannot report
+      anything about itself. The flag stops further writes; the fd stays open.
+    """
+
+    def __init__(self, stream: IO[bytes]) -> None:
+        self._stream = stream
+        self._closed = False
+
+    def write(self, data: bytes, /) -> None:
+        if self._closed:
+            raise TransportClosed("write to a closed stdio writer")
+        try:
+            self._stream.write(data)
+        except (OSError, ValueError) as exc:
+            # ValueError is what a file object raises once it is closed, and it is not
+            # an OSError. A client that exits mid-frame produces exactly this.
+            self._closed = True
+            raise TransportClosed(f"writing to stdout failed: {exc}") from exc
+
+    async def drain(self) -> None:
+        if self._closed:
+            raise TransportClosed("flush of a closed stdio writer")
+        try:
+            self._stream.flush()
+        except (OSError, ValueError) as exc:
+            self._closed = True
+            raise TransportClosed(f"flushing stdout failed: {exc}") from exc
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        with suppress(OSError, ValueError):
+            self._stream.flush()
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
+
 def memory_duplex(*, limit: int = READER_LIMIT) -> tuple[StreamPair, StreamPair]:
     """Two connected :class:`StreamPair` ends, entirely in memory.
 
@@ -145,6 +199,78 @@ def memory_duplex(*, limit: int = READER_LIMIT) -> tuple[StreamPair, StreamPair]
     near = StreamPair(reader=to_near, writer=PipeWriter(to_far))
     far = StreamPair(reader=to_far, writer=PipeWriter(to_near))
     return near, far
+
+
+async def stdio_streams(
+    *,
+    stdin: IO[bytes] | None = None,
+    stdout: IO[bytes] | None = None,
+    limit: int = READER_LIMIT,
+) -> StreamPair:
+    """This process's own stdin and stdout, as a :class:`StreamPair`.
+
+    The other half of :func:`memory_duplex`: the same type, wired to real pipes, so
+    :func:`ronin.mcp.server.serve_stdio` does not know or care which end of the seam it
+    is on. This is what a client that *spawns* Ronin — Claude Desktop, Cursor, another
+    Ronin — connects to.
+
+    Reading goes through ``loop.connect_read_pipe`` rather than a blocking
+    ``stdin.readline()``, and that is the half that has to be async: waiting for the
+    next request is unbounded, and a blocked loop is a session whose shell, background
+    jobs and MCP clients are all frozen while it waits. Writing is
+    :class:`FileWriter` — see its docstring for why blocking is acceptable there.
+
+    Raises :class:`~ronin.mcp.jsonrpc.TransportClosed`, naming the reason, on a platform
+    that cannot poll a pipe (Windows' proactor loop refuses ``connect_read_pipe`` for
+    anything that is not a socket). A named error is the point: the alternative is a
+    server that appears to start and then never answers.
+
+    Both file objects are injectable so the tests drive this over a real ``os.pipe()``
+    without touching the interpreter's own streams.
+    """
+    source = _binary(sys.stdin, "stdin") if stdin is None else stdin
+    sink = _binary(sys.stdout, "stdout") if stdout is None else stdout
+    # Asked before ``connect_read_pipe`` rather than left to it. A stream with no
+    # descriptor — pytest's capture, a StringIO, a closed file — makes asyncio raise from
+    # inside a half-built transport whose ``__del__`` then emits its own unrelated
+    # warning, which buries the actual reason under a second traceback.
+    try:
+        source.fileno()
+    except (AttributeError, OSError, ValueError) as exc:
+        raise TransportClosed(
+            f"stdin has no file descriptor ({type(exc).__name__}: {exc}), so it cannot "
+            "carry an MCP session. This process's stdin has been replaced by an "
+            "in-memory object; serve on injected streams instead."
+        ) from exc
+    loop = asyncio.get_running_loop()
+    reader = asyncio.StreamReader(limit=limit)
+    try:
+        await loop.connect_read_pipe(lambda: asyncio.StreamReaderProtocol(reader), source)
+    except (NotImplementedError, OSError, ValueError) as exc:
+        raise TransportClosed(
+            f"cannot read stdin asynchronously ({type(exc).__name__}: {exc}). An MCP "
+            "stdio server needs a real pipe or terminal on fd 0; this happens when "
+            "stdin has been replaced by an object with no file descriptor, or on a "
+            "platform whose event loop cannot poll a pipe."
+        ) from exc
+    return StreamPair(reader=reader, writer=FileWriter(sink))
+
+
+def _binary(stream: object, name: str) -> IO[bytes]:
+    """The byte layer under a text stream.
+
+    ``sys.stdout`` is a ``TextIOWrapper`` with a buffer of its own, and writing bytes
+    past it would interleave with anything the text layer has not flushed. Taking
+    ``.buffer`` means one writer for the stream. A replaced stream that has no
+    ``buffer`` (``StringIO``, pytest's capture) is refused here rather than half-working.
+    """
+    buffer = getattr(stream, "buffer", None)
+    if buffer is None:
+        raise TransportClosed(
+            f"sys.{name} has no binary buffer, so this process cannot serve MCP over "
+            f"stdio. It has been replaced by a text-only object ({type(stream).__name__})."
+        )
+    return buffer  # type: ignore[no-any-return]  # a TextIOWrapper's buffer is IO[bytes]
 
 
 async def read_frame(reader: ByteReader, *, max_bytes: int = MAX_FRAME_BYTES) -> bytes:
@@ -828,6 +954,7 @@ __all__ = [
     "STDERR_TAIL_LINES",
     "ByteReader",
     "ByteWriter",
+    "FileWriter",
     "HttpSender",
     "HttpTransport",
     "HttpxSender",
@@ -844,4 +971,5 @@ __all__ = [
     "memory_duplex",
     "read_frame",
     "sse_responses",
+    "stdio_streams",
 ]

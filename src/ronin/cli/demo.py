@@ -19,7 +19,10 @@ What it walks through, in the order a session does it:
    **repair attempt** that gives up honestly when the failure signature stops moving;
 5. a **compaction** that folds the middle, keeps the most recent tool result per file
    path in full, and says so where the user can see it;
-6. the whole session **written to a transcript and replayed** with no unpaired tool
+6. the same live session **served over MCP** — what ``ronin2 mcp-serve`` does — driven by
+   the real ``McpClient`` over an in-memory pipe, with the permission mode deciding what
+   a remote client is even shown;
+7. the whole session **written to a transcript and replayed** with no unpaired tool
    calls.
 
 Every section prints what it proves, and the exit code is non-zero if any of those
@@ -520,11 +523,15 @@ async def main() -> int:
                 for degradation in conversation.notes:
                     for index, line in enumerate(degradation.splitlines()[:3]):
                         _bullet(("note: " if index == 0 else "      ") + line)
+
+            # ------------------------------------------------- mcp-serve
+            _heading("5. the same session, served over MCP (`ronin2 mcp-serve`)")
+            failures += await _serve_section(runtime, conversation)
         finally:
             await runtime.aclose()
 
         # ------------------------------------------------ transcript + replay
-        _heading("5. the transcript, written and replayed")
+        _heading("6. the transcript, written and replayed")
         if runtime.transcript is None:
             print("  FAILED: no transcript was opened")
             failures += 1
@@ -595,6 +602,91 @@ async def main() -> int:
             return 1
         print("every claim above held.")
         return 0
+
+
+async def _serve_section(runtime: Any, conversation: Conversation) -> int:
+    """Serve *this* session over MCP and drive it with the real client. Returns failures.
+
+    No subprocess and no second process: :func:`~ronin.mcp.transport.memory_duplex` puts
+    both ends of the pipe in memory, so what runs here is exactly what runs when Claude
+    Desktop spawns ``ronin2 mcp-serve`` — the same :class:`~ronin.mcp.server.McpServer`,
+    the same framing, the same :class:`~ronin.mcp.client.McpClient`.
+
+    The two facts worth watching: the mode decides what is even *published*, and a
+    published tool still goes through the session's policy on every call.
+    """
+    from ..core.types import DangerLevel
+    from ..mcp.client import McpClient
+    from ..mcp.config import McpServerConfig, TransportKind
+    from ..mcp.server import serve_stdio
+    from ..mcp.transport import StdioTransport, memory_duplex
+    from .sdk import Agent
+    from .serve import build_server
+
+    failures = 0
+    agent = Agent(runtime, conversation=conversation)
+    served = build_server(agent, version="demo")
+    for line in served.banner().rstrip("\n").splitlines():
+        _bullet(line)
+    _bullet("")
+    _bullet("auto_edit mode, so `edit` is published and `bash` is not: over stdio there is no")
+    _bullet("human to prompt, and a tool that would refuse every call teaches a client's model")
+    _bullet("to keep trying it.")
+
+    near, far = memory_duplex()
+    serving = asyncio.create_task(serve_stdio(served.server, far))
+    client = McpClient(
+        McpServerConfig(
+            name="self",
+            transport=TransportKind.STDIO,
+            command="unused",
+            danger_level=DangerLevel.READ_ONLY,
+            requires_approval=False,
+            timeout_seconds=5.0,
+        ),
+        lambda _config: StdioTransport(streams=near, timeout=5.0),
+    )
+    try:
+        capabilities = await client.connect()
+        _bullet("")
+        _bullet(
+            f"handshake         {capabilities.server_name} {capabilities.server_version}, "
+            f"tools={capabilities.supports_tools}"
+        )
+        descriptors = await client.list_tools()
+        for descriptor in descriptors:
+            meta = descriptor["_meta"]
+            _bullet(
+                f"published         {descriptor['name']:<6} "
+                f"danger={meta['ronin/dangerLevel']:<9} "
+                f"approval={meta['ronin/requiresApproval']}"
+            )
+        result = await client.call_tool("read", {"path": "src/widget.py"})
+        if not result.ok:
+            print(f"  FAILED: a served read did not work: {result.error}")
+            failures += 1
+        else:
+            _bullet(f"read over MCP     {len(result.content.splitlines())} line(s) came back")
+
+        # The claim that matters. `bash` is withheld by the mode, so the name does not
+        # exist on this server at all — the refusal is "no such tool", not a silent run.
+        refused = await client.call_tool("bash", {"command": "echo hello"})
+        if refused.ok:
+            print("  FAILED: a tool the mode withheld was runnable over the wire")
+            failures += 1
+        else:
+            _bullet("bash over MCP     refused: it was never published in this mode")
+
+        names = {tool.spec().name for tool in client.build_tools()[0]}
+        _bullet(
+            f"as a client sees  {', '.join(sorted(names))}"
+            if names
+            else "as a client sees  nothing"
+        )
+    finally:
+        await client.close()
+        serving.cancel()
+    return failures
 
 
 async def _run(conversation: Conversation, runtime: Any, prompt: str) -> list[Event]:

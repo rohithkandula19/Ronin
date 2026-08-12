@@ -12,19 +12,22 @@ requires-python = ">=3.11"
 dependencies = []
 
 [project.scripts]
-# `ronin2`, deliberately not `ronin`. The v1 tree (`packages/cli`, ~300 modules) owns
-# the `ronin` name and is what every existing install runs; taking that name here would
-# silently swap the agent under people who upgraded for an unrelated reason.
+# Both names, and both point here. `ronin2` was the only one for as long as taking the
+# short name would have been a silent swap: v1 (`packages/cli`, ~300 modules) declared
+# `ronin`, and two distributions declaring one console script means whichever was
+# installed second wins, quietly.
 #
-# Two trees ship side by side on purpose, and the point is that the choice gets decided
-# by evidence rather than by preference: `tests/evals/` measures v2 today, and until it
-# has measured both there is no honest basis for a cutover. `ronin2` is how someone runs
-# the measured one without giving up the one that works.
+# That is now decided rather than deferred. v1's entry point is renamed to `ronin1` in
+# `packages/cli/pyproject.toml` — an explicit name, not a removal, so an existing user
+# has something to type — and `ronin` means this tree. `ronin2` stays as well: it is what
+# the docs, the eval harness and anyone who already installed it invoke, and breaking a
+# name to tidy up a name is a poor trade.
 #
 # `main` rather than an app object because `ronin.cli.main.main` returns an int and never
 # calls `sys.exit` — see its module docstring. The console-script wrapper turns the
 # return value into the process status, so the exit codes (0 done, 1 error, 2 an approval
 # was refused) survive the packaging layer unchanged.
+ronin = "ronin.cli.main:main"
 ronin2 = "ronin.cli.main:main"
 
 [project.optional-dependencies]
@@ -235,6 +238,7 @@ module = [
     "test_ronin_cli_interactive",
     "test_ronin_cli_main",
     "test_ronin_cli_sdk",
+    "test_ronin_cli_serve",
     "test_ronin_cli_slash",
     "test_ronin_cli_spine",
     "test_ronin_cli_status",

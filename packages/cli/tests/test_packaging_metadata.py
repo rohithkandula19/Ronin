@@ -60,13 +60,21 @@ def test_all_internal_deps_declared_as_versions(cli_wheel):
         assert dep in reqs, f"internal dependency not declared in wheel metadata: {dep}"
 
 
-def test_both_console_scripts_present(cli_wheel):
+def test_the_console_script_is_ronin1_and_does_not_claim_the_short_names(cli_wheel):
+    # This tree used to declare `ronin` and `ro`. Both are gone on purpose: the v2 tree
+    # at the repository root now declares `ronin`, and console scripts are not
+    # namespaced — two installed distributions declaring one name means whichever was
+    # installed second silently overwrites the other's launcher, so a user who upgraded
+    # one of them finds a different agent behind the same word. `ronin1` is a rename
+    # rather than a removal, so this CLI still has a name to type.
     z = zipfile.ZipFile(cli_wheel)
     ep = next((n for n in z.namelist() if n.endswith("entry_points.txt")), None)
     assert ep, "no entry_points.txt in wheel"
     txt = z.read(ep).decode()
-    assert "ronin = ronin_cli.main:app" in txt
-    assert "ro = ronin_cli.main:app" in txt
+    assert "ronin1 = ronin_cli.main:app" in txt
+    scripts = {line.split("=")[0].strip() for line in txt.splitlines() if "=" in line}
+    assert "ronin" not in scripts, "the short name belongs to the v2 tree at the repo root"
+    assert "ro" not in scripts, "a two-letter name resolving to v1 is the same silent swap"
 
 
 def test_no_secret_or_state_files_in_artifact(cli_wheel):

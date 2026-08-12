@@ -54,6 +54,9 @@ from ..core.types import (
     ToolEnd,
     ToolStart,
 )
+from ..mcp.jsonrpc import TransportClosed
+from ..mcp.server import serve_stdio
+from ..mcp.transport import StreamPair, stdio_streams
 from ..persistence import export as export_module
 from ..persistence.index import SessionIndex, SessionIndexError
 from ..persistence.resume import ResumedSession, resume_latest, resume_session
@@ -81,6 +84,7 @@ from .approve import Handoff, PromptAsker
 from .bench import BenchOptions, default_suite, run_duel_command, run_eval
 from .doctor import run_doctor
 from .sdk import Agent, load_router
+from .serve import build_server
 from .spine import Paths
 from .status import context_share, current_branch
 from .stream import DEFAULT_MAX_ITERATIONS, CompactionPairingError
@@ -118,6 +122,7 @@ class Command(StrEnum):
     EVAL = "eval"
     DUEL = "duel"
     TELEMETRY = "telemetry"
+    MCP_SERVE = "mcp-serve"
 
 
 class ExportFormat(StrEnum):
@@ -327,6 +332,14 @@ def build_parser() -> _Parser:
             "  telemetry [status|on|off|show]\n"
             "                             opt-in aggregate task outcomes; off by "
             "default\n"
+            "  mcp-serve                  serve this workspace's tools over MCP on "
+            "stdio, so\n"
+            "                             claude desktop / cursor / another ronin can "
+            "drive it.\n"
+            "                             --mode decides what is exposed: ask gives "
+            "the read-only\n"
+            "                             tools, auto_edit adds edit, full adds bash "
+            "and ronin_task\n"
             "\n"
             "eval/duel flags: --suite PATH, --model NAME (repeat for duel), "
             "--parallel N,\n"
@@ -569,6 +582,7 @@ def parse(argv: Sequence[str]) -> Options | Usage:
         Command.EVAL.value,
         Command.DUEL.value,
         Command.TELEMETRY.value,
+        Command.MCP_SERVE.value,
     }:
         command = Command(tokens.pop(0))
 
@@ -592,6 +606,8 @@ def parse(argv: Sequence[str]) -> Options | Usage:
         return _telemetry_options(namespace, words)
     if command is Command.SESSIONS:
         return _sessions_options(namespace, words)
+    if command is Command.MCP_SERVE:
+        return _mcp_serve_options(namespace, words)
 
     prompt = namespace.print_prompt if namespace.print_prompt is not None else words
     headless = namespace.print_prompt is not None
@@ -664,6 +680,46 @@ def _sessions_options(namespace: argparse.Namespace, words: str) -> Options | Us
             reindex=bool(namespace.reindex),
             by_cost=bool(namespace.by_cost),
         ),
+    )
+
+
+def _mcp_serve_options(namespace: argparse.Namespace, words: str) -> Options | Usage:
+    """``mcp-serve`` argv. Takes no prompt, and says so rather than ignoring one.
+
+    A prompt is refused instead of dropped because ``ronin2 mcp-serve "fix the test"``
+    reads as though it would run something — and a server that silently discarded the
+    request would sit there answering frames while its user waited for an answer.
+
+    ``--print`` and ``--output-format`` are refused for the same reason and one more:
+    both write to stdout, and stdout is the JSON-RPC frame stream. A single line of
+    prose there corrupts the session for the client at the other end.
+    """
+    if words:
+        return Usage(
+            f"{PROGRAM}: error: mcp-serve takes no prompt (got {words!r}); it serves "
+            f"this workspace's tools to whatever launched it. Use `{PROGRAM} -p` to run "
+            "a prompt yourself."
+        )
+    if namespace.print_prompt is not None:
+        return Usage(f"{PROGRAM}: error: mcp-serve does not take --print")
+    if namespace.output_format is not None:
+        return Usage(
+            f"{PROGRAM}: error: mcp-serve does not take --output-format; its stdout "
+            "carries JSON-RPC frames and nothing else"
+        )
+    return Options(
+        command=Command.MCP_SERVE,
+        mode=Mode(namespace.mode) if namespace.mode else None,
+        yolo=bool(namespace.yolo),
+        sandbox=bool(namespace.sandbox),
+        cwd=Path(namespace.cwd),
+        record=bool(namespace.record),
+        connect_mcp=bool(namespace.connect_mcp),
+        # The first-run wizard prints a question to stdout and reads the answer from
+        # stdin. Both are the protocol here, so it is not merely unhelpful — it would
+        # write a prompt into the frame stream and then consume the client's first
+        # request as the answer. Off unconditionally, not by flag.
+        wizard=False,
     )
 
 
@@ -795,12 +851,18 @@ async def dispatch(
     streams: Streams,
     environ: Mapping[str, str] | None = None,
     agent: Agent | None = None,
+    mcp_streams: StreamPair | None = None,
 ) -> int:
     """Do what the options say. The one place a command line becomes behaviour.
 
     ``agent`` is injected by ``tests/cli`` and by ``ronin.cli.demo``: a fully
     assembled :class:`~ronin.cli.sdk.Agent` needs a model, and every path below has
     to be reachable without one.
+
+    ``mcp_streams`` is the same idea for ``mcp-serve``: the pipes it serves on.
+    Injected, it is one end of a :func:`~ronin.mcp.transport.memory_duplex` and a real
+    :class:`~ronin.mcp.client.McpClient` can drive this whole path in a test; omitted,
+    ``mcp-serve`` wraps this process's own stdin and stdout.
     """
     env = os.environ if environ is None else environ
     if options.command is Command.VERSION:
@@ -816,6 +878,8 @@ async def dispatch(
         return await _bench(options, paths, env, streams)
     if options.command is Command.TELEMETRY:
         return _telemetry(options, paths, streams)
+    if options.command is Command.MCP_SERVE:
+        return await _mcp_serve(options, paths, env, streams, agent, mcp_streams)
 
     if options.command is Command.DOCTOR:
         report = await run_doctor(
@@ -889,6 +953,54 @@ async def _bench(
     if out:
         streams.out(out)
     return code
+
+
+async def _mcp_serve(
+    options: Options,
+    paths: Paths,
+    env: Mapping[str, str],
+    streams: Streams,
+    agent: Agent | None,
+    pipes: StreamPair | None,
+) -> int:
+    """``mcp-serve``: assemble a session, publish its tools, answer frames until EOF.
+
+    Before the first-run wizard in :func:`dispatch`, like ``eval`` and ``telemetry``,
+    and for a stronger reason than either: the wizard prompts on stdout and reads
+    stdin, which here are the protocol. :func:`_mcp_serve_options` sets
+    ``wizard=False`` as well, so this is true whichever way the options were built.
+
+    Every line this function emits goes to **stderr**. A client reading stdout is
+    parsing JSON-RPC frames, and :class:`~ronin.mcp.transport.StdioTransport` — Ronin's
+    own client — treats one unexpected line there as fatal, correctly. Returning ``0``
+    at EOF is the normal end: the peer closed the pipe because it was finished.
+    """
+    owns = agent is None
+    if agent is None:
+        # No asker: there is no human on the other end of stdin to ask. Anything the
+        # mode does not already allow is refused as a value, and `serve.build_server`
+        # will not have published it in the first place.
+        built = await _open_agent(options, paths, env, streams, asker=None)
+        if built is None:
+            return EXIT_ERROR
+        agent = built
+    try:
+        served = build_server(agent, version=_version())
+        for note in agent.loaded.notes:
+            streams.err(note.line() + "\n")
+        streams.err(served.banner())
+        streams.flush()
+        if pipes is None:
+            try:
+                pipes = await stdio_streams()
+            except TransportClosed as exc:
+                streams.err(f"{PROGRAM}: cannot serve MCP on stdio: {exc}\n")
+                return EXIT_ERROR
+        await serve_stdio(served.server, pipes)
+    finally:
+        if owns:
+            await agent.aclose()
+    return EXIT_OK
 
 
 def _telemetry(options: Options, paths: Paths, streams: Streams) -> int:
