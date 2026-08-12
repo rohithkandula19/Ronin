@@ -43,8 +43,15 @@ dependencies = [
 ]
 
 [project.scripts]
-ronin = "ronin_cli.main:app"
-ro = "ronin_cli.main:app"   # short alias
+# `ronin1`, not `ronin`. The short name now belongs to the v2 tree in the repository
+# root, and two distributions declaring one console script means whichever was installed
+# second silently wins — so the name is stated here rather than contested.
+#
+# Renamed, not removed: this tree is the one that works today and an existing user needs
+# something to type. `ro` is gone with it, because a two-letter name resolving to v1
+# while `ronin` resolves to v2 is the same silent swap in miniature, and nothing in this
+# repository, its docs or its CI invokes it.
+ronin1 = "ronin_cli.main:app"
 
 [project.urls]
 Homepage = "https://github.com/rohithkandula19/Ronin"

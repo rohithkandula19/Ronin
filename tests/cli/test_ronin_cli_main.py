@@ -889,10 +889,10 @@ def test_main_with_no_model_configuration_returns_one(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_the_declared_entry_point_resolves_to_a_callable() -> None:
-    """`ronin2 = "ronin.cli.main:main"` must name something importable.
+def test_every_declared_entry_point_resolves_to_a_callable() -> None:
+    """`ronin` and `ronin2` must both name something importable.
 
-    A typo in that string is invisible until somebody installs the wheel — `uv run`
+    A typo in either string is invisible until somebody installs the wheel — `uv run`
     and `python -m ronin` both work regardless, so the whole local development loop
     passes while the published artifact has a broken command. Resolved here the same
     way importlib.metadata resolves it at install time.
@@ -904,16 +904,47 @@ def test_the_declared_entry_point_resolves_to_a_callable() -> None:
     config = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
     scripts = config["project"]["scripts"]
 
-    assert "ronin2" in scripts, "the v2 console script must stay declared"
-    assert "ronin" not in scripts, (
-        "the bare `ronin` name belongs to packages/cli (v1); taking it here would swap "
-        "the agent under everyone who upgraded for an unrelated reason"
-    )
+    assert {"ronin", "ronin2"} <= set(scripts), "both console scripts must stay declared"
+    for name, target in scripts.items():
+        module_path, _, attribute = target.partition(":")
+        resolved = getattr(import_module(module_path), attribute)
+        assert callable(resolved), name
+        assert resolved is main, f"{name} must point at the same main() tested above"
 
-    module_path, _, attribute = scripts["ronin2"].partition(":")
-    resolved = getattr(import_module(module_path), attribute)
-    assert callable(resolved)
-    assert resolved is main, "the script must point at the same main() tested above"
+
+def test_no_two_distributions_in_this_workspace_claim_one_command_name() -> None:
+    """The invariant behind the `ronin` / `ronin1` / `ronin2` naming, as a gate.
+
+    Console scripts are not namespaced. When two installed distributions declare the same
+    name, whichever was installed second overwrites the other's launcher — silently, with
+    no warning and no error, so a user who upgraded one of them for an unrelated reason
+    finds a different agent behind the same word. That is why the root tree held off on
+    `ronin` for as long as `packages/cli` declared it, and why v1's entry point was
+    *renamed* to `ronin1` rather than left to collide.
+
+    Checked across the whole workspace rather than between those two files, because the
+    next collision will be a third package nobody thought about.
+    """
+    import tomllib
+
+    root = Path(__file__).resolve().parents[2]
+    members = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["tool"]["uv"][
+        "workspace"
+    ]["members"]
+
+    owners: dict[str, list[str]] = {}
+    for manifest in [
+        root / "pyproject.toml",
+        *(root / member / "pyproject.toml" for member in members),
+    ]:
+        if not manifest.is_file():
+            continue
+        project = tomllib.loads(manifest.read_text(encoding="utf-8")).get("project", {})
+        for name in project.get("scripts", {}):
+            owners.setdefault(name, []).append(project.get("name", str(manifest)))
+
+    clashes = {name: sources for name, sources in owners.items() if len(sources) > 1}
+    assert not clashes, f"two distributions declare the same console script: {clashes}"
 
 
 def test_the_console_script_returns_an_int_rather_than_exiting() -> None:

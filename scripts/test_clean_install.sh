@@ -43,10 +43,22 @@ for pkg in ronin-agent-patterns ronin-hardening ronin-memory ronin-mcp-servers r
   "$VENV/bin/pip" show "$pkg" >/dev/null 2>&1 || fail "workspace dep not installed: $pkg"
 done
 
-RONIN="$VENV/bin/ronin"
-RO="$VENV/bin/ro"
-[ -x "$RONIN" ] || fail "console script 'ronin' missing"
-[ -x "$RO" ]    || fail "console script 'ro' missing"
+# `ronin1`, not `ronin`. The short name belongs to the v2 tree at the repository
+# root, and console scripts are not namespaced: two installed distributions
+# declaring one name means whichever landed second silently overwrote the other's
+# launcher. Asserting the *absence* of the old names is the half that matters —
+# without it this script would still pass in the world where the collision came
+# back and the wheel this venv installed was not the one being invoked.
+RONIN="$VENV/bin/ronin1"
+[ -x "$RONIN" ] || fail "console script 'ronin1' missing"
+# `if`, not `[ … ] && fail`: under `set -e` a false test at the head of an `&&` list
+# makes the list non-zero and kills the script, so the negative assertions would
+# "pass" by aborting the run before the smoke tests below ever happened.
+for retired in ronin ro; do
+  if [ -e "$VENV/bin/$retired" ]; then
+    fail "ronin-cli claimed '$retired'; that name is the v2 tree's or was retired"
+  fi
+done
 
 echo "== prove the install does NOT import from the source tree =="
 SRC_FILE="$(cd "$RUNDIR" && "$VENV/bin/python" -c 'import ronin_cli, sys; sys.stdout.write(ronin_cli.__file__)')"
@@ -64,11 +76,10 @@ esac
 
 echo "== smoke, run from OUTSIDE the repo ($RUNDIR) =="
 cd "$RUNDIR"
-"$RONIN" --version                >/dev/null || fail "ronin --version"
-"$RONIN" util version             >/dev/null || fail "ronin util version"
-"$RONIN" --help                   >/dev/null || fail "ronin --help"
-"$RONIN" util doctor              >/dev/null || fail "ronin util doctor"
-"$RO" --version                   >/dev/null || fail "ro --version"
+"$RONIN" --version                >/dev/null || fail "ronin1 --version"
+"$RONIN" util version             >/dev/null || fail "ronin1 util version"
+"$RONIN" --help                   >/dev/null || fail "ronin1 --help"
+"$RONIN" util doctor              >/dev/null || fail "ronin1 util doctor"
 # offline-safe: a missing eval dataset must error gracefully (exit 2), not crash.
 set +e
 "$RONIN" eval run /nonexistent.jsonl >/dev/null 2>&1; ec=$?

@@ -172,14 +172,39 @@ jobs:
       - name: Standalone clean-install smoke (outside the repo, no source tree)
         run: bash scripts/test_clean_install.sh
 
-      - name: Smoke test ronin CLI
+      # `ronin1`, the v1 console script. It was `ronin` until the v2 tree at the
+      # repository root took that name; in this workspace venv both are installed, so
+      # invoking `ronin` here would silently run v2's parser against v1's verbs and
+      # fail on `init --demo`. Renaming the entry point is what makes which one runs a
+      # decision rather than an install-order accident.
+      - name: Smoke test the v1 CLI (ronin1)
         run: |
           mkdir -p /tmp/ronin-smoke && cd /tmp/ronin-smoke
-          uv --project "$GITHUB_WORKSPACE" run ronin init --demo -y
-          uv --project "$GITHUB_WORKSPACE" run ronin util tools
-          uv --project "$GITHUB_WORKSPACE" run ronin util doctor
-          uv --project "$GITHUB_WORKSPACE" run ronin util version
-          uv --project "$GITHUB_WORKSPACE" run ronin update --check
-          uv --project "$GITHUB_WORKSPACE" run ronin util relay --help
-          uv --project "$GITHUB_WORKSPACE" run ronin util relay connect --help
-          uv --project "$GITHUB_WORKSPACE" run ronin util telegram --help
+          uv --project "$GITHUB_WORKSPACE" run ronin1 init --demo -y
+          uv --project "$GITHUB_WORKSPACE" run ronin1 util tools
+          uv --project "$GITHUB_WORKSPACE" run ronin1 util doctor
+          uv --project "$GITHUB_WORKSPACE" run ronin1 util version
+          uv --project "$GITHUB_WORKSPACE" run ronin1 update --check
+          uv --project "$GITHUB_WORKSPACE" run ronin1 util relay --help
+          uv --project "$GITHUB_WORKSPACE" run ronin1 util relay connect --help
+          uv --project "$GITHUB_WORKSPACE" run ronin1 util telegram --help
+
+      # The v2 console script, which nothing checked before: `ronin2` was declared and
+      # `pyproject.toml` was only proved importable by a unit test. Both names now have
+      # to actually launch, from the venv, the way a user reaches them.
+      - name: Smoke test the v2 CLI (ronin / ronin2)
+        run: |
+          mkdir -p /tmp/ronin2-smoke && cd /tmp/ronin2-smoke
+          uv --project "$GITHUB_WORKSPACE" run ronin --version
+          uv --project "$GITHUB_WORKSPACE" run ronin2 --version
+          uv --project "$GITHUB_WORKSPACE" run ronin --help
+          # `doctor` exits 1 on a box with no provider key and no local model server —
+          # which this runner is, by design. That non-zero is doctor working correctly
+          # (`providers` is a FAIL, deliberately: no model, no session), so the smoke
+          # proves the command RAN to completion — it printed its report and named the
+          # builtin skills that had to survive the wheel build — rather than demanding a
+          # healthy environment it does not have.
+          report="$(uv --project "$GITHUB_WORKSPACE" run ronin doctor || true)"
+          echo "$report"
+          echo "$report" | grep -q "^ronin doctor" || { echo "::error::ronin doctor produced no report"; exit 1; }
+          echo "$report" | grep -q "autoplan" || { echo "::error::builtin role skills missing from a clean install"; exit 1; }

@@ -115,6 +115,31 @@ LoRA are real options the config exposes, but they will likely OOM on an 8 GB M2
 `memory_warnings()` says so, and the 0.5B model is the fallback. Nothing here claims a
 successful train you didn't run.
 
+## Optional pass 3: GRPO with a verifiable reward
+
+The `adapter/` pipeline has three passes — SFT (`adapter_sft.yaml`), DPO
+(`adapter_dpo.yaml`), and now GRPO (`adapter_grpo.yaml`). GRPO's reward is **not** a
+learned reward model: it is the *verifier* in `ronin_training.adapter.reward`, which
+scores a sampled completion on facts — a call that parses and validates against the v2
+registry earns reward; the wrong (v1) dialect is punished below zero. That is what lets
+the pass be defined, validated and unit-tested here with **no GPU** — the reward for a
+completion is a fact, not another network's opinion.
+
+```bash
+# validate the config (structural, offline — imports no ML stack)
+uv run --package ronin-training python -m ronin_training.adapter.config \
+    training/config/adapter_grpo.yaml
+
+# see the reward score five scripted completions and the group-relative advantage:
+uv run --package ronin-training python -m ronin_training.adapter.demo   # section 5
+```
+
+There is **no mlx-lm lane** for GRPO (`to_mlx_config()` refuses it, by name): run it on
+the peft/trl lane with `trl.GRPOTrainer` and the reward from
+`ronin_training.adapter.reward.make_reward_fn`. As with every number in this package, no
+GRPO run happened here — the hyperparameters in the config are trl's documented defaults,
+carried explicitly, not values tuned by a run.
+
 ## Run Ronin WITH the fine-tuned adapter
 
 The embedded provider loads a trained LoRA adapter on top of the 4-bit base model

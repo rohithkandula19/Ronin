@@ -37,7 +37,7 @@ import argparse
 import asyncio
 import os
 import sys
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
@@ -54,6 +54,9 @@ from ..core.types import (
     ToolEnd,
     ToolStart,
 )
+from ..mcp.jsonrpc import TransportClosed
+from ..mcp.server import serve_stdio
+from ..mcp.transport import StreamPair, stdio_streams
 from ..persistence import export as export_module
 from ..persistence.index import SessionIndex, SessionIndexError
 from ..persistence.resume import ResumedSession, resume_latest, resume_session
@@ -79,15 +82,17 @@ from ..ui.reduce import ViewState, reduce_event, summarize_arguments, summarize_
 from ..ui.render import strip_controls
 from .approve import Handoff, PromptAsker
 from .bench import BenchOptions, default_suite, run_duel_command, run_eval
+from .detect import Detection, detect, real_probe
 from .doctor import run_doctor
 from .sdk import Agent, load_router
+from .serve import build_server
 from .spine import Paths
 from .status import context_share, current_branch
 from .stream import DEFAULT_MAX_ITERATIONS, CompactionPairingError
 from .telemetry_cmd import TelemetryOptions, Verb
 from .telemetry_cmd import run as run_telemetry
 from .wire import load_workspace
-from .wizard import apply_plan, plan_first_run
+from .wizard import apply_plan, plan_config, plan_first_run, run_smoke, write_config
 
 PROGRAM = "ronin"
 
@@ -118,6 +123,10 @@ class Command(StrEnum):
     EVAL = "eval"
     DUEL = "duel"
     TELEMETRY = "telemetry"
+    MCP_SERVE = "mcp-serve"
+    ACP = "acp"
+    API = "api"
+    PLUGIN = "plugin"
 
 
 class ExportFormat(StrEnum):
@@ -212,6 +221,13 @@ class Options:
     telemetry: TelemetryOptions | None = None
     #: Present for ``sessions`` only, same rule again.
     sessions: SessionsOptions | None = None
+    #: ``api`` bind address. Loopback by default: an agentic endpoint that runs the
+    #: whole loop must not be reachable off the machine unless the operator says so.
+    host: str = "127.0.0.1"
+    port: int = 8080
+    #: ``plugin`` verb and its argument (``add <source>`` / ``list``).
+    plugin_verb: str = ""
+    plugin_source: str = ""
 
     @property
     def flags(self) -> dict[str, object]:
@@ -327,6 +343,24 @@ def build_parser() -> _Parser:
             "  telemetry [status|on|off|show]\n"
             "                             opt-in aggregate task outcomes; off by "
             "default\n"
+            "  mcp-serve                  serve this workspace's tools over MCP on "
+            "stdio, so\n"
+            "                             claude desktop / cursor / another ronin can "
+            "drive it.\n"
+            "                             --mode decides what is exposed: ask gives "
+            "the read-only\n"
+            "                             tools, auto_edit adds edit, full adds bash "
+            "and ronin_task\n"
+            "  acp                        serve the Agent Client Protocol over stdio, "
+            "so zed /\n"
+            "                             jetbrains / any ACP editor drives a ronin "
+            "session\n"
+            "  api [--host H --port N]    OpenAI- and Anthropic-compatible /v1 "
+            "endpoints that\n"
+            "                             run the agentic loop (loopback by default)\n"
+            "  plugin add PATH | list     install a local plugin bundle (skills, mcp, "
+            "agents,\n"
+            "                             commands, hooks) or list installed ones\n"
             "\n"
             "eval/duel flags: --suite PATH, --model NAME (repeat for duel), "
             "--parallel N,\n"
@@ -461,6 +495,15 @@ def build_parser() -> _Parser:
         action="store_true",
         help="order sessions by cost instead of recency (sessions only)",
     )
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        metavar="HOST",
+        help="bind address for `api` (default: 127.0.0.1, loopback only)",
+    )
+    parser.add_argument(
+        "--port", type=int, default=8080, metavar="N", help="bind port for `api` (default: 8080)"
+    )
     parser.add_argument("--version", action="store_true", help="print the version")
 
     # eval / duel. In this parser rather than a subparser so `--help` stays one page
@@ -569,6 +612,10 @@ def parse(argv: Sequence[str]) -> Options | Usage:
         Command.EVAL.value,
         Command.DUEL.value,
         Command.TELEMETRY.value,
+        Command.MCP_SERVE.value,
+        Command.ACP.value,
+        Command.API.value,
+        Command.PLUGIN.value,
     }:
         command = Command(tokens.pop(0))
 
@@ -592,6 +639,14 @@ def parse(argv: Sequence[str]) -> Options | Usage:
         return _telemetry_options(namespace, words)
     if command is Command.SESSIONS:
         return _sessions_options(namespace, words)
+    if command is Command.MCP_SERVE:
+        return _mcp_serve_options(namespace, words)
+    if command is Command.ACP:
+        return _acp_options(namespace, words)
+    if command is Command.API:
+        return _api_options(namespace, words)
+    if command is Command.PLUGIN:
+        return _plugin_options(namespace, words)
 
     prompt = namespace.print_prompt if namespace.print_prompt is not None else words
     headless = namespace.print_prompt is not None
@@ -664,6 +719,133 @@ def _sessions_options(namespace: argparse.Namespace, words: str) -> Options | Us
             reindex=bool(namespace.reindex),
             by_cost=bool(namespace.by_cost),
         ),
+    )
+
+
+def _mcp_serve_options(namespace: argparse.Namespace, words: str) -> Options | Usage:
+    """``mcp-serve`` argv. Takes no prompt, and says so rather than ignoring one.
+
+    A prompt is refused instead of dropped because ``ronin2 mcp-serve "fix the test"``
+    reads as though it would run something — and a server that silently discarded the
+    request would sit there answering frames while its user waited for an answer.
+
+    ``--print`` and ``--output-format`` are refused for the same reason and one more:
+    both write to stdout, and stdout is the JSON-RPC frame stream. A single line of
+    prose there corrupts the session for the client at the other end.
+    """
+    if words:
+        return Usage(
+            f"{PROGRAM}: error: mcp-serve takes no prompt (got {words!r}); it serves "
+            f"this workspace's tools to whatever launched it. Use `{PROGRAM} -p` to run "
+            "a prompt yourself."
+        )
+    if namespace.print_prompt is not None:
+        return Usage(f"{PROGRAM}: error: mcp-serve does not take --print")
+    if namespace.output_format is not None:
+        return Usage(
+            f"{PROGRAM}: error: mcp-serve does not take --output-format; its stdout "
+            "carries JSON-RPC frames and nothing else"
+        )
+    return Options(
+        command=Command.MCP_SERVE,
+        mode=Mode(namespace.mode) if namespace.mode else None,
+        yolo=bool(namespace.yolo),
+        sandbox=bool(namespace.sandbox),
+        cwd=Path(namespace.cwd),
+        record=bool(namespace.record),
+        connect_mcp=bool(namespace.connect_mcp),
+        # The first-run wizard prints a question to stdout and reads the answer from
+        # stdin. Both are the protocol here, so it is not merely unhelpful — it would
+        # write a prompt into the frame stream and then consume the client's first
+        # request as the answer. Off unconditionally, not by flag.
+        wizard=False,
+    )
+
+
+def _acp_options(namespace: argparse.Namespace, words: str) -> Options | Usage:
+    """``acp`` argv. Like ``mcp-serve``: stdio is the wire, so no prompt and no stdout.
+
+    An editor (Zed, JetBrains) launches ``ronin acp`` and speaks the Agent Client
+    Protocol over stdin/stdout. A prompt, ``--print`` or ``--output-format`` would all
+    put prose where the JSON-RPC frames go, so each is refused rather than dropped.
+    """
+    if words:
+        return Usage(
+            f"{PROGRAM}: error: acp takes no prompt (got {words!r}); an ACP client drives "
+            "the session over stdio"
+        )
+    if namespace.print_prompt is not None:
+        return Usage(f"{PROGRAM}: error: acp does not take --print")
+    if namespace.output_format is not None:
+        return Usage(
+            f"{PROGRAM}: error: acp does not take --output-format; its stdout carries "
+            "JSON-RPC frames and nothing else"
+        )
+    return Options(
+        command=Command.ACP,
+        mode=Mode(namespace.mode) if namespace.mode else None,
+        cwd=Path(namespace.cwd),
+        record=bool(namespace.record),
+        connect_mcp=bool(namespace.connect_mcp),
+        wizard=False,  # prompts on stdout / reads stdin — both are the protocol
+    )
+
+
+def _api_options(namespace: argparse.Namespace, words: str) -> Options | Usage:
+    """``api`` argv: bind an OpenAI/Anthropic-compatible HTTP endpoint.
+
+    Takes ``--host``/``--port``, not a prompt. The endpoints run the whole agentic loop
+    per request; there is no single prompt to give here.
+    """
+    if words:
+        return Usage(
+            f"{PROGRAM}: error: api takes no prompt (got {words!r}); it serves the "
+            "OpenAI/Anthropic-compatible endpoints on --host/--port"
+        )
+    if namespace.print_prompt is not None:
+        return Usage(f"{PROGRAM}: error: api does not take --print")
+    if namespace.port < 1 or namespace.port > 65535:
+        return Usage(f"{PROGRAM}: error: --port must be between 1 and 65535")
+    return Options(
+        command=Command.API,
+        mode=Mode(namespace.mode) if namespace.mode else None,
+        cwd=Path(namespace.cwd),
+        record=bool(namespace.record),
+        connect_mcp=bool(namespace.connect_mcp),
+        host=str(namespace.host),
+        port=int(namespace.port),
+        wizard=False,
+    )
+
+
+def _plugin_options(namespace: argparse.Namespace, words: str) -> Options | Usage:
+    """``plugin add <source>`` / ``plugin list``. A verb plus, for ``add``, a path.
+
+    ``add`` takes a **local** path — a directory holding a plugin. Cloning a git URL is
+    out of scope here (offline), so a URL is refused with the reason rather than a
+    confusing failure deep in a copy.
+    """
+    parts = words.split(maxsplit=1)
+    verb = parts[0] if parts else ""
+    argument = parts[1].strip() if len(parts) > 1 else ""
+    if verb not in {"add", "list"}:
+        return Usage(
+            f"{PROGRAM}: error: plugin takes a verb — `plugin add <path>` installs a "
+            "local plugin directory, `plugin list` shows what is installed"
+        )
+    if verb == "add" and not argument:
+        return Usage(f"{PROGRAM}: error: plugin add needs a path to a plugin directory")
+    if verb == "add" and "://" in argument:
+        return Usage(
+            f"{PROGRAM}: error: plugin add takes a local path, not a URL. Clone the repo "
+            "first, then `plugin add <the cloned directory>`."
+        )
+    return Options(
+        command=Command.PLUGIN,
+        cwd=Path(namespace.cwd),
+        plugin_verb=verb,
+        plugin_source=argument,
+        wizard=False,
     )
 
 
@@ -795,12 +977,19 @@ async def dispatch(
     streams: Streams,
     environ: Mapping[str, str] | None = None,
     agent: Agent | None = None,
+    mcp_streams: StreamPair | None = None,
+    acp_streams: StreamPair | None = None,
 ) -> int:
     """Do what the options say. The one place a command line becomes behaviour.
 
     ``agent`` is injected by ``tests/cli`` and by ``ronin.cli.demo``: a fully
     assembled :class:`~ronin.cli.sdk.Agent` needs a model, and every path below has
     to be reachable without one.
+
+    ``mcp_streams``/``acp_streams`` are the same idea for ``mcp-serve``/``acp``: the
+    pipes each serves on. Injected, each is one end of a
+    :func:`~ronin.mcp.transport.memory_duplex` so a real client can drive the whole
+    path in a test; omitted, the server wraps this process's own stdin and stdout.
     """
     env = os.environ if environ is None else environ
     if options.command is Command.VERSION:
@@ -816,20 +1005,33 @@ async def dispatch(
         return await _bench(options, paths, env, streams)
     if options.command is Command.TELEMETRY:
         return _telemetry(options, paths, streams)
+    if options.command is Command.MCP_SERVE:
+        return await _mcp_serve(options, paths, env, streams, agent, mcp_streams)
+    if options.command is Command.ACP:
+        return await _acp(options, paths, env, streams, acp_streams)
+    if options.command is Command.API:
+        return await _api(options, paths, env, streams)
+    if options.command is Command.PLUGIN:
+        return _plugin(options, paths, streams)
 
     if options.command is Command.DOCTOR:
         report = await run_doctor(
             load_workspace(paths, flags=options.flags, environ=env),
             router=_router_or_none(paths, env),
             environ=env,
+            detection=detect(env=env, probe=real_probe),
         )
         streams.out(report.render())
         return report.exit_code()
 
     # Before the agent, and whether or not one was injected: the wizard is about the
-    # workspace, not about who supplied the session.
+    # workspace, not about who supplied the session. Model detection (which probes
+    # loopback ports) and the smoke run only at an interactive terminal — a piped or
+    # test run skips them, so nothing here opens a socket off the onboarding path.
     if options.wizard and not paths.ronin_dir.exists():
-        _first_run(paths, streams)
+        detection = detect(env=env, probe=real_probe) if streams.isatty else None
+        smoke = _smoke_task(options, paths, env) if streams.isatty else None
+        await _first_run(paths, streams, detection=detection, smoke=smoke)
 
     # Who answers an approval is decided here, before the agent exists, because the
     # policy engine is built with its asker and cannot be handed a different one later.
@@ -889,6 +1091,175 @@ async def _bench(
     if out:
         streams.out(out)
     return code
+
+
+async def _mcp_serve(
+    options: Options,
+    paths: Paths,
+    env: Mapping[str, str],
+    streams: Streams,
+    agent: Agent | None,
+    pipes: StreamPair | None,
+) -> int:
+    """``mcp-serve``: assemble a session, publish its tools, answer frames until EOF.
+
+    Before the first-run wizard in :func:`dispatch`, like ``eval`` and ``telemetry``,
+    and for a stronger reason than either: the wizard prompts on stdout and reads
+    stdin, which here are the protocol. :func:`_mcp_serve_options` sets
+    ``wizard=False`` as well, so this is true whichever way the options were built.
+
+    Every line this function emits goes to **stderr**. A client reading stdout is
+    parsing JSON-RPC frames, and :class:`~ronin.mcp.transport.StdioTransport` — Ronin's
+    own client — treats one unexpected line there as fatal, correctly. Returning ``0``
+    at EOF is the normal end: the peer closed the pipe because it was finished.
+    """
+    owns = agent is None
+    if agent is None:
+        # No asker: there is no human on the other end of stdin to ask. Anything the
+        # mode does not already allow is refused as a value, and `serve.build_server`
+        # will not have published it in the first place.
+        built = await _open_agent(options, paths, env, streams, asker=None)
+        if built is None:
+            return EXIT_ERROR
+        agent = built
+    try:
+        served = build_server(agent, version=_version())
+        for note in agent.loaded.notes:
+            streams.err(note.line() + "\n")
+        streams.err(served.banner())
+        streams.flush()
+        if pipes is None:
+            try:
+                pipes = await stdio_streams()
+            except TransportClosed as exc:
+                streams.err(f"{PROGRAM}: cannot serve MCP on stdio: {exc}\n")
+                return EXIT_ERROR
+        await serve_stdio(served.server, pipes)
+    finally:
+        if owns:
+            await agent.aclose()
+    return EXIT_OK
+
+
+async def _acp(
+    options: Options,
+    paths: Paths,
+    env: Mapping[str, str],
+    streams: Streams,
+    pipes: StreamPair | None,
+) -> int:
+    """``acp``: serve the Agent Client Protocol over stdio to an editor.
+
+    Unlike ``mcp-serve`` there is no single pre-built agent: ACP opens one Agent per
+    ``session/new`` cwd, so this passes a factory rather than an agent. No asker, for
+    the same reason as ``mcp-serve`` — stdin is the wire, there is no human on it — so a
+    tool the mode does not already allow is refused as a value. Every line here is
+    stderr; stdout carries frames.
+    """
+    from .acp import AcpServer, serve_acp
+
+    async def open_agent(cwd: str) -> Agent:
+        discovered = Paths.discover(Path(cwd))
+        return await Agent.open(
+            cwd,
+            router=load_router(discovered, environ=env),
+            mode=options.mode,
+            environ=env,
+            record=options.record,
+            connect_mcp=options.connect_mcp,
+            asker=None,
+        )
+
+    server = AcpServer(open_agent=open_agent, version=_version())
+    streams.err("ronin acp: Agent Client Protocol over stdio\n")
+    streams.flush()
+    if pipes is None:
+        try:
+            pipes = await stdio_streams()
+        except TransportClosed as exc:
+            streams.err(f"{PROGRAM}: cannot serve ACP on stdio: {exc}\n")
+            return EXIT_ERROR
+    await serve_acp(server, pipes)
+    return EXIT_OK
+
+
+async def _api(options: Options, paths: Paths, env: Mapping[str, str], streams: Streams) -> int:
+    """``api``: bind the OpenAI/Anthropic-compatible HTTP endpoints.
+
+    Each request opens its own Agent and runs the full loop — the endpoints are
+    stateless, so a fresh session per request is the honest model. Loopback by default;
+    binding off-box is the operator's explicit ``--host`` choice. Blocks in
+    ``serve_forever`` until interrupted.
+    """
+    from .http_api import serve_http
+
+    try:
+        router = load_router(paths, environ=env)
+    except FileNotFoundError as exc:
+        streams.err(f"{exc}\n")
+        return EXIT_ERROR
+
+    async def open_agent() -> Agent:
+        return await Agent.open(
+            options.cwd,
+            router=router,
+            mode=options.mode,
+            environ=env,
+            record=options.record,
+            connect_mcp=options.connect_mcp,
+            asker=None,
+        )
+
+    streams.err(
+        f"ronin api: OpenAI/Anthropic-compatible endpoints on "
+        f"http://{options.host}:{options.port} (loop runs per request)\n"
+    )
+    streams.flush()
+    try:
+        await asyncio.to_thread(
+            serve_http, options.host, options.port, open_agent=open_agent, err=streams.err
+        )
+    except OSError as exc:
+        streams.err(f"{PROGRAM}: cannot bind {options.host}:{options.port}: {exc}\n")
+        return EXIT_ERROR
+    return EXIT_OK
+
+
+def _plugin(options: Options, paths: Paths, streams: Streams) -> int:
+    """``plugin add <path>`` / ``plugin list`` — install and inspect installed plugins.
+
+    ``add`` shows a community bundle's consent summary — the shell hooks and tools it
+    wants — and installs only if the human agrees, because a plugin's hooks run
+    ``/bin/sh``. ``official``/``trusted`` bundles skip the prompt.
+    """
+    from ..ext.plugins import PluginConsent, PluginError, install, load_installed
+
+    if options.plugin_verb == "list":
+        plugins, notes = load_installed(paths.home)
+        if not plugins:
+            streams.out("no plugins installed. `ronin plugin add <path>` installs one.\n")
+        for plugin in plugins:
+            streams.out(
+                f"{plugin.name}  [{plugin.trust}]  {plugin.description or plugin.directory}\n"
+            )
+        for note in notes:
+            streams.err(f"note: {note}\n")
+        return EXIT_OK
+
+    def approve(consent: PluginConsent) -> bool:
+        streams.out(consent.render() + "\n")
+        answer = streams.ask(f"enable plugin {consent.name!r}? [y/N] ").strip().lower()
+        return answer in ("y", "yes")
+
+    try:
+        plugin = install(Path(options.plugin_source), paths.home, approve=approve)
+    except (PluginError, OSError) as exc:
+        streams.err(f"{PROGRAM}: cannot add plugin: {exc}\n")
+        return EXIT_ERROR
+    streams.out(
+        f"installed {plugin.name} [{plugin.trust}] to {paths.home / '.ronin' / 'plugins'}\n"
+    )
+    return EXIT_OK
 
 
 def _telemetry(options: Options, paths: Paths, streams: Streams) -> int:
@@ -956,29 +1327,82 @@ def _router_or_none(paths: Paths, env: Mapping[str, str]) -> Router | None:
         return None
 
 
-def _first_run(paths: Paths, streams: Streams) -> None:
-    """Show the plan, ask, then apply it. The asking lives here on purpose.
+async def _first_run(
+    paths: Paths,
+    streams: Streams,
+    *,
+    detection: Detection | None = None,
+    smoke: Callable[[], Awaitable[bool]] | None = None,
+) -> None:
+    """Show the plan, ask, apply it, then get the user to a working model.
 
     ``wizard`` owns the plan/apply split (``plan_first_run`` touches nothing,
     ``apply_plan`` writes); this owns the question, because a module that prompts is a
     module that cannot be tested without a terminal. A ``no`` is respected and the
     session continues on defaults — the wizard is a convenience, not a gate.
+
+    When a ``detection`` is supplied and it found a usable model but no config exists, a
+    working ``models.toml`` is written from it — pointing at a detected local server
+    (ollama/lmstudio/vllm) or a provider whose key is set — so the common
+    "``pipx install`` then nothing works because there is no config" first run ends with
+    one that does. The optional ``smoke`` is the 10-second "does a task actually
+    complete" check; it is injected so a test never needs a model, and any failure is
+    reported as a line, never raised.
     """
     plan = plan_first_run(paths)
-    if plan.empty:
-        return
-    streams.out("first run in this workspace.\n")
-    streams.out(plan.render())
-    answer = streams.ask(WIZARD_QUESTION).strip().lower()
-    if answer not in ("", "y", "yes"):
-        streams.out("nothing written. `ronin doctor` shows the defaults in use.\n")
-        return
-    written = apply_plan(plan)
-    if not written:
-        streams.out("nothing needed writing.\n")
-        return
-    for path in written:
-        streams.out(f"wrote {path}\n")
+    if not plan.empty:
+        streams.out("first run in this workspace.\n")
+        streams.out(plan.render())
+        answer = streams.ask(WIZARD_QUESTION).strip().lower()
+        if answer not in ("", "y", "yes"):
+            streams.out("nothing written. `ronin doctor` shows the defaults in use.\n")
+            return
+        written = apply_plan(plan)
+        for path in written:
+            streams.out(f"wrote {path}\n")
+        if not written:
+            streams.out("nothing needed writing.\n")
+
+    # Model config: only when detection says a model is actually reachable and the user
+    # has none yet. Never overwrites — `write_config` returns None if a config exists.
+    if detection is not None and detection.has_any_model():
+        body = plan_config(detection)
+        if body is not None:
+            config_path = write_config(paths, body)
+            if config_path is not None:
+                streams.out(f"wrote {config_path} (from a detected model)\n")
+                if smoke is not None:
+                    result = await run_smoke(smoke)
+                    streams.out(result.line() + "\n")
+    elif detection is not None:
+        streams.out(
+            "no API key or local model server detected. Set a provider key (e.g. "
+            "ANTHROPIC_API_KEY) or run `ollama serve`, then `ronin doctor`.\n"
+        )
+
+
+def _smoke_task(
+    options: Options, paths: Paths, env: Mapping[str, str]
+) -> Callable[[], Awaitable[bool]]:
+    """The 10-second "does a task actually complete" check, as an awaitable.
+
+    Opens an agent from the config the wizard just wrote and asks it one trivial
+    question; ``run_smoke`` wraps this with the deadline and turns any failure into a
+    reported line. Kept as a closure so the wizard needs no model knowledge and a test
+    can pass its own.
+    """
+
+    async def smoke() -> bool:
+        agent = await _open_agent(options, paths, env, streams=Streams.standard(), asker=None)
+        if agent is None:
+            return False
+        try:
+            result = await agent.run("Reply with exactly the word: ok")
+            return result.ok and "ok" in result.text.lower()
+        finally:
+            await agent.aclose()
+
+    return smoke
 
 
 def _wants_modal(options: Options, streams: Streams) -> bool:
@@ -1238,6 +1662,14 @@ async def _slash(line: str, agent: Agent, streams: Streams) -> Slash:
     registry = agent.loaded.commands
     parsed = parse_command(line, registry=registry)
     if isinstance(parsed, ParseError):
+        # Only reached when neither a builtin nor a user command owns the name, so a
+        # skill can never shadow /clear or /plan: those parse successfully above. A skill
+        # invoked this way runs its body as an ordinary turn, exactly like a user command
+        # — the other half of "the tool and the slash command do the same thing".
+        invocation = agent.loaded.skills.invocation(line)
+        if invocation is not None:
+            streams.out(f"/{invocation.skill.name} → skill ({invocation.skill.source})\n")
+            return Slash(prompt=invocation.prompt)
         streams.err(parsed.display + "\n")
         return Slash()
     if parsed.is_user_defined:
@@ -1250,6 +1682,11 @@ async def _slash(line: str, agent: Agent, streams: Streams) -> Slash:
     name = parsed.name
     if name == "help":
         streams.out(render_help(registry) + "\n")
+        skills = agent.loaded.skills
+        if skills.skills:
+            streams.out("\nskills (invoke with /name or the skill tool):\n")
+            for skill in skills.skills:
+                streams.out(f"  /{skill.name:<16} {skill.description}\n")
     elif name == "doctor":
         report = await run_doctor(agent.loaded, runtime=agent.runtime)
         streams.out(report.render())
@@ -1289,7 +1726,9 @@ async def _slash(line: str, agent: Agent, streams: Streams) -> Slash:
     elif name == "hooks":
         streams.out(_render_hooks(agent))
     elif name == "init":
-        _first_run(agent.loaded.paths, streams)
+        # /init scaffolds the workspace; a running session already has a model, so it
+        # does not re-detect or write a models.toml — that is the fresh-install path.
+        await _first_run(agent.loaded.paths, streams)
     else:  # pragma: no cover - every declared command above is wired
         streams.err(
             f"/{name} is a real command but is not wired into this line session. "

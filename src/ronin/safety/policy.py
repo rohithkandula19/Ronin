@@ -892,6 +892,23 @@ class PolicyEngine:
         """
         self.mode = mode
 
+    def relaxes(self, spec: ToolSpec) -> bool:
+        """Whether the current mode turns an ``ask`` for ``spec`` into an ``allow``.
+
+        The question "can this tool run with nobody watching?", answered by the object
+        that owns the mode ladder. Exists because :mod:`ronin.cli.serve` has to answer
+        it *before* any call is made — an MCP server over stdio has no human to ask,
+        since stdin is the protocol channel, so it exposes exactly the tools this mode
+        does not need one for. Re-deriving the ladder there would be a second copy of
+        :meth:`_relax`, and the copy that drifts is always the one in the layer that
+        merely uses the rule.
+
+        Narrower than "will this call be allowed": a rule or the deny list can still
+        refuse an individual call, and that refusal is a value the caller gets back.
+        This answers only the mode's half.
+        """
+        return self._relax(Decision.ASK, spec) is Decision.ALLOW
+
     # -- inspection --------------------------------------------------------- #
 
     @property

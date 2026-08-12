@@ -5,6 +5,43 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Added
+- **`ronin2 mcp-serve` — Claude Desktop, Cursor or another Ronin can now actually launch
+  this one.** The MCP server side was written, tested, documented down to its trust model
+  and *never constructed outside the test suite*: no subcommand, no real `NestedRunner`.
+  The capability read as shipped and was unreachable. `cli/serve.py` is the missing
+  constructor and `mcp-serve` is the process that runs it, on this process's own stdin and
+  stdout (`mcp.transport.stdio_streams`).
+  - **The permission mode decides what is published**, because over stdio there is no
+    human to ask — stdin carries the frames. `ask` exposes `read`/`grep`/`glob`,
+    `auto_edit` adds `edit`, `full` adds `bash` and `ronin_task`. Publishing a tool that
+    would refuse every call is the mistake `wire.py` already argues against for a
+    `web_search` with no backend, so what is withheld is named on stderr together with the
+    lowest `--mode` that would expose it. The question is asked of
+    `PolicyEngine.relaxes()` rather than re-derived, so there is no second copy of the
+    mode ladder.
+  - **Nothing reaches stdout but frames.** `mcp-serve` refuses `--print` and
+    `--output-format`, never runs the first-run wizard (it prompts on stdout and reads
+    stdin — both are the protocol), and puts its banner and every note on stderr. A test
+    injects streams whose `out` raises.
+  - **Both halves of the gate travel, and there are two.** `GatedRegistry` does hooks, the
+    stale-edit check, taint and the output clamp; approval is *not* in it, because in a
+    session `core.loop` asks the policy first. A `tools/call` has no loop behind it, so
+    `ExposedTool` asks in the loop's place. That was found the hard way — the first version
+    only went through the registry, and a test that served `rm -rf ~` deleted the
+    directory, because the unconditional deny list lives in the policy engine and nothing
+    else in the path looks at it.
+  - One integration test runs the whole path: argv → `dispatch` → a real `McpClient` over
+    an in-memory pipe → `mcp__self__ronin_task` in a client-side registry → exit 0 when the
+    peer hangs up. `python -m ronin.cli.demo` gained a section that does the same and
+    prints what a client sees.
+- **`ronin` is a console script again, alongside `ronin2`.** Both point at this tree. v1's
+  entry point in `packages/cli` is renamed `ronin1` — explicitly, not removed, so an
+  existing user has something to type — which is what makes the short name safe to take:
+  console scripts are not namespaced, so two distributions declaring one name means
+  whichever was installed second silently wins. A test now checks that no two
+  distributions in this workspace claim the same command, because the next collision will
+  be a package nobody thought about. The two-letter `ro` alias is gone: `ro` resolving to
+  v1 while `ronin` resolves to v2 is the same silent swap in miniature.
 - **`from ronin import Agent` works, and the SDK can be embedded.** The package root was a
   single docstring, so the one import line every doc and example would start with failed.
   It now re-exports `Agent`, `AgentConfig`, `AgentResult`, `Run`, the whole `Event` union,
@@ -29,6 +66,99 @@ All notable changes to this project will be documented here. Format follows [Kee
     suite runs the script. Writing it found the gap it now covers: `Tool`, `ToolContext`
     and `ToolSpec` were unexported, so a caller could be told to bring a tool and had no
     way to declare one.
+- **Skills — a directory of saved workflows that cost one line each until used.** A skill
+  is a `SKILL.md` (frontmatter + body) on disk. Only each skill's name and one-line
+  description enters the prompt at session start; the body loads on demand — via the new
+  `skill(name=…)` tool or by typing `/name` — and comes back as a *tool result*, so the
+  output gate truncates it deterministically like everything else the model reads. A
+  hundred skills cost ~a hundred lines in the cached prefix, not their full text.
+  - **Discovery precedence is "local wins", and a shadow is a note, never a silent
+    override.** `installed < ~/.ronin/skills < ./.ronin/skills`; when two tiers define one
+    name the project copy is used and the shadow is recorded where a human will read it.
+  - `allowed-tools` and `model` are advisory — surfaced in the loaded body, not enforced
+    at the gate — and documented as advisory rather than pretended otherwise. Frontmatter
+    reuses `agents.definitions.parse_frontmatter`, now parameterised with `known_keys` so
+    one grammar serves both agents and skills.
+- **Role workflows ship in the box.** Nine builtin skills — `autoplan`, `office-hours`,
+  `design-review`, `eng-review`, `review`, `ship`, `qa`, `retro`, `investigate` — load as
+  the lowest discovery tier, so a bare workspace already answers `/review` and a project
+  can shadow any of them. `review` and `investigate` drive the real `reviewer`/`fixer`
+  subagents through `task`; each carries an `adapted-from:` line where it borrows a shape.
+- **Plugins — a bundle a stranger wrote, and a consent gate in front of it.** `ronin plugin
+  add <path>` installs a directory carrying any of skills, MCP servers, subagents, slash
+  commands, hooks and assets, declared in a `plugin.json` (`.ronin-plugin/` or the
+  `.codex-plugin` alias). Surfaces merge into the workspace with the plugin *losing* every
+  collision, because a bundle must not be able to redefine a builtin out from under you.
+  - **A community bundle's hooks are `/bin/sh -c` that fire on the model's actions — so
+    installing one is arbitrary code execution the moment it is enabled.** Trust tiers
+    `builtin < official < trusted < community` gate that: an `official`/`trusted` bundle
+    installs silently, a `community` one (or any unrecognised tier) prints exactly what it
+    would run — the shell commands verbatim, the MCP servers, the agents and commands it
+    adds — and installs nothing until a human says yes. A malformed surface is omitted from
+    the summary *and* from what loads, so what is approved is exactly what runs. A
+    programmatic `install(...)` with no approver keeps its existing contract: the caller
+    owns the trust decision.
+  - Hooks arriving from a plugin are normalised through `HookConfig.normalize`, which now
+    accepts the flat, per-entry `event` shape as well as the nested one, so a bundle
+    authored against either the Ronin or the OpenAI hook schema loads without translation.
+- **`ronin acp` — Zed, JetBrains or any ACP editor can drive the loop over stdio.** The
+  Agent Client Protocol server speaks `initialize` / `session/new` / `session/prompt` /
+  `session/cancel` as JSON-RPC over the same framing the MCP server already uses
+  (`mcp.transport`), and maps the loop's event stream to `session/update` notifications. As
+  with `mcp-serve`, nothing but frames reaches stdout — the writer that would corrupt the
+  wire is refused at parse time.
+- **`ronin api` — an OpenAI- and Anthropic-shaped `/v1` in front of the agentic loop.** A
+  stdlib `http.server` exposes `/v1/chat/completions` and `/v1/messages`; each request runs
+  a real turn and returns the provider-native response shape, so an existing SDK client can
+  point its base URL here and get an agent instead of a single completion. Defaults to
+  `127.0.0.1:8080`; SSE streaming is a documented non-goal for now, named rather than
+  half-built.
+- **First-run wizard and `ronin doctor` detection.** On a first interactive run Ronin now
+  detects provider keys in the environment and any local model server it can reach
+  (`ollama`, `lmstudio`, `vllm`), proposes a config, writes it only after asking, and runs
+  a bounded 10-second smoke so "configured" means "answered once". `ronin doctor` reports
+  the same detection. Probing is gated behind an interactive TTY, so a pipe or a test never
+  opens a socket — the whole path stays offline-testable with an injected probe.
+- **`obs/` — an observer that cannot become a second exfiltration path.** A new
+  `SessionObserver.observe(event)` folds the loop's event stream into structured logs,
+  turn timings and counters. It imports **only** `ronin.core` and stdlib, pinned by a
+  dedicated boundary test — if it could reach the tool, provider or session layers,
+  "observability" would quietly become a channel by which prompts, paths or file contents
+  leave the loop.
+- **`evals/harvest.py` — turning real runs into training data, honestly.** `harvest()`
+  takes recorded `TaskOutcome`s, applies a `TrajectoryQualityBar`, and emits ShareGPT
+  (SFT), preference-pair (DPO) and RLVR datasets from the trajectories that clear it —
+  offline, from transcripts, with the bar that dropped a row recorded rather than the row
+  silently vanishing.
+- **GRPO with a verifiable reward — the RF.3 training pass (`ronin-training`).** The
+  adapter pipeline had SFT and DPO; this adds the third pass, and the reward is the point.
+  It is **not** a learned reward model: `ronin_training.adapter.reward` is a *verifier*
+  that scores a sampled completion on facts — a call that parses and validates against the
+  v2 registry earns reward, the v1 dialect the runtime can't execute is the one outcome
+  punished below zero — which is exactly what lets an RL pass be defined, validated and
+  unit-tested with **no GPU**. `group_advantages` implements GRPO's group-relative
+  advantage (`(r − mean)/std`, zero for a tied group), and `make_reward_fn` returns the
+  callable `trl.GRPOTrainer` expects — no `torch`/`trl`/`mlx` imported anywhere in the
+  module. `adapter/config.py` gains a validated `grpo` pass and `adapter_grpo.yaml`;
+  `to_mlx_config()` refuses GRPO by name (mlx-lm has no GRPO lane — it is peft/trl only).
+  Every hyperparameter shipped is trl's documented default carried explicitly, not a value
+  tuned by a run that did not happen here. Tests: `test_adapter_reward.py` (17),
+  `test_adapter_grpo.py` (13, incl. the shipped config end to end); `adapter.demo` gains a
+  fifth section that scores five completions in the policy order the weights encode.
+- **GitHub-App webhook → a gated Ronin run (`ronin-relay`).** `ronin_relay.github_app`
+  turns a GitHub webhook into a typed `RunRequest` and stops there — it verifies the
+  delivery, decides whether it should start a run, and hands the request to an injected
+  `enqueue` callable (the seam to `ronin-jobs`), so the whole path is a pure function of
+  `(secret, headers, body)` with no network. Three rules, each returned as a *value* not
+  raised (a webhook that raises is a 500 and a retry storm): a bad HMAC-SHA256 signature is
+  `REJECTED` and never enqueues; a **bot's own comment is ignored** so a run that comments
+  cannot trigger itself forever; and only a comment opening with the command prefix
+  (default `/ronin`) becomes a run — everything else is `IGNORED` with a reason. It states
+  its own offline limit: an `issue_comment` payload has no PR head SHA, so a command on a
+  PR runs against the default branch unless a caller resolves the head ref via the API.
+  16 tests; `python -m ronin_relay.github_app` runs the whole path against a fake queue.
+  The remaining RH steps — a real GitHub-App install, the live deploy, the API calls back
+  to GitHub — need infrastructure this sandbox does not have and are not claimed here.
 
 ### Fixed
 - **A command you wrote yourself could not be run.** `.ronin/commands/*.md` has always

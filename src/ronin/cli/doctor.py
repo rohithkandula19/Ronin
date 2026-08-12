@@ -41,7 +41,8 @@ from ..providers.router import Role as ModelRole
 from ..providers.router import Router
 from ..safety.settings import LOCAL_SETTINGS
 from ..verify.checkpoints import CheckpointReason, CheckpointStore
-from .spine import Loaded, Runtime
+from .detect import Detection
+from .spine import Loaded, Paths, Runtime
 
 #: Paths inside ``.ronin/`` that a team is supposed to share, and that a blanket
 #: ``.ronin/`` ignore rule silently hides. Checked as concrete paths rather than as
@@ -84,6 +85,30 @@ GITIGNORE_PATCH = """\
 .ronin/settings.local.json
 .ronin/*.local.json
 """
+
+#: Where a ``models.toml`` is looked for, relative to the workspace root and the home
+#: layer, plus the env var that overrides both. Mirrors ``cli.sdk.ROUTER_CONFIG_NAMES``
+#: / ``ROUTER_CONFIG_ENV`` — duplicated rather than imported so importing this diagnostic
+#: does not pull the whole SDK (and a model client) in behind it.
+_MODELS_CONFIG_NAMES: tuple[str, ...] = (".ronin/models.toml", "models.toml")
+_MODELS_CONFIG_ENV = "RONIN_MODELS"
+
+#: The exact remedies the detection checks attach. Named constants because they are the
+#: fix a first-run user acts on, and a diagnostic's whole worth is that the fix is right
+#: — so they live in one place, are asserted against by the tests, and cannot drift into
+#: a paraphrase that no longer matches the command someone has to type.
+RIPGREP_REMEDY = (
+    "no ripgrep found — install with `brew install ripgrep` / `apt install ripgrep`; "
+    "the grep, glob and ls tools wrap it, so search is unavailable until it is on PATH"
+)
+NO_MODEL_REMEDY = (
+    "no model configured — set ANTHROPIC_API_KEY (or another provider key) or run "
+    "`ollama serve`, then copy examples/models.toml to .ronin/models.toml"
+)
+NO_CONFIG_REMEDY = (
+    "copy examples/models.toml to .ronin/models.toml, or set RONIN_MODELS to a config "
+    "path — Ronin ships no default model, so no session starts without one"
+)
 
 
 class CheckStatus(StrEnum):
@@ -199,6 +224,7 @@ async def run_doctor(
     environ: Mapping[str, str] | None = None,
     which: Callable[[str], str | None] = shutil.which,
     checkpoints: CheckpointStore | None = None,
+    detection: Detection | None = None,
 ) -> DoctorReport:
     """Diagnose a loaded workspace, and a live runtime when there is one.
 
@@ -210,6 +236,14 @@ async def run_doctor(
     ``environ`` is injected, and when it is absent the API-key half of the model check
     is skipped and says so. Reading ``os.environ`` from in here would make the answer
     depend on the shell the test ran in.
+
+    ``detection`` is the offline probe of :func:`ronin.cli.detect.detect` — provider
+    keys, reachable local servers, and ripgrep. When supplied it adds the first-run
+    picture the SDK-free ``models`` check cannot give on its own: whether a config file
+    resolves at all, whether *any* model is reachable, and whether search will work. It
+    is a pre-built value rather than ``env``/``probe`` so this stays hermetic and so the
+    caller (``main``) owns the one impure probe; omit it and the report is exactly what
+    it was before, which is what keeps every existing call site unchanged.
     """
     store = checkpoints or (runtime.checkpoints if runtime is not None else None)
     store = store or CheckpointStore(loaded.paths.workspace_root)
@@ -222,8 +256,95 @@ async def run_doctor(
     checks.append(await _checkpoint_check(store))
     checks.extend(_mcp_checks(loaded, which))
     checks.append(_gitignore_check(loaded))
+    if detection is not None:
+        checks.append(_config_check(loaded.paths, environ))
+        checks.append(_providers_check(detection))
+        checks.append(_ripgrep_check(detection))
     checks.append(_telemetry_check(loaded))
     return DoctorReport(loaded=loaded, checks=tuple(checks))
+
+
+def _resolve_config(paths: Paths, environ: Mapping[str, str] | None) -> Path | None:
+    """The ``models.toml`` this workspace would use, or ``None``. Reads only ``environ``.
+
+    Deliberately does *not* fall back to ``os.environ`` when ``environ`` is ``None`` —
+    unlike ``cli.sdk.find_router_config``, whose caller wants the real environment. A
+    diagnostic that read the real one would give an answer that depends on the shell it
+    ran in, which is the thing this module refuses to do everywhere else.
+    """
+    env = environ or {}
+    explicit = env.get(_MODELS_CONFIG_ENV, "")
+    if explicit:
+        candidate = Path(explicit)
+        return candidate if candidate.is_file() else None
+    for root in (paths.workspace_root, paths.home):
+        for name in _MODELS_CONFIG_NAMES:
+            candidate = root / name
+            if candidate.is_file():
+                return candidate
+    return None
+
+
+def _config_check(paths: Paths, environ: Mapping[str, str] | None) -> Check:
+    """Is there a resolvable ``models.toml``? Ronin ships no default, so this decides.
+
+    A warning, not a failure: the neighbouring ``providers`` check is where an absent
+    model becomes a hard problem, and reporting the same thing as two failures would
+    double-count one cause. This answers the narrower, file-level question — is the
+    config the loader looks for actually on disk — because "no model" and "no config
+    file" have different fixes and a first-run user needs to see which one they hit.
+    """
+    found = _resolve_config(paths, environ)
+    if found is not None:
+        return Check(name="config", status=CheckStatus.OK, detail=f"models config at {found}")
+    return Check(
+        name="config",
+        status=CheckStatus.WARN,
+        detail=(
+            f"no models.toml found (searched {paths.workspace_root}/.ronin and {paths.home}/.ronin)"
+        ),
+        remedy=NO_CONFIG_REMEDY,
+    )
+
+
+def _providers_check(detection: Detection) -> Check:
+    """Is any model reachable at all — a provider key, or a live local server?
+
+    The one check that fails a first run outright, because with neither there is nothing
+    to send a turn to and every other check is describing a session that cannot start.
+    When something is reachable it lists what, so the report says *why* it is satisfied
+    rather than only that it is.
+    """
+    if not detection.has_any_model():
+        return Check(
+            name="providers",
+            status=CheckStatus.FAIL,
+            detail="no provider API key is set and no local model server is reachable",
+            remedy=NO_MODEL_REMEDY,
+        )
+    parts: list[str] = []
+    if detection.keys:
+        parts.append("provider keys: " + ", ".join(detection.keys))
+    if detection.local_servers:
+        parts.append("local servers: " + ", ".join(detection.local_servers))
+    return Check(name="providers", status=CheckStatus.OK, detail="; ".join(parts))
+
+
+def _ripgrep_check(detection: Detection) -> Check:
+    """Is ripgrep on ``PATH``? The grep/glob/ls tools wrap it and cannot run without it.
+
+    A warning rather than a failure: a session still starts, and the model can read files
+    and run bash — it is search specifically that goes dark, which is degradation, the
+    exact thing a warning is for.
+    """
+    if detection.ripgrep:
+        return Check(name="ripgrep", status=CheckStatus.OK, detail="ripgrep (rg) is on PATH")
+    return Check(
+        name="ripgrep",
+        status=CheckStatus.WARN,
+        detail="ripgrep (rg) is not on PATH",
+        remedy=RIPGREP_REMEDY,
+    )
 
 
 def _telemetry_check(loaded: Loaded) -> Check:
@@ -563,6 +684,9 @@ def gitignore_patch(root: Path) -> str:
 __all__ = [
     "GENERATED_PATHS",
     "GITIGNORE_PATCH",
+    "NO_CONFIG_REMEDY",
+    "NO_MODEL_REMEDY",
+    "RIPGREP_REMEDY",
     "SECRET_CONFIG_PATH",
     "SHARED_CONFIG_PATHS",
     "Check",

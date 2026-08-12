@@ -12,19 +12,22 @@ requires-python = ">=3.11"
 dependencies = []
 
 [project.scripts]
-# `ronin2`, deliberately not `ronin`. The v1 tree (`packages/cli`, ~300 modules) owns
-# the `ronin` name and is what every existing install runs; taking that name here would
-# silently swap the agent under people who upgraded for an unrelated reason.
+# Both names, and both point here. `ronin2` was the only one for as long as taking the
+# short name would have been a silent swap: v1 (`packages/cli`, ~300 modules) declared
+# `ronin`, and two distributions declaring one console script means whichever was
+# installed second wins, quietly.
 #
-# Two trees ship side by side on purpose, and the point is that the choice gets decided
-# by evidence rather than by preference: `tests/evals/` measures v2 today, and until it
-# has measured both there is no honest basis for a cutover. `ronin2` is how someone runs
-# the measured one without giving up the one that works.
+# That is now decided rather than deferred. v1's entry point is renamed to `ronin1` in
+# `packages/cli/pyproject.toml` — an explicit name, not a removal, so an existing user
+# has something to type — and `ronin` means this tree. `ronin2` stays as well: it is what
+# the docs, the eval harness and anyone who already installed it invoke, and breaking a
+# name to tidy up a name is a poor trade.
 #
 # `main` rather than an app object because `ronin.cli.main.main` returns an int and never
 # calls `sys.exit` — see its module docstring. The console-script wrapper turns the
 # return value into the process status, so the exit codes (0 done, 1 error, 2 an approval
 # was refused) survive the packaging layer unchanged.
+ronin = "ronin.cli.main:main"
 ronin2 = "ronin.cli.main:main"
 
 [project.optional-dependencies]
@@ -57,6 +60,12 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ronin"]
+# The built-in role-workflow skills are Markdown data files under the package, and the
+# `packages` entry above already carries every file it finds there — Python and data
+# alike — into the wheel. A `force-include` of the same directory would add each SKILL.md
+# a *second* time and hatchling aborts on the duplicate path, so the data files ride along
+# on the package inclusion and nothing extra is declared. The clean-install smoke test is
+# what proves they actually shipped, rather than a config comment asserting they did.
 
 [tool.uv]
 # Build and install the root project itself, not just its dependencies — this is the
@@ -148,7 +157,9 @@ files = [
     "tests/context",
     "tests/core",
     "tests/evalsuite",
+    "tests/ext",
     "tests/mcp",
+    "tests/obs",
     "tests/persistence",
     "tests/providers",
     "tests/safety",
@@ -161,7 +172,7 @@ files = [
 strict = true
 warn_unreachable = true
 explicit_package_bases = true
-mypy_path = "src:scripts:tests/agents:tests/cli:tests/context:tests/core:tests/evalsuite:tests/mcp:tests/persistence:tests/providers:tests/safety:tests/scripts:tests/telemetry:tests/tools:tests/ui:tests/verify"
+mypy_path = "src:scripts:tests/agents:tests/cli:tests/context:tests/core:tests/evalsuite:tests/ext:tests/mcp:tests/obs:tests/persistence:tests/providers:tests/safety:tests/scripts:tests/telemetry:tests/tools:tests/ui:tests/verify"
 
 # pytest's @parametrize is an untyped decorator as far as mypy is concerned;
 # that is a property of pytest, not a hole in our typing. Enumerated rather
@@ -226,15 +237,23 @@ module = [
     "test_providers_demo",
     "test_registry",
     "test_resilience",
+    "test_ronin_agents_hook_normalize",
+    "test_ronin_cli_acp",
     "test_ronin_cli_approve",
     "test_ronin_cli_bench",
     "test_ronin_cli_demo",
+    "test_ronin_cli_detect",
     "test_ronin_cli_doctor",
+    "test_ronin_cli_doctor_detect",
+    "test_ronin_cli_ext_commands",
     "test_ronin_cli_gate",
+    "test_ronin_cli_http_api",
     "test_ronin_cli_integration",
     "test_ronin_cli_interactive",
     "test_ronin_cli_main",
     "test_ronin_cli_sdk",
+    "test_ronin_cli_serve",
+    "test_ronin_cli_skills",
     "test_ronin_cli_slash",
     "test_ronin_cli_spine",
     "test_ronin_cli_status",
@@ -242,6 +261,9 @@ module = [
     "test_ronin_cli_telemetry",
     "test_ronin_cli_wire",
     "test_ronin_cli_wizard",
+    "test_ronin_cli_wizard_detect",
+    "test_ronin_eval_harvest",
+    "test_ronin_eval_taxonomy",
     "test_ronin_evals_duel",
     "test_ronin_evals_integration",
     "test_ronin_evals_report",
@@ -250,6 +272,10 @@ module = [
     "test_ronin_evals_swebench",
     "test_ronin_evals_task",
     "test_ronin_evals_taxonomy",
+    "test_ronin_ext_plugins",
+    "test_ronin_ext_role_skills",
+    "test_ronin_ext_skills",
+    "test_ronin_ext_trust",
     "test_ronin_local_adapter",
     "test_ronin_mcp_client",
     "test_ronin_mcp_config",
@@ -258,6 +284,11 @@ module = [
     "test_ronin_mcp_server",
     "test_ronin_mcp_tools",
     "test_ronin_mcp_transport",
+    "test_ronin_obs_boundary",
+    "test_ronin_obs_logs",
+    "test_ronin_obs_metrics",
+    "test_ronin_obs_recorder",
+    "test_ronin_obs_timing",
     "test_ronin_telemetry_consent",
     "test_ronin_telemetry_docsite",
     "test_ronin_telemetry_payload",
@@ -330,7 +361,9 @@ include = [
     "tests/context/**/*.py",
     "tests/core/**/*.py",
     "tests/evalsuite/**/*.py",
+    "tests/ext/**/*.py",
     "tests/mcp/**/*.py",
+    "tests/obs/**/*.py",
     "tests/persistence/**/*.py",
     "tests/providers/**/*.py",
     "tests/safety/**/*.py",

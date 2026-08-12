@@ -211,13 +211,81 @@ model forgetting.
 
 `--no-record` skips the transcript for a run you do not want on disk.
 
-## 9. what to configure next
+## 9. let something else drive it (MCP)
+
+Ronin is an MCP *server* as well as a client, so Claude Desktop, Cursor or a second Ronin
+can launch this one and call its tools:
+
+```sh
+python -m ronin mcp-serve                    # read, grep, glob
+python -m ronin mcp-serve --mode auto_edit   # … and edit
+python -m ronin mcp-serve --mode full        # … and bash, and ronin_task
+```
+
+It speaks JSON-RPC on stdin and stdout, which is why `--mode` decides what is exposed
+rather than a separate flag: **there is no human on the other end of stdin to approve
+anything**, so only the tools this mode does not need one for are published. A gated tool
+that appeared in the list and then refused every call would just teach the client's model
+to keep trying it. Whatever is withheld is named on stderr, with the flag that would
+expose it.
+
+`ronin_task(prompt)` is the interesting one: it runs a full nested Ronin loop — planning,
+searching, editing, verifying — and returns the summary, so the client gets a whole task
+done rather than one file read.
+
+In Claude Desktop's `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "ronin": {
+      "command": "ronin",
+      "args": ["mcp-serve", "--mode", "auto_edit", "--cwd", "/path/to/your/repo"]
+    }
+  }
+}
+```
+
+Everything a served tool does still goes through this session's permission rules, deny
+list, hooks and output budget. `--mode full` waives the *prompt*; it does not waive the
+unconditional refusals.
+
+Ronin as a *client* of other servers is `.ronin/mcp.json`, and its tools arrive named
+`mcp__<server>__<tool>`.
+
+There are two more front doors onto the same loop. An editor that speaks the **Agent
+Client Protocol** (Zed, JetBrains) drives it over stdio:
+
+```sh
+python -m ronin acp --cwd /path/to/your/repo
+```
+
+— same JSON-RPC framing as `mcp-serve`, mapping the loop's events to `session/update`
+notifications, and the same refusal of anything that would write to stdout, because there
+too the protocol *is* stdin and stdout.
+
+And an existing OpenAI- or Anthropic-SDK client can point its base URL at Ronin and get
+an agent where it expected one completion:
+
+```sh
+python -m ronin api --host 127.0.0.1 --port 8080   # /v1/chat/completions + /v1/messages
+```
+
+Each request runs a full turn and comes back in the provider-native response shape.
+Streaming (SSE) is a named non-goal for now, not a half-built one.
+
+## 10. what to configure next
 
 * `.ronin/settings.json` — permission rules and modes: [config.md](config.md)
 * `.ronin/hooks.json` — shell commands on lifecycle events, and the exit-code-2 block:
   [hooks.md](hooks.md)
 * `.ronin/agents/*.md` — subagents with their own tools and prompts:
   [subagents.md](subagents.md)
+* `.ronin/skills/<name>/SKILL.md` — a saved workflow the model loads on demand as `/name`
+  or via the `skill` tool; nine role workflows (`/review`, `/ship`, `/qa`,
+  `/investigate`, …) already ship, and a project copy shadows a builtin of the same name
+* `python -m ronin plugin add <path>` — install a bundle (skills, MCP servers, subagents,
+  commands, hooks); a community-tier bundle shows exactly what it would run before it may
 * `examples/workflows/` — three copyable workflows (pre-commit reviewer, CI failure
   fixer, repo onboarding explainer)
 
@@ -248,10 +316,12 @@ the local log of anything that was sent.
 
 ## known rough edges, named rather than hidden
 
-* **`python -m ronin`, not `ronin`.** The `ronin` console script belongs to
-  `packages/cli` (the v1 CLI). Repointing a shipped command at a different program
-  would silently change what people already have installed, so the v2 app is reached
-  as a module.
+* **`ronin` is this app now — `python -m ronin` is the same program.** The console
+  script was repointed at v2; v1's is renamed `ronin1` (kept, not removed, so an
+  existing user still has something to type). Console scripts are not namespaced, so the
+  old two-letter `ro` is gone and a test refuses any two distributions in this workspace
+  claiming one command. The examples here use `python -m ronin` because it works whether
+  or not the scripts are installed.
 * **Slash commands are only partly wired in the line session.** `/help`, `/doctor`,
   `/clear`, `/cost`, `/diff` and `/undo` work. Any other command — including
   user-defined ones in `.ronin/commands/*.md` — is reported by name as not wired
@@ -266,8 +336,9 @@ the local log of anything that was sent.
   approvals that were granted, not only refused.
 * **No web tools on the command line.** `web_fetch` and `web_search` exist but are only
   built when a fetcher, extractor and searcher are injected, which `ronin.cli.wire` does
-  not do. A CLI session has 11 tools, not 13 — [tools.md](tools.md) derives the list
-  rather than asserting it. Reaching the web today means an MCP server.
+  not do — so those two are exactly what a CLI session is missing. [tools.md](tools.md)
+  derives the list rather than asserting it. A `skill` tool joins the set when skills are
+  present, which by default they are. Reaching the web today means an MCP server.
 * **Telemetry is off, and there is nowhere for it to go.** `ronin2 telemetry
   status|on|off|show` is wired now, but **no endpoint is configured in this build**:
   `record()` returns `no_sender` and never opens a socket, and `status` says so rather

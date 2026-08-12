@@ -8,7 +8,11 @@ transports repeat the same shape, so they get the same treatment.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import io
 import json
+import os
+from typing import IO
 
 import pytest
 from mcp_harness import FailingSender, ScriptedSender, sse_bytes
@@ -23,6 +27,7 @@ from ronin.mcp.jsonrpc import (
     encode,
 )
 from ronin.mcp.transport import (
+    FileWriter,
     HttpTransport,
     SseFrame,
     SseFrameReader,
@@ -34,6 +39,7 @@ from ronin.mcp.transport import (
     join_url,
     memory_duplex,
     read_frame,
+    stdio_streams,
 )
 
 RESPONSE = Response(id=1, result={"ok": True, "text": "line one\nline two"})
@@ -340,3 +346,112 @@ def test_join_url_tolerates_the_slashes_people_actually_type(
     base: str, path: str, expected: str
 ) -> None:
     assert join_url(base, path) == expected
+
+
+# --------------------------------------------------------------------------- #
+# This process's own stdin and stdout
+# --------------------------------------------------------------------------- #
+
+
+class Pipes:
+    """Two real OS pipes, wired the way a spawned MCP server sees them.
+
+    A real ``os.pipe()`` rather than an in-memory double, because the whole point of
+    ``stdio_streams`` is the part ``memory_duplex`` cannot exercise: an fd, a poller and
+    a flush. Everything else in this file is already covered without one.
+    """
+
+    def __init__(self) -> None:
+        to_server, self.client_writes = os.pipe()
+        self.client_reads, from_server = os.pipe()
+        self.stdin: IO[bytes] = os.fdopen(to_server, "rb", buffering=0)
+        self.stdout: IO[bytes] = os.fdopen(from_server, "wb", buffering=0)
+
+    def send(self, payload: bytes) -> None:
+        os.write(self.client_writes, payload)
+
+    def receive(self, size: int = 4096) -> bytes:
+        return os.read(self.client_reads, size)
+
+    def hang_up(self) -> None:
+        """What a client exiting looks like from in here: EOF on the server's stdin."""
+        os.close(self.client_writes)
+        self.client_writes = -1
+
+    def close(self) -> None:
+        for fd in (self.client_writes, self.client_reads):
+            if fd >= 0:
+                with contextlib.suppress(OSError):
+                    os.close(fd)
+        for stream in (self.stdin, self.stdout):
+            with contextlib.suppress(OSError, ValueError):
+                stream.close()
+
+
+async def test_stdio_streams_round_trips_over_real_pipes() -> None:
+    pipes = Pipes()
+    try:
+        pair = await stdio_streams(stdin=pipes.stdin, stdout=pipes.stdout)
+        pipes.send(encode(PING))
+        assert await read_frame(pair.reader) == encode(PING).rstrip(b"\n")
+
+        pair.writer.write(encode(RESPONSE))
+        await pair.writer.drain()
+        assert json.loads(pipes.receive())["result"]["ok"] is True
+    finally:
+        pipes.close()
+
+
+async def test_a_client_hanging_up_reaches_the_server_as_eof() -> None:
+    """`serve_stdio` returns on `TransportClosed`, so this is how a session ends."""
+    pipes = Pipes()
+    try:
+        pair = await stdio_streams(stdin=pipes.stdin, stdout=pipes.stdout)
+        pipes.hang_up()
+        with pytest.raises(TransportClosed, match="EOF"):
+            await read_frame(pair.reader)
+    finally:
+        pipes.close()
+
+
+async def test_stdin_without_a_descriptor_is_refused_by_name() -> None:
+    """The alternative is a server that starts and then answers nothing, forever."""
+    with pytest.raises(TransportClosed, match="no file descriptor"):
+        await stdio_streams(stdin=io.BytesIO(b""), stdout=io.BytesIO())
+
+
+def test_a_text_stream_with_no_binary_buffer_is_refused_by_name() -> None:
+    """`sys.stdout` under a capture layer has no `.buffer`, and half-working is worse."""
+    from ronin.mcp.transport import _binary
+
+    with pytest.raises(TransportClosed, match="no binary buffer"):
+        _binary(io.StringIO(), "stdout")
+
+
+def test_file_writer_flushes_on_drain_and_does_not_close_the_file() -> None:
+    """Closing the process's stdout would leave it unable to report anything at all."""
+    sink = io.BytesIO()
+    writer = FileWriter(sink)
+    writer.write(b'{"a":1}\n')
+    asyncio.run(writer.drain())
+    assert sink.getvalue() == b'{"a":1}\n'
+
+    writer.close()
+    assert writer.closed
+    assert not sink.closed, "FileWriter closed the underlying stream"
+    with pytest.raises(TransportClosed, match="closed stdio writer"):
+        writer.write(b"more")
+
+
+def test_file_writer_turns_a_vanished_pipe_into_a_transport_error() -> None:
+    """A client exiting mid-frame is an OSError from `write`, not a crash to report."""
+    read_fd, write_fd = os.pipe()
+    os.close(read_fd)
+    sink = os.fdopen(write_fd, "wb", buffering=0)
+    writer = FileWriter(sink)
+    with pytest.raises(TransportClosed, match="writing to stdout failed"):
+        for _ in range(3):  # SIGPIPE lands on the first or second write
+            writer.write(b"x" * 1024)
+    assert writer.closed
+    with contextlib.suppress(OSError, ValueError):
+        sink.close()

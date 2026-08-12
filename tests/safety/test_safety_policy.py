@@ -423,6 +423,43 @@ def test_auto_edit_relaxes_edits_but_not_the_shell() -> None:
     assert policy.evaluate(BASH, use("./deploy.sh")).decision is Decision.ASK
 
 
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [
+        (Mode.ASK, {"read": True, "write": False, "bash": False}),
+        (Mode.AUTO_EDIT, {"read": True, "write": True, "bash": False}),
+        (Mode.FULL, {"read": True, "write": True, "bash": True}),
+        # Plan mode relaxes nothing that mutates, and the rung below `ask` is where a
+        # caller reading `relaxes` as "is this allowed" would get it most wrong.
+        (Mode.PLAN, {"read": True, "write": False, "bash": False}),
+    ],
+)
+def test_relaxes_answers_which_tools_this_mode_needs_no_human_for(
+    mode: Mode, expected: dict[str, bool]
+) -> None:
+    """The predicate ``cli.serve`` asks before it publishes a tool over MCP.
+
+    Exposed so that module does not carry a second copy of the mode ladder: over stdio
+    there is no human to prompt, so "would this mode ask?" decides what a client is even
+    shown. The rows below are ``_relax``'s behaviour, stated once, here.
+    """
+    policy = engine(mode=mode)
+    for spec, name in ((READ, "read"), (WRITE, "write"), (BASH, "bash")):
+        assert policy.relaxes(spec) is expected[name], f"{mode.value}/{name}"
+
+
+def test_relaxes_answers_only_the_modes_half_not_the_deny_lists() -> None:
+    """Narrower than "will this be allowed", and the difference is load-bearing.
+
+    ``relaxes`` is about the mode. An individual call can still be refused by a rule or
+    unconditionally by the deny list — which is exactly why ``cli.serve.ExposedTool``
+    asks :meth:`approve` per call as well as filtering the published set once.
+    """
+    policy = engine(mode=Mode.FULL)
+    assert policy.relaxes(BASH) is True
+    assert policy.evaluate(BASH, use("rm -rf /")).decision is Decision.DENY
+
+
 def test_plan_mode_denies_anything_that_mutates_and_says_why() -> None:
     policy = engine(mode=Mode.PLAN)
     verdict = policy.evaluate(BASH, use("git commit -m x"))

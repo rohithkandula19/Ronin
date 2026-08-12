@@ -234,13 +234,23 @@ def _inline_list(raw: str, source: str, line: int) -> tuple[str, ...]:
 
 
 def parse_frontmatter(
-    text: str, *, source: str = "<string>"
+    text: str,
+    *,
+    source: str = "<string>",
+    known_keys: Sequence[str] | None = KNOWN_KEYS,
 ) -> tuple[Mapping[str, FrontmatterValue], str]:
     """Split ``text`` into ``(frontmatter, body)``.
 
     The document must open with a ``---`` fence and close it. Everything after the
     closing fence is the body verbatim (leading blank lines trimmed), because that
     body is a system prompt and its internal formatting matters.
+
+    ``known_keys`` bounds the vocabulary: an unrecognised key is a load-time error, so
+    ``tool:`` for ``tools:`` is caught before it produces a toolless agent. It defaults
+    to the agent keys, and is a parameter because :mod:`ronin.ext.skills` reuses this
+    exact parser with its own key set — one frontmatter grammar for every ``---``-fenced
+    file in the tree rather than a second, subtly-different one. Pass ``None`` to accept
+    any key (validate nothing), which no caller should want but the fixture tests do.
     """
     lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     first = 0
@@ -286,9 +296,9 @@ def parse_frontmatter(
         key, raw_value = match.group(1), match.group(2)
         if key in fields:
             raise FrontmatterError(source, offset, f"duplicate key {key!r}")
-        if key not in KNOWN_KEYS:
+        if known_keys is not None and key not in known_keys:
             raise FrontmatterError(
-                source, offset, f"unknown key {key!r}; known keys are {list(KNOWN_KEYS)}"
+                source, offset, f"unknown key {key!r}; known keys are {list(known_keys)}"
             )
         value = raw_value.strip()
         if not value:

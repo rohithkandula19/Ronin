@@ -408,6 +408,75 @@ class HookConfig:
                 specs.extend(cls._parse_group(event, group, index))
         return cls(hooks=tuple(specs))
 
+    @classmethod
+    def from_entries(cls, entries: object) -> HookConfig:
+        """Parse the *flat* shape: a list where each entry names its own ``event``.
+
+        Ronin's own config keys groups by event (:meth:`from_mapping`); a codex/OpenAI-
+        style plugin ships a flat list instead — ``[{"event": "PreToolUse", "command":
+        ..., "matcher": ...}, ...]``. Both normalize to the same :class:`HookConfig`, so
+        the gate never learns which dialect a hook was written in. Every rejection names
+        the offending index, same as the nested parser.
+        """
+        if not isinstance(entries, Sequence) or isinstance(entries, (str, bytes)):
+            raise HookConfigError("flat hook config must be a list of hook entries")
+        specs: list[HookSpec] = []
+        for index, entry in enumerate(entries):
+            spot = f"hooks[{index}]"
+            if not isinstance(entry, Mapping):
+                raise HookConfigError(f"{spot}: expected an object with 'event' and 'command'")
+            raw_event = entry.get("event")
+            try:
+                event = HookEvent(str(raw_event))
+            except ValueError as exc:
+                known = [e.value for e in HookEvent]
+                raise HookConfigError(
+                    f"{spot}: unknown or missing hook event {raw_event!r}; known events are {known}"
+                ) from exc
+            command = entry.get("command")
+            if not isinstance(command, str) or not command.strip():
+                raise HookConfigError(f"{spot}: 'command' is required and must be a string")
+            raw_timeout = entry.get("timeout", DEFAULT_TIMEOUT_SECONDS)
+            if isinstance(raw_timeout, bool) or not isinstance(raw_timeout, (int, float)):
+                raise HookConfigError(f"{spot}: 'timeout' must be a number of seconds")
+            try:
+                specs.append(
+                    HookSpec(
+                        event=event,
+                        command=command,
+                        matcher=str(entry.get("matcher", MATCH_ALL)),
+                        timeout_seconds=float(raw_timeout),
+                        block_on_timeout=bool(entry.get("block_on_timeout", False)),
+                        name=str(entry.get("name", "")),
+                    )
+                )
+            except ValueError as exc:
+                raise HookConfigError(f"{spot}: {exc}") from exc
+        return cls(hooks=tuple(specs))
+
+    @classmethod
+    def normalize(cls, data: object) -> HookConfig:
+        """One :class:`HookConfig` from either dialect — the nested or the flat shape.
+
+        A bare list, or a ``{"hooks": [...]}`` wrapper, is the flat shape; a mapping whose
+        keys are event names is Ronin's nested shape. This is the single door a plugin's
+        ``hooks.json`` comes through, so a bundle may ship either and register the same.
+        """
+        if isinstance(data, Sequence) and not isinstance(data, (str, bytes)):
+            return cls.from_entries(data)
+        if isinstance(data, Mapping):
+            known_events = {e.value for e in HookEvent}
+            if set(map(str, data.keys())) <= known_events:
+                return cls.from_mapping(data)
+            wrapped = data.get("hooks")
+            if isinstance(wrapped, Sequence) and not isinstance(wrapped, (str, bytes)):
+                return cls.from_entries(wrapped)
+            return cls.from_mapping(data)  # let the nested parser name the bad key
+        raise HookConfigError(
+            f"hook config must be a list of entries or an object keyed by event, got "
+            f"{type(data).__name__}"
+        )
+
     @staticmethod
     def _parse_group(event: HookEvent, group: object, index: int) -> list[HookSpec]:
         where = f"{event.value}[{index}]"

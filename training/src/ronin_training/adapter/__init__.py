@@ -29,6 +29,7 @@ The five pieces:
 has no GPU and ``mlx-lm`` is Apple-silicon-only, so no training run happened here and
 no artifact in this tree carries a score from one.
 """
+
 from __future__ import annotations
 
 from .config import (
@@ -39,6 +40,8 @@ from .config import (
     DIALECT_CLOSE_TAG,
     DIALECT_OPEN_TAG,
     DPO_CONFIG_PATH,
+    GRPO_CONFIG_PATH,
+    KNOWN_REWARDS,
     LONG_SEQ_LENGTH,
     MLP_TARGETS,
     MLX_ARGV_FLAGS,
@@ -52,6 +55,7 @@ from .config import (
     AdapterConfig,
     ConfigError,
     DPOSpec,
+    GRPOSpec,
     HoldoutSpec,
     LoRASpec,
     TrainPass,
@@ -98,6 +102,15 @@ from .metrics import (
 )
 from .preflight import Preflight, preflight
 from .preflight import render as render_preflight
+from .reward import (
+    DEFAULT_WEIGHTS,
+    RewardFn,
+    RewardWeights,
+    TurnReward,
+    group_advantages,
+    make_reward_fn,
+    score_turn,
+)
 from .threeway import (
     ADAPTER,
     BASE,
@@ -128,12 +141,15 @@ __all__ = [
     "BASE_MODEL",
     "BASE_MODEL_LICENCE",
     "BASE_MODEL_MLX",
+    "DEFAULT_WEIGHTS",
     "DIALECT_CLOSE_TAG",
     "DIALECT_OPEN_TAG",
     "DPO_CONFIG_PATH",
     "DPO_REQUIRED",
+    "GRPO_CONFIG_PATH",
     "ITERATE_STEPS",
     "KIMI",
+    "KNOWN_REWARDS",
     "LONG_SEQ_LENGTH",
     "METRIC_DEFINITIONS",
     "MLP_TARGETS",
@@ -156,12 +172,15 @@ __all__ = [
     "DPOSpec",
     "DatasetError",
     "Example",
+    "GRPOSpec",
     "HoldoutSpec",
     "LoRASpec",
     "MetricsError",
     "Outcome",
     "Preflight",
     "RecoveryScore",
+    "RewardFn",
+    "RewardWeights",
     "Setback",
     "SuiteScore",
     "SyntaxScore",
@@ -173,6 +192,7 @@ __all__ = [
     "TrainPass",
     "TrainSpec",
     "TurnRecord",
+    "TurnReward",
     "Validation",
     "Verdict",
     "assemble_report",
@@ -184,8 +204,10 @@ __all__ = [
     "evals_module",
     "examples_from_rows",
     "find_call_blocks",
+    "group_advantages",
     "load_config",
     "load_tool_schemas",
+    "make_reward_fn",
     "parse_config",
     "preflight",
     "read_examples",
@@ -194,6 +216,7 @@ __all__ = [
     "render_markdown",
     "render_preflight",
     "run_three_way",
+    "score_turn",
     "split_by_task",
     "suite_score_of",
     "target_runner",

@@ -49,6 +49,7 @@ from ..context.memory import Memory, find_repo_root
 from ..context.repomap import RepoMap
 from ..core.protocols import ToolRegistry
 from ..core.types import Mode
+from ..ext.skills import SkillSet
 from ..mcp.config import MCP_CONFIG_RELATIVE_PATH, McpServerConfig
 from ..persistence.transcript import SESSIONS_SUBDIR, Transcript
 from ..safety.injection import TaintTracker
@@ -79,6 +80,10 @@ CACHE_SUBDIR = Path(RONIN_DIRNAME) / "cache"
 
 #: ``agents.hooks`` loads from an explicit path; this is the conventional one.
 HOOKS_FILENAME = "hooks.json"
+
+#: Saved workflows. ``ext.skills`` owns the loader and the string; re-exported here so
+#: ``Paths`` keeps one home per location like every other surface.
+SKILLS_SUBDIR = Path(RONIN_DIRNAME) / "skills"
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,6 +134,15 @@ class Paths:
         return self.workspace_root / COMMANDS_SUBDIR
 
     @property
+    def skills_dir(self) -> Path:
+        return self.workspace_root / SKILLS_SUBDIR
+
+    @property
+    def user_skills_dir(self) -> Path:
+        """Skills that follow the user across workspaces, under the home layer."""
+        return self.home / SKILLS_SUBDIR
+
+    @property
     def cache_dir(self) -> Path:
         return self.workspace_root / CACHE_SUBDIR
 
@@ -171,6 +185,7 @@ class Paths:
             ("checkpoints", self.checkpoints_dir),
             ("agents", self.agents_dir),
             ("commands", self.commands_dir),
+            ("skills", self.skills_dir),
             ("mcp config", self.mcp_config),
             ("hooks", self.hooks_config),
             ("user settings", self.user_settings),
@@ -229,6 +244,7 @@ class Loaded:
     verify: VerifySpec = field(default_factory=VerifySpec)
     mcp_servers: tuple[McpServerConfig, ...] = ()
     commands: CommandRegistry = field(default_factory=CommandRegistry)
+    skills: SkillSet = field(default_factory=SkillSet)
     sandbox: Sandbox | Unavailable = field(default_factory=NoSandbox)
     notes: tuple[Note, ...] = ()
 
@@ -274,7 +290,12 @@ class Loaded:
         error, but one that says nothing and costs forever.
         """
         rendered_map = self.repo_map.render() if self.repo_map.entries else ""
-        parts = [text for text in (self.memory.render(), rendered_map) if text]
+        # The skills catalog belongs in the stable prefix too, and belongs here rather
+        # than in the skill tool's description because a human types /name without the
+        # tool ever being consulted — so the one line per skill lives in exactly one
+        # place, seen whichever way a skill is reached. Bodies are never in it.
+        catalog = self.skills.catalog()
+        parts = [text for text in (self.memory.render(), rendered_map, catalog) if text]
         return "\n\n".join(parts)
 
     def render(self) -> str:
@@ -296,6 +317,8 @@ class Loaded:
             f"mcp servers       {', '.join(c.name for c in self.mcp_servers) or 'none'}",
             f"slash commands    {len(self.commands.names())} "
             f"({len(self.commands.user)} user-defined)",
+            f"skills            {len(self.skills.skills)}"
+            f"{': ' + ', '.join(self.skills.names()) if self.skills.skills else ''}",
             "",
             "verify",
             *(f"  {row}" for row in self.verify.explain().splitlines()),

@@ -44,7 +44,8 @@ SCENES: tuple[str, ...] = (
     "2. one mutating turn: gate, checkpoint, verify, repair",
     "3. compaction: fold the middle, keep the diffs",
     "4. what the session degraded on",
-    "5. the transcript, written and replayed",
+    "5. the same session, served over MCP (`ronin2 mcp-serve`)",
+    "6. the transcript, written and replayed",
     "what this proves",
 )
 
@@ -84,7 +85,7 @@ async def test_the_demo_runs_offline_and_every_claim_holds(
 
 
 async def test_the_demo_reaches_every_scene(capsys: pytest.CaptureFixture[str]) -> None:
-    """Five scenes and a verdict. A demo that exits 0 having skipped compaction is
+    """Six scenes and a verdict. A demo that exits 0 having skipped compaction is
     still a demo that stopped covering compaction."""
     _, out = await run(capsys)
     for scene in SCENES:
