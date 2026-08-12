@@ -32,6 +32,7 @@ object — "13 tools", "5 hook events" — are facts about this checkout and are
 recomputed here; anything that would require running a model or a benchmark is not
 stated at all.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -172,13 +173,23 @@ def full_registry(root: Path) -> ToolRegistry:
 def cli_registry(root: Path) -> ToolRegistry:
     """The tools a plain ``python -m ronin`` session gets, derived the same way it is.
 
-    ``ronin.cli.wire.build_runtime`` calls ``build_registry(ctx, shell=…)`` and nothing
-    else, then ``ronin.session.build_session`` adds ``task``. Mirroring that here rather
-    than hardcoding a list is what makes the "not in a plain session" column on
-    ``tools.md`` true after someone widens the wiring.
+    ``ronin.cli.wire.build_runtime`` wires a shell and — *unconditionally* — a fetcher and
+    extractor, so ``web_fetch`` is in every CLI session; ``ronin.session.build_session``
+    then adds ``task``. ``web_search`` is deliberately absent here: ``build_runtime`` adds
+    it only when a search provider is configured (``RONIN_SEARCH_PROVIDER``), which a bare
+    session has not set, so a bare CLI session has no ``web_search``. Mirroring
+    ``build_runtime`` here rather than hardcoding a list is what keeps the "in a plain
+    session?" column true after someone changes the wiring. None of these callables is
+    invoked — the page is rendered from ``ToolSpec``s — so the ``_no_*`` sentinels are safe.
     """
     ctx = ToolContext(root=root, env={})
-    return build_registry(ctx, shell=ShellSession(shell=PersistentShell(cwd=root, env={})))
+    return build_registry(
+        ctx,
+        shell=ShellSession(shell=PersistentShell(cwd=root, env={})),
+        fetch=_no_fetch,
+        extract=_no_extract,
+        clock=lambda: 0.0,
+    )
 
 
 #: Added by ``ronin.session.build_session`` after ``build_registry`` returns, because
@@ -272,27 +283,29 @@ def render_tools() -> str:
                     f"[`{spec.name}`](#{spec.name})",
                     spec.danger_level.name.lower(),
                     "yes" if spec.requires_approval else "no",
-                    "yes" if spec.name in in_cli else "no — needs injection",
+                    "yes" if spec.name in in_cli else "no — needs a search provider",
                 ]
                 for spec in specs
             ],
         ),
         "",
-        "The last column is the one that catches people out, so it is derived rather "
-        "than asserted: `ronin.cli.wire.build_runtime` calls `build_registry(ctx, "
-        "shell=…)` and nothing else, and `ronin.session.build_session` then adds "
+        "The last column is derived, not asserted: `ronin.cli.wire.build_runtime` wires "
+        "the shell and — unconditionally — a fetcher and extractor, so `web_fetch` is "
+        "present in every CLI session; `ronin.session.build_session` then adds "
         + ", ".join(f"`{name}`" for name in SESSION_ADDED_TOOLS)
-        + ". That means "
+        + ". "
         + (
             ", ".join(f"`{name}`" for name in needs_injection)
-            + " are **not** present in a `python -m ronin` session"
+            + " is the one tool a bare `python -m ronin` session does **not** have: it "
+            "appears only when a search provider is configured (`RONIN_SEARCH_PROVIDER`), "
+            "because a search tool with no backend that errors on every call teaches the "
+            "model to keep trying it"
             if needs_injection
             else "every tool below is present in a `python -m ronin` session"
         )
-        + ": they need a fetcher, an extractor or a searcher passed in, which the "
-        "programmatic entry point (`ronin.cli.sdk.Agent`) can do and the command line "
-        "currently cannot. Reaching the web from the CLI today means an MCP server; "
-        "see [config.md](config.md).",
+        + ". Web content that does arrive — from `web_fetch` or `web_search` — is "
+        "registered with the taint tracker and surfaced as untrusted data, not obeyed as "
+        "instructions; see [config.md](config.md).",
         "",
     ]
     for spec in specs:
@@ -408,9 +421,7 @@ def render_config() -> str:
                 ["`tool`", "tool name, or `*` for every tool. Defaults to `*`."],
                 [
                     "`decision`",
-                    "one of "
-                    + ", ".join(f"`{decision.value}`" for decision in Decision)
-                    + ".",
+                    "one of " + ", ".join(f"`{decision.value}`" for decision in Decision) + ".",
                 ],
                 [
                     "`match`",
@@ -500,9 +511,7 @@ def render_hooks() -> str:
         ),
         "",
         "Blocking only makes sense before the fact. "
-        + ", ".join(
-            f"`{event.value}`" for event in HookEvent if event not in BLOCKING_EVENTS
-        )
+        + ", ".join(f"`{event.value}`" for event in HookEvent if event not in BLOCKING_EVENTS)
         + " all fire after the thing has happened — the file is already written — so "
         f"an exit {BLOCK_EXIT_CODE} there is reported as a warning rather than a "
         "block that would be a lie told after the fact.",
@@ -563,14 +572,13 @@ def render_hooks() -> str:
                 [
                     "`block_on_timeout`",
                     "`false`",
-                    "treat a timeout as a block. For a policy check that must fail "
-                    "closed.",
+                    "treat a timeout as a block. For a policy check that must fail closed.",
                 ],
                 [
                     "`name`",
                     "—",
                     "cosmetic, but it is what appears in the block reason. "
-                    "\"no-migrations blocked this\" beats \"hook 2 blocked this\".",
+                    '"no-migrations blocked this" beats "hook 2 blocked this".',
                 ],
             ],
         ),
@@ -597,7 +605,7 @@ def render_hooks() -> str:
         "",
         f"Each stream is capped at {MAX_HOOK_OUTPUT_CHARS:,} characters, with a marker "
         "naming what was cut. A hook that prints its whole test suite must not push "
-        "the transcript out of the context window on its way to saying \"ok\".",
+        'the transcript out of the context window on its way to saying "ok".',
         "",
         "## a hook that blocks, end to end",
         "",
@@ -634,8 +642,7 @@ _HOOK_WHEN: Mapping[HookEvent, str] = {
 _HOOK_OUTCOME: Mapping[HookOutcome, str] = {
     HookOutcome.OK: "exit 0; stdout may be shown to the model as context",
     HookOutcome.WARN: (
-        "non-zero and not the block code, or a timeout: the action proceeds and the "
-        "user is told"
+        "non-zero and not the block code, or a timeout: the action proceeds and the user is told"
     ),
     HookOutcome.BLOCK: (
         f"exit {BLOCK_EXIT_CODE} on a blocking event: the action does not happen and "
@@ -758,15 +765,15 @@ def render_subagents() -> str:
             "allowed globs, returning a failed tool result that names the roots it "
             "*may* write to.",
             "",
-            "This is why `test-writer` cannot touch `src/`. A prompt saying \"only "
-            "write tests\" is a preference; a model told not to edit edits three "
+            'This is why `test-writer` cannot touch `src/`. A prompt saying "only '
+            'write tests" is a preference; a model told not to edit edits three '
             "turns later. Read tools are deliberately not wrapped — a subagent "
             "reading outside its lane costs context, not correctness.",
             "",
             "## dispatch",
             "",
             "The model normally names the type it wants: "
-            "`task(subagent_type=\"explorer\", ...)`. Selection by task description is "
+            '`task(subagent_type="explorer", ...)`. Selection by task description is '
             "only a fallback for a caller that has a description and no name, and it "
             "returns nothing rather than guessing below a floor — a wrong subagent "
             "(fresh context, wrong tools, confident answer) is worse than no "
@@ -859,9 +866,7 @@ def render_providers() -> str:
                 f"### {_PROTOCOL_TITLE[builder_name]}",
                 "",
                 "Reached by "
-                + ", ".join(
-                    f'`provider = "{name}"`' for name in sorted(grouped[builder_name])
-                )
+                + ", ".join(f'`provider = "{name}"`' for name in sorted(grouped[builder_name]))
                 + ".",
                 "",
                 *_SETUP[builder_name],
@@ -1242,8 +1247,7 @@ def render_telemetry() -> str:
                 [
                     f"`{Consent.UNASKED.value}`",
                     "no",
-                    "the default. Not a soft yes — nothing is sent in any state but "
-                    "`granted`.",
+                    "the default. Not a soft yes — nothing is sent in any state but `granted`.",
                 ],
                 [f"`{Consent.GRANTED.value}`", "yes", "you ran the opt-in command."],
                 [
@@ -1315,17 +1319,16 @@ def _telemetry_wiring_note() -> list[str]:
         "describes the intended surface, and this section is generated by probing the "
         "parser, so it disappears on its own when the command lands.",
         "",
-        "Until then, the two files *are* the interface, which is the point of keeping "
-        "them plain:",
+        "Until then, the two files *are* the interface, which is the point of keeping them plain:",
         "",
         "```sh",
         "# opt in  (equivalent of `telemetry on`)",
         f"mkdir -p ~/{CONSENT_RELATIVE_PATH.parent.as_posix()}",
-        f"printf '{{\"disclosed\": true, \"schema\": 1, \"state\": \"granted\"}}\\n' "
+        f'printf \'{{"disclosed": true, "schema": 1, "state": "granted"}}\\n\' '
         f"> ~/{CONSENT_RELATIVE_PATH.as_posix()}",
         "",
         "# opt out (equivalent of `telemetry off`) — sticky, nothing re-prompts",
-        f"printf '{{\"disclosed\": true, \"schema\": 1, \"state\": \"refused\"}}\\n' "
+        f'printf \'{{"disclosed": true, "schema": 1, "state": "refused"}}\\n\' '
         f"> ~/{CONSENT_RELATIVE_PATH.as_posix()}",
         "",
         "# audit   (equivalent of `telemetry show`)",

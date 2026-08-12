@@ -334,11 +334,13 @@ the local log of anything that was sent.
   the next request.
 * **Exit code `2` over-reports.** See [above](#the-2-that-is-not-a-denial): it fires for
   approvals that were granted, not only refused.
-* **No web tools on the command line.** `web_fetch` and `web_search` exist but are only
-  built when a fetcher, extractor and searcher are injected, which `ronin.cli.wire` does
-  not do — so those two are exactly what a CLI session is missing. [tools.md](tools.md)
-  derives the list rather than asserting it. A `skill` tool joins the set when skills are
-  present, which by default they are. Reaching the web today means an MCP server.
+* **`web_search` needs a provider; `web_fetch` does not.** A CLI session gets `web_fetch`
+  out of the box — `ronin.cli.wire.build_runtime` wires the SSRF-vetted fetcher
+  unconditionally. `web_search` appears only when `RONIN_SEARCH_PROVIDER` is set (brave /
+  tavily / searxng), deliberately: a search tool with no backend that errors on every call
+  teaches the model to keep trying it. Both route their output through the taint tracker,
+  so a fetched page is surfaced as untrusted data, not obeyed as instructions.
+  [tools.md](tools.md) derives the list rather than asserting it.
 * **Telemetry is off, and there is nowhere for it to go.** `ronin2 telemetry
   status|on|off|show` is wired now, but **no endpoint is configured in this build**:
   `record()` returns `no_sender` and never opens a socket, and `status` says so rather
