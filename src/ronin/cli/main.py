@@ -37,7 +37,7 @@ import argparse
 import asyncio
 import os
 import sys
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
@@ -66,7 +66,7 @@ from ..providers.router import Router
 from ..providers.types import ProviderError
 from ..safety.policy import Asker
 from ..telemetry import DISCLOSURE
-from ..ui.app import TEXTUAL_MISSING, run_app, textual_available
+from ..ui.app import TEXTUAL_MISSING, multi_turn_events, run_app, textual_available
 from ..ui.app import Session as AppSession
 from ..ui.commands import ParseError, is_command, render_help
 from ..ui.commands import parse as parse_command
@@ -1544,6 +1544,13 @@ def _app_session(options: Options, agent: Agent, handoff: Handoff | None) -> App
     ``shift+tab`` moved the status line and nothing else, and an approval could be read
     but never answered. Each one below is a key that now reaches the thing it names.
 
+    ``on_submit`` makes the view multi-turn. The argv prompt runs the first turn, exactly
+    as before; the input line then feeds each follow-up onto a queue, and
+    ``multi_turn_events`` runs it as the next turn on the same conversation (``agent.stream``
+    continues it). The entry condition is unchanged — the TUI still starts from an argv
+    prompt — so this adds follow-ups without deciding the separate "start with an empty
+    TUI" question. ``ctrl+c`` still quits, cancelling the worker that awaits the queue.
+
     ``on_rewind`` is deliberately still absent. Rewinding to an earlier turn means
     restoring the conversation to a state it has already left, and the only honest
     mechanisms for that — snapshot every turn's ``AgentState``, or replay the transcript
@@ -1552,13 +1559,18 @@ def _app_session(options: Options, agent: Agent, handoff: Handoff | None) -> App
     silently lose work. It stays unwired, and says so, until that is decided.
     """
     policy = agent.runtime.policy
-    return AppSession(
-        events=agent.stream(
-            options.prompt,
+    submissions: asyncio.Queue[str | None] = asyncio.Queue()
+
+    def run_turn(prompt: str) -> AsyncIterator[Event]:
+        return agent.stream(
+            prompt,
             budget=options.budget,
             max_iterations=options.max_iterations,
             verify=options.verify,
-        ),
+        )
+
+    return AppSession(
+        events=multi_turn_events(options.prompt, submissions, run_turn),
         model=agent.runtime.session.router.spec_for(ModelRole.MAIN).model,
         cwd=str(agent.loaded.paths.cwd),
         branch=current_branch(agent.loaded.paths.workspace_root),
@@ -1567,6 +1579,7 @@ def _app_session(options: Options, agent: Agent, handoff: Handoff | None) -> App
         on_mode_change=policy.set_mode,
         on_attach=handoff.attach if handoff is not None else None,
         on_status=lambda: context_share(agent.conversation.messages, agent.runtime.compaction),
+        on_submit=submissions.put_nowait,
     )
 
 

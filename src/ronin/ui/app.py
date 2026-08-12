@@ -38,6 +38,7 @@ auto-accept mode.
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -76,6 +77,10 @@ TODOS_ID = "todos"
 APPROVAL_ID = "approval"
 STATUS_ID = "status"
 ERRORS_ID = "errors"
+INPUT_ID = "prompt-input"
+
+#: Placeholder shown in the empty input line.
+INPUT_PLACEHOLDER = "type a message, Enter to send — esc interrupt, shift+tab mode, ctrl+c quit"
 
 APP_CSS = """
 Screen { layout: vertical; }
@@ -84,6 +89,7 @@ Screen { layout: vertical; }
 #todos { height: auto; max-height: 30%; padding: 0 1; }
 #approval { height: auto; padding: 0 1; }
 #errors { height: auto; padding: 0 1; }
+#prompt-input { dock: bottom; height: 3; margin: 0 1; }
 #status { height: 1; dock: bottom; padding: 0 1; }
 """
 
@@ -152,6 +158,12 @@ class Session:
     on_approval: Callable[[ApprovalRequest], None] | None = None
     on_attach: Callable[[Asking], None] | None = None
     on_status: Callable[[], float] | None = None
+    #: The multi-turn seam. When set, the input line is live: a submitted, non-empty
+    #: message is handed here, and the orchestrator turns it into the next turn (whose
+    #: events arrive on the same ``events`` iterator — see :func:`multi_turn_events`).
+    #: Unset (demo, a replayed recording) leaves the input inert: nothing consumes a
+    #: prompt, so there is no path from a keystroke to a turn that never runs.
+    on_submit: Callable[[str], None] | None = None
 
 
 def initial_state(session: Session) -> ViewState:
@@ -171,6 +183,35 @@ def initial_state(session: Session) -> ViewState:
 def panels_for(state: ViewState, *, styles: Styles = MARKUP, show_thinking: bool = False) -> Panels:
     """The five regions for one state. The app's entire rendering decision."""
     return render_panels(state, styles=styles, show_thinking=show_thinking)
+
+
+#: Runs one prompt's turn, yielding its events. In production this is ``agent.stream``
+#: bound to its per-turn options; in a test, a function that yields a scripted list.
+TurnRunner = Callable[[str], AsyncIterator[Event]]
+
+
+async def multi_turn_events(
+    first: str,
+    submissions: asyncio.Queue[str | None],
+    run_turn: TurnRunner,
+) -> AsyncIterator[Event]:
+    """The app's event source for a multi-turn session: run a turn, then wait for the next.
+
+    Yields every event of the ``first`` prompt's turn, then blocks on ``submissions`` for
+    the next prompt (the input line puts one there via ``Session.on_submit``) and runs it,
+    repeating until ``None`` is queued. One ``Agent`` is one conversation and ``run_turn``
+    continues it, so turn *n* sees the history of turns before it.
+
+    This is the whole multi-turn orchestration, and it is pure over an injected
+    ``run_turn``: tested with scripted turns and a hand-fed queue — no model, no Textual.
+    Termination by a queued ``None`` is for a clean shutdown and for the tests; in a live
+    session the app is torn down by ``ctrl+c``, which cancels the worker awaiting here.
+    """
+    prompt: str | None = first
+    while prompt is not None:
+        async for event in run_turn(prompt):
+            yield event
+        prompt = await submissions.get()
 
 
 @dataclass(slots=True)
@@ -231,6 +272,7 @@ def _build_app(session: Session) -> Any:
     vertical_scroll: Any = textual_containers.VerticalScroll
     modal_base: Any = textual_screen.ModalScreen
     static: Any = textual_widgets.Static
+    input_widget: Any = textual_widgets.Input
 
     class ApprovalModal(modal_base):  # type: ignore[misc]  # base is Any: lazy import
         """One approval, taking the whole screen until the human answers it.
@@ -282,7 +324,25 @@ def _build_app(session: Session) -> Any:
             yield static("", id=TODOS_ID)
             yield static("", id=APPROVAL_ID)
             yield static("", id=ERRORS_ID)
+            # The multi-turn affordance. Docked above the status line so streaming text
+            # fills the space between. Present even when `on_submit` is unset (demo /
+            # replay); the submit handler simply has nothing to hand a prompt to then.
+            yield input_widget(placeholder=INPUT_PLACEHOLDER, id=INPUT_ID)
             yield static("", id=STATUS_ID)
+
+        def on_input_submitted(self, event: Any) -> None:
+            """Enter in the prompt line: hand a non-empty message to ``on_submit``, clear.
+
+            Textual dispatches ``Input.Submitted`` here by name. The line is cleared
+            unconditionally (so trailing whitespace never lingers) but a blank submit is
+            dropped — an empty prompt is not a turn. Whether a submitted prompt becomes a
+            turn is the orchestrator's business, reached only through the injected
+            ``on_submit``; the app itself starts nothing.
+            """
+            text = event.value
+            event.input.value = ""
+            if text.strip() and self.session.on_submit is not None:
+                self.session.on_submit(text)
 
         def on_mount(self) -> None:
             self._paint()
@@ -353,6 +413,8 @@ __all__ = [
     "APP_CSS",
     "DISMISSED",
     "ERRORS_ID",
+    "INPUT_ID",
+    "INPUT_PLACEHOLDER",
     "MODAL_CSS",
     "MODAL_ID",
     "STATUS_ID",
@@ -363,7 +425,9 @@ __all__ = [
     "Asking",
     "KeyController",
     "Session",
+    "TurnRunner",
     "initial_state",
+    "multi_turn_events",
     "panels_for",
     "run_app",
     "textual_available",

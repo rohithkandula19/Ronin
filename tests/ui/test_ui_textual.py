@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from typing import Any
 
 import pytest
 from ui_harness import APPROVAL, approval_turn, happy_turn, stream
@@ -25,6 +26,7 @@ from ronin.core.types import (
 )
 from ronin.ui.app import (
     APPROVAL_ID,
+    INPUT_ID,
     MODAL_ID,
     STATUS_ID,
     TODOS_ID,
@@ -307,3 +309,58 @@ async def test_the_app_never_constructs_an_approval_decision() -> None:
         await pilot.pause()
     # The request is handed out; the answer is somebody else's job.
     assert requests == ["Bash"]
+
+
+# --------------------------------------------------------------------------- #
+# the multi-turn input line, driven for real through the pilot
+# --------------------------------------------------------------------------- #
+
+
+def _input(app: object) -> Any:
+    from textual.widgets import Input
+
+    return app.query_one(f"#{INPUT_ID}", Input)  # type: ignore[attr-defined]
+
+
+async def test_a_submitted_message_reaches_on_submit_and_clears_the_line() -> None:
+    submitted: list[str] = []
+    app = _build_app(Session(events=stream(happy_turn()), on_submit=submitted.append))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        line = _input(app)
+        line.focus()
+        await pilot.pause()
+        line.value = "delete the temp files"
+        await pilot.press("enter")
+        await pilot.pause()
+    assert submitted == ["delete the temp files"], "Enter hands the message to on_submit"
+    assert line.value == "", "the line clears after a submit"
+
+
+async def test_a_blank_submit_is_not_a_turn() -> None:
+    submitted: list[str] = []
+    app = _build_app(Session(events=stream(happy_turn()), on_submit=submitted.append))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        line = _input(app)
+        line.focus()
+        await pilot.pause()
+        line.value = "   "  # whitespace only
+        await pilot.press("enter")
+        await pilot.pause()
+    assert submitted == [], "a blank/whitespace submit is dropped, not run"
+
+
+async def test_the_input_line_is_present_even_with_no_on_submit() -> None:
+    # Demo / replay: the line renders (so the layout is stable) but a submit has nowhere
+    # to go, and the handler simply does nothing rather than erroring.
+    app = _build_app(Session(events=stream(happy_turn())))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        line = _input(app)
+        line.focus()
+        await pilot.pause()
+        line.value = "ignored"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert line.value == "", "still cleared, even with nothing consuming it"
