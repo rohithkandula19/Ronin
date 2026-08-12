@@ -198,4 +198,13 @@ jobs:
           uv --project "$GITHUB_WORKSPACE" run ronin --version
           uv --project "$GITHUB_WORKSPACE" run ronin2 --version
           uv --project "$GITHUB_WORKSPACE" run ronin --help
-          uv --project "$GITHUB_WORKSPACE" run ronin doctor
+          # `doctor` exits 1 on a box with no provider key and no local model server —
+          # which this runner is, by design. That non-zero is doctor working correctly
+          # (`providers` is a FAIL, deliberately: no model, no session), so the smoke
+          # proves the command RAN to completion — it printed its report and named the
+          # builtin skills that had to survive the wheel build — rather than demanding a
+          # healthy environment it does not have.
+          report="$(uv --project "$GITHUB_WORKSPACE" run ronin doctor || true)"
+          echo "$report"
+          echo "$report" | grep -q "^ronin doctor" || { echo "::error::ronin doctor produced no report"; exit 1; }
+          echo "$report" | grep -q "autoplan" || { echo "::error::builtin role skills missing from a clean install"; exit 1; }

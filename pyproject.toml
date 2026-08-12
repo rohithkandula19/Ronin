@@ -60,11 +60,12 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ronin"]
-# The built-in role-workflow skills are Markdown data files, and hatchling packages only
-# Python by default — so without this they load from a source checkout and vanish from a
-# `pip install ronin`, which is exactly the "works because the repo is present" trap the
-# clean-install smoke test exists to catch. Force them into the wheel under the package.
-force-include = { "src/ronin/ext/role_skills" = "ronin/ext/role_skills" }
+# The built-in role-workflow skills are Markdown data files under the package, and the
+# `packages` entry above already carries every file it finds there — Python and data
+# alike — into the wheel. A `force-include` of the same directory would add each SKILL.md
+# a *second* time and hatchling aborts on the duplicate path, so the data files ride along
+# on the package inclusion and nothing extra is declared. The clean-install smoke test is
+# what proves they actually shipped, rather than a config comment asserting they did.
 
 [tool.uv]
 # Build and install the root project itself, not just its dependencies — this is the
