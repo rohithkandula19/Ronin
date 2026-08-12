@@ -145,6 +145,20 @@ All notable changes to this project will be documented here. Format follows [Kee
   tuned by a run that did not happen here. Tests: `test_adapter_reward.py` (17),
   `test_adapter_grpo.py` (13, incl. the shipped config end to end); `adapter.demo` gains a
   fifth section that scores five completions in the policy order the weights encode.
+- **GitHub-App webhook → a gated Ronin run (`ronin-relay`).** `ronin_relay.github_app`
+  turns a GitHub webhook into a typed `RunRequest` and stops there — it verifies the
+  delivery, decides whether it should start a run, and hands the request to an injected
+  `enqueue` callable (the seam to `ronin-jobs`), so the whole path is a pure function of
+  `(secret, headers, body)` with no network. Three rules, each returned as a *value* not
+  raised (a webhook that raises is a 500 and a retry storm): a bad HMAC-SHA256 signature is
+  `REJECTED` and never enqueues; a **bot's own comment is ignored** so a run that comments
+  cannot trigger itself forever; and only a comment opening with the command prefix
+  (default `/ronin`) becomes a run — everything else is `IGNORED` with a reason. It states
+  its own offline limit: an `issue_comment` payload has no PR head SHA, so a command on a
+  PR runs against the default branch unless a caller resolves the head ref via the API.
+  16 tests; `python -m ronin_relay.github_app` runs the whole path against a fake queue.
+  The remaining RH steps — a real GitHub-App install, the live deploy, the API calls back
+  to GitHub — need infrastructure this sandbox does not have and are not claimed here.
 
 ### Fixed
 - **A command you wrote yourself could not be run.** `.ronin/commands/*.md` has always
