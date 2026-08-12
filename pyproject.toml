@@ -266,6 +266,7 @@ module = [
     "test_ronin_eval_taxonomy",
     "test_ronin_evals_duel",
     "test_ronin_evals_integration",
+    "test_ronin_evals_poolgen",
     "test_ronin_evals_report",
     "test_ronin_evals_runner",
     "test_ronin_evals_suite_shape",
