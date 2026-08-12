@@ -48,7 +48,7 @@ import json
 import shutil
 import sys
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -93,7 +93,7 @@ from ..safety.policy import (
 from ..safety.sandbox import NoSandbox, Sandbox, Unavailable, detect
 from ..safety.settings import Settings, load_settings
 from ..session import SubagentPolicyFactory, build_session
-from ..tools.base import MAX_RESULT_CHARS, ToolContext
+from ..tools.base import MAX_RESULT_CHARS, Tool, ToolContext
 from ..tools.fetcher import pinned_fetcher
 from ..tools.net import Searcher
 from ..tools.registry import ToolRegistry, build_registry
@@ -557,6 +557,7 @@ async def build_runtime(
     context_window: int = DEFAULT_CONTEXT_WINDOW,
     shell: ShellSession | None = None,
     transport_provider: TransportProvider | None = None,
+    extra_tools: Sequence[Tool] = (),
 ) -> Runtime:
     """Turn a :class:`~ronin.cli.spine.Loaded` into live, wired objects.
 
@@ -654,6 +655,13 @@ async def build_runtime(
     )
 
     inner: ToolRegistry = session.registry
+    if extra_tools:
+        # Folded in *here*, above the session's registry and below `gated`, so a tool an
+        # embedder brought is gated exactly like a builtin: same policy, same hooks, same
+        # taint tracking, same output budget. Adding it after the gate would be the one
+        # arrangement worth forbidding — a caller's tool would then be the only thing in
+        # the process that could write a file without asking anyone.
+        inner = ToolRegistry((*inner.tools(), *extra_tools), ctx)
     if connect_mcp and loaded.mcp_servers:
         inner, mcp_notes, mcp_closer = await _connect_mcp(
             loaded.mcp_servers, inner, transport_provider

@@ -4,6 +4,32 @@ All notable changes to this project will be documented here. Format follows [Kee
 
 ## [Unreleased]
 
+### Added
+- **`from ronin import Agent` works, and the SDK can be embedded.** The package root was a
+  single docstring, so the one import line every doc and example would start with failed.
+  It now re-exports `Agent`, `AgentConfig`, `AgentResult`, `Run`, the whole `Event` union,
+  and the four names needed to declare a tool — **lazily**, through a PEP 562
+  `__getattr__`, because reaching `Agent` pulls in the entire application layer and
+  `import ronin` should not. A test resolves every name in `__all__`, and another asserts
+  in a subprocess that `import ronin` loads no `ronin.cli` module.
+  - **Both call shapes, one implementation.** `agent.run(prompt)` returns a `Run` that is
+    awaitable *and* async-iterable: `await agent.run(p)` folds to an `AgentResult` exactly
+    as before, `async for event in agent.run(p)` yields typed events. `stream()` is one
+    line over the same object. Two methods with two bodies is how a fix to one misses the
+    other.
+  - **`Agent(config)` is synchronous**, opening its workspace on first use, because
+    assembling a runtime reads files and resolves a router and cannot happen in
+    `__init__` without an event loop. `await agent.ready()` is the explicit form;
+    `agent.runtime` before that raises with the sentence that fixes it.
+  - **Callers can register their own tools** (`AgentConfig.tools` / `Agent.open(tools=…)`),
+    folded in *below* the gate — same policy, hooks, taint tracking and output budget as a
+    builtin. A tool added above the gate would be the only thing in the process able to act
+    without them, so there is a test asserting the clamp applies to a caller's tool.
+  - `examples/sdk_quickstart.py` runs all of it offline with a scripted provider, and the
+    suite runs the script. Writing it found the gap it now covers: `Tool`, `ToolContext`
+    and `ToolSpec` were unexported, so a caller could be told to bring a tool and had no
+    way to declare one.
+
 ### Fixed
 - **A command you wrote yourself could not be run.** `.ronin/commands/*.md` has always
   been parsed, validated (`$ARGUMENTS`, `$1..$n`, `$$`, builtin-shadow refusal) and loaded
