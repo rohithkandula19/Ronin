@@ -22,31 +22,40 @@ Keys, and where their logic lives:
 ``ctrl+c``    quit
 ============= ===============================================================
 
-The app never approves anything by itself. It renders
-:class:`~ronin.core.types.ApprovalRequest` verbatim and calls the
-``on_approval`` callback the caller injected; a UI that answered on its own
-behalf would be exactly the auto-approval this codebase refuses.
+The app never approves anything by itself. An :class:`~ronin.core.types.ApprovalRequest`
+takes the whole screen as a modal that renders ``request.rendered`` verbatim, and the
+keystroke is turned into a decision by :func:`ronin.ui.reduce.decision_for` — a pure
+function in a module with no terminal in it. This layer chooses nothing; it carries the
+human's answer back to whoever asked, and the policy engine is the only thing that may
+act on it. A UI that answered on its own behalf would be exactly the auto-approval this
+codebase refuses, and with ``on_attach`` unset that is enforced by there being no path
+from a keystroke to an approval at all.
+
+The modal is raised by the policy's *question*, never by the ``ApprovalRequest`` event —
+see :class:`Session`. Getting that backwards would interrupt for every edit in
+auto-accept mode.
 """
 
 from __future__ import annotations
 
 import importlib.util
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
-from ronin.core.types import ApprovalRequest, Event, Mode
+from ronin.core.types import ApprovalDecision, ApprovalRequest, Event, Mode, TurnEnd
 
 from .reduce import (
     EscapeAction,
     EscapeState,
     ViewState,
+    decision_for,
     next_mode,
     press_escape,
     reduce_event,
 )
-from .render import MARKUP, Panels, Styles, render_panels
+from .render import MARKUP, Panels, Styles, render_approval, render_panels
 
 #: What a bare install is told, verbatim, instead of a traceback.
 TEXTUAL_MISSING = (
@@ -55,7 +64,12 @@ TEXTUAL_MISSING = (
     "a scripted run, `python -m ronin.ui.demo` for an offline walkthrough."
 )
 
+#: What a modal popped from outside — never in normal use — is reported as. Refusing is
+#: the only safe reading of a dialog that vanished without an answer.
+DISMISSED = "the approval was dismissed without an answer, so the action was refused"
+
 #: Region ids, so the tests and the CSS agree on one spelling.
+MODAL_ID = "approval-modal"
 TRANSCRIPT_ID = "transcript"
 TOOLS_ID = "tools"
 TODOS_ID = "todos"
@@ -73,6 +87,22 @@ Screen { layout: vertical; }
 #status { height: 1; dock: bottom; padding: 0 1; }
 """
 
+#: The modal's own CSS. It is deliberately not a small floating box: an approval is the
+#: one moment the screen has a single job, and a decision surface that shares the
+#: viewport with streaming text is the class of bug that let a padded command hide its
+#: own tail in another agent's UI. Taking the screen means what is shown is all there is.
+MODAL_CSS = """
+ApprovalModal { align: center middle; background: $background 85%; }
+#approval-modal { width: 90%; height: auto; max-height: 90%; overflow-y: auto;
+                  border: round $warning; padding: 1 2; }
+"""
+
+
+#: "Put this to the human and tell me what they said." The app hands one of these to the
+#: orchestrator on mount; the orchestrator gives it to whatever the policy engine asks.
+#: Typed with ``core`` values only, so the UI still knows nothing about ``safety``.
+Asking = Callable[[ApprovalRequest], Awaitable[ApprovalDecision]]
+
 
 def textual_available() -> bool:
     """Whether the ``tui`` extra is installed. No import, so no import cost."""
@@ -86,6 +116,27 @@ class Session:
     ``events`` is an ``AsyncIterator[Event]`` — in production the loop, in a test
     or the demo a scripted list. That is the whole reason the TUI is testable with
     no model and no network.
+
+    ``on_attach`` is the answer path, and it is what makes the app usable rather than
+    merely watchable. On mount the app hands the orchestrator an :data:`Asking` — "put
+    this to the human and tell me what they said" — which the orchestrator gives to
+    whatever the policy engine asks. Leaving it unset keeps the old behaviour: requests
+    render and nothing can be approved, which is right for the demo and for replaying a
+    recording, where no live turn is waiting on an answer.
+
+    It is deliberately *not* driven by the ``ApprovalRequest`` event, and the difference
+    matters. The loop emits that event for every tool whose spec says
+    ``requires_approval``, and *then* asks the policy — which in auto-accept mode allows
+    the call without asking anyone. A modal driven off the event would therefore
+    interrupt for every edit in the one mode whose entire purpose is not interrupting,
+    and would collect an answer nobody acted on. Only the policy knows whether a human is
+    needed, so the modal is raised by the policy's question and by nothing else.
+
+    ``on_status`` supplies context-window occupancy, asked for once per ``TurnEnd``
+    rather than folded from the stream. The loop reports cumulative *spend*, which is
+    not the same number as how full the window is, and printing one under the other's
+    label would be a lie the status line tells every second — so the orchestrator, the
+    only layer that can see the live transcript, is asked instead.
     """
 
     events: AsyncIterator[Event]
@@ -99,6 +150,8 @@ class Session:
     on_rewind: Callable[[int], None] | None = None
     on_mode_change: Callable[[Mode], None] | None = None
     on_approval: Callable[[ApprovalRequest], None] | None = None
+    on_attach: Callable[[Asking], None] | None = None
+    on_status: Callable[[], float] | None = None
 
 
 def initial_state(session: Session) -> ViewState:
@@ -171,11 +224,41 @@ def _build_app(session: Session) -> Any:
     textual_app = importlib.import_module("textual.app")
     textual_binding = importlib.import_module("textual.binding")
     textual_containers = importlib.import_module("textual.containers")
+    textual_screen = importlib.import_module("textual.screen")
     textual_widgets = importlib.import_module("textual.widgets")
     app_base: Any = textual_app.App
     binding: Any = textual_binding.Binding
     vertical_scroll: Any = textual_containers.VerticalScroll
+    modal_base: Any = textual_screen.ModalScreen
     static: Any = textual_widgets.Static
+
+    class ApprovalModal(modal_base):  # type: ignore[misc]  # base is Any: lazy import
+        """One approval, taking the whole screen until the human answers it.
+
+        No bindings and no buttons: every key goes through
+        :func:`~ronin.ui.reduce.decision_for`, so the set of keys that can approve an
+        edit is a table in a pure module and not a list of widget handlers. A key that
+        means nothing is swallowed rather than treated as either answer.
+        """
+
+        CSS = MODAL_CSS
+
+        def __init__(self, request: ApprovalRequest) -> None:
+            super().__init__()
+            self.request = request
+
+        def compose(self) -> Any:
+            yield static(render_approval(self.request, styles=MARKUP), id=MODAL_ID)
+
+        def on_key(self, event: Any) -> None:
+            decision = decision_for(event.key)
+            if decision is None:
+                return
+            # Stopped *and* default-prevented: `escape` denies here, and it must not
+            # also reach the app's escape binding and interrupt the turn as well.
+            event.stop()
+            event.prevent_default()
+            self.dismiss(decision)
 
     class RoninApp(app_base):  # type: ignore[misc]  # base is Any: lazy import, no stubs
         CSS = APP_CSS
@@ -203,7 +286,26 @@ def _build_app(session: Session) -> Any:
 
         def on_mount(self) -> None:
             self._paint()
+            if self.session.on_attach is not None:
+                self.session.on_attach(self._ask_human)
             self.run_worker(self._consume(), exclusive=True)
+
+        async def _ask_human(self, request: ApprovalRequest) -> ApprovalDecision:
+            """Raise the modal and wait for an answer. Called by the policy's asker.
+
+            ``push_screen_wait`` has to be awaited from a worker rather than from the
+            message pump, and it is: the only caller is the policy engine, reached from
+            inside ``_consume``, which *is* the worker. The pump therefore stays free to
+            deliver the keypress that dismisses this — which is what makes waiting here
+            safe rather than a deadlock.
+            """
+            self._paint()
+            decision = await self.push_screen_wait(ApprovalModal(request))
+            if isinstance(decision, ApprovalDecision):
+                return decision
+            # Dismissed without an answer — only reachable if the screen is popped from
+            # outside. Refusing is the only safe reading of "no answer".
+            return ApprovalDecision(approved=False, reason=DISMISSED)
 
         async def _consume(self) -> None:
             # Painting inside the loop, per event, is the no-buffering guarantee:
@@ -212,6 +314,8 @@ def _build_app(session: Session) -> Any:
                 self.state = reduce_event(self.state, event)
                 if isinstance(event, ApprovalRequest) and self.session.on_approval:
                     self.session.on_approval(event)
+                elif isinstance(event, TurnEnd) and self.session.on_status is not None:
+                    self.state = self.state.with_status(context_used=self.session.on_status())
                 self._paint()
 
         def _paint(self) -> None:
@@ -247,12 +351,16 @@ def _build_app(session: Session) -> Any:
 __all__ = [
     "APPROVAL_ID",
     "APP_CSS",
+    "DISMISSED",
     "ERRORS_ID",
+    "MODAL_CSS",
+    "MODAL_ID",
     "STATUS_ID",
     "TEXTUAL_MISSING",
     "TODOS_ID",
     "TOOLS_ID",
     "TRANSCRIPT_ID",
+    "Asking",
     "KeyController",
     "Session",
     "initial_state",

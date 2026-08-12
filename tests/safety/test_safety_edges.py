@@ -505,12 +505,36 @@ def test_remembering_a_call_with_only_a_path_keys_on_that_path() -> None:
 
 def test_remembering_a_call_with_a_list_of_paths_keys_on_the_first() -> None:
     """The list shape has to reach the same lane; without it a `paths: [...]` call
-    would fall through to a tool-wide allow."""
+    would fall through to a tool-wide allow.
+
+    Keyed on ``paths`` — the argument's *own* name — and this line used to read ``path``.
+    That was a bug rather than a convention: `Exact` is matched by
+    `MatchTarget.argument`, which is a literal lookup in the call's arguments, so a rule
+    naming ``path`` could never match a call that spells it ``paths`` (or ``file_path``,
+    which is what every file tool here uses). The remembered rule matched nothing, and
+    the observable effect was that "approve for this session" asked again on the very
+    next identical call — invisible until an interactive approval existed to notice it.
+    """
     use = ToolUse(id="t1", name="write", arguments={"paths": ["a.py", "b.py"]})
     rule = engine().remembered_rule(
         spec("write", danger=DangerLevel.MUTATING), use, Outcome.YES_SESSION
     )
-    assert rule.matcher == Exact(argument="path", value="a.py")
+    assert rule.matcher == Exact(argument="paths", value="a.py")
+
+
+def test_a_remembered_rule_matches_the_call_it_was_made_from() -> None:
+    """The property the two tests above only imply, asserted end to end.
+
+    A rule that does not match the very call that produced it is not a narrow rule; it is
+    a rule that does nothing. Parametrised over the argument names real tools use, because
+    the failure was specific to the spelling and a single example would have missed it.
+    """
+    for argument in ("path", "file_path", "target", "directory"):
+        use = ToolUse(id="t1", name="write", arguments={argument: "notes.md", "content": "x"})
+        written = spec("write", danger=DangerLevel.MUTATING)
+        rule = engine().remembered_rule(written, use, Outcome.YES_SESSION)
+        target = MatchTarget(tool=use.name, arguments=use.arguments)
+        assert rule.matcher.matches(target), f"a remembered rule missed its own {argument}"
 
 
 def test_remembering_a_call_with_neither_falls_back_to_tool_wide() -> None:

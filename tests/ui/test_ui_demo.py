@@ -38,7 +38,8 @@ SECTIONS: tuple[str, ...] = (
     "6. the approval block renders ApprovalRequest.rendered, verbatim",
     "7. the same stream, headless: stream-json + exit code",
     "8. slash commands, including one from .ronin/commands",
-    "9. the TUI is a thin skin over the same functions",
+    "9. answering an approval — which keys grant what, and which grant nothing",
+    "10. the TUI is a thin skin over the same functions",
 )
 
 

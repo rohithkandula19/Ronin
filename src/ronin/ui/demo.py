@@ -52,7 +52,7 @@ from ronin.core.types import (
 from .app import TEXTUAL_MISSING, Session, initial_state, panels_for, textual_available
 from .commands import ParseError, load_registry, parse, render_help
 from .headless import OutputFormat, run_headless
-from .reduce import ViewState, reduce_event, reduce_stream
+from .reduce import ViewState, decision_for, reduce_event, reduce_stream
 from .render import (
     ANSI,
     render_approval,
@@ -265,7 +265,25 @@ async def main() -> int:
                 summary = outcome.body.strip() or f"builtin, argument={outcome.argument!r}"
                 print(f"{line:<28} ✓ {summary}")
 
-    section("9. the TUI is a thin skin over the same functions")
+    section("9. answering an approval — which keys grant what, and which grant nothing")
+    print("the request above is answered by a keystroke, and the mapping is a pure")
+    print("function so this table is the whole behaviour, terminal or not:\n")
+    for key in ("y", "a", "n", "escape", "enter", "space", "j"):
+        decision = decision_for(key)
+        if decision is None:
+            print(f"  {key:<8} — not an answer; the request stays open")
+        elif decision.approved:
+            scope = "and remembered for this session" if decision.remember else "once"
+            print(f"  {key:<8} → APPROVED {scope}")
+        else:
+            print(f"  {key:<8} → denied ({decision.reason})")
+    print("\n`enter` and `space` are deliberately absent: a held-down key or a stray")
+    print("newline arriving while an approval is on screen must not be able to approve.")
+    print("\nthe same keys reach the policy engine through cli.approve, which turns a")
+    print("decision into its Answer — and answers 'no' whenever no human is attached,")
+    print("so a script, a subagent or a dead front end refuses rather than waits.")
+
+    section("10. the TUI is a thin skin over the same functions")
     panels = panels_for(state)
     print(f"transcript region: {len(panels.transcript)} chars of markup")
     print(f"status region:     {panels.status}")

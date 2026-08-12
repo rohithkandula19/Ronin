@@ -4,6 +4,43 @@ All notable changes to this project will be documented here. Format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+- **A human at the interactive TUI could not approve anything.** Every piece existed and
+  nothing was connected: `ui/app.py` has always accepted `on_interrupt`, `on_rewind`,
+  `on_mode_change` and `on_approval`, and `cli/main.py` — the only caller of `run_app` —
+  passed **none of them**. So `esc` and `shift+tab` moved the status line and did nothing
+  to the running turn, and the only asker in `src/` was `UnattendedAsker`, which always
+  refuses. In the shipped `ronin2`, every gated edit was auto-denied with no way to say
+  yes.
+  - Approvals are now a **modal screen** that takes the viewport, renders
+    `ApprovalRequest.rendered` verbatim, and answers `y` (once) / `a` (and remember) /
+    `n` / `esc` (deny). The keystroke→decision mapping is `ui.reduce.decision_for`, a pure
+    table with unit tests — the widget decides nothing. `enter` and `space` answer
+    *nothing*, deliberately: a held-down key while an approval appears must not be able to
+    approve.
+  - **The modal is raised by the policy's question, not by the `ApprovalRequest` event.**
+    The loop emits that event for every tool whose spec requires approval and *then* asks
+    the policy, which in auto-accept mode allows the call itself. A UI driven by the event
+    would interrupt for every edit in the one mode that exists to stop interrupting. The
+    first version of this change did exactly that; there is now a test pinning it.
+  - `esc` reaches `PolicyEngine.cancel()` and `shift+tab` reaches a new
+    `PolicyEngine.set_mode()`. `esc esc` (rewind) is **still unwired and says so** —
+    restoring a conversation to a state it has left is a design decision, and wiring it to
+    something approximate would silently lose work.
+  - The status line shows the real model and git branch, and asks the orchestrator for
+    context occupancy once per turn. Occupancy is measured against the live transcript,
+    *not* from `Budget.spent_tokens`: spend is cumulative and includes messages compaction
+    has folded away, so using it would make the gauge drift further from the truth with
+    every turn.
+  - The line REPL gets `PromptAsker`, so a bare install with no Textual can approve too.
+    Both surfaces share one keymap.
+- **"Approve for this session" never matched anything.** `PolicyEngine.remembered_rule`
+  wrote `Exact(argument="path", …)` — a canonical name — while matching is a literal lookup
+  in the call's arguments (`MatchTarget.argument`). Every file tool here spells it
+  `file_path`, so the remembered rule matched no future call and the human was asked again
+  on the very next identical edit. The rule now records the argument's own name. Found by
+  the integration test for the `a` key, which is the first thing that could observe it.
+
 ### Added
 - **The URL policy reads the IPv4 address hidden inside an IPv6 one — and ISATAP was a
   real hole.** The gap note said 6to4 and Teredo were blocked by prefix rather than by

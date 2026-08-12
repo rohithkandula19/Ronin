@@ -57,8 +57,10 @@ from ..persistence import export as export_module
 from ..persistence.index import SessionIndex, SessionIndexError
 from ..persistence.resume import ResumedSession, resume_latest, resume_session
 from ..persistence.transcript import list_sessions
+from ..providers.router import Role as ModelRole
 from ..providers.router import Router
 from ..providers.types import ProviderError
+from ..safety.policy import Asker
 from ..telemetry import DISCLOSURE
 from ..ui.app import TEXTUAL_MISSING, run_app, textual_available
 from ..ui.app import Session as AppSession
@@ -74,10 +76,12 @@ from ..ui.headless import (
 )
 from ..ui.reduce import ViewState, reduce_event, summarize_arguments, summarize_result
 from ..ui.render import strip_controls
+from .approve import Handoff, PromptAsker
 from .bench import BenchOptions, default_suite, run_duel_command, run_eval
 from .doctor import run_doctor
 from .sdk import Agent, load_router
 from .spine import Paths
+from .status import context_share, current_branch
 from .stream import DEFAULT_MAX_ITERATIONS
 from .telemetry_cmd import TelemetryOptions, Verb
 from .telemetry_cmd import run as run_telemetry
@@ -810,13 +814,20 @@ async def dispatch(
     if options.wizard and not paths.ronin_dir.exists():
         _first_run(paths, streams)
 
+    # Who answers an approval is decided here, before the agent exists, because the
+    # policy engine is built with its asker and cannot be handed a different one later.
+    # An injected agent keeps whatever it was built with — a caller who assembled the
+    # session also chose its consent path, and overriding that from here would be this
+    # function deciding who may approve an edit in somebody else's runtime.
+    handoff = Handoff() if _wants_modal(options, streams) else None
     if agent is None:
-        built = await _open_agent(options, paths, env, streams)
+        built = await _open_agent(options, paths, env, streams, asker=_asker(handoff, streams))
         if built is None:
             return EXIT_ERROR
         agent = built
         owns = True
     else:
+        handoff = None
         owns = False
 
     try:
@@ -828,7 +839,7 @@ async def dispatch(
             streams.err(note.line() + "\n")
         if options.headless:
             return await _headless(options, agent, streams)
-        return await _interactive(options, agent, streams)
+        return await _interactive(options, agent, streams, handoff)
     finally:
         if owns:
             await agent.aclose()
@@ -953,8 +964,38 @@ def _first_run(paths: Paths, streams: Streams) -> None:
         streams.out(f"wrote {path}\n")
 
 
+def _wants_modal(options: Options, streams: Streams) -> bool:
+    """Whether this run will show the Textual approval modal.
+
+    The same condition :func:`_interactive` uses to choose the Textual view, asked
+    early because the asker has to be built before the agent is. Duplicating the
+    condition would be how the two come apart — a run that shows a modal nobody
+    collects an answer from, or an asker waiting for a modal that never appears.
+    """
+    return bool(options.tui and options.prompt and streams.isatty and textual_available())
+
+
+def _asker(handoff: Handoff | None, streams: Streams) -> Asker | None:
+    """Who answers gated calls: the modal, the line prompt, or nobody.
+
+    ``None`` means the default, :class:`~ronin.safety.policy.UnattendedAsker` — every
+    gated call refused. That is the right answer for a pipe: an approval prompt written
+    to a stream nobody is reading is an approval nobody gave.
+    """
+    if handoff is not None:
+        return handoff
+    if streams.isatty:
+        return PromptAsker(prompt=streams.ask, write=streams.out)
+    return None
+
+
 async def _open_agent(
-    options: Options, paths: Paths, env: Mapping[str, str], streams: Streams
+    options: Options,
+    paths: Paths,
+    env: Mapping[str, str],
+    streams: Streams,
+    *,
+    asker: Asker | None = None,
 ) -> Agent | None:
     """Assemble the agent, turning every startup failure into a message and ``None``."""
     try:
@@ -970,6 +1011,7 @@ async def _open_agent(
             environ=env,
             record=options.record,
             connect_mcp=options.connect_mcp,
+            asker=asker,
         )
     except (OSError, ValueError) as exc:
         streams.err(f"{PROGRAM}: could not start a session: {exc}\n")
@@ -1032,7 +1074,9 @@ async def _headless(options: Options, agent: Agent, streams: Streams) -> int:
     return result.exit_code
 
 
-async def _interactive(options: Options, agent: Agent, streams: Streams) -> int:
+async def _interactive(
+    options: Options, agent: Agent, streams: Streams, handoff: Handoff | None = None
+) -> int:
     """The default path: the Textual view for a given prompt, else a line session.
 
     ``ui.app.Session`` consumes one ``AsyncIterator[Event]`` and exposes no input
@@ -1045,21 +1089,44 @@ async def _interactive(options: Options, agent: Agent, streams: Streams) -> int:
         if not textual_available():
             streams.err(TEXTUAL_MISSING + "\n")
         else:
-            return await run_app(
-                AppSession(
-                    events=agent.stream(
-                        options.prompt,
-                        budget=options.budget,
-                        max_iterations=options.max_iterations,
-                        verify=options.verify,
-                    ),
-                    cwd=str(agent.loaded.paths.cwd),
-                    mode=agent.loaded.mode,
-                )
-            )
+            return await run_app(_app_session(options, agent, handoff))
     elif options.tui and streams.isatty and not options.prompt:
         streams.err(NO_TUI + "\n")
     return await _repl(options, agent, streams)
+
+
+def _app_session(options: Options, agent: Agent, handoff: Handoff | None) -> AppSession:
+    """Everything the Textual view needs, wired to the live session.
+
+    This function is the fix for a real defect rather than a tidy-up: the app has always
+    accepted these callbacks and this call site has always omitted them, so ``esc`` and
+    ``shift+tab`` moved the status line and nothing else, and an approval could be read
+    but never answered. Each one below is a key that now reaches the thing it names.
+
+    ``on_rewind`` is deliberately still absent. Rewinding to an earlier turn means
+    restoring the conversation to a state it has already left, and the only honest
+    mechanisms for that — snapshot every turn's ``AgentState``, or replay the transcript
+    — are a design decision with consequences for cost and for what "undo" means next to
+    ``/undo``'s checkpoints. Wiring it to something approximate would make ``esc esc``
+    silently lose work. It stays unwired, and says so, until that is decided.
+    """
+    policy = agent.runtime.policy
+    return AppSession(
+        events=agent.stream(
+            options.prompt,
+            budget=options.budget,
+            max_iterations=options.max_iterations,
+            verify=options.verify,
+        ),
+        model=agent.runtime.session.router.spec_for(ModelRole.MAIN).model,
+        cwd=str(agent.loaded.paths.cwd),
+        branch=current_branch(agent.loaded.paths.workspace_root),
+        mode=agent.loaded.mode,
+        on_interrupt=policy.cancel,
+        on_mode_change=policy.set_mode,
+        on_attach=handoff.attach if handoff is not None else None,
+        on_status=lambda: context_share(agent.conversation.messages, agent.runtime.compaction),
+    )
 
 
 async def _repl(options: Options, agent: Agent, streams: Streams) -> int:

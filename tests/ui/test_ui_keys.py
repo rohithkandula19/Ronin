@@ -6,10 +6,14 @@ import pytest
 
 from ronin.core.types import Mode
 from ronin.ui.reduce import (
+    APPROVAL_KEYS,
+    DENIED_BY_HUMAN,
     DOUBLE_ESCAPE_WINDOW_SECONDS,
     MODE_CYCLE,
+    REMEMBER_KEY,
     EscapeAction,
     EscapeState,
+    decision_for,
     mode_label,
     next_mode,
     press_escape,
@@ -99,3 +103,54 @@ def test_the_window_is_a_named_constant_a_caller_can_override() -> None:
     first, _ = press_escape(EscapeState(), now=0.0, window=0.0)
     _, action = press_escape(first, now=0.001, window=0.0)
     assert action is EscapeAction.INTERRUPT
+
+
+# --------------------------------------------------------------------------- #
+# answering an approval
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("key", "approved", "remember"),
+    [("y", True, False), ("a", True, True), ("n", False, False), ("escape", False, False)],
+)
+def test_each_answering_key_means_exactly_one_thing(
+    key: str, approved: bool, remember: bool
+) -> None:
+    """The most consequential table in the UI: which keystrokes let an edit run.
+
+    Tested here rather than only through the widget because this is the layer that
+    decides, and a table is exhaustively checkable in a way a terminal is not.
+    """
+    decision = decision_for(key)
+    assert decision is not None
+    assert (decision.approved, decision.remember) == (approved, remember)
+
+
+@pytest.mark.parametrize("key", ["", "j", "Y", "enter", "space", "ctrl+c", "tab", "yes"])
+def test_no_other_key_answers_anything(key: str) -> None:
+    """``None`` means "not an answer", and that is different from "no".
+
+    ``enter`` and ``space`` are in this list deliberately: they are what a held-down or
+    stray keypress produces while a dialog appears, and either one approving would be an
+    edit nobody agreed to. Capital ``Y`` is here because the modal does not lowercase —
+    a key that looks like a yes but is not mapped must do nothing rather than nearly work.
+    """
+    assert decision_for(key) is None
+
+
+def test_only_two_keys_can_approve_and_they_are_named() -> None:
+    """Reads the table itself, so adding a third approving key without arguing for it in
+    a test fails here. The count is the claim: two ways to say yes, no more."""
+    approving = sorted(key for key, approves in APPROVAL_KEYS.items() if approves)
+    assert approving == ["a", "y"]
+    assert REMEMBER_KEY in approving
+    assert APPROVAL_KEYS["escape"] is False, "escape must never be an approval"
+
+
+def test_a_denial_says_why_so_the_model_can_act_on_it() -> None:
+    """A refusal with no words reads to the model as a malfunction, and it retries."""
+    denied = decision_for("n")
+    assert denied is not None
+    assert denied.reason == DENIED_BY_HUMAN
+    assert not denied.remember, "a denial has nothing to remember"

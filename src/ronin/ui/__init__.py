@@ -47,12 +47,14 @@ from .headless import (
     run_headless,
 )
 from .reduce import (
+    APPROVAL_KEYS,
     DOUBLE_ESCAPE_WINDOW_SECONDS,
     MODE_CYCLE,
     EscapeAction,
     EscapeState,
     ToolLine,
     ViewState,
+    decision_for,
     mode_label,
     next_mode,
     press_escape,
@@ -78,6 +80,7 @@ from .render import (
 
 __all__ = [
     "ANSI",
+    "APPROVAL_KEYS",
     "BUILTIN_COMMANDS",
     "BUILTIN_REGISTRY",
     "DOUBLE_ESCAPE_WINDOW_SECONDS",
@@ -105,6 +108,7 @@ __all__ = [
     "ToolLine",
     "UserCommand",
     "ViewState",
+    "decision_for",
     "event_to_json",
     "exit_code_for",
     "is_command",
