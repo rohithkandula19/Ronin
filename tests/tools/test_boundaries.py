@@ -75,6 +75,12 @@ LAYER_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     # it. They still may not know which model is calling them.
     ("agents", ("ronin.providers", *ABOVE)),
     ("mcp", ("ronin.providers", *ABOVE)),
+    # `ext` is the composition layer: skills and plugins turn a checked-in directory
+    # into the other surfaces' own types, so it may import `agents` (the frontmatter
+    # parser, AgentDefinition), `mcp` (McpServerConfig), `ui` (the command registry) and
+    # `tools`. It sits below `cli`, which wires the result into a session, and — like
+    # every layer here — it may not know which provider is answering.
+    ("ext", ("ronin.providers", *ABOVE)),
     # The tool layer sits on `core` and, in its two network modules, on `safety`:
     # `tools/net.py` fences fetched web content with the canonical wrapper from
     # `safety.injection` and asks `safety.net` whether a URL may be fetched at all, and

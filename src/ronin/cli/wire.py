@@ -71,6 +71,7 @@ from ..context.repomap import (
 )
 from ..core.protocols import Policy
 from ..core.types import Budget
+from ..ext.skills import SkillSet, SkillTool, load_skills
 from ..mcp.client import TransportProvider, connect_all, default_transport_provider
 from ..mcp.config import McpServerConfig, load_mcp_config
 from ..mcp.jsonrpc import McpError
@@ -228,6 +229,9 @@ def load_workspace(
     if commands_note is not None:
         notes.append(commands_note)
 
+    skills, skills_notes = _load_skills(paths)
+    notes.extend(skills_notes)
+
     sandbox = _load_sandbox(settings, which=which, platform=platform)
     note = sandbox_note(sandbox)
     if note is not None:
@@ -243,6 +247,7 @@ def load_workspace(
         verify=verify,
         mcp_servers=servers,
         commands=commands,
+        skills=skills,
         sandbox=sandbox,
         notes=tuple(notes),
     )
@@ -369,6 +374,24 @@ def _load_commands(paths: Paths) -> tuple[CommandRegistry, Note | None]:
                 "commands are available"
             ),
         )
+
+
+def _load_skills(paths: Paths) -> tuple[SkillSet, tuple[Note, ...]]:
+    """Discover skills from the project and the user home. Every problem is a note.
+
+    A malformed or missing skill never stops a session — one bad ``SKILL.md`` is one
+    workflow unavailable, not a dead workspace — so :func:`load_skills` returns its
+    complaints as strings and they become notes here, the same treatment the command
+    loader gets. Installed-plugin skills are added later by the plugin layer; this loads
+    the two on-disk tiers a bare workspace has.
+    """
+    try:
+        skillset, messages = load_skills(paths.workspace_root, paths.home)
+    except OSError as exc:
+        return SkillSet(), (
+            Note(subject="skills", detail=f"{paths.skills_dir} could not be read ({exc})"),
+        )
+    return skillset, tuple(Note(subject="skills", detail=message) for message in messages)
 
 
 def _load_sandbox(
@@ -655,13 +678,19 @@ async def build_runtime(
     )
 
     inner: ToolRegistry = session.registry
-    if extra_tools:
+    extras: list[Tool] = list(extra_tools)
+    if loaded.skills.skills:
+        # Only when there are skills to load. A `skill` tool over an empty catalog would
+        # deny every call, which is the always-refusing-tool anti-pattern the search and
+        # MCP layers already avoid — a group appears exactly when its dependency does.
+        extras.append(SkillTool(loaded.skills))
+    if extras:
         # Folded in *here*, above the session's registry and below `gated`, so a tool an
-        # embedder brought is gated exactly like a builtin: same policy, same hooks, same
-        # taint tracking, same output budget. Adding it after the gate would be the one
-        # arrangement worth forbidding — a caller's tool would then be the only thing in
-        # the process that could write a file without asking anyone.
-        inner = ToolRegistry((*inner.tools(), *extra_tools), ctx)
+        # embedder brought — or the skill loader — is gated exactly like a builtin: same
+        # policy, same hooks, same taint tracking, same output budget. Adding it after
+        # the gate would be the one arrangement worth forbidding — a caller's tool would
+        # then be the only thing in the process that could write a file without asking.
+        inner = ToolRegistry((*inner.tools(), *extras), ctx)
     if connect_mcp and loaded.mcp_servers:
         inner, mcp_notes, mcp_closer = await _connect_mcp(
             loaded.mcp_servers, inner, transport_provider

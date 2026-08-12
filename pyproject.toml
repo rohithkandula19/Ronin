@@ -151,6 +151,7 @@ files = [
     "tests/context",
     "tests/core",
     "tests/evalsuite",
+    "tests/ext",
     "tests/mcp",
     "tests/persistence",
     "tests/providers",
@@ -164,7 +165,7 @@ files = [
 strict = true
 warn_unreachable = true
 explicit_package_bases = true
-mypy_path = "src:scripts:tests/agents:tests/cli:tests/context:tests/core:tests/evalsuite:tests/mcp:tests/persistence:tests/providers:tests/safety:tests/scripts:tests/telemetry:tests/tools:tests/ui:tests/verify"
+mypy_path = "src:scripts:tests/agents:tests/cli:tests/context:tests/core:tests/evalsuite:tests/ext:tests/mcp:tests/persistence:tests/providers:tests/safety:tests/scripts:tests/telemetry:tests/tools:tests/ui:tests/verify"
 
 # pytest's @parametrize is an untyped decorator as far as mypy is concerned;
 # that is a property of pytest, not a hole in our typing. Enumerated rather
@@ -239,6 +240,7 @@ module = [
     "test_ronin_cli_main",
     "test_ronin_cli_sdk",
     "test_ronin_cli_serve",
+    "test_ronin_cli_skills",
     "test_ronin_cli_slash",
     "test_ronin_cli_spine",
     "test_ronin_cli_status",
@@ -254,6 +256,7 @@ module = [
     "test_ronin_evals_swebench",
     "test_ronin_evals_task",
     "test_ronin_evals_taxonomy",
+    "test_ronin_ext_skills",
     "test_ronin_local_adapter",
     "test_ronin_mcp_client",
     "test_ronin_mcp_config",
@@ -334,6 +337,7 @@ include = [
     "tests/context/**/*.py",
     "tests/core/**/*.py",
     "tests/evalsuite/**/*.py",
+    "tests/ext/**/*.py",
     "tests/mcp/**/*.py",
     "tests/persistence/**/*.py",
     "tests/providers/**/*.py",

@@ -1350,6 +1350,14 @@ async def _slash(line: str, agent: Agent, streams: Streams) -> Slash:
     registry = agent.loaded.commands
     parsed = parse_command(line, registry=registry)
     if isinstance(parsed, ParseError):
+        # Only reached when neither a builtin nor a user command owns the name, so a
+        # skill can never shadow /clear or /plan: those parse successfully above. A skill
+        # invoked this way runs its body as an ordinary turn, exactly like a user command
+        # — the other half of "the tool and the slash command do the same thing".
+        invocation = agent.loaded.skills.invocation(line)
+        if invocation is not None:
+            streams.out(f"/{invocation.skill.name} → skill ({invocation.skill.source})\n")
+            return Slash(prompt=invocation.prompt)
         streams.err(parsed.display + "\n")
         return Slash()
     if parsed.is_user_defined:
@@ -1362,6 +1370,11 @@ async def _slash(line: str, agent: Agent, streams: Streams) -> Slash:
     name = parsed.name
     if name == "help":
         streams.out(render_help(registry) + "\n")
+        skills = agent.loaded.skills
+        if skills.skills:
+            streams.out("\nskills (invoke with /name or the skill tool):\n")
+            for skill in skills.skills:
+                streams.out(f"  /{skill.name:<16} {skill.description}\n")
     elif name == "doctor":
         report = await run_doctor(agent.loaded, runtime=agent.runtime)
         streams.out(report.render())
