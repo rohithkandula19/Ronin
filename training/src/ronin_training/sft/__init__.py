@@ -24,6 +24,7 @@ from ronin_training.sft.masking import (
     Tokenizer,
     build_labels,
     default_render,
+    learnable_row,
     masked_roles,
 )
 from ronin_training.sft.pipeline import SFTPlan, plan_sft_run
@@ -33,6 +34,11 @@ from ronin_training.sft.profiles import (
     SFTProfile,
     SFTProfileError,
 )
+
+# NOTE: ``ronin_training.sft.train`` is an entrypoint (``python -m …sft.train``), not part
+# of this package's import surface. Re-exporting it here would make ``-m …sft.train`` warn
+# "found in sys.modules after import of package" and run module-level code twice — the same
+# footgun ``adapter/__main__.py`` documents. Import ``check_run`` from ``sft.train`` directly.
 
 __all__ = [
     "ASSISTANT_ROLE",
@@ -51,6 +57,7 @@ __all__ = [
     "call_is_valid",
     "calls_from_rows",
     "default_render",
+    "learnable_row",
     "masked_roles",
     "plan_sft_run",
     "tool_validity",

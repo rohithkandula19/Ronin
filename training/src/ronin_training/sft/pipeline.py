@@ -53,6 +53,7 @@ def plan_sft_run(
     fraction: float = 0.10,
     seed: int = 0,
     known_tools: frozenset[str] | None = None,
+    config_path: str = "",
     data_dir: str = "training/data/sft",
     adapter_out: str = "training/adapters/sft",
 ) -> SFTPlan:
@@ -75,7 +76,7 @@ def plan_sft_run(
     validity = tool_validity(
         calls_from_rows([example.row for example in split.holdout]), known_tools=known_tools
     )
-    argv = profile.trainer_argv(data_dir, adapter_out)
+    argv = profile.run_command(config_path, data_dir, adapter_out)
     return SFTPlan(
         train_examples=len(split.train),
         holdout_examples=len(split.holdout),

@@ -84,38 +84,33 @@ class SFTProfile:
         """PEFT's effective LoRA scale, ``alpha / rank``."""
         return self.alpha / self.rank
 
-    def trainer_argv(self, data_dir: str, adapter_out: str) -> list[str]:
-        """The trainer command this profile implies. Pure — built, not run.
+    def run_command(self, config_path: str, data_dir: str, adapter_out: str) -> list[str]:
+        """The command that runs this profile — the real SFT entrypoint, built not launched.
 
-        The 7b lane shells out to the trl/axolotl driver; the 1.5b lane to ``mlx_lm.lora``.
-        Returning argv (not launching) is what makes the config reviewable and testable with
-        no trainer, no weights, and no GPU present — the "smoke" this environment can run.
+        Both lanes go through ``python -m ronin_training.sft.train``: the entrypoint
+        validates the data offline, then drives trl (peft/7b) or ``mlx_lm.lora`` (mlx/1.5b)
+        for the lane. Returning argv rather than launching is what makes the recipe
+        reviewable and testable with no trainer, no weights, and no GPU present.
         """
-        if self.lane == "mlx":
-            return [
-                "python", "-m", "mlx_lm.lora", "--train",
-                "--model", self.base_model_mlx,
-                "--data", data_dir,
-                "--adapter-path", adapter_out,
-                "--num-layers", "-1",
-                "--max-seq-length", str(self.max_seq_length),
-                "--learning-rate", str(self.learning_rate),
-                "--iters", "0",
-            ]
         return [
-            "python", "-m", "ronin_training.sft.train_peft",
-            "--base-model", self.base_model,
+            "python", "-m", "ronin_training.sft.train",
+            "--config", config_path,
             "--data", data_dir,
-            "--adapter-out", adapter_out,
-            "--rank", str(self.rank),
-            "--alpha", str(self.alpha),
-            "--target-modules", ",".join(self.target_modules),
+            "--out", adapter_out,
+            "--lane", self.lane,
+        ]
+
+    def mlx_lora_argv(self, data_dir: str, adapter_out: str) -> list[str]:
+        """The underlying ``mlx_lm.lora`` command the mlx lane execs. Pure; built, not run."""
+        return [
+            "python", "-m", "mlx_lm.lora", "--train",
+            "--model", self.base_model_mlx,
+            "--data", data_dir,
+            "--adapter-path", adapter_out,
+            "--num-layers", "-1",
             "--max-seq-length", str(self.max_seq_length),
             "--learning-rate", str(self.learning_rate),
-            "--schedule", self.schedule,
-            "--epochs", str(self.epochs),
-            "--quant", self.quant,
-            "--no-packing",
+            "--iters", "0",
         ]
 
     @classmethod

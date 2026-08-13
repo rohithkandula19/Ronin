@@ -125,6 +125,20 @@ def build_labels(
     return example
 
 
+def learnable_row(row: Mapping[str, Any], *, render: MessageRenderer = default_render) -> bool:
+    """Whether a ``{messages, tools}`` row has any learnable assistant token.
+
+    Tokeniser-free: it asks whether an assistant turn renders to non-empty text (prose or a
+    tool call), which is the same condition :func:`build_labels` would leave unmasked. Used
+    by the training entrypoint's ``--check`` to reject a row that teaches nothing *before*
+    a GPU tokenises anything.
+    """
+    for message in row.get("messages", []):
+        if str(message.get("role", "")) == ASSISTANT_ROLE and render(message).strip():
+            return True
+    return False
+
+
 def masked_roles(messages: Sequence[Mapping[str, Any]]) -> tuple[str, ...]:
     """The roles whose tokens will be masked — everything that is not the assistant.
 
@@ -144,5 +158,6 @@ __all__ = [
     "Tokenizer",
     "build_labels",
     "default_render",
+    "learnable_row",
     "masked_roles",
 ]

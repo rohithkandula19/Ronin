@@ -47,7 +47,7 @@ def test_the_dry_run_splits_masks_scores_and_builds_a_command() -> None:
     assert plan.train_examples > 0 and plan.holdout_examples > 0
     assert plan.all_learnable, "every train row has a learnable assistant token"
     assert plan.holdout_validity.rate == 1.0  # reference calls are all valid
-    assert "--no-packing" in plan.trainer_argv
+    assert "ronin_training.sft.train" in " ".join(plan.trainer_argv)
 
 
 def test_the_split_holds_out_by_task_with_no_leak() -> None:

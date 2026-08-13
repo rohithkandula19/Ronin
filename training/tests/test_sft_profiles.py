@@ -67,12 +67,14 @@ def test_an_unknown_key_is_refused() -> None:
         SFTProfile.from_mapping({"rank": 32, "nonsense": True})
 
 
-def test_the_trainer_argv_differs_by_lane_and_never_packs() -> None:
-    peft = QWEN7B_QLORA.trainer_argv("data", "out")
-    assert "--no-packing" in peft
-    assert "ronin_training.sft.train_peft" in peft
-    assert "32" in peft and "64" in peft  # rank / alpha reach the command
+def test_run_command_points_at_the_real_entrypoint() -> None:
+    cmd = QWEN7B_QLORA.run_command("training/config/sft_qwen7b.yaml", "data", "out")
+    assert cmd[:3] == ["python", "-m", "ronin_training.sft.train"]
+    assert "--config" in cmd and "training/config/sft_qwen7b.yaml" in cmd
+    assert "--lane" in cmd and "peft" in cmd
 
-    mlx = QWEN1P5B_DEBUG.trainer_argv("data", "out")
-    assert "mlx_lm.lora" in mlx
-    assert "--train" in mlx
+
+def test_the_mlx_lane_underlying_command_is_mlx_lm_lora() -> None:
+    mlx = QWEN1P5B_DEBUG.mlx_lora_argv("data", "out")
+    assert "mlx_lm.lora" in mlx and "--train" in mlx
+    assert QWEN1P5B_DEBUG.base_model_mlx in mlx
