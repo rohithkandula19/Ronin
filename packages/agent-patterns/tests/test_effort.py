@@ -11,6 +11,7 @@ from ronin_agent_patterns.effort import (
     describe_effort,
     effort_to_params,
     normalize_effort,
+    reasoning_capability,
 )
 
 
@@ -120,6 +121,34 @@ def test_unknown_effort_is_inert_everywhere() -> None:
 def test_provider_match_is_case_insensitive() -> None:
     assert effort_to_params("ANTHROPIC", "high")["thinking"]["budget_tokens"] == 8192
     assert effort_to_params("OpenAI", "medium") == {"reasoning_effort": "medium"}
+
+
+def test_reasoning_capabilities_are_explicit_about_tool_state() -> None:
+    assert reasoning_capability("anthropic").request_mode == "anthropic-thinking"
+    assert reasoning_capability("openai").request_mode == "openai-effort"
+    assert reasoning_capability("gemini").preserve_tool_state is True
+    assert reasoning_capability("ollama").request_mode == "none"
+
+
+@pytest.mark.parametrize(
+    "provider,mode,preserves_state",
+    [
+        ("anthropic", "anthropic-thinking", False),
+        ("openai", "openai-effort", False),
+        ("gemini", "none", True),
+        ("groq", "none", False),
+        ("cerebras", "none", False),
+        ("openrouter", "none", False),
+        ("ollama", "none", False),
+        ("local", "none", False),
+        ("custom", "none", False),
+        ("UNKNOWN", "none", False),
+    ],
+)
+def test_reasoning_capability_matrix(provider: str, mode: str, preserves_state: bool) -> None:
+    capability = reasoning_capability(provider)
+    assert capability.request_mode == mode
+    assert capability.preserve_tool_state is preserves_state
 
 
 # ---------- describe_effort ----------

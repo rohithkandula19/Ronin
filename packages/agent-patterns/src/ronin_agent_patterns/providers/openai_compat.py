@@ -20,6 +20,7 @@ from typing import Any, Iterator
 import httpx
 
 from ..types import MALFORMED_ARGS_KEY, Tool
+from ..token_counting import TokenCount
 from .base import LLMProvider, LLMResponse, Message, StreamEvent, ToolCall
 
 
@@ -161,6 +162,90 @@ class OpenAICompatProvider(LLMProvider):
 
     def _url(self) -> str:
         return f"{self.base_url.rstrip('/')}/chat/completions"
+
+    def _input_token_url(self) -> str:
+        return f"{self.base_url.rstrip('/')}/responses/input_tokens"
+
+    def _uses_openai_token_counter(self) -> bool:
+        """Only OpenAI's own Responses endpoint is a native count authority.
+
+        An OpenAI-compatible URL may implement a different tokenizer or no
+        count endpoint at all.  Treating it as OpenAI would create a false sense
+        of precision, so those providers retain the explicit local estimate.
+        """
+        return (
+            self.effort_provider.strip().lower() == "openai"
+            and self.base_url.rstrip("/") == OPENAI_BASE_URL.rstrip("/")
+        )
+
+    @staticmethod
+    def _responses_input(messages: list[Message]) -> list[dict[str, Any]]:
+        """Render neutral history as Responses input for OpenAI's count API."""
+        rendered: list[dict[str, Any]] = []
+        for message in messages:
+            if message.role == "tool":
+                rendered.append({
+                    "type": "function_call_output",
+                    "call_id": message.tool_call_id or "",
+                    "output": message.content,
+                })
+            elif message.role == "assistant" and message.tool_calls:
+                if message.content:
+                    rendered.append({"role": "assistant", "content": message.content})
+                rendered.extend({
+                    "type": "function_call",
+                    "call_id": call.id,
+                    "name": call.name,
+                    "arguments": json.dumps(call.arguments, separators=(",", ":")),
+                } for call in message.tool_calls)
+            else:
+                rendered.append({"role": message.role, "content": message.content})
+        return rendered
+
+    def count_input_tokens(
+        self,
+        *,
+        system: str,
+        messages: list[Message],
+        tools: list[Tool],
+    ) -> TokenCount:
+        """Use ``POST /responses/input_tokens`` for first-party OpenAI requests.
+
+        Ronin's completion path remains Chat Completions for broad compatibility;
+        this count uses OpenAI's official Responses representation, which counts
+        text, function tools, and function-call history server-side.  We do not
+        send this request in offline mode or to compatible providers.
+        """
+        if not self._uses_openai_token_counter():
+            return super().count_input_tokens(system=system, messages=messages, tools=tools)
+        body: dict[str, Any] = {
+            "model": self.model,
+            "instructions": system or None,
+            "input": self._responses_input(messages),
+        }
+        if tools:
+            body["tools"] = [
+                {
+                    "type": "function",
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.input_schema,
+                }
+                for tool in tools
+            ]
+        if self.effort:
+            from ..effort import effort_to_params
+            body.update(effort_to_params("openai", self.effort))
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                response = client.post(self._input_token_url(), json=body, headers=self._headers())
+                response.raise_for_status()
+                tokens = int((response.json() or {}).get("input_tokens"))
+            if tokens >= 0:
+                return TokenCount(tokens=tokens, kind="native", method="openai-responses-input_tokens")
+        except Exception:  # noqa: BLE001 - a count endpoint failure must not block work.
+            pass
+        return super().count_input_tokens(system=system, messages=messages, tools=tools)
 
     @staticmethod
     def _parse_args(args_raw: Any) -> dict[str, Any]:

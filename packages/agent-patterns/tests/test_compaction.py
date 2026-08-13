@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from conftest import make_block, make_response  # type: ignore
 
-from ronin_agent_patterns import FakeProvider, LLMResponse, ReActAgent, Tool, ToolCall
+from ronin_agent_patterns import FakeProvider, LLMResponse, ReActAgent, TokenCount, Tool, ToolCall
 
 
 def _big_result_tool() -> Tool:
@@ -61,6 +61,23 @@ def test_compaction_under_threshold_is_noop() -> None:
     result = agent.run("just answer")
     assert result.success
     assert not any("context compacted" in str(s.content) for s in result.trace)
+
+
+def test_compaction_uses_provider_counter_and_records_final_count() -> None:
+    class CountingProvider(FakeProvider):
+        counts: int = 0
+
+        def count_input_tokens(self, *, system, messages, tools):
+            self.counts += 1
+            return TokenCount(tokens=10, kind="native", method="test-counter")
+
+    provider = CountingProvider(responses=[LLMResponse(text="done", stop_reason="end_turn")])
+    result = ReActAgent(
+        system="x", provider=provider, compact_after_tokens=100,
+    ).run("answer")
+    assert result.success
+    assert provider.counts == 1
+    assert result.usage["latest_context_tokens"] == 10
 
 
 def test_est_tokens_counts_tool_call_arguments() -> None:

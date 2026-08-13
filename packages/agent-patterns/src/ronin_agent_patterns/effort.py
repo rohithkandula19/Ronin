@@ -42,6 +42,8 @@ knob to retune is ``_ANTHROPIC_BUDGET`` below.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 
 # Canonical, ordered effort levels (cheapest → most reasoning). Order matters:
 # tests and any future "bump one level" logic rely on the index ascending.
@@ -91,10 +93,32 @@ _OPENAI_EFFORT: dict[str, str] = {
     "xhigh": "high",  # clamped — the API has no level above "high"
 }
 
-# Providers whose models expose ``reasoning_effort`` on an OpenAI-compatible
-# endpoint. Everything else routed through OpenAICompatProvider (groq, cerebras,
-# ollama, local, gemini-via-openai) has NO reasoning knob, so it gets ``{}``.
-_OPENAI_REASONING_PROVIDERS: frozenset[str] = frozenset({"openai"})
+@dataclass(frozen=True)
+class ReasoningCapability:
+    """Provider feature declaration used by routing and request construction.
+
+    ``preserve_tool_state`` means opaque provider metadata must survive a
+    tool-call round trip. Gemini's thought signatures use this path through the
+    OpenAI-compatible adapter even though Gemini has no normalized effort knob
+    in that adapter.
+    """
+
+    provider: str
+    request_mode: str  # "anthropic-thinking" | "openai-effort" | "none"
+    preserve_tool_state: bool = False
+
+
+_CAPABILITIES: dict[str, ReasoningCapability] = {
+    "anthropic": ReasoningCapability("anthropic", "anthropic-thinking"),
+    "openai": ReasoningCapability("openai", "openai-effort"),
+    "gemini": ReasoningCapability("gemini", "none", preserve_tool_state=True),
+}
+
+
+def reasoning_capability(provider: str) -> ReasoningCapability:
+    """Return the normalized reasoning/tool-state contract for a provider."""
+    normalized = (provider or "").strip().lower()
+    return _CAPABILITIES.get(normalized, ReasoningCapability(normalized or "unknown", "none"))
 
 # One-line human descriptions, surfaced by ``/effort`` and ``describe_effort``.
 _DESCRIPTIONS: dict[str, str] = {
@@ -150,13 +174,14 @@ def effort_to_params(provider: str, effort: str) -> dict:
 
     provider = (provider or "").strip().lower()
 
-    if provider == "anthropic":
+    capability = reasoning_capability(provider)
+    if capability.request_mode == "anthropic-thinking":
         budget = _ANTHROPIC_BUDGET.get(effort)
         if budget is None:  # low → leave extended thinking disabled
             return {}
         return {"thinking": {"type": "enabled", "budget_tokens": budget}}
 
-    if provider in _OPENAI_REASONING_PROVIDERS:
+    if capability.request_mode == "openai-effort":
         return {"reasoning_effort": _OPENAI_EFFORT[effort]}
 
     # groq / cerebras / ollama / local / gemini / together / fireworks /

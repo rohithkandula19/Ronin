@@ -16,6 +16,7 @@ from .effort import (
     describe_effort,
     effort_to_params,
     normalize_effort,
+    reasoning_capability,
 )
 from .contracts import AgentRequest, ContextAssembly, ContextFragment, ContextProvider, assemble_context
 from .durable import BudgetDecision, BudgetExceeded, BudgetLimits, DurableRunError, JournalEvent, RunBudget, RunJournal
@@ -45,6 +46,7 @@ from .react import ReActAgent
 from .reflexion import Critique, ReflexionAgent
 from .supervisor import SubAgent, SupervisorAgent
 from .types import AgentResult, Step, Tool
+from .token_counting import TokenCount, estimate_request_tokens, estimate_text_tokens
 
 __all__ = [
     "AgentResult",
@@ -62,6 +64,7 @@ __all__ = [
     "describe_effort",
     "effort_to_params",
     "normalize_effort",
+    "reasoning_capability",
     "FailoverProvider",
     "FakeProvider",
     "LLMProvider",
@@ -90,5 +93,8 @@ __all__ = [
     "SupervisorAgent",
     "Tool",
     "ToolCall",
+    "TokenCount",
     "assemble_context",
+    "estimate_request_tokens",
+    "estimate_text_tokens",
 ]

@@ -383,6 +383,8 @@ def build_runner(*, max_iterations: int) -> AgentRunner:
     config = load_config()
 
     def run(prompt: str, cwd: Path, history: list, mode: str, emit: Callable[[str], None]) -> Any:
+        from .durable_runtime import surface_runtime
+        runtime = surface_runtime(cwd, "acp", f"{mode}:{prompt}")
         if mode == "proposal":
             # Writes are never directed into the editor workspace. The existing
             # orchestrator creates detached worktrees and retains an explicit,
@@ -407,6 +409,9 @@ def build_runner(*, max_iterations: int) -> AgentRunner:
             include_image_tool=False,
             role="reviewer",
             on_text_cb=emit,
+            journal=runtime.journal,
+            journal_run_id=runtime.run_id,
+            budget=runtime.budget,
         )
 
     return run

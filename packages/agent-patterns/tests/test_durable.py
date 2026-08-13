@@ -109,6 +109,35 @@ def test_react_resumes_pending_tool_call_from_a_verified_checkpoint(tmp_path) ->
     assert [event.kind for event in journal.events("run-recover")].count("tool_started") == 2
 
 
+def test_react_resumes_after_interrupt_during_provider_call(tmp_path) -> None:
+    """The pre-provider checkpoint makes a provider interruption resumable."""
+    class InterruptOnceProvider(FakeProvider):
+        interrupted: bool = False
+
+        def complete(self, **kwargs):  # type: ignore[no-untyped-def]
+            if not self.interrupted:
+                self.interrupted = True
+                raise KeyboardInterrupt
+            return super().complete(**kwargs)
+
+    provider = InterruptOnceProvider(responses=[LLMResponse(text="recovered", stop_reason="end_turn")])
+    agent = ReActAgent(system="x", provider=provider)
+    journal = RunJournal(tmp_path / "runs.sqlite")
+
+    interrupted = agent.run("recover", journal=journal, journal_run_id="run-provider-interrupt")
+
+    assert not interrupted.success
+    assert interrupted.error == "interrupted by user"
+    assert journal.interrupted_runs() == ["run-provider-interrupt"]
+
+    resumed = agent.resume("run-provider-interrupt", journal)
+
+    assert resumed.success
+    assert resumed.output == "recovered"
+    assert len(provider.calls) == 1
+    assert [event.kind for event in journal.events("run-provider-interrupt")].count("provider_requested") == 2
+
+
 def test_react_blocks_tool_before_execution_when_shared_budget_is_exhausted(tmp_path) -> None:
     calls: list[str] = []
     agent = ReActAgent(

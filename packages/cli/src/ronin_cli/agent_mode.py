@@ -112,6 +112,9 @@ def run_agent(
     confirm: bool = False,
     max_iterations: int = 15,
     faithfulness: str | None = None,
+    journal=None,
+    journal_run_id: str | None = None,
+    budget=None,
 ) -> AgentRunResult:
     """Run the autonomous agent loop toward ``goal``.
 
@@ -155,7 +158,8 @@ def run_agent(
     on_reset = renderer.on_reset if renderer is not None else None
 
     result = agent.run(goal, on_step=on_step, before_tool=before_tool, on_text=on_text,
-                       on_reset=on_reset)
+                       on_reset=on_reset, journal=journal, journal_run_id=journal_run_id,
+                       budget=budget)
     if renderer is not None:
         renderer.finish()
 

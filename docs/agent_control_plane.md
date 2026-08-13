@@ -98,6 +98,35 @@ the planner only bounded status data for the predecessor's planned subtasks.
 It never marks old output as validated or automatically reuses an unreviewed
 patch.
 
+## Kernel Reliability Boundaries
+
+The control plane uses the same kernel reliability contract as the terminal
+agent rather than estimating its own context or inventing separate recovery
+state:
+
+- **Provider-aware context accounting.** Anthropic and first-party OpenAI
+  requests use their native request-counting APIs. Ollama, compatible, local,
+  and custom endpoints without a registered tokenizer use Ronin's documented
+  UTF-8 estimate. That result is labelled `estimated`; it is not a provider
+  guarantee, billing record, or hard context limit. See
+  [context token counting](architecture/context_token_counting.md).
+- **Reasoning normalization.** Provider adapters declare either
+  `anthropic-thinking`, `openai-effort`, or `none`. Unsupported providers emit
+  no reasoning parameter. Gemini is explicitly `none` for normalized effort
+  while preserving the opaque tool/thought state required by its provider
+  protocol.
+- **Durable orchestration.** With `ronin util orchestrate --durable`, the
+  kernel journals the accepted plan and each completed dependency wave. A
+  single `RunBudget` is shared by concurrent specialists, and recovery resumes
+  only unfinished waves. This mode remains read-only; writing work continues
+  through governed mission candidates.
+
+The complete execution-surface inventory, including intentionally deferred
+one-shot and transport-only paths, is maintained in
+[durable surfaces](architecture/durable_surfaces.md). A surface must not claim
+crash recovery merely because it calls an agent: it needs a `RunJournal`, a
+`RunBudget`, and a defined resume boundary.
+
 Use `ronin util agent-runs` for a terminal view of task state and provider
 observations. It reports only real subtask outcomes; no provider is marked
 available or healthy without observed successful work.

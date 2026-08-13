@@ -7,6 +7,7 @@ from typing import Any
 from typing import Iterator
 
 from ..types import Tool
+from ..token_counting import TokenCount
 from .base import LLMProvider, LLMResponse, Message, StreamEvent, ToolCall
 
 
@@ -206,6 +207,32 @@ class AnthropicProvider(LLMProvider):
             from ..effort import effort_to_params
             kwargs.update(effort_to_params("anthropic", self.effort))
         return kwargs
+
+    def count_input_tokens(
+        self,
+        *,
+        system: str,
+        messages: list[Message],
+        tools: list[Tool],
+    ) -> TokenCount:
+        """Use Anthropic's native Messages token-count endpoint.
+
+        This counts the same structured system/messages/tools shape as the
+        completion request.  A transport failure falls back locally so context
+        management never turns a transient counting outage into an agent outage.
+        """
+        try:
+            kwargs = self._build_kwargs(
+                system=system, messages=messages, tools=tools, max_tokens=1,
+            )
+            kwargs.pop("max_tokens", None)
+            counted = self._client().messages.count_tokens(**kwargs)
+            tokens = int(getattr(counted, "input_tokens"))
+            if tokens >= 0:
+                return TokenCount(tokens=tokens, kind="native", method="anthropic-messages-count_tokens")
+        except Exception:  # noqa: BLE001 - provider completion remains available.
+            pass
+        return super().count_input_tokens(system=system, messages=messages, tools=tools)
 
     def complete(
         self,

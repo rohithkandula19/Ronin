@@ -175,6 +175,9 @@ Ronin resolves a provider/model-aware context policy for every coding turn. It
 reserves output capacity, keeps retrieval within a bounded share of the input
 budget, and compacts before the provider's hard limit. Known model families use
 the local catalog; unknown or local models default conservatively to 32k tokens.
+Anthropic and first-party OpenAI requests use their native request counters;
+other endpoints use a clearly labelled local estimate and never add network
+traffic in offline mode. See [context token counting](docs/architecture/context_token_counting.md).
 Use `/context` in a session to inspect the active window, `/context 64k` to save
 a project override, `/context auto` to return to automatic policy, or pass
 `ronin code --context-window 64000` for a one-run override.
@@ -242,6 +245,11 @@ the mission candidate workflow, which gives writes isolated workspaces, Docker
 verification, review/security evidence, and explicit approval gates. A resumed
 run retains its original budget ceilings; any limits supplied at resume time can
 only make those ceilings tighter.
+
+The broader terminal, editor, pipeline, mission, messaging, and scheduled-task
+surfaces share the same durable kernel where they execute an agent. The
+[durability surface matrix](docs/architecture/durable_surfaces.md) distinguishes
+those governed runs from transport-only components such as Relay.
 
 ### Editor Interoperability
 

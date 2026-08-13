@@ -12,6 +12,20 @@ All notable changes to this project will be documented here. Format follows [Kee
   real without embedding credential-shaped literals in source files.
 
 ### Added
+- **Native context token accounting.** ReAct compaction now asks Anthropic's
+  Messages counter and OpenAI's Responses input-token counter for their rendered
+  request shapes, recording only safe count metadata in durable journals. Local,
+  Ollama, compatible, and custom endpoints use a documented conservative UTF-8
+  estimate when no tokenizer is available; offline mode never makes a counting
+  request.
+- **Shared durable CLI runtime.** Coding sessions, ACP turns, pipeline stages,
+  mission implementation, Telegram turns, and scheduled task runs now create
+  project-local `RunJournal`/`RunBudget` instances without changing their
+  existing approval, read-only, or candidate-workspace restrictions.
+- **Reasoning capability contract.** Provider reasoning controls and opaque
+  tool-state requirements are exposed through one typed capability declaration;
+  Gemini thought-signature round trips remain explicit while unsupported effort
+  controls stay safe no-ops.
 - **Durable orchestration CLI.** `ronin util orchestrate --durable` now saves
   read-only multi-agent plan/wave checkpoints under `.ronin/`, prints a
   recoverable runtime id, accepts hard team-wide token/cost/time/tool budgets,

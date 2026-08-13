@@ -304,16 +304,23 @@ def run_due(
     ``runner`` in tests to assert the wiring without invoking any model.
     """
     now = now or datetime.now()
-    if runner is None:
-        from .runner import run_ask as _run_ask
-
-        def runner(cfg: Any, prompt: str) -> Any:  # noqa: ANN401
-            return _run_ask(cfg, prompt)
+    default_runner = runner is None
 
     results: list[RunResult] = []
     for task in due_tasks(load_tasks(), now):
         try:
-            res = runner(config, task.prompt)
+            if default_runner:
+                from .durable_runtime import surface_runtime
+                from .runner import run_ask
+
+                runtime = surface_runtime(Path.cwd(), "schedule", task.name)
+                res = run_ask(
+                    config, task.prompt, journal=runtime.journal,
+                    journal_run_id=runtime.run_id, budget=runtime.budget,
+                )
+            else:
+                assert runner is not None
+                res = runner(config, task.prompt)
             results.append(RunResult(
                 name=task.name,
                 prompt=task.prompt,

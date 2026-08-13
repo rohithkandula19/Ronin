@@ -329,6 +329,8 @@ def telegram(
             except Exception:  # noqa: BLE001 - best-effort
                 pass
 
+        from .durable_runtime import surface_runtime
+        runtime = surface_runtime(root, "telegram", message_text)
         res = run_code_agent(
             config,
             message_text,
@@ -342,6 +344,9 @@ def telegram(
             base_system=edit_nudge if edits_on else None,
             extra_system=mem_block,
             on_step_cb=on_step_cb,
+            journal=runtime.journal,
+            journal_run_id=runtime.run_id,
+            budget=runtime.budget,
             **extra,
         )
         out = res.output or res.error or "(no answer)"
@@ -364,6 +369,8 @@ def telegram(
         except Exception:  # noqa: BLE001 - memory is best-effort, never fatal
             mem_block = ""
 
+        from .durable_runtime import surface_runtime
+        runtime = surface_runtime(root, "telegram-briefing", prompt)
         res = run_code_agent(
             config,
             prompt,
@@ -375,6 +382,9 @@ def telegram(
             max_iterations=DEFAULT_MAX_ITERATIONS,
             deny=is_secret_path,
             extra_system=mem_block,
+            journal=runtime.journal,
+            journal_run_id=runtime.run_id,
+            budget=runtime.budget,
         )
         return res.output or res.error or "(no answer)"
 
@@ -426,5 +436,4 @@ def telegram(
         bot.run_forever()
     except KeyboardInterrupt:
         console.print("\n[dim]stopped[/dim]")
-
 

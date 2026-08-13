@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import Iterator
 
 from ..types import Tool
+from ..token_counting import TokenCount
 from .base import LLMProvider, LLMResponse, Message, StreamEvent
 
 
@@ -37,6 +38,17 @@ class FailoverProvider(LLMProvider):
         if i < len(self.labels) and self.labels[i]:
             return self.labels[i]
         return getattr(self.providers[i], "model", f"provider-{i}")
+
+    def count_input_tokens(
+        self, *, system: str, messages: list[Message], tools: list[Tool],
+    ) -> TokenCount:
+        """Count through the primary provider without making counting fatal."""
+        for provider in self.providers:
+            try:
+                return provider.count_input_tokens(system=system, messages=messages, tools=tools)
+            except Exception:  # noqa: BLE001 - execution remains independent of counting.
+                continue
+        return super().count_input_tokens(system=system, messages=messages, tools=tools)
 
     def complete(
         self, *, system: str, messages: list[Message], tools: list[Tool], max_tokens: int = 4096,

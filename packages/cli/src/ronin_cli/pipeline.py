@@ -385,6 +385,7 @@ def _stage_prompt(task: str, role: str, prior_artifacts: list[dict],
 def _default_stage_runner(config, role, prompt, *, read_only, root, console,
                           max_iterations) -> StageOutcome:
     from .code_mode import run_code_agent
+    from .durable_runtime import surface_runtime
     from .pipeline_artifacts import (
         ImplementationReport,
         VerificationReport,
@@ -392,9 +393,11 @@ def _default_stage_runner(config, role, prompt, *, read_only, root, console,
         finalize_verdict,
     )
     undo: list = []
+    runtime = surface_runtime(root, "pipeline", f"{role}:{prompt}")
     result = run_code_agent(
         config, prompt, root=root, console=console, yolo=False,
         read_only=read_only, role=role, undo_stack=undo, max_iterations=max_iterations,
+        journal=runtime.journal, journal_run_id=runtime.run_id, budget=runtime.budget,
     )
     files = sorted({e[0] for e in undo if isinstance(e, (list, tuple)) and e})
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from time import monotonic
 from typing import Any, Callable, ClassVar
 
@@ -10,6 +11,7 @@ from .base import execute_tool_call
 from .contracts import AgentRequest, ContextProvider, assemble_context
 from .durable import BudgetExceeded, RunBudget, RunJournal
 from .providers import AnthropicProvider, LLMProvider, Message, ToolCall
+from .token_counting import TokenCount
 from .types import AgentResult, Step, Tool
 
 # Live-narration hook: called for every step as it's appended to the trace.
@@ -250,6 +252,32 @@ class ReActAgent(BaseModel):
             return result
 
         current_iteration = start_iteration
+        token_count_cache: dict[str, TokenCount] = {}
+
+        def count_current_request() -> TokenCount:
+            """Count one exact request shape at most once per run.
+
+            Compaction can inspect the same history more than once while
+            deciding whether to trim it. Cache only an opaque digest locally;
+            neither the prompt nor tool payload is persisted by this helper.
+            """
+            fingerprint = json.dumps({
+                "system": effective_system,
+                "messages": [message.model_dump(mode="json") for message in messages],
+                "tools": [
+                    {"name": tool.name, "description": tool.description, "input_schema": tool.input_schema}
+                    for tool in self.tools
+                ],
+            }, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+            key = hashlib.sha256(fingerprint).hexdigest()
+            cached = token_count_cache.get(key)
+            if cached is None:
+                cached = self.provider.count_input_tokens(
+                    system=effective_system, messages=messages, tools=self.tools,
+                )
+                token_count_cache[key] = cached
+            return cached
+
         try:
             if pending_calls:
                 # A checkpoint taken after the provider requested tools contains
@@ -283,7 +311,20 @@ class ReActAgent(BaseModel):
                             decision.reason, "", i, trace, usage, messages, emit,
                         ), "blocked")
                 if self.compact_after_tokens is not None:
-                    self._maybe_compact(messages, emit)
+                    counted = self._maybe_compact(
+                        messages,
+                        emit,
+                        token_counter=count_current_request,
+                    )
+                    if counted is not None:
+                        usage["latest_context_tokens"] = counted.tokens
+                        if journal is not None:
+                            journal.append_event(active_run_id, "context_counted", {
+                                "iteration": i + 1,
+                                "tokens": counted.tokens,
+                                "kind": counted.kind,
+                                "method": counted.method,
+                            })
                 checkpoint(i)
                 if journal is not None:
                     journal.append_event(active_run_id, "provider_requested", {"iteration": i + 1})
@@ -634,7 +675,13 @@ class ReActAgent(BaseModel):
     # spot it in the history.
     COMPACTION_PREFIX: ClassVar[str] = "[earlier context summarized:"
 
-    def _maybe_compact(self, messages: list[Message], emit) -> None:
+    def _maybe_compact(
+        self,
+        messages: list[Message],
+        emit,
+        *,
+        token_counter: "Callable[[], TokenCount] | None" = None,
+    ) -> TokenCount | None:
         """Keep the running history under the context budget.
 
         Two stages, both pairing-safe:
@@ -660,7 +707,18 @@ class ReActAgent(BaseModel):
         if threshold is None:
             return
 
+        latest_count: TokenCount | None = None
+
         def est_tokens() -> int:
+            nonlocal latest_count
+            if token_counter is not None:
+                try:
+                    latest_count = token_counter()
+                    return latest_count.tokens
+                except Exception:
+                    # A context counter is a safety optimisation.  Its outage
+                    # must not stop the run; use the documented local fallback.
+                    latest_count = None
             # Count tool-call ARGUMENTS too — write_file/edit_file payloads live
             # in m.tool_calls[].arguments, not m.content, so counting only content
             # would wildly undercount a persisted, edit-heavy history.
@@ -672,7 +730,7 @@ class ReActAgent(BaseModel):
             return total // 4
 
         if est_tokens() <= threshold:
-            return
+            return latest_count
 
         marker = " …[truncated by context compaction]"
         compacted = 0
@@ -725,6 +783,10 @@ class ReActAgent(BaseModel):
             if evicted:
                 note.append(f"summarized {evicted} oldest turn(s)")
             emit(Step(kind="thought", content=f"[context compacted: {', '.join(note)}]"))
+        # Recount the final history, not only the pre-compaction request.  This
+        # lets journals and UIs show the actual payload that will be sent next.
+        est_tokens()
+        return latest_count
 
     def _summarize_groups(self, groups: list[list[Message]]) -> Message:
         """Deterministically fold evicted turn-groups into one summary Message.

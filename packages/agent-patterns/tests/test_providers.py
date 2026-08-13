@@ -57,6 +57,20 @@ def test_anthropic_provider_text_response() -> None:
     assert response.usage["input_tokens"] == 10
 
 
+def test_anthropic_provider_uses_native_token_counter() -> None:
+    fake_client = MagicMock()
+    fake_client.messages.count_tokens.return_value = SimpleNamespace(input_tokens=123)
+    provider = AnthropicProvider(api_key="sk-test")
+    with patch("ronin_agent_patterns.providers.anthropic_provider.anthropic.Anthropic", return_value=fake_client):
+        count = provider.count_input_tokens(
+            system="be precise", messages=[Message(role="user", content="hi")], tools=[_cache_tool()],
+        )
+    assert count.tokens == 123
+    assert count.kind == "native"
+    assert count.method == "anthropic-messages-count_tokens"
+    assert fake_client.messages.count_tokens.call_args.kwargs["tools"][0]["name"] == "calc"
+
+
 def test_anthropic_provider_tool_call() -> None:
     fake_client = MagicMock()
     fake_client.messages.create.return_value = _anthropic_response(
@@ -188,6 +202,38 @@ def test_openai_compat_text() -> None:
     # Verify auth header was set
     headers = fake_client.post.call_args.kwargs["headers"]
     assert headers["Authorization"] == "Bearer sk-x"
+
+
+def test_openai_provider_uses_responses_native_token_counter() -> None:
+    response = MagicMock(spec=httpx.Response)
+    response.json.return_value = {"input_tokens": 88}
+    response.raise_for_status = MagicMock()
+    fake_client = MagicMock()
+    fake_client.__enter__.return_value = fake_client
+    fake_client.__exit__.return_value = False
+    fake_client.post.return_value = response
+
+    with patch("ronin_agent_patterns.providers.openai_compat.httpx.Client", return_value=fake_client):
+        provider = OpenAICompatProvider(model="gpt-test", api_key="sk-x")
+        count = provider.count_input_tokens(
+            system="s", messages=[Message(role="user", content="hi")], tools=[_cache_tool()],
+        )
+
+    assert count.tokens == 88
+    assert count.kind == "native"
+    assert fake_client.post.call_args.args[0].endswith("/responses/input_tokens")
+    body = fake_client.post.call_args.kwargs["json"]
+    assert body["instructions"] == "s"
+    assert body["tools"][0]["name"] == "calc"
+
+
+def test_openai_compat_fallback_count_is_explicit_estimate() -> None:
+    provider = OpenAICompatProvider(model="llama3.1", base_url="http://localhost:11434/v1", effort_provider="ollama")
+    count = provider.count_input_tokens(
+        system="s", messages=[Message(role="user", content="hello")], tools=[],
+    )
+    assert count.kind == "estimated"
+    assert "estimate" in count.method
 
 
 def test_openai_compat_tool_call_parses_json_arguments() -> None:

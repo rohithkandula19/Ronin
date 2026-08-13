@@ -291,7 +291,15 @@ The "no write access" rule applies only to their business data services, NOT to 
 Keep replies short; any media you generate is shown to the user automatically."""
 
 
-def run_ask(config: RoninConfig, question: str, *, console: Console | None = None) -> AgentResultRich:
+def run_ask(
+    config: RoninConfig,
+    question: str,
+    *,
+    console: Console | None = None,
+    journal=None,
+    journal_run_id: str | None = None,
+    budget=None,
+) -> AgentResultRich:
     """One-shot agent invocation.
 
     Modes:
@@ -326,9 +334,9 @@ def run_ask(config: RoninConfig, question: str, *, console: Console | None = Non
     try:
         if console is not None:
             with Live(Spinner("dots", text="[cyan]thinking…[/cyan]"), console=console, refresh_per_second=10):
-                result = agent.run(question)
+                result = agent.run(question, journal=journal, journal_run_id=journal_run_id, budget=budget)
         else:
-            result = agent.run(question)
+            result = agent.run(question, journal=journal, journal_run_id=journal_run_id, budget=budget)
     except Exception as e:  # noqa: BLE001 — surface provider/network errors cleanly
         return AgentResultRich(
             success=False,

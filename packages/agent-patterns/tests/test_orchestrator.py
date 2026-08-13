@@ -429,6 +429,7 @@ def test_orchestration_resume_runs_only_unfinished_waves(tmp_path) -> None:
     assert result.success
     assert len(researcher.calls) == 0
     assert len(implementer.calls) == 1
+    assert "known facts" in implementer.calls[0]["messages"][0]["content"]
     assert len(planner.calls) == 1
     assert any(event.kind == "orchestration_resumed" for event in journal.events(run_id))
 

@@ -6,6 +6,7 @@ from typing import Any, Iterator, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..types import Tool
+from ..token_counting import TokenCount, estimate_request_tokens
 
 
 class ToolCall(BaseModel):
@@ -74,6 +75,21 @@ class LLMProvider(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     model: str
+
+    def count_input_tokens(
+        self,
+        *,
+        system: str,
+        messages: list[Message],
+        tools: list[Tool],
+    ) -> TokenCount:
+        """Count a rendered request, falling back to a documented local estimate.
+
+        Subclasses with an official count endpoint override this.  The default
+        deliberately makes no network call, preserving offline and custom
+        provider behaviour.
+        """
+        return estimate_request_tokens(system=system, messages=messages, tools=tools)
 
     def complete(
         self,

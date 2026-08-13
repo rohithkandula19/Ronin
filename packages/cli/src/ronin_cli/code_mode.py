@@ -705,6 +705,10 @@ def run_code_agent(
     on_reset_cb=None,
     on_step_cb=None,
     gate_cb=None,
+    journal=None,
+    journal_run_id: str | None = None,
+    budget=None,
+    resume_state: dict | None = None,
 ) -> CodeRunResult:
     # Trust polarity: the user's OWN typed task is the TRUSTED channel, so a
     # scanner hit here is a warning, not a hard block (hard-blocking locked out
@@ -995,7 +999,9 @@ def run_code_agent(
                            on_step=on_step, before_tool=before_tool,
                            on_text=on_text, on_reset=on_reset, after_tool=after_tool,
                            parallel_safe=lambda n: n in _PARALLEL_TOOLS,
-                           runtime_context={"root": str(_Path(root).resolve()), "mode": "code"})
+                           runtime_context={"root": str(_Path(root).resolve()), "mode": "code"},
+                           journal=journal, journal_run_id=journal_run_id,
+                           budget=budget, resume_state=resume_state)
     except KeyboardInterrupt:
         # Ctrl-C during a turn → stop THIS turn, keep the session alive.
         if renderer is not None:
@@ -1865,6 +1871,9 @@ def run_code_session(
                 console.print(f"[#6b7089]↑ self-tuning: escalated to "
                               f"{turn_cfg.provider} (cheap blade unreliable here)[/#6b7089]")
         _iq = InputQueue(console)
+        from .durable_runtime import surface_runtime
+        from .sessions import current_session_id
+        _runtime = surface_runtime(root, "cli-session", f"{current_session_id()}:{user}")
         with _iq:
             result = run_code_agent(
                 turn_cfg, user, root=root, console=console, yolo=_turn_yolo,
@@ -1874,6 +1883,7 @@ def run_code_session(
                 extra_tools=(build_background_tools(root) + build_checkpoint_tools(root)
                              + build_vision_tools(turn_cfg, root)
                              + build_semantic_tools(turn_cfg, root)),
+                journal=_runtime.journal, journal_run_id=_runtime.run_id, budget=_runtime.budget,
             )
         pending.extend(_iq.drain())
 

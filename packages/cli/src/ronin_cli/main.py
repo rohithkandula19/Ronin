@@ -3070,6 +3070,7 @@ def mission_implement(
     from .agent_mode import has_real_key
     from .code_mode import run_code_agent
     from .mission_workflow import MissionWorkflow
+    from ronin_agent_patterns import BudgetLimits
 
     config = load_config()
     if offline:
@@ -3082,14 +3083,33 @@ def mission_implement(
     # interactive CLI was previously launched with --full-access.
     config = config.model_copy(update={"full_access": False})
 
+    workflow = MissionWorkflow(root)
+    try:
+        mission_budget = workflow.store.load(mission_id).budget
+    except ValueError as exc:
+        console.print(f"[red]x[/red] {exc}")
+        raise typer.Exit(2)
+
     def runner(task: str, candidate_root: Path, iterations: int):
+        from .durable_runtime import surface_runtime
+        runtime = surface_runtime(
+            candidate_root, "mission", mission_id,
+            limits=BudgetLimits(
+                max_tokens=mission_budget.max_tokens,
+                max_cost_usd=mission_budget.max_cost_usd,
+                max_wall_time_seconds=mission_budget.max_wall_time_seconds,
+                max_tool_calls=mission_budget.max_tool_calls,
+                max_concurrency=mission_budget.max_concurrency,
+            ),
+        )
         return run_code_agent(
             config, task, root=candidate_root, console=None, yolo=True,
             max_iterations=iterations, include_image_tool=False, role="implementer",
+            journal=runtime.journal, journal_run_id=runtime.run_id, budget=runtime.budget,
         )
 
     try:
-        mission = MissionWorkflow(root).execute_implementation(
+        mission = workflow.execute_implementation(
             mission_id, runner, max_iterations=max_steps,
         )
     except ValueError as exc:
@@ -7821,9 +7841,12 @@ def agent(
     console.print(Panel.fit(f"[bold]Goal:[/bold] {text}", border_style="cyan", title="ronin agent"))
 
     fmode = faithfulness.strip().lower() if faithfulness is not None else None
+    from .durable_runtime import surface_runtime
+    runtime = surface_runtime(Path.cwd(), "agent", text)
     result = run_agent(
         config, text, console=console, confirm=confirm,
         max_iterations=max_steps, faithfulness=fmode,
+        journal=runtime.journal, journal_run_id=runtime.run_id, budget=runtime.budget,
     )
 
     console.print()
