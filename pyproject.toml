@@ -247,6 +247,7 @@ module = [
     "test_ronin_cli_doctor_detect",
     "test_ronin_cli_ext_commands",
     "test_ronin_cli_gate",
+    "test_ronin_cli_harvest",
     "test_ronin_cli_http_api",
     "test_ronin_cli_integration",
     "test_ronin_cli_interactive",

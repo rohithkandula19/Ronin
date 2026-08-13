@@ -328,6 +328,65 @@ def test_a_nonsense_parallel_or_limit_is_a_usage_error() -> None:
     assert isinstance(parse(["eval", "--dry-run", "--limit", "0"]), Usage)
 
 
+def test_harvest_collects_its_flags() -> None:
+    parsed = options(
+        [
+            "harvest",
+            "--tasks",
+            "pool",
+            "--out",
+            "datasets",
+            "--model",
+            "qwen-local",
+            "--parallel",
+            "16",
+            "--category",
+            "single-file",
+            "--container",
+        ]
+    )
+    assert parsed.command is Command.HARVEST
+    harvest = parsed.harvest
+    assert harvest is not None
+    assert harvest.tasks == Path("pool")
+    assert harvest.out == Path("datasets")
+    assert harvest.models == ("qwen-local",)
+    assert harvest.parallel == 16
+    assert harvest.categories == frozenset({"single-file"})
+    assert harvest.container is True
+
+
+def test_harvest_needs_tasks() -> None:
+    usage = parse(["harvest", "--out", "datasets", "--dry-run"])
+    assert isinstance(usage, Usage)
+    assert "--tasks" in usage.message
+
+
+def test_harvest_needs_out_unless_dry_run() -> None:
+    assert isinstance(parse(["harvest", "--tasks", "pool"]), Usage)
+    # --dry-run writes nothing, so it needs no --out.
+    parsed = options(["harvest", "--tasks", "pool", "--dry-run"])
+    assert parsed.harvest is not None
+    assert parsed.harvest.dry_run is True
+
+
+def test_harvest_runs_one_model() -> None:
+    usage = parse(["harvest", "--tasks", "pool", "--out", "d", "--model", "a", "--model", "b"])
+    assert isinstance(usage, Usage)
+    assert "one model" in usage.message
+
+
+def test_harvest_takes_flags_not_a_prompt() -> None:
+    usage = parse(["harvest", "--tasks", "pool", "--out", "d", "fix", "it"])
+    assert isinstance(usage, Usage)
+    assert "takes flags, not a prompt" in usage.message
+
+
+def test_a_run_carries_no_harvest_options() -> None:
+    """``harvest`` is ``None`` off that command, so a stray read fails loudly."""
+    assert options(["do a thing"]).harvest is None
+
+
 def test_a_run_carries_no_bench_options() -> None:
     """``bench`` is ``None`` off these two commands, so a stray read fails loudly."""
     assert options(["hello"]).bench is None
