@@ -31,11 +31,14 @@ from ronin.core.types import (
     TurnState,
 )
 from ronin.evals.harvest import (
+    ASSISTANT_TAG,
+    FROM_TAG,
     TaskOutcome,
     TrajectoryQualityBar,
     harvest,
     make_pair,
     outcome_from_transcript,
+    render_tool_call,
     repeated_tool_errors,
     to_dpo,
     to_sharegpt,
@@ -345,3 +348,30 @@ def test_harvest_and_write_are_byte_identical_across_runs(tmp_path: Path) -> Non
     b = write_dataset(second, tmp_path / "b")
     for name in ("sft", "dpo", "rlvr"):
         assert a[name].read_bytes() == b[name].read_bytes()
+
+
+# --------------------------------------------------------------------------- #
+# Cross-project contract lock
+# --------------------------------------------------------------------------- #
+#
+# The training project's harvest→trainer bridge
+# (``training/src/ronin_training/adapter/from_harvest.py``) inverts these two contracts
+# to turn ``sft.jsonl`` into the trainer's ``messages`` rows. It lives in a separate
+# project that cannot import this one, so a silent change to the sharegpt tags or the
+# tool-call wire format here would break the bridge with no failing test on that side.
+# These pin the exact surface the bridge depends on, so the break surfaces *here*.
+
+
+def test_sharegpt_tags_are_the_ones_the_bridge_inverts() -> None:
+    assert FROM_TAG[Role.SYSTEM] == "system"
+    assert FROM_TAG[Role.USER] == "human"
+    assert FROM_TAG[Role.ASSISTANT] == "gpt"
+    assert FROM_TAG[Role.TOOL] == "tool"
+    assert ASSISTANT_TAG == "gpt"
+
+
+def test_tool_call_wire_format_is_the_one_the_bridge_parses() -> None:
+    text = render_tool_call(ToolUse(id="c0", name="read", arguments={"path": "app.py"}))
+    assert text.startswith("<tool_call>") and text.endswith("</tool_call>")
+    body = json.loads(text[len("<tool_call>") : -len("</tool_call>")])
+    assert body == {"name": "read", "arguments": {"path": "app.py"}}
