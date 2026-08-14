@@ -35,6 +35,13 @@ from .checkpoints import (
     changed_paths_from_diff,
     unavailable_note,
 )
+from .contract import (
+    ArtifactContract,
+    ArtifactRule,
+    ContractResult,
+    ContractViolation,
+    validate_contract,
+)
 from .critique import (
     CRITIQUE_PROMPT,
     MAX_DIFF_CHARS,
@@ -48,6 +55,7 @@ from .critique import (
     critique_gate,
     parse_critique,
 )
+from .flaky import FlakeResult, Stability, classify, probe
 from .repair import (
     DEFAULT_MAX_ATTEMPTS,
     IDENTICAL_LIMIT,
@@ -108,6 +116,7 @@ from .spec import (
     is_scopable,
     parse_command,
 )
+from .suites import SuiteResult, SuiteTier, TieredOutcome, aggregate
 
 __all__ = [
     "CHECKPOINT_DIR",
@@ -127,6 +136,8 @@ __all__ = [
     "PYTHON_RULES",
     "SHADOW_EXCLUDES",
     "TYPESCRIPT_RULES",
+    "ArtifactContract",
+    "ArtifactRule",
     "Attempt",
     "Availability",
     "Checkpoint",
@@ -137,6 +148,8 @@ __all__ = [
     "CommandKind",
     "CommandOutcome",
     "CommandRunner",
+    "ContractResult",
+    "ContractViolation",
     "Critique",
     "CritiqueGate",
     "CritiqueModel",
@@ -146,6 +159,7 @@ __all__ = [
     "FailureKind",
     "FailureSnapshot",
     "FixStep",
+    "FlakeResult",
     "IterateStep",
     "LanguageRules",
     "PlanStep",
@@ -154,17 +168,23 @@ __all__ = [
     "RestoreResult",
     "Scope",
     "Scoping",
+    "Stability",
     "StepResult",
+    "SuiteResult",
+    "SuiteTier",
     "TestTargets",
+    "TieredOutcome",
     "VerifyOutcome",
     "VerifyPlan",
     "VerifySpec",
     "VerifyStep",
+    "aggregate",
     "as_tool_result",
     "candidate_test_paths",
     "changed_paths_from_diff",
     "clamp_diff",
     "clamp_output",
+    "classify",
     "critique_change",
     "critique_gate",
     "detect_verify_spec",
@@ -178,6 +198,7 @@ __all__ = [
     "parse_critique",
     "parse_failures",
     "plan_for_changes",
+    "probe",
     "repair_loop",
     "resolve_test_targets",
     "root_relative",
@@ -186,4 +207,5 @@ __all__ = [
     "run_plan",
     "should_verify",
     "unavailable_note",
+    "validate_contract",
 ]

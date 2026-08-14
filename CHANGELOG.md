@@ -5,6 +5,18 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Added
+- **Verification engine: flaky detection, optional suites, and artifact contracts.** Three
+  pure additions to `verify/`, on top of the existing change-scoped runner and red-green
+  repair. `flaky.py` classifies a target from repeated runs of the *same* code
+  (stable-pass / stable-fail / **flaky** on a mix) so a green that means nothing is named
+  as noise — the runner is injected, and the honest limit is stated: N runs observe
+  flakiness, they never prove its absence. `suites.py` adds the required-vs-optional tier
+  the roadmap asked for: an optional suite (a linter, a slow integration pass) runs and is
+  reported but **never fails the gate and is never silently promoted to a blocker** — only
+  a required failure turns a task red. `contract.py` validates produced artifacts against a
+  declared contract (files exist, JSON parses, required keys present), so "it wrote a
+  report with a score field" is checked, not trusted. All offline: a runner callable, a
+  fold over results, and a `tmp_path` read.
 - **Provider pricing tiers + the free→paid fallback guard.** `providers/capability.py`
   resolves the ambiguity the ledger already warned about: a `0.0` price is **FREE** only
   for a local/keyless endpoint; for a hosted, key-requiring model with no price it is
