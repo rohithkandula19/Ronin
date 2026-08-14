@@ -357,27 +357,6 @@ def test_http_reply_json_rejects_a_non_object() -> None:
         HttpReply(200, b"<html>").json(what="thing")
 
 
-def test_persisted_auth_round_trips_through_json() -> None:
-    original = PersistedAuth(
-        client_id="c",
-        client_secret="s",
-        token=TokenSet(
-            access_token="a",
-            resource=RESOURCE,
-            refresh_token="r",
-            expires_at=4600.0,
-            scopes=("mcp:read", "mcp:write"),
-        ),
-    )
-    restored = PersistedAuth.from_json(json.loads(json.dumps(original.to_json())))
-    assert restored == original
-
-
-def test_persisted_auth_drops_a_token_missing_its_access_token() -> None:
-    restored = PersistedAuth.from_json({"client_id": "c", "token": {"resource": RESOURCE}})
-    assert restored.client_id == "c" and restored.token is None
-
-
 def test_in_memory_store_deletes() -> None:
     store = InMemoryAuthStore()
     store.save("k", PersistedAuth(client_id="c"))
@@ -386,10 +365,47 @@ def test_in_memory_store_deletes() -> None:
     store.delete("k")  # deleting a missing key is a no-op, not an error
 
 
-def test_the_real_adapters_construct_without_touching_their_edges(tmp_path: Path) -> None:
-    """Constructing the impure adapters opens nothing — the I/O is deferred to their methods."""
+def test_file_store_persists_the_client_id_but_never_the_token(tmp_path: Path) -> None:
+    """The load-bearing security assertion: a bearer token must not reach the disk."""
+    token = TokenSet(access_token="super-secret", resource=RESOURCE, refresh_token="rt-secret")
+    FileAuthStore(tmp_path).save("remote", PersistedAuth(client_id="cid-1", token=token))
+
+    on_disk = (tmp_path / "remote.json").read_text(encoding="utf-8")
+    assert "cid-1" in on_disk  # the non-secret registration is durable
+    assert "super-secret" not in on_disk and "rt-secret" not in on_disk  # the token is not
+
+    # A fresh store (a new process) recovers the client_id but not the session-only token.
+    reloaded = FileAuthStore(tmp_path).load("remote")
+    assert reloaded is not None
+    assert reloaded.client_id == "cid-1" and reloaded.token is None
+
+
+def test_file_store_reuses_the_token_within_one_session(tmp_path: Path) -> None:
+    store = FileAuthStore(tmp_path)
+    token = TokenSet(access_token="at", resource=RESOURCE)
+    store.save("remote", PersistedAuth(client_id="cid", token=token))
+    loaded = store.load("remote")
+    assert loaded is not None and loaded.token is not None
+    assert loaded.token.access_token == "at"  # same instance keeps it in memory
+
+
+def test_file_store_tolerates_a_corrupt_client_id_file(tmp_path: Path) -> None:
+    (tmp_path / "remote.json").write_text("{ not json", encoding="utf-8")
+    assert FileAuthStore(tmp_path).load("remote") is None  # unreadable → treated as absent
+
+
+def test_file_store_load_is_none_for_an_unknown_server_and_delete_clears(tmp_path: Path) -> None:
+    store = FileAuthStore(tmp_path)
+    assert store.load("never-seen") is None
+    store.save("remote", PersistedAuth(client_id="cid", token=TokenSet("at", RESOURCE)))
+    store.delete("remote")
+    assert store.load("remote") is None
+    store.delete("remote")  # deleting a missing key is a no-op
+
+
+def test_the_network_adapters_construct_without_touching_their_edges() -> None:
+    """Constructing the socket/browser adapters opens nothing — the I/O is deferred."""
     assert isinstance(HttpxFetcher(timeout=1.0), HttpxFetcher)
-    assert isinstance(FileAuthStore(tmp_path), FileAuthStore)
     assert isinstance(LoopbackAuthorizer(timeout=1.0), LoopbackAuthorizer)
 
 

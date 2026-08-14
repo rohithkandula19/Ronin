@@ -28,8 +28,10 @@ Fail-closed choices, continued from the core:
   only source of PKCE and CSRF entropy and ``now`` the only clock; the real driver wires
   them to :mod:`secrets` and :func:`time.time`, and a test wires them to fixtures so a flow
   is byte-for-byte reproducible.
-* **Persisted secrets are written ``0600``.** A token file is a bearer credential; the file
-  store creates it readable only by its owner and says so if the platform cannot.
+* **Tokens are never written to disk.** A refresh/access token is a bearer credential;
+  :class:`FileAuthStore` persists only the non-secret ``client_id`` (so a client registers
+  once) and keeps the token in a session-only in-memory overlay. Encrypted-at-rest token
+  persistence via an OS keyring is a deliberate follow-up, not a plaintext file.
 """
 
 from __future__ import annotations
@@ -135,57 +137,20 @@ class Authorizer:
 
 @dataclass(frozen=True, slots=True)
 class PersistedAuth:
-    """What survives between runs for one server: its client identity and last token set.
+    """What a store holds for one server: its client identity and last token set.
 
-    The client identity is kept because dynamic registration (RFC 7591) is meant to happen
-    *once* — re-registering on every launch litters the authorization server with clients
-    and, on servers that rate-limit registration, eventually fails. The token is kept so a
-    still-valid access token is reused and an expired one is refreshed without a new browser
-    round trip.
+    The client identity is durable because dynamic registration (RFC 7591) is meant to
+    happen *once* — re-registering on every launch litters the authorization server with
+    clients and, on servers that rate-limit registration, eventually fails. The token is the
+    sensitive half: a live bearer credential, kept so a still-valid access token is reused
+    and an expiring one refreshed without a new browser round trip. How long each half
+    survives is the store's choice — :class:`FileAuthStore` keeps the ``client_id`` on disk
+    but the token in memory only, precisely because a token must not be written in clear text.
     """
 
     client_id: str = ""
     client_secret: str = ""
     token: TokenSet | None = None
-
-    def to_json(self) -> Mapping[str, object]:
-        out: dict[str, object] = {"client_id": self.client_id}
-        if self.client_secret:
-            out["client_secret"] = self.client_secret
-        if self.token is not None:
-            out["token"] = {
-                "access_token": self.token.access_token,
-                "resource": self.token.resource,
-                "refresh_token": self.token.refresh_token,
-                "expires_at": self.token.expires_at,
-                "scopes": list(self.token.scopes),
-            }
-        return out
-
-    @classmethod
-    def from_json(cls, data: Mapping[str, object]) -> PersistedAuth:
-        raw = data.get("token")
-        token: TokenSet | None = None
-        if isinstance(raw, Mapping):
-            access = raw.get("access_token")
-            resource = raw.get("resource")
-            if isinstance(access, str) and access and isinstance(resource, str) and resource:
-                expires = raw.get("expires_at")
-                scopes = raw.get("scopes")
-                token = TokenSet(
-                    access_token=access,
-                    resource=resource,
-                    refresh_token=_as_str(raw.get("refresh_token")),
-                    expires_at=float(expires) if isinstance(expires, (int, float)) else None,
-                    scopes=tuple(s for s in scopes if isinstance(s, str))
-                    if isinstance(scopes, Sequence) and not isinstance(scopes, (str, bytes))
-                    else (),
-                )
-        return cls(
-            client_id=_as_str(data.get("client_id")),
-            client_secret=_as_str(data.get("client_secret")),
-            token=token,
-        )
 
 
 class AuthStore:
@@ -575,45 +540,55 @@ class InMemoryAuthStore(AuthStore):
 
 
 class FileAuthStore(AuthStore):
-    """A JSON-file :class:`AuthStore` under a directory, one file per server, mode ``0600``.
+    """Persists only the *non-secret* ``client_id`` to disk; tokens stay in memory.
 
-    A token file is a live bearer credential, so each is created readable only by its owner;
-    on a platform that cannot express that (Windows), the write still succeeds and the
-    caller is expected to protect the directory. Import-safe and covered indirectly through
-    :class:`PersistedAuth` round-trips — the disk I/O itself is the impure part left to
-    manual verification.
+    An access/refresh token is a live bearer credential, and writing one to a plaintext file
+    is a clear-text-storage risk — Ronin ships no keyring to encrypt it, so it is not written
+    to disk at all. What *is* durable is the dynamically-registered ``client_id`` (a public
+    PKCE client keeps no secret, RFC 7591): persisting it to ``<dir>/<server>.json`` means a
+    client is registered once instead of on every launch. Tokens live in a per-process
+    overlay, so within a session an access token is reused and refreshed, but a new session
+    starts unauthenticated and logs in again. Durable, encrypted-at-rest token persistence
+    (an OS keyring) is a deliberate follow-up, not a plaintext file.
+
+    Unlike the other leaf adapters this one touches no network or browser — only ``tmp_path``
+    — so it is exercised directly by the offline suite.
     """
 
     def __init__(self, directory: str | Path) -> None:
         self._dir = Path(directory)
+        self._tokens: dict[str, TokenSet] = {}
 
-    def _path(self, key: str) -> Path:  # pragma: no cover - trivial path join over disk
+    def _path(self, key: str) -> Path:
         safe = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in key)
         return self._dir / f"{safe}.json"
 
-    def load(self, key: str) -> PersistedAuth | None:  # pragma: no cover - touches disk
+    def load(self, key: str) -> PersistedAuth | None:
+        client_id = ""
         path = self._path(key)
-        if not path.exists():
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                data = {}
+            if isinstance(data, Mapping):
+                client_id = _as_str(data.get("client_id"))
+        token = self._tokens.get(key)
+        if not client_id and token is None:
             return None
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return None
-        return PersistedAuth.from_json(data) if isinstance(data, Mapping) else None
+        return PersistedAuth(client_id=client_id, token=token)
 
-    def save(self, key: str, state: PersistedAuth) -> None:  # pragma: no cover - touches disk
-        import os
+    def save(self, key: str, state: PersistedAuth) -> None:
+        if state.token is not None:
+            self._tokens[key] = state.token
+        if state.client_id:
+            self._dir.mkdir(parents=True, exist_ok=True)
+            self._path(key).write_text(json.dumps({"client_id": state.client_id}), encoding="utf-8")
 
-        self._dir.mkdir(parents=True, exist_ok=True)
-        path = self._path(key)
-        path.write_text(json.dumps(state.to_json(), indent=2), encoding="utf-8")
+    def delete(self, key: str) -> None:
+        self._tokens.pop(key, None)
         with contextlib.suppress(OSError):
-            os.chmod(path, 0o600)
-
-    def delete(self, key: str) -> None:  # pragma: no cover - touches disk
-        path = self._path(key)
-        with contextlib.suppress(OSError):
-            path.unlink()
+            self._path(key).unlink()
 
 
 class LoopbackAuthorizer(Authorizer):
@@ -678,13 +653,14 @@ class LoopbackAuthorizer(Authorizer):
 def default_oauth_driver(
     token_dir: str | Path, *, interactive: bool = False
 ) -> OAuthDriver:  # pragma: no cover - wires the impure adapters
-    """A driver backed by the real edges: ``httpx``, a file token store, and system entropy.
+    """A driver backed by the real edges: ``httpx``, a file client-id store, and system entropy.
 
-    ``token_dir`` is where per-server tokens are persisted (mode ``0600``). ``interactive``
-    controls whether a browser authorizer is attached — session startup passes ``False`` so
-    a missing token becomes a "log in first" failure rather than a browser that never opens;
-    an attended login passes ``True``. Not exercised offline: every part it assembles opens
-    a socket, the disk, or a browser.
+    ``token_dir`` is where each server's non-secret ``client_id`` is persisted (tokens stay
+    in memory — see :class:`FileAuthStore`). ``interactive`` controls whether a browser
+    authorizer is attached — session startup passes ``False`` so a missing token becomes a
+    "log in first" failure rather than a browser that never opens; an attended login passes
+    ``True``. Not exercised offline: the fetcher and authorizer it assembles open a socket
+    and a browser.
     """
     import secrets
     import time

@@ -15,8 +15,11 @@ All notable changes to this project will be documented here. Format follows [Kee
   `LoopbackAuthorizer`, `FileAuthStore`) ever open a socket, a browser, or the disk.
   Fail-closed to match the core: **startup never launches a browser** — `ensure(...,
   interactive=False)` reuses or refreshes a stored token but turns a missing one into a
-  "log in first" note rather than a hang; persisted token files are written `0600`; a
-  refresh with no client-id or no refresh-token on record is refused, not guessed. The
+  "log in first" note rather than a hang; **tokens are never written to disk** — the file
+  store persists only the non-secret `client_id` (so a client registers once) and keeps the
+  bearer token in a session-only in-memory overlay, because a plaintext token file is a
+  clear-text-storage risk and Ronin ships no keyring to encrypt it; a refresh with no
+  client-id or no refresh-token on record is refused, not guessed. The
   config surface lands with it — a network server may declare `"auth": "oauth"` in
   `.ronin/mcp.json` (https-only, refused on stdio), and `authorize_servers()` resolves each
   such server's `Authorization` header, recording per-server failures the way a dead server
