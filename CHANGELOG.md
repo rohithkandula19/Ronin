@@ -5,6 +5,41 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Added
+- **OAuth 2.1 live driver for remote MCP servers (`mcp/oauth_driver.py`).** The follow-up the
+  protocol core promised: the orchestration that strings the pure transforms into a real
+  flow — `discover -> register -> authorize -> exchange -> refresh` — plus the three impure
+  edges it needs, each an injected Protocol. `HttpFetcher` does the HTTPS, `Authorizer`
+  runs browser consent + loopback redirect capture, `AuthStore` persists the client
+  identity and tokens; the clock and PKCE/CSRF entropy are injected too, so the whole
+  sequence is driven offline in tests with fakes and only the leaf adapters (`HttpxFetcher`,
+  `LoopbackAuthorizer`, `FileAuthStore`) ever open a socket, a browser, or the disk.
+  Fail-closed to match the core: **startup never launches a browser** — `ensure(...,
+  interactive=False)` reuses or refreshes a stored token but turns a missing one into a
+  "log in first" note rather than a hang; **tokens are never written to disk** — the file
+  store persists only the non-secret `client_id` (so a client registers once) and keeps the
+  bearer token in a session-only in-memory overlay, because a plaintext token file is a
+  clear-text-storage risk and Ronin ships no keyring to encrypt it; a refresh with no
+  client-id or no refresh-token on record is refused, not guessed. The
+  config surface lands with it — a network server may declare `"auth": "oauth"` in
+  `.ronin/mcp.json` (https-only, refused on stdio), and `authorize_servers()` resolves each
+  such server's `Authorization` header, recording per-server failures the way a dead server
+  is recorded so one unauthorized server never costs the session its other tools. Remote
+  (`http`/`sse`) MCP servers are now wired with a default HTTP sender in the CLI as a
+  result. The reactive mid-session refresh-on-`401` remains a documented next step (it needs
+  the transport to surface the `WWW-Authenticate` challenge).
+- **OAuth 2.1 protocol core for remote MCP servers (`mcp/oauth.py`).** The pure machinery
+  for the MCP authorization flow — PKCE (S256, RFC 7636), `WWW-Authenticate` parsing and
+  protected-resource / authorization-server metadata discovery (RFC 9728 / 8414), dynamic
+  client registration (RFC 7591), the authorization-URL builder, and authorization-code +
+  refresh token requests with a resource-pinned `TokenSet` (RFC 8707). Every transform is a
+  pure function — the HTTPS calls, the browser redirect, the randomness, the clock, and the
+  token store are all injected — so a security-critical flow is tested exhaustively offline
+  (the PKCE test uses the RFC 7636 Appendix B vector). Fail-closed throughout: PKCE is
+  mandatory and S256-only (no `plain` downgrade), every endpoint must be https (loopback
+  http aside), a missing required field errors rather than defaults, `state` is checked on
+  the redirect, and the token is bound to one `resource`. The live driver (real HTTP +
+  browser + persistence) and the config surface are a deliberate follow-up — the protocol,
+  the part that must be exactly right, lands first and fully covered.
 - **Verification engine: flaky detection, optional suites, and artifact contracts.** Three
   pure additions to `verify/`, on top of the existing change-scoped runner and red-green
   repair. `flaky.py` classifies a target from repeated runs of the *same* code

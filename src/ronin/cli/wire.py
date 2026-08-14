@@ -74,9 +74,11 @@ from ..core.types import Budget
 from ..ext.plugins import PluginSurfaces, collect_surfaces, load_installed
 from ..ext.skills import BUILTIN_SKILLS_DIR, SkillSet, SkillSource, SkillTool, load_skills
 from ..mcp.client import TransportProvider, connect_all, default_transport_provider
-from ..mcp.config import McpServerConfig, load_mcp_config
+from ..mcp.config import AuthKind, McpServerConfig, TransportKind, load_mcp_config
 from ..mcp.jsonrpc import McpError
+from ..mcp.oauth_driver import OAuthDriver, authorize_servers, default_oauth_driver
 from ..mcp.tools import extend_registry
+from ..mcp.transport import HttpxSender
 from ..persistence.index import SessionIndex
 from ..persistence.transcript import Transcript, new_session_id
 from ..providers.router import Role as ModelRole
@@ -639,6 +641,7 @@ async def build_runtime(
     context_window: int = DEFAULT_CONTEXT_WINDOW,
     shell: ShellSession | None = None,
     transport_provider: TransportProvider | None = None,
+    oauth_driver: OAuthDriver | None = None,
     extra_tools: Sequence[Tool] = (),
 ) -> Runtime:
     """Turn a :class:`~ronin.cli.spine.Loaded` into live, wired objects.
@@ -752,7 +755,11 @@ async def build_runtime(
         inner = ToolRegistry((*inner.tools(), *extras), ctx)
     if connect_mcp and loaded.mcp_servers:
         inner, mcp_notes, mcp_closer = await _connect_mcp(
-            loaded.mcp_servers, inner, transport_provider
+            loaded.mcp_servers,
+            inner,
+            transport_provider,
+            workspace_root=paths.workspace_root,
+            oauth_driver=oauth_driver,
         )
         notes.extend(mcp_notes)
         closers.append(mcp_closer)
@@ -927,17 +934,41 @@ async def _connect_mcp(
     servers: tuple[McpServerConfig, ...],
     inner: ToolRegistry,
     transport_provider: TransportProvider | None,
+    *,
+    workspace_root: Path,
+    oauth_driver: OAuthDriver | None = None,
 ) -> tuple[ToolRegistry, tuple[Note, ...], Closer]:
     """Connect every configured server and fold its tools in. Never raises.
 
     ``connect_all`` already refuses to let one bad server cost the session its local
     tools; this adds the other half — a note per failure, so "no tools appeared" is
     never a silent outcome — and registers the teardown as a closer.
+
+    When the caller injects a ``transport_provider`` it owns transport entirely, including
+    any authentication. Otherwise the default provider is built here: a real HTTP sender for
+    network servers, and — for every ``auth: oauth`` server — a resolved ``Authorization``
+    header. Resolution is non-interactive (it reuses or refreshes a stored token but never
+    opens a browser at startup), so a server that has never been logged in becomes a failure
+    note telling the operator to authorize it, and the session continues regardless.
     """
-    provider = (
-        transport_provider if transport_provider is not None else default_transport_provider()
-    )
+    oauth_failures: dict[str, str] = {}
+    if transport_provider is not None:
+        provider = transport_provider
+    else:
+        auth_headers: dict[str, Mapping[str, str]] = {}
+        if any(config.auth is AuthKind.OAUTH for config in servers):
+            driver = oauth_driver or default_oauth_driver(workspace_root / ".ronin" / "mcp-auth")
+            resolved = await authorize_servers(servers, driver, interactive=False)
+            auth_headers = dict(resolved.headers)
+            oauth_failures = dict(resolved.failures)
+        sender = (
+            HttpxSender()
+            if any(config.transport is not TransportKind.STDIO for config in servers)
+            else None
+        )
+        provider = default_transport_provider(sender=sender, auth_headers=auth_headers)
     toolset = await connect_all(servers, provider)
+    merged_failures = {**oauth_failures, **dict(toolset.failures)}
     notes: list[Note] = [
         Note(
             subject=f"mcp server {name!r}",
@@ -946,7 +977,7 @@ async def _connect_mcp(
                 "message; the session continues with the local tools"
             ),
         )
-        for name, why in sorted(toolset.failures.items())
+        for name, why in sorted(merged_failures.items())
     ]
     skipped = sequence_note(
         "mcp tools",

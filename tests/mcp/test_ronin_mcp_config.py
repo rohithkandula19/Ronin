@@ -17,6 +17,7 @@ from ronin.core.types import DangerLevel
 from ronin.mcp.config import (
     MCP_CONFIG_RELATIVE_PATH,
     UNDECLARED_DANGER_LEVEL,
+    AuthKind,
     ConfigError,
     McpServerConfig,
     TransportKind,
@@ -265,3 +266,52 @@ def test_the_dataclass_itself_refuses_an_incoherent_config() -> None:
         McpServerConfig(name="x", transport=TransportKind.SSE)
     with pytest.raises(ValueError, match="timeout_seconds"):
         McpServerConfig(name="x", transport=TransportKind.STDIO, command="c", timeout_seconds=0)
+
+
+# --------------------------------------------------------------------------- #
+# auth: oauth
+# --------------------------------------------------------------------------- #
+
+
+def test_auth_defaults_to_none_and_parses_oauth() -> None:
+    (plain,) = parse_mcp_config({"mcpServers": {"r": {"transport": "http", "url": "https://x/"}}})
+    assert plain.auth is AuthKind.NONE
+    (oauth,) = parse_mcp_config(
+        {"mcpServers": {"r": {"transport": "http", "url": "https://x/", "auth": "oauth"}}}
+    )
+    assert oauth.auth is AuthKind.OAUTH
+
+
+def test_an_unknown_auth_value_is_refused_naming_the_key() -> None:
+    with pytest.raises(ConfigError) as caught:
+        parse_mcp_config(
+            {"mcpServers": {"r": {"transport": "http", "url": "https://x/", "auth": "basic"}}}
+        )
+    assert "'auth'" in str(caught.value) and "'basic'" in str(caught.value)
+
+
+def test_oauth_requires_a_secure_url() -> None:
+    with pytest.raises(ConfigError, match="https url"):
+        parse_mcp_config(
+            {"mcpServers": {"r": {"transport": "http", "url": "http://x/", "auth": "oauth"}}}
+        )
+    # loopback http is the one exception, for a local dev auth server.
+    (local,) = parse_mcp_config(
+        {"mcpServers": {"r": {"transport": "http", "url": "http://127.0.0.1:9/", "auth": "oauth"}}}
+    )
+    assert local.auth is AuthKind.OAUTH
+
+
+def test_auth_on_a_stdio_server_is_refused_as_a_wrong_transport_key() -> None:
+    with pytest.raises(ConfigError) as caught:
+        parse_mcp_config({"mcpServers": {"r": {"command": "x", "auth": "oauth"}}})
+    assert "'auth'" in str(caught.value) and "different transport" in str(caught.value)
+
+
+def test_the_dataclass_refuses_oauth_on_stdio_or_an_insecure_url() -> None:
+    with pytest.raises(ValueError, match="not stdio"):
+        McpServerConfig(name="x", transport=TransportKind.STDIO, command="c", auth=AuthKind.OAUTH)
+    with pytest.raises(ValueError, match="https url"):
+        McpServerConfig(
+            name="x", transport=TransportKind.HTTP, url="http://x/", auth=AuthKind.OAUTH
+        )
