@@ -256,6 +256,7 @@ module = [
     "test_ronin_cli_interactive",
     "test_ronin_cli_main",
     "test_ronin_cli_repo",
+    "test_ronin_cli_repo_render",
     "test_ronin_cli_sdk",
     "test_ronin_cli_serve",
     "test_ronin_cli_skills",
