@@ -85,6 +85,8 @@ from .bench import BenchOptions, default_suite, run_duel_command, run_eval
 from .detect import Detection, detect, real_probe
 from .doctor import run_doctor
 from .harvest import HarvestOptions, run_harvest
+from .repo import SUBCOMMANDS as REPO_SUBCOMMANDS
+from .repo import RepoOptions, run_repo
 from .sdk import Agent, load_router
 from .serve import build_server
 from .spine import Paths
@@ -129,6 +131,7 @@ class Command(StrEnum):
     ACP = "acp"
     API = "api"
     PLUGIN = "plugin"
+    REPO = "repo"
 
 
 class ExportFormat(StrEnum):
@@ -233,6 +236,9 @@ class Options:
     #: ``plugin`` verb and its argument (``add <source>`` / ``list``).
     plugin_verb: str = ""
     plugin_source: str = ""
+    #: Present for ``repo`` only, same rule as ``bench``: ``None`` everywhere else so a
+    #: path that reads it without checking the command fails loudly.
+    repo: RepoOptions | None = None
 
     @property
     def flags(self) -> dict[str, object]:
@@ -630,6 +636,21 @@ def build_parser() -> _Parser:
         action="store_true",
         help="run each task's verify.sh in docker (harvest); fails closed with no daemon",
     )
+    parser.add_argument(
+        "--root",
+        dest="repo_root",
+        default=None,
+        metavar="DIR",
+        help="repo root to analyse (repo); defaults to the working directory",
+    )
+    parser.add_argument(
+        "--top",
+        dest="repo_top",
+        type=int,
+        default=None,
+        metavar="N",
+        help="how many top-ranked modules `repo map` lists",
+    )
     return parser
 
 
@@ -649,6 +670,7 @@ def parse(argv: Sequence[str]) -> Options | Usage:
         Command.ACP.value,
         Command.API.value,
         Command.PLUGIN.value,
+        Command.REPO.value,
     }:
         command = Command(tokens.pop(0))
 
@@ -682,6 +704,8 @@ def parse(argv: Sequence[str]) -> Options | Usage:
         return _api_options(namespace, words)
     if command is Command.PLUGIN:
         return _plugin_options(namespace, words)
+    if command is Command.REPO:
+        return _repo_options(namespace, words)
 
     prompt = namespace.print_prompt if namespace.print_prompt is not None else words
     headless = namespace.print_prompt is not None
@@ -1059,6 +1083,42 @@ def _budget(namespace: argparse.Namespace) -> Budget | None:
 # --------------------------------------------------------------------------- #
 
 
+def _repo_options(namespace: argparse.Namespace, words: str) -> Options | Usage:
+    """``repo <subcommand> [path]`` — a read-only analysis verb.
+
+    The subcommand and (for ``explain``) the target file come through the shared
+    ``words`` positional; ``--root`` overrides where to scan, ``--top`` sizes the map
+    listing, and ``--output-format json`` switches the render — no new format flag.
+    """
+    parts = words.split()
+    if not parts:
+        return Usage(f"{PROGRAM} repo: needs a subcommand ({', '.join(REPO_SUBCOMMANDS)})\n")
+    subcommand, *rest = parts
+    if subcommand not in REPO_SUBCOMMANDS:
+        return Usage(
+            f"{PROGRAM} repo: unknown subcommand {subcommand!r}; "
+            f"expected one of {', '.join(REPO_SUBCOMMANDS)}\n"
+        )
+    target = rest[0] if rest else ""
+    if subcommand == "explain" and not target:
+        return Usage(f"{PROGRAM} repo explain: needs a file path\n")
+    root = Path(namespace.repo_root) if namespace.repo_root else Path(namespace.cwd)
+    as_json = namespace.output_format == OutputFormat.JSON.value
+    if namespace.repo_top is None:
+        repo = RepoOptions(subcommand=subcommand, root=root, target=target, as_json=as_json)
+    else:
+        if namespace.repo_top <= 0:
+            return Usage(f"{PROGRAM} repo: --top must be a positive integer\n")
+        repo = RepoOptions(
+            subcommand=subcommand,
+            root=root,
+            target=target,
+            top=namespace.repo_top,
+            as_json=as_json,
+        )
+    return Options(command=Command.REPO, cwd=Path(namespace.cwd), repo=repo)
+
+
 async def dispatch(
     options: Options,
     *,
@@ -1103,6 +1163,8 @@ async def dispatch(
         return await _api(options, paths, env, streams)
     if options.command is Command.PLUGIN:
         return _plugin(options, paths, streams)
+    if options.command is Command.REPO:
+        return _repo(options, streams)
 
     if options.command is Command.DOCTOR:
         report = await run_doctor(
@@ -1176,6 +1238,25 @@ async def _bench(
 
     run = run_eval if options.command is Command.EVAL else run_duel_command
     code, out, err = await run(bench, paths, env)
+    if err:
+        streams.err(err)
+    if out:
+        streams.out(out)
+    return code
+
+
+def _repo(options: Options, streams: Streams) -> int:
+    """``repo``: scan the tree and render an analysis. Read-only, offline, no wizard.
+
+    Before the first-run wizard in :func:`dispatch`, like ``eval`` and ``harvest``: a
+    read-only analysis of some other directory must never write ``.ronin/`` into the
+    repo it was pointed at as a side effect of answering a question about it.
+    """
+    repo = options.repo
+    if repo is None:  # pragma: no cover - parse always supplies one for this command
+        streams.err(f"{PROGRAM}: internal error: repo without options\n")
+        return EXIT_ERROR
+    code, out, err = run_repo(repo)
     if err:
         streams.err(err)
     if out:

@@ -1025,26 +1025,48 @@ class RepoMap:
         return "\n\n".join(parts) + "\n"
 
 
-def build_repo_map(
+@dataclass(frozen=True, slots=True)
+class RepoScan:
+    """The un-budgeted analysis of a repo: every code file's shape and how they link.
+
+    This is the raw material :func:`build_repo_map` budgets down into a rendered map,
+    exposed on its own because the repo-intelligence commands
+    (:mod:`ronin.repo`) need the *whole* graph — every file, every rank, every
+    inbound count — not the top-N slice a token budget leaves behind. One walk, one
+    parse, shared by both consumers so there is a single definition of "scan the repo."
+
+    Maps are keyed by repo-relative posix path. ``signatures`` and ``refs`` carry an
+    entry for every file in ``files``; ``parse_errors`` carries one only for files
+    that failed to parse.
+    """
+
+    root: Path
+    files: tuple[str, ...]
+    signatures: Mapping[str, tuple[Signature, ...]]
+    refs: Mapping[str, tuple[ImportRef, ...]]
+    parse_errors: Mapping[str, str]
+    graph: ImportGraph
+    ranks: Mapping[str, float]
+    inbound: Mapping[str, int]
+    parser_name: str
+    reused_files: int = 0
+    parsed_files: int = 0
+
+
+def scan_repo(
     root: Path,
     *,
-    budget_tokens: int = DEFAULT_BUDGET_TOKENS,
     parser: Parser | None = None,
     cache_dir: Path | None = None,
-    top_n: int = DEFAULT_TOP_N,
-) -> RepoMap:
-    """Walk, rank, parse and budget ``root`` into a repo map.
+) -> RepoScan:
+    """Walk, parse and rank ``root`` into a :class:`RepoScan` — no budget applied.
 
-    ``cache_dir`` is caller-supplied; with ``None`` nothing is written and nothing
-    is read. The cache is keyed per file on ``(path, mtime_ns, size)`` plus the
-    parser name, so one touched file re-parses one file and everything else is
-    reused — then the graph is re-ranked from scratch, because one new import can
-    change every rank.
+    The shared front half of :func:`build_repo_map`: it walks the tree (honouring
+    ``.gitignore``), reads and parses every code file once (signatures + imports
+    together), builds the import graph and runs pagerank over it. ``cache_dir``
+    behaves exactly as it does for :func:`build_repo_map` — ``None`` reads and writes
+    nothing; otherwise the per-file ``(path, mtime_ns, size)`` cache is reused.
     """
-    if budget_tokens <= 0:
-        raise ValueError("build_repo_map: budget_tokens must be positive")
-    if top_n <= 0:
-        raise ValueError("build_repo_map: top_n must be positive")
     active = parser or PythonAstParser()
     files = [path for path in walk_repo(root) if path.suffix in CODE_SUFFIXES]
     cache = _load_cache(cache_dir, root, active.name)
@@ -1070,23 +1092,59 @@ def build_repo_map(
     graph = build_import_graph({rel: item.refs for rel, item in scanned.items()})
     ranks = pagerank(graph.nodes, graph.edges)
     inbound = graph.inbound_counts()
+    _save_cache(cache_dir, root, active.name, scanned)
+    return RepoScan(
+        root=root,
+        files=tuple(sorted(scanned)),
+        signatures={rel: item.signatures for rel, item in scanned.items()},
+        refs={rel: item.refs for rel, item in scanned.items()},
+        parse_errors={rel: item.parse_error for rel, item in scanned.items() if item.parse_error},
+        graph=graph,
+        ranks=ranks,
+        inbound=inbound,
+        parser_name=active.name,
+        reused_files=reused,
+        parsed_files=len(scanned) - reused,
+    )
+
+
+def build_repo_map(
+    root: Path,
+    *,
+    budget_tokens: int = DEFAULT_BUDGET_TOKENS,
+    parser: Parser | None = None,
+    cache_dir: Path | None = None,
+    top_n: int = DEFAULT_TOP_N,
+) -> RepoMap:
+    """Walk, rank, parse and budget ``root`` into a repo map.
+
+    ``cache_dir`` is caller-supplied; with ``None`` nothing is written and nothing
+    is read. The cache is keyed per file on ``(path, mtime_ns, size)`` plus the
+    parser name, so one touched file re-parses one file and everything else is
+    reused — then the graph is re-ranked from scratch, because one new import can
+    change every rank.
+    """
+    if budget_tokens <= 0:
+        raise ValueError("build_repo_map: budget_tokens must be positive")
+    if top_n <= 0:
+        raise ValueError("build_repo_map: top_n must be positive")
+    scan = scan_repo(root, parser=parser, cache_dir=cache_dir)
     entries = tuple(
         FileEntry(
             path=rel,
-            rank=ranks.get(rel, 0.0),
-            inbound=inbound.get(rel, 0),
-            signatures=item.signatures,
-            parse_error=item.parse_error,
+            rank=scan.ranks.get(rel, 0.0),
+            inbound=scan.inbound.get(rel, 0),
+            signatures=scan.signatures.get(rel, ()),
+            parse_error=scan.parse_errors.get(rel, ""),
         )
-        for rel, item in sorted(scanned.items())
+        for rel in scan.files
     )
     considered = sorted(entries, key=lambda e: (-e.rank, e.path))[:top_n]
-    kept, dropped = _fit_budget(considered, budget_tokens, len(considered), active.name)
-    _save_cache(cache_dir, root, active.name, scanned)
+    kept, dropped = _fit_budget(considered, budget_tokens, len(considered), scan.parser_name)
     return replace(
-        _assemble(kept, dropped, budget_tokens, len(considered), active.name),
-        reused_files=reused,
-        parsed_files=len(scanned) - reused,
+        _assemble(kept, dropped, budget_tokens, len(considered), scan.parser_name),
+        reused_files=scan.reused_files,
+        parsed_files=scan.parsed_files,
     )
 
 

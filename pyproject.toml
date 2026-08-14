@@ -162,6 +162,7 @@ files = [
     "tests/obs",
     "tests/persistence",
     "tests/providers",
+    "tests/repo",
     "tests/safety",
     "tests/scripts",
     "tests/telemetry",
@@ -172,7 +173,7 @@ files = [
 strict = true
 warn_unreachable = true
 explicit_package_bases = true
-mypy_path = "src:scripts:tests/agents:tests/cli:tests/context:tests/core:tests/evalsuite:tests/ext:tests/mcp:tests/obs:tests/persistence:tests/providers:tests/safety:tests/scripts:tests/telemetry:tests/tools:tests/ui:tests/verify"
+mypy_path = "src:scripts:tests/agents:tests/cli:tests/context:tests/core:tests/evalsuite:tests/ext:tests/mcp:tests/obs:tests/persistence:tests/providers:tests/repo:tests/safety:tests/scripts:tests/telemetry:tests/tools:tests/ui:tests/verify"
 
 # pytest's @parametrize is an untyped decorator as far as mypy is concerned;
 # that is a property of pytest, not a hole in our typing. Enumerated rather
@@ -209,6 +210,7 @@ module = [
     "test_context_repomap",
     "test_context_repomap_edges",
     "test_context_repomap_paths",
+    "test_context_scan_repo",
     "test_core_demo",
     "test_definitions",
     "test_definitions_edges",
@@ -236,6 +238,7 @@ module = [
     "test_plan_mode",
     "test_providers_demo",
     "test_registry",
+    "test_repo_analyze",
     "test_resilience",
     "test_ronin_agents_hook_normalize",
     "test_ronin_cli_acp",
@@ -252,6 +255,7 @@ module = [
     "test_ronin_cli_integration",
     "test_ronin_cli_interactive",
     "test_ronin_cli_main",
+    "test_ronin_cli_repo",
     "test_ronin_cli_sdk",
     "test_ronin_cli_serve",
     "test_ronin_cli_skills",
@@ -368,6 +372,7 @@ include = [
     "tests/obs/**/*.py",
     "tests/persistence/**/*.py",
     "tests/providers/**/*.py",
+    "tests/repo/**/*.py",
     "tests/safety/**/*.py",
     "tests/scripts/**/*.py",
     "tests/telemetry/**/*.py",
