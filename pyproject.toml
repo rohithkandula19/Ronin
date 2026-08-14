@@ -290,6 +290,7 @@ module = [
     "test_ronin_mcp_config",
     "test_ronin_mcp_integration",
     "test_ronin_mcp_jsonrpc",
+    "test_ronin_mcp_oauth",
     "test_ronin_mcp_server",
     "test_ronin_mcp_tools",
     "test_ronin_mcp_transport",

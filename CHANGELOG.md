@@ -5,6 +5,19 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Added
+- **OAuth 2.1 protocol core for remote MCP servers (`mcp/oauth.py`).** The pure machinery
+  for the MCP authorization flow — PKCE (S256, RFC 7636), `WWW-Authenticate` parsing and
+  protected-resource / authorization-server metadata discovery (RFC 9728 / 8414), dynamic
+  client registration (RFC 7591), the authorization-URL builder, and authorization-code +
+  refresh token requests with a resource-pinned `TokenSet` (RFC 8707). Every transform is a
+  pure function — the HTTPS calls, the browser redirect, the randomness, the clock, and the
+  token store are all injected — so a security-critical flow is tested exhaustively offline
+  (the PKCE test uses the RFC 7636 Appendix B vector). Fail-closed throughout: PKCE is
+  mandatory and S256-only (no `plain` downgrade), every endpoint must be https (loopback
+  http aside), a missing required field errors rather than defaults, `state` is checked on
+  the redirect, and the token is bound to one `resource`. The live driver (real HTTP +
+  browser + persistence) and the config surface are a deliberate follow-up — the protocol,
+  the part that must be exactly right, lands first and fully covered.
 - **Verification engine: flaky detection, optional suites, and artifact contracts.** Three
   pure additions to `verify/`, on top of the existing change-scoped runner and red-green
   repair. `flaky.py` classifies a target from repeated runs of the *same* code
