@@ -67,6 +67,11 @@ ABOVE: tuple[str, ...] = ("ronin.cli", "ronin.evals")
 
 LAYER_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("context", LEAF_FORBIDDEN),
+    # `repo` is repository-intelligence analysis: it reads a `context.repomap` scan and
+    # derives views (map/health/explain/deadcode). A static analyser, nothing more — so it
+    # takes no provider, tool, agent, MCP, or application-layer import, exactly like the
+    # other leaves. (`context` itself is not forbidden, which is the one edge it needs.)
+    ("repo", LEAF_FORBIDDEN),
     ("safety", LEAF_FORBIDDEN),
     ("verify", LEAF_FORBIDDEN),
     ("persistence", LEAF_FORBIDDEN),
