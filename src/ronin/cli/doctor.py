@@ -37,6 +37,7 @@ from pathlib import Path
 
 from ..context.repomap import GitIgnore
 from ..mcp.config import TransportKind
+from ..providers.capability import PricingTier, capability_matrix, fallback_concerns
 from ..providers.router import Role as ModelRole
 from ..providers.router import Router
 from ..safety.settings import LOCAL_SETTINGS
@@ -216,6 +217,44 @@ class DoctorReport:
 # --------------------------------------------------------------------------- #
 
 
+def _capability_check(router: Router) -> Check:
+    """The provider x capability picture, and whether any fallback silently escalates cost.
+
+    A fallback that climbs from a free model to a paid or unknown-price one is a ``warn``,
+    never a failure: a user may have configured "pay to finish when the free model is down"
+    on purpose. Surfacing it is the point — the swap is then a choice made here, not a
+    surprise discovered on a bill. The remedy states the invariant plainly.
+    """
+    config = router.config
+    matrix = capability_matrix(config)
+    counts = dict.fromkeys(PricingTier, 0)
+    for row in matrix:
+        counts[row.tier] += 1
+    breakdown = (
+        f"{len(matrix)} model(s): {counts[PricingTier.FREE]} free, "
+        f"{counts[PricingTier.PAID]} paid, {counts[PricingTier.UNKNOWN]} unknown-price"
+    )
+    concerns = fallback_concerns(config)
+    if not concerns:
+        return Check(
+            name="provider pricing",
+            status=CheckStatus.OK,
+            detail=f"{breakdown}; no fallback escalates cost",
+        )
+    detail = f"{breakdown}; {len(concerns)} cost-escalating fallback(s): " + "; ".join(
+        concern.message for concern in concerns
+    )
+    return Check(
+        name="provider pricing",
+        status=CheckStatus.WARN,
+        detail=detail,
+        remedy=(
+            "reorder each role's fallback chain to stay on free/local models, or accept the "
+            "cost knowingly — Ronin will not silently swap a free model for a paid one"
+        ),
+    )
+
+
 async def run_doctor(
     loaded: Loaded,
     *,
@@ -252,6 +291,8 @@ async def run_doctor(
     checks: list[Check] = []
     checks.extend(_settings_checks(loaded))
     checks.append(_model_check(active_router, environ))
+    if active_router is not None:
+        checks.append(_capability_check(active_router))
     checks.append(_git_check(loaded))
     checks.append(await _checkpoint_check(store))
     checks.extend(_mcp_checks(loaded, which))
