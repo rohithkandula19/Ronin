@@ -33,6 +33,35 @@ Kaggle (also free) is the fallback if a Colab T4 isn't available.
    - Clears it → two commands take you from "trained" to "shipped and
      default", still at $0:
 
+## Optional: train on your own harvested trajectories
+
+Cell 2 builds the deterministic synthetic corpus. If instead you want to train on
+**real** trajectories your model actually ran, close the flywheel: generate a task pool,
+run it through `ronin harvest` (records every run, writes datasets), and feed the SFT
+file straight into the same pipeline through the bridge:
+
+```bash
+python -m ronin.evals.poolgen --out pool/                 # a pool, separate from the eval suite
+ronin harvest --tasks pool/ --out data/ --model <name>    # run + record + write data/sft.jsonl
+```
+
+```python
+from ronin_training.adapter.from_harvest import load_sft_rows
+from ronin_training.sft.pipeline import plan_sft_run
+from ronin_training.sft.profiles import QWEN7B_QLORA
+
+rows = load_sft_rows("data/sft.jsonl")                    # sharegpt -> trainer messages rows
+plan = plan_sft_run(rows, QWEN7B_QLORA, tokenize=tok)     # same offline dry-run as Cell 2
+```
+
+`ronin harvest` writes sharegpt (`conversations` / `assistant_spans`); the trainer wants
+chat `messages`. `load_sft_rows` is the converter — it also reconstructs each inlined
+`<tool_call>` block back into a structured call, so the tool-validity hook scores real
+syntax. Only **SFT** is bridged this way: the DPO trainer needs a behavioural preference
+class harvest's generic pairs don't carry, and the RL environment is online (live task +
+policy + hidden test), not a `rlvr.jsonl` it can load — so those two paths keep their own
+producers rather than being faked from harvest output.
+
 ## Trained → shipped → default: the last two commands
 
 **1. Publish (gate-enforced — the script refuses a sub-gate checkpoint):**

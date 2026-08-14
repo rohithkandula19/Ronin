@@ -1,0 +1,21 @@
+# SFT — qlora on Qwen2.5-Coder-7B. The real run; trl/axolotl (peft) lane on a GPU.
+#
+# Teaches Ronin's exact prompt format and rules. Validated offline by:
+#   uv run --package ronin-training python -c \
+#     "from ronin_training.sft.profiles import SFTProfile; print(SFTProfile.load('training/config/sft_qwen7b.yaml'))"
+#
+# NO packing: it corrupts the assistant-only loss mask. The value is the user's; no GPU
+# here ran SFT to tune it.
+name: qwen7b-qlora
+base_model: Qwen/Qwen2.5-Coder-7B-Instruct
+base_model_mlx: mlx-community/Qwen2.5-Coder-7B-Instruct-4bit
+lane: peft
+quant: qlora
+rank: 32
+alpha: 64
+target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+max_seq_length: 16384
+learning_rate: 1.0e-5
+schedule: cosine
+epochs: 2
+packing: false

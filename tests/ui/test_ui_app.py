@@ -10,16 +10,18 @@ functions below — and the remainder is assignment statements.
 from __future__ import annotations
 
 import ast
+import asyncio
 import inspect
 import os
 import subprocess
 import sys
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
 from ui_harness import APPROVAL, happy_turn, stream
 
-from ronin.core.types import Mode
+from ronin.core.types import Event, Mode, TextDelta
 from ronin.ui import app as app_module
 from ronin.ui.app import (
     APP_CSS,
@@ -33,6 +35,7 @@ from ronin.ui.app import (
     KeyController,
     Session,
     initial_state,
+    multi_turn_events,
     panels_for,
     run_app,
     textual_available,
@@ -153,19 +156,26 @@ def test_the_key_controller_double_press_uses_an_injected_clock() -> None:
     assert keys.press_escape() is EscapeAction.INTERRUPT
 
 
-def test_the_session_is_data_the_orchestrator_injects() -> None:
+async def test_the_session_is_data_the_orchestrator_injects() -> None:
     calls: list[str] = []
+
+    async def rewind(index: int) -> str:
+        calls.append(f"rewind:{index}")
+        return f"rewound to turn {index}"
+
     session = Session(
         events=stream(()),
         on_interrupt=lambda: calls.append("interrupt"),
-        on_rewind=lambda index: calls.append(f"rewind:{index}"),
+        on_rewind=rewind,
         on_mode_change=lambda mode: calls.append(f"mode:{mode.value}"),
         on_approval=lambda request: calls.append(f"approval:{request.name}"),
     )
     assert session.on_interrupt is not None
     session.on_interrupt()
     assert session.on_rewind is not None
-    session.on_rewind(3)
+    # on_rewind is async and returns the one-line notice the app shows — unlike the
+    # other callbacks, which are fire-and-forget.
+    assert await session.on_rewind(3) == "rewound to turn 3"
     assert session.on_mode_change is not None
     session.on_mode_change(Mode.PLAN)
     assert session.on_approval is not None
@@ -210,3 +220,76 @@ def test_the_app_never_answers_an_approval_itself() -> None:
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
     }
     assert "Answer" not in named, "nor may it build the policy layer's answer type"
+
+
+# --------------------------------------------------------------------------- #
+# multi_turn_events — the multi-turn driver, offline over a scripted run_turn
+# --------------------------------------------------------------------------- #
+
+
+async def _reply_turn(prompt: str, seen: list[str]) -> AsyncIterator[Event]:
+    """A scripted 'turn': record the prompt, emit one text event. No model."""
+    seen.append(prompt)
+    yield TextDelta(text=f"reply to {prompt}")
+
+
+async def test_multi_turn_events_runs_the_first_prompt_then_each_queued_follow_up() -> None:
+    seen: list[str] = []
+    submissions: asyncio.Queue[str | None] = asyncio.Queue()
+    submissions.put_nowait("second")
+    submissions.put_nowait(None)  # end the stream after the follow-up
+    events = [
+        e async for e in multi_turn_events("first", submissions, lambda p: _reply_turn(p, seen))
+    ]
+    assert seen == ["first", "second"], "the argv prompt runs, then the queued follow-up"
+    assert [e.text for e in events if isinstance(e, TextDelta)] == [
+        "reply to first",
+        "reply to second",
+    ]
+
+
+async def test_multi_turn_events_ends_when_none_is_queued() -> None:
+    seen: list[str] = []
+    submissions: asyncio.Queue[str | None] = asyncio.Queue()
+    submissions.put_nowait(None)  # nothing follows the first turn
+    events = [
+        e async for e in multi_turn_events("only", submissions, lambda p: _reply_turn(p, seen))
+    ]
+    assert seen == ["only"]
+    assert [e.text for e in events if isinstance(e, TextDelta)] == ["reply to only"]
+
+
+async def test_multi_turn_events_blocks_for_the_next_prompt_rather_than_ending() -> None:
+    """Between turns the driver awaits the queue — it does not finish when a turn's events
+    run out, which is what makes the session multi-turn rather than one-and-done.
+
+    Driven with a background consumer task (never cancelled) rather than a timeout on
+    ``__anext__``: cancelling an in-flight ``__anext__`` finalises the async generator, so
+    that technique would prove the opposite of what it claims. Instead we watch the task
+    stay *pending* while the queue is empty, and advance only when a prompt arrives.
+    """
+    seen: list[str] = []
+    collected: list[Event] = []
+    submissions: asyncio.Queue[str | None] = asyncio.Queue()
+
+    async def consume() -> None:
+        async for event in multi_turn_events("first", submissions, lambda p: _reply_turn(p, seen)):
+            collected.append(event)
+
+    task = asyncio.create_task(consume())
+    await asyncio.sleep(0.05)  # let the first turn drain
+    assert [e.text for e in collected if isinstance(e, TextDelta)] == ["reply to first"]
+    assert not task.done(), "the driver ended after one turn instead of awaiting the next"
+
+    submissions.put_nowait("second")
+    await asyncio.sleep(0.05)
+    assert [e.text for e in collected if isinstance(e, TextDelta)] == [
+        "reply to first",
+        "reply to second",
+    ]
+    assert not task.done(), "still multi-turn: awaiting the next prompt, not finished"
+    assert seen == ["first", "second"]
+
+    submissions.put_nowait(None)  # end it
+    await asyncio.wait_for(task, timeout=1.0)
+    assert task.done()

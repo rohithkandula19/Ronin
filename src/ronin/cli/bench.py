@@ -263,8 +263,24 @@ def router_for(
     price per million tokens for it, and an invented price is a wrong number in
     someone's cost report — so an unknown name lists the defined ones instead.
     """
-    if options.router is not None:
-        return options.router
+    return resolve_router(options.router, paths, environ, model)
+
+
+def resolve_router(
+    override: Router | None,
+    paths: Paths,
+    environ: Mapping[str, str],
+    model: str,
+) -> Router | Failed:
+    """The router-resolution body :func:`router_for` and ``harvest`` both need.
+
+    Split out so ``ronin harvest`` — which resolves a model exactly as ``eval`` does
+    but carries its own options object — points the ``main`` role at ``model`` through
+    the same code, rather than a second copy that could drift on what an unknown name
+    reports.
+    """
+    if override is not None:
+        return override
     try:
         router = load_router(paths, environ=environ)
     except FileNotFoundError as exc:
@@ -492,6 +508,7 @@ __all__ = [
     "default_suite",
     "manifest_note",
     "render_dry_run",
+    "resolve_router",
     "router_for",
     "run_duel_command",
     "run_eval",

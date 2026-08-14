@@ -1,0 +1,24 @@
+# DPO — a preference pass onto the SFT adapter for Qwen2.5-Coder-7B. peft/trl lane on a GPU.
+#
+# Fixes behaviours (looping, giving up, ignoring denials, blind edits) that SFT can't teach.
+# Starts from (and references, frozen) the SFT adapter. Validated offline by:
+#   uv run --package ronin-training python -c \
+#     "from ronin_training.dpo.profile import DPOProfile; print(DPOProfile.load('training/config/dpo_qwen7b.yaml'))"
+#
+# lr is ~20x below SFT (1e-5) so the preference pass does not overrun the reference. sigmoid
+# is standard DPO; switch to ipo if it over-optimises (reward margin grows, model degrades).
+# beta and epochs are the user's numbers; no GPU here ran DPO to tune them.
+name: qwen7b-dpo
+base_model: Qwen/Qwen2.5-Coder-7B-Instruct
+base_model_mlx: mlx-community/Qwen2.5-Coder-7B-Instruct-4bit
+init_adapter: training/adapters/sft
+lane: peft
+rank: 32
+alpha: 64
+target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+max_seq_length: 16384
+learning_rate: 5.0e-7
+beta: 0.1
+loss: sigmoid
+epochs: 1
+packing: false

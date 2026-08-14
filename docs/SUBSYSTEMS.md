@@ -306,8 +306,12 @@ boundary quietly dissolves — is caught too. Hard dependencies are zero; every 
 (`tui`, `repomap`, `http`) is reached through a lazy import and degrades with a named
 error rather than an `ImportError` traceback.
 
-**Named gaps, `safety/`.** Symlink escape out of the workspace is not caught: a
-symlink inside the workspace pointing out of it passes the path check. There is no
+**Named gaps, `safety/`.** The bash command-text deny list is symlink-blind by design:
+`Denylist.resolve` uses `normpath`, not `resolve`, so `rm -rf ./link` is judged by the
+literal `./link`, not by where the link points — a static analyser of command *text* must
+not touch the disk. This is *not* a hole in the write boundary: the file tools confine
+through `ToolContext.resolve`, which follows symlinks and refuses any target outside the
+workspace, so a `write`/`edit` cannot escape the tree through a symlink. There is no
 variable expansion beyond `$HOME`, so `rm -rf "$TARGET"` is judged on literal text.
 The fork-bomb pattern is textual, not structural, and is kept byte-identical to
 `tools/shell.py`'s so the two cannot disagree. Heredoc bodies are parsed as commands

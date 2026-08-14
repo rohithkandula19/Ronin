@@ -1,0 +1,15 @@
+# SFT — 1.5B debug profile. The fast lane (mlx-lm on a laptop / a free T4) to exercise the
+# whole pipeline end to end before the 7B run. Same rules; smaller model and context.
+name: qwen1.5b-debug
+base_model: Qwen/Qwen2.5-Coder-1.5B-Instruct
+base_model_mlx: mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit
+lane: mlx
+quant: qlora
+rank: 32
+alpha: 64
+target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+max_seq_length: 4096
+learning_rate: 1.0e-5
+schedule: cosine
+epochs: 2
+packing: false

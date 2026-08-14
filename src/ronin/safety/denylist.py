@@ -519,10 +519,17 @@ class Denylist:
     def resolve(self, word: str, base: Path) -> Path:
         """Absolute, normalised, and never touching the filesystem.
 
-        ``normpath`` rather than ``resolve``: resolving follows symlinks, which needs
-        the path to exist and makes the check depend on the disk. The cost is that a
-        symlink pointing out of the workspace is not caught here — that is a real gap,
-        and it is named in the package docstring rather than papered over.
+        ``normpath`` rather than ``resolve``: this analyses bash *command text*, where the
+        path may not exist yet and where reading the disk during a static safety check
+        would be both wrong (the command has not run) and a filesystem touch this layer
+        promises never to make. So it is symlink-blind **by design** — ``rm -rf ./link``
+        is judged by the literal ``./link``, not by where the link points.
+
+        That is a limitation of the command-text heuristic, not of Ronin's write
+        confinement. The file tools resolve their paths through ``ToolContext.resolve``
+        (the tools layer), which *does* follow symlinks and refuses any target outside the
+        workspace — so a ``write``/``edit`` cannot escape the tree through a symlink even
+        in the cases this text check would not flag.
         """
         expanded = self.expand(word)
         path = Path(expanded)

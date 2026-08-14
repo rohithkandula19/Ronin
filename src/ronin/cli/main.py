@@ -37,7 +37,7 @@ import argparse
 import asyncio
 import os
 import sys
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
@@ -66,7 +66,7 @@ from ..providers.router import Router
 from ..providers.types import ProviderError
 from ..safety.policy import Asker
 from ..telemetry import DISCLOSURE
-from ..ui.app import TEXTUAL_MISSING, run_app, textual_available
+from ..ui.app import TEXTUAL_MISSING, multi_turn_events, run_app, textual_available
 from ..ui.app import Session as AppSession
 from ..ui.commands import ParseError, is_command, render_help
 from ..ui.commands import parse as parse_command
@@ -84,6 +84,7 @@ from .approve import Handoff, PromptAsker
 from .bench import BenchOptions, default_suite, run_duel_command, run_eval
 from .detect import Detection, detect, real_probe
 from .doctor import run_doctor
+from .harvest import HarvestOptions, run_harvest
 from .sdk import Agent, load_router
 from .serve import build_server
 from .spine import Paths
@@ -122,6 +123,7 @@ class Command(StrEnum):
     VERSION = "version"
     EVAL = "eval"
     DUEL = "duel"
+    HARVEST = "harvest"
     TELEMETRY = "telemetry"
     MCP_SERVE = "mcp-serve"
     ACP = "acp"
@@ -214,6 +216,9 @@ class Options:
     #: that reads it without checking the command fails loudly instead of running an
     #: eval with default settings.
     bench: BenchOptions | None = None
+    #: Present for ``harvest`` only, same rule as ``bench``: ``None`` everywhere else so
+    #: a path that reads it without checking the command fails loudly.
+    harvest: HarvestOptions | None = None
     #: Whether ``--suite`` was passed. Distinguishes "the user chose this path" from
     #: "nobody said, so use the workspace default", which a bare ``Path()`` cannot.
     suite_given: bool = False
@@ -340,6 +345,10 @@ def build_parser() -> _Parser:
             "  eval [--dry-run]           run the task suite in tests/evals and "
             "report\n"
             "  duel --model A --model B   run the same tasks against two models\n"
+            "  harvest --tasks POOL --out DIR\n"
+            "                             run a task pool, record trajectories, and "
+            "write\n"
+            "                             SFT/DPO/RLVR training datasets\n"
             "  telemetry [status|on|off|show]\n"
             "                             opt-in aggregate task outcomes; off by "
             "default\n"
@@ -369,6 +378,11 @@ def build_parser() -> _Parser:
             "  --json FILE, --markdown FILE, --keep-workspaces, --record, "
             "--allow-network.\n"
             "  --dry-run lists what would run and opens no model, so it needs no key.\n"
+            "\n"
+            "harvest flags: --tasks POOL, --out DIR, --model NAME, --parallel N, "
+            "--container,\n"
+            "  the eval selection flags (--category/--tag/--task/--limit), and "
+            "--dry-run.\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -598,6 +612,24 @@ def build_parser() -> _Parser:
     parser.add_argument(
         "--dry-run", action="store_true", help="list what would run; opens no model, needs no key"
     )
+
+    # harvest. Its selection flags (--category/--tag/--task/--limit/--model/--parallel/
+    # --workspaces/--keep-workspaces/--allow-network) are the eval ones above; these
+    # three are harvest's own.
+    parser.add_argument(
+        "--tasks",
+        dest="harvest_tasks",
+        default=None,
+        metavar="POOL",
+        help="task pool root to harvest (never the eval suite)",
+    )
+    # harvest's dataset output dir reuses export's --out/-o rather than defining a
+    # second spelling for "where the output goes".
+    parser.add_argument(
+        "--container",
+        action="store_true",
+        help="run each task's verify.sh in docker (harvest); fails closed with no daemon",
+    )
     return parser
 
 
@@ -611,6 +643,7 @@ def parse(argv: Sequence[str]) -> Options | Usage:
         Command.SESSIONS.value,
         Command.EVAL.value,
         Command.DUEL.value,
+        Command.HARVEST.value,
         Command.TELEMETRY.value,
         Command.MCP_SERVE.value,
         Command.ACP.value,
@@ -635,6 +668,8 @@ def parse(argv: Sequence[str]) -> Options | Usage:
         return _export_options(namespace, words)
     if command in (Command.EVAL, Command.DUEL):
         return _bench_options(namespace, command, words)
+    if command is Command.HARVEST:
+        return _harvest_options(namespace, words)
     if command is Command.TELEMETRY:
         return _telemetry_options(namespace, words)
     if command is Command.SESSIONS:
@@ -926,6 +961,59 @@ def _bench_options(namespace: argparse.Namespace, command: Command, words: str) 
     )
 
 
+def _harvest_options(namespace: argparse.Namespace, words: str) -> Options | Usage:
+    """``harvest`` argv into :class:`HarvestOptions`, carried on :class:`Options`.
+
+    ``--tasks`` is required (there is no default pool — the eval suite is refused as
+    input), and ``--out`` is required for a real run but not for ``--dry-run``, which
+    writes nothing. The selection flags are shared with ``eval``; harvest reuses their
+    parsed values rather than defining a second spelling.
+    """
+    if words:
+        return Usage(
+            f"{PROGRAM}: error: harvest takes flags, not a prompt (got {words!r}). "
+            "Select tasks with --task/--category/--tag."
+        )
+    if namespace.print_prompt:
+        return Usage(f"{PROGRAM}: error: harvest does not take --print")
+    if namespace.parallel < 1:
+        return Usage(f"{PROGRAM}: error: --parallel must be at least 1")
+    if namespace.limit is not None and namespace.limit < 1:
+        return Usage(f"{PROGRAM}: error: --limit must be at least 1")
+    if not namespace.harvest_tasks:
+        return Usage(f"{PROGRAM}: error: harvest needs --tasks POOL (the pool to run)")
+
+    dry_run = bool(namespace.dry_run)
+    models = tuple(namespace.models or ())
+    if len(models) > 1:
+        return Usage(f"{PROGRAM}: error: harvest runs one model (got {len(models)})")
+    if not dry_run and not namespace.export_out:
+        return Usage(
+            f"{PROGRAM}: error: harvest needs --out DIR for the datasets, or --dry-run "
+            "to see what would run without writing anything"
+        )
+
+    harvest = HarvestOptions(
+        tasks=Path(namespace.harvest_tasks),
+        # A placeholder under --dry-run, which never writes; replaced by the real path
+        # for a run, where it is required above. Reuses export's --out/-o.
+        out=Path(namespace.export_out) if namespace.export_out else Path(),
+        models=models,
+        parallel=int(namespace.parallel),
+        ids=frozenset(namespace.task_ids or ()),
+        categories=frozenset(namespace.categories or ()),
+        tags=frozenset(namespace.eval_tags or ()),
+        regression_gate=bool(namespace.regression_gate),
+        limit=namespace.limit,
+        workspace_root=(Path(namespace.workspace_root) if namespace.workspace_root else None),
+        keep_workspaces=bool(namespace.keep_workspaces),
+        container=bool(namespace.container),
+        allow_network=bool(namespace.allow_network),
+        dry_run=dry_run,
+    )
+    return Options(command=Command.HARVEST, cwd=Path(namespace.cwd), harvest=harvest)
+
+
 def _telemetry_options(namespace: argparse.Namespace, words: str) -> Options | Usage:
     """``telemetry [status|on|off|show]``. Bare ``telemetry`` means ``status``.
 
@@ -1003,6 +1091,8 @@ async def dispatch(
     paths = Paths.discover(options.cwd)
     if options.command in (Command.EVAL, Command.DUEL):
         return await _bench(options, paths, env, streams)
+    if options.command is Command.HARVEST:
+        return await _harvest(options, paths, env, streams)
     if options.command is Command.TELEMETRY:
         return _telemetry(options, paths, streams)
     if options.command is Command.MCP_SERVE:
@@ -1086,6 +1176,30 @@ async def _bench(
 
     run = run_eval if options.command is Command.EVAL else run_duel_command
     code, out, err = await run(bench, paths, env)
+    if err:
+        streams.err(err)
+    if out:
+        streams.out(out)
+    return code
+
+
+async def _harvest(
+    options: Options,
+    paths: Paths,
+    env: Mapping[str, str],
+    streams: Streams,
+) -> int:
+    """``harvest``: run a pool, record trajectories, write datasets.
+
+    Before the first-run wizard for the same reason as :func:`_bench`: a harvest runs
+    in throwaway workspaces and must not write ``.ronin/`` into the repository it was
+    invoked from as a side effect.
+    """
+    harvest = options.harvest
+    if harvest is None:  # pragma: no cover - parse always supplies one for this command
+        streams.err(f"{PROGRAM}: internal error: harvest without options\n")
+        return EXIT_ERROR
+    code, out, err = await run_harvest(harvest, paths, env)
     if err:
         streams.err(err)
     if out:
@@ -1544,29 +1658,50 @@ def _app_session(options: Options, agent: Agent, handoff: Handoff | None) -> App
     ``shift+tab`` moved the status line and nothing else, and an approval could be read
     but never answered. Each one below is a key that now reaches the thing it names.
 
-    ``on_rewind`` is deliberately still absent. Rewinding to an earlier turn means
-    restoring the conversation to a state it has already left, and the only honest
-    mechanisms for that — snapshot every turn's ``AgentState``, or replay the transcript
-    — are a design decision with consequences for cost and for what "undo" means next to
-    ``/undo``'s checkpoints. Wiring it to something approximate would make ``esc esc``
-    silently lose work. It stays unwired, and says so, until that is decided.
+    ``on_submit`` makes the view multi-turn. The argv prompt runs the first turn, exactly
+    as before; the input line then feeds each follow-up onto a queue, and
+    ``multi_turn_events`` runs it as the next turn on the same conversation (``agent.stream``
+    continues it). The entry condition is unchanged — the TUI still starts from an argv
+    prompt — so this adds follow-ups without deciding the separate "start with an empty
+    TUI" question. ``ctrl+c`` still quits, cancelling the worker that awaits the queue.
+
+    ``on_rewind`` is ``esc esc``, unified with ``/undo``. One turn back per double-press,
+    destructive: :meth:`~ronin.cli.stream.Conversation.rewind` truncates the transcript
+    to before the turn *and* restores that turn's checkpoint through the same
+    ``CheckpointStore`` ``/undo`` uses, so the conversation and the work tree move
+    together. It degrades cleanly — a read-only turn rewinds the conversation only, and a
+    mutating turn with no git rewinds the conversation and says the files remain — and the
+    one-line outcome is returned for the TUI to show. The ``index`` the app computes is
+    advisory: v1 always steps one turn back rather than seeking to an arbitrary one.
     """
     policy = agent.runtime.policy
-    return AppSession(
-        events=agent.stream(
-            options.prompt,
+    submissions: asyncio.Queue[str | None] = asyncio.Queue()
+
+    def run_turn(prompt: str) -> AsyncIterator[Event]:
+        return agent.stream(
+            prompt,
             budget=options.budget,
             max_iterations=options.max_iterations,
             verify=options.verify,
-        ),
+        )
+
+    async def on_rewind(index: int) -> str:
+        del index  # advisory; v1 rewinds exactly one turn (see the docstring)
+        outcome = await agent.conversation.rewind(agent.runtime)
+        return outcome.detail
+
+    return AppSession(
+        events=multi_turn_events(options.prompt, submissions, run_turn),
         model=agent.runtime.session.router.spec_for(ModelRole.MAIN).model,
         cwd=str(agent.loaded.paths.cwd),
         branch=current_branch(agent.loaded.paths.workspace_root),
         mode=agent.loaded.mode,
         on_interrupt=policy.cancel,
+        on_rewind=on_rewind,
         on_mode_change=policy.set_mode,
         on_attach=handoff.attach if handoff is not None else None,
         on_status=lambda: context_share(agent.conversation.messages, agent.runtime.compaction),
+        on_submit=submissions.put_nowait,
     )
 
 

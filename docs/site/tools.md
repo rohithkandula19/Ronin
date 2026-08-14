@@ -32,11 +32,11 @@ asks, and anything higher can be gated by a rule in `.ronin/settings.json`. See
 | [`read`](#read) | read_only | no | yes |
 | [`task`](#task) | read_only | no | yes |
 | [`todo_write`](#todo_write) | read_only | no | yes |
-| [`web_fetch`](#web_fetch) | read_only | no | no — needs injection |
-| [`web_search`](#web_search) | read_only | no | no — needs injection |
+| [`web_fetch`](#web_fetch) | read_only | no | yes |
+| [`web_search`](#web_search) | read_only | no | no — needs a search provider |
 | [`write`](#write) | mutating | yes | yes |
 
-The last column is the one that catches people out, so it is derived rather than asserted: `ronin.cli.wire.build_runtime` calls `build_registry(ctx, shell=…)` and nothing else, and `ronin.session.build_session` then adds `task`. That means `web_fetch`, `web_search` are **not** present in a `python -m ronin` session: they need a fetcher, an extractor or a searcher passed in, which the programmatic entry point (`ronin.cli.sdk.Agent`) can do and the command line currently cannot. Reaching the web from the CLI today means an MCP server; see [config.md](config.md).
+The last column is derived, not asserted: `ronin.cli.wire.build_runtime` wires the shell and — unconditionally — a fetcher and extractor, so `web_fetch` is present in every CLI session; `ronin.session.build_session` then adds `task`. `web_search` is the one tool a bare `python -m ronin` session does **not** have: it appears only when a search provider is configured (`RONIN_SEARCH_PROVIDER`), because a search tool with no backend that errors on every call teaches the model to keep trying it. Web content that does arrive — from `web_fetch` or `web_search` — is registered with the taint tracker and surfaced as untrusted data, not obeyed as instructions; see [config.md](config.md).
 
 ## bash
 

@@ -116,7 +116,10 @@ def test_the_tool_reference_says_which_tools_a_plain_session_lacks(tmp_path: Pat
     for name in sorted(full - plain):
         assert f"| [`{name}`]" in page
         row = next(line for line in page.splitlines() if line.startswith(f"| [`{name}`]"))
-        assert "needs injection" in row
+        # The only tool a wired CLI session lacks is web_search, absent until a provider
+        # is configured; the column names that reason rather than the old, wrong "needs
+        # injection" (web_fetch is wired unconditionally and is no longer in this set).
+        assert "needs a search provider" in row
 
 
 # --------------------------------------------------------------------------- #

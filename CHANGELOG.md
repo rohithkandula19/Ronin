@@ -201,9 +201,20 @@ All notable changes to this project will be documented here. Format follows [Kee
     would interrupt for every edit in the one mode that exists to stop interrupting. The
     first version of this change did exactly that; there is now a test pinning it.
   - `esc` reaches `PolicyEngine.cancel()` and `shift+tab` reaches a new
-    `PolicyEngine.set_mode()`. `esc esc` (rewind) is **still unwired and says so** —
-    restoring a conversation to a state it has left is a design decision, and wiring it to
-    something approximate would silently lose work.
+    `PolicyEngine.set_mode()`.
+  - **`esc esc` now rewinds one turn**, unified with `/undo`. `Conversation.rewind`
+    truncates the transcript back to before the turn *and* restores that turn's checkpoint
+    through the same `CheckpointStore` `/undo` uses, so the conversation and the work tree
+    move together — never a file rewinding under a transcript that still describes the turn
+    that touched it. One turn back per double-press, destructive (no redo), and it degrades
+    honestly: a read-only turn rewinds the conversation only, and a mutating turn on a tree
+    with no git rewinds the conversation and says the files remain rather than claiming a
+    restore that could not happen. Spend is not refunded — tokens billed stay billed. The
+    one-line outcome is shown as a notification; the app decides none of it, `rewind` does.
+  - **The full-screen TUI takes multi-turn input.** `RoninApp` docks a real input line: the
+    argv prompt runs the first turn, and each submitted follow-up is fed onto a queue that
+    `multi_turn_events` runs as the next turn on the same conversation. Unset `on_submit`
+    (demo, replay) leaves the line inert rather than starting a turn that never runs.
   - The status line shows the real model and git branch, and asks the orchestrator for
     context occupancy once per turn. Occupancy is measured against the live transcript,
     *not* from `Budget.spent_tokens`: spend is cumulative and includes messages compaction
