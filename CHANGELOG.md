@@ -5,6 +5,18 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Added
+- **Provider pricing tiers + the free→paid fallback guard.** `providers/capability.py`
+  resolves the ambiguity the ledger already warned about: a `0.0` price is **FREE** only
+  for a local/keyless endpoint; for a hosted, key-requiring model with no price it is
+  **UNKNOWN**, never silently "free." On top of that tiering it adds `capability_matrix()`
+  (the provider × capability table the coverage audit asked for — every configured model,
+  its tier, and what it can do) and `fallback_concerns()`, which walks each role's failover
+  chain and flags every step that escalates cost (free→unknown, free→paid, unknown→paid).
+  `ronin doctor` surfaces the result as a `provider pricing` check — a **warning, never a
+  silent swap and never a hard failure**, because "pay to finish when the free model is
+  down" is a valid choice; the point is that the swap is seen here rather than on a bill.
+  Pure and offline: everything is a function of the router config, tested against
+  hand-built specs with no client and no request.
 - **`ronin repo` — repository intelligence, read-only and offline.** One verb, four
   subcommands: `map` (the shape of the tree — file/definition counts, languages, entry
   points, and the load-bearing modules by pagerank), `health` (static signals: orphan
