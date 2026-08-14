@@ -508,14 +508,25 @@ async def connect_all(
     )
 
 
-def default_transport_provider(*, sender: HttpSender | None = None) -> TransportProvider:
+def default_transport_provider(
+    *,
+    sender: HttpSender | None = None,
+    auth_headers: Mapping[str, Mapping[str, str]] | None = None,
+) -> TransportProvider:
     """Build real transports from config: a subprocess for stdio, ``sender`` above.
 
     ``sender`` is required for ``sse``/``http`` and its absence is a
     :class:`ConfigError` at connection time rather than a silently skipped server,
     because "I configured a remote server and no tools appeared" is exactly the
     diagnosis this package exists to avoid.
+
+    ``auth_headers`` carries per-server headers resolved *after* config load — the
+    ``Authorization: Bearer …`` an ``auth: oauth`` server gets from
+    :func:`ronin.mcp.oauth_driver.authorize_servers`. They are merged over the config's
+    own ``headers`` (a resolved token wins over a stale static one), and a server with no
+    entry is built exactly as before, so nothing changes for non-OAuth servers.
     """
+    resolved = auth_headers or {}
 
     def build(config: McpServerConfig) -> Transport:
         if config.transport is TransportKind.STDIO:
@@ -531,17 +542,18 @@ def default_transport_provider(*, sender: HttpSender | None = None) -> Transport
                 "transport, which needs an HTTP sender; none was supplied to "
                 "default_transport_provider()"
             )
+        headers = {**config.headers, **resolved.get(config.name, {})}
         if config.transport is TransportKind.SSE:
             return SseTransport(
                 url=config.url,
                 sender=sender,
-                headers=config.headers,
+                headers=headers,
                 timeout=config.timeout_seconds,
             )
         return HttpTransport(
             url=config.url,
             sender=sender,
-            headers=config.headers,
+            headers=headers,
             timeout=config.timeout_seconds,
         )
 

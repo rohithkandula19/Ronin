@@ -46,6 +46,7 @@ from ronin.context.budget import estimate_tokens
 from ronin.context.repomap import ParserUnavailable, Signature
 from ronin.core.types import Budget, DangerLevel, Mode, ToolSpec, ToolUse
 from ronin.mcp.config import TransportKind
+from ronin.mcp.oauth_driver import HttpxFetcher, InMemoryAuthStore, OAuthDriver
 from ronin.persistence.transcript import TranscriptError
 from ronin.safety.injection import TaintTracker
 from ronin.safety.policy import (
@@ -560,6 +561,50 @@ async def test_a_live_mcp_server_contributes_namespaced_tools_and_a_closer(
 
     await runtime.aclose()
     assert server.closed
+
+
+def _oauth_driver() -> OAuthDriver:
+    """A driver with an empty store and no authorizer — ``ensure`` cannot obtain a token.
+
+    The fetcher is the real one but is never called: a non-interactive ``ensure`` over an
+    empty store refuses before any network, which is exactly the startup behaviour asserted.
+    """
+    return OAuthDriver(
+        fetcher=HttpxFetcher(),
+        store=InMemoryAuthStore(),
+        now=lambda: 0.0,
+        new_verifier=lambda: "v" * 43,
+        new_state=lambda: "s",
+    )
+
+
+async def test_an_unauthorized_oauth_server_becomes_a_login_note_not_a_hang(
+    tmp_path: Path,
+) -> None:
+    """A server declaring ``auth: oauth`` with no stored token must not open a browser at
+    startup; it becomes a note telling the operator to log in, and the session continues."""
+    paths = workspace(git_repo(tmp_path))
+    body = {
+        "mcpServers": {
+            "remote": {
+                "transport": "http",
+                "url": "https://mcp.example.com/mcp",
+                "auth": "oauth",
+                "enabled": False,  # so connect_all never opens a socket in this offline test
+            }
+        }
+    }
+    write(tmp_path, ".ronin/mcp.json", json.dumps(body) + "\n")
+    loaded = load_workspace(paths)
+    assert loaded.mcp_servers[0].auth.value == "oauth"
+
+    runtime = await build_runtime(loaded, fake_router(), record=False, oauth_driver=_oauth_driver())
+    try:
+        assert "mcp server 'remote'" in subjects(runtime.loaded)
+        assert "interactive login" in note_for(runtime.loaded, "mcp server 'remote'")
+        assert runtime.registry.get("bash") is not None  # the session still works
+    finally:
+        await runtime.aclose()
 
 
 async def test_connect_mcp_false_skips_the_servers_entirely(tmp_path: Path) -> None:

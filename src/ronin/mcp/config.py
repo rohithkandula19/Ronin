@@ -39,6 +39,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from ..core.types import DangerLevel
 from .jsonrpc import McpError
@@ -69,11 +70,28 @@ class TransportKind(StrEnum):
     HTTP = "http"
 
 
+class AuthKind(StrEnum):
+    """How a remote server is authenticated.
+
+    ``NONE`` is the default and covers both an open server and one that takes a static
+    bearer via ``headers`` — the config already carries that, and nothing new is needed for
+    it. ``OAUTH`` opts a server into the OAuth 2.1 flow in :mod:`ronin.mcp.oauth_driver`:
+    the ``Authorization`` header is *resolved* (discovered, obtained, refreshed) rather than
+    written by hand. It is only meaningful for a network transport, so it lives among the
+    network keys and a stdio server that declares it is rejected.
+    """
+
+    NONE = "none"
+    OAUTH = "oauth"
+
+
 _COMMON_KEYS = frozenset(
     {"transport", "danger_level", "requires_approval", "enabled", "timeout_seconds"}
 )
 _STDIO_KEYS = frozenset({"command", "args", "env", "cwd"})
-_NETWORK_KEYS = frozenset({"url", "headers"})
+_NETWORK_KEYS = frozenset({"url", "headers", "auth"})
+
+_AUTH_BY_NAME: Mapping[str, AuthKind] = {kind.value: kind for kind in AuthKind}
 
 _DANGER_BY_NAME: Mapping[str, DangerLevel] = {level.name.lower(): level for level in DangerLevel}
 
@@ -101,6 +119,7 @@ class McpServerConfig:
     requires_approval: bool | None = None
     enabled: bool = True
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
+    auth: AuthKind = AuthKind.NONE
 
     def __post_init__(self) -> None:
         if not self.name:
@@ -109,6 +128,14 @@ class McpServerConfig:
             raise ValueError(f"server {self.name!r}: a stdio server needs a command")
         if self.transport is not TransportKind.STDIO and not self.url:
             raise ValueError(f"server {self.name!r}: a {self.transport.value} server needs a url")
+        if self.auth is AuthKind.OAUTH and self.transport is TransportKind.STDIO:
+            raise ValueError(
+                f"server {self.name!r}: OAuth applies to network transports, not stdio"
+            )
+        if self.auth is AuthKind.OAUTH and not _is_secure_url(self.url):
+            raise ValueError(
+                f"server {self.name!r}: OAuth requires an https url (loopback http excepted)"
+            )
         if self.timeout_seconds <= 0:
             raise ValueError(f"server {self.name!r}: timeout_seconds must be positive")
 
@@ -247,9 +274,17 @@ def _server(name: str, body: object, environ: Mapping[str, str]) -> McpServerCon
             cwd=_optional_str(name, body, "cwd"),
             **common,
         )
+    url = _required_str(name, body, "url")
+    auth = _auth(name, body)
+    if auth is AuthKind.OAUTH and not _is_secure_url(url):
+        raise ConfigError(
+            f"server {name!r}: auth 'oauth' requires an https url (loopback http excepted), "
+            f"got {url!r}"
+        )
     return McpServerConfig(
-        url=_required_str(name, body, "url"),
+        url=url,
         headers=_string_map(name, body, "headers", environ),
+        auth=auth,
         **common,
     )
 
@@ -275,6 +310,33 @@ def _transport_kind(name: str, body: Mapping[str, Any]) -> TransportKind:
             f"server {name!r}: key 'transport' is {declared!r}; expected one of "
             f"{[kind.value for kind in TransportKind]}"
         ) from exc
+
+
+def _auth(name: str, body: Mapping[str, Any]) -> AuthKind:
+    raw = body.get("auth")
+    if raw is None:
+        return AuthKind.NONE
+    if not isinstance(raw, str):
+        raise ConfigError(f"server {name!r}: key 'auth' must be a string, got {type(raw).__name__}")
+    kind = _AUTH_BY_NAME.get(raw.strip().lower())
+    if kind is None:
+        raise ConfigError(
+            f"server {name!r}: key 'auth' is {raw!r}; expected one of {sorted(_AUTH_BY_NAME)}"
+        )
+    return kind
+
+
+def _is_secure_url(url: str) -> bool:
+    """Whether ``url`` may carry OAuth: https, or http only to a loopback host.
+
+    Same rule the OAuth core applies to endpoints, kept here so a misconfigured server URL
+    is refused at config-load time (naming the server) rather than deep in the flow.
+    """
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme == "https":
+        return True
+    return parsed.scheme == "http" and host in ("localhost", "127.0.0.1", "::1")
 
 
 def _danger(name: str, body: Mapping[str, Any]) -> DangerLevel | None:
@@ -407,6 +469,7 @@ __all__ = [
     "MCP_CONFIG_RELATIVE_PATH",
     "SERVERS_KEY",
     "UNDECLARED_DANGER_LEVEL",
+    "AuthKind",
     "ConfigError",
     "McpServerConfig",
     "TransportKind",
