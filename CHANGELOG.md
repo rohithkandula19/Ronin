@@ -17,6 +17,22 @@ All notable changes to this project will be documented here. Format follows [Kee
   down" is a valid choice; the point is that the swap is seen here rather than on a bill.
   Pure and offline: everything is a function of the router config, tested against
   hand-built specs with no client and no request.
+- **`ronin repo` — repository intelligence, read-only and offline.** One verb, four
+  subcommands: `map` (the shape of the tree — file/definition counts, languages, entry
+  points, and the load-bearing modules by pagerank), `health` (static signals: orphan
+  modules, parse errors, oversized API surfaces, a missing test suite), `explain <path>`
+  (one file's definitions plus its resolved import neighbours — `imported by` *is* the
+  change-impact set), and `deadcode` (import-graph leaves that nothing imports).
+  - **A view, not a second scanner.** All four are pure functions of a `RepoScan`, the
+    un-budgeted walk/parse/rank extracted from `context.repomap` and now shared with the
+    model's repo map — one definition of "scan the repo," reused. `--output-format json`
+    switches every subcommand to machine output; no new format flag.
+  - **Honest about static limits.** A module reached only through `importlib`, a plugin
+    entry point, or test discovery looks orphaned to a static graph, so `deadcode` and the
+    orphan signal are labelled *candidates*, never verdicts; entry points, tests and
+    package `__init__`/`__main__` files are excluded because they are leaves by design.
+    Nothing claims a line count it did not measure — "size" is the definition count the
+    scan really has, not LOC it would have to re-read to know.
 - **`ronin2 mcp-serve` — Claude Desktop, Cursor or another Ronin can now actually launch
   this one.** The MCP server side was written, tested, documented down to its trust model
   and *never constructed outside the test suite*: no subcommand, no real `NestedRunner`.
