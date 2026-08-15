@@ -5,6 +5,21 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Added
+- **Mid-session OAuth refresh-on-`401` for remote MCP servers.** The reactive half the live
+  driver flagged as a follow-up: when a remote server rejects a request with `401` mid-turn
+  (its token expired or was revoked), the client now refreshes the bearer and retries the
+  *same* request in place instead of declaring the server dead. Three seams changed to make
+  it honest: the transport surfaces a `401` as a distinct `Unauthorized` (carrying the
+  `WWW-Authenticate` challenge) and, crucially, does **not** mark itself dead — an HTTP/SSE
+  request is stateless, so a rejected bearer is a header to swap, not a connection to tear
+  down; `OAuthDriver.force_refresh` refreshes even a token our own clock still thinks is
+  valid (a server-side revocation looks exactly like that), where the proactive path would
+  wrongly reuse it; and `McpClient` runs the refresh + one retry, bounded — a token still
+  rejected after a fresh one is fetched fails the call with a *re-authorize* message (server
+  is up, authorization is gone), distinct from the *server-down* message, and never a retry
+  loop. Wired through `connect_all`'s `refresher_for` seam, which an `auth: oauth` server
+  gets and everything else does not. Exercised offline end-to-end: a fake sender rejects the
+  first `tools/call` and accepts it only once the swapped-in bearer reaches the wire.
 - **OAuth 2.1 live driver for remote MCP servers (`mcp/oauth_driver.py`).** The follow-up the
   protocol core promised: the orchestration that strings the pure transforms into a real
   flow — `discover -> register -> authorize -> exchange -> refresh` — plus the three impure

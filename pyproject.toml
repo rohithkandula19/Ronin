@@ -292,6 +292,7 @@ module = [
     "test_ronin_mcp_jsonrpc",
     "test_ronin_mcp_oauth",
     "test_ronin_mcp_oauth_driver",
+    "test_ronin_mcp_oauth_refresh",
     "test_ronin_mcp_server",
     "test_ronin_mcp_tools",
     "test_ronin_mcp_transport",
