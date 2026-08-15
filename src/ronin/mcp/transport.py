@@ -70,6 +70,22 @@ class TransportTimeout(McpError):
     """A request went unanswered for longer than the configured timeout."""
 
 
+class Unauthorized(McpError):
+    """A network peer answered ``401``. Distinct from :class:`TransportClosed` on purpose.
+
+    A ``401`` is not a dead connection — it means the bearer token was rejected (expired or
+    revoked), and an HTTP/SSE transport is stateless per request, so swapping in a fresh
+    token and re-sending the *same* request is a valid recovery. Collapsing it into
+    ``TransportClosed`` (the old behaviour) threw away both that distinction and the
+    ``WWW-Authenticate`` challenge the server sent, so the client could only give up. This
+    carries the challenge through and, crucially, does **not** mark the transport dead.
+    """
+
+    def __init__(self, message: str, *, challenge: str = "") -> None:
+        super().__init__(message)
+        self.challenge = challenge
+
+
 # --------------------------------------------------------------------------- #
 # Streams
 # --------------------------------------------------------------------------- #
@@ -455,6 +471,14 @@ class Transport(Protocol):
         """Release everything. Idempotent, and safe on an already-dead peer."""
         ...
 
+    def set_auth_header(self, headers: Mapping[str, str]) -> None:
+        """Replace the auth headers sent on every subsequent request.
+
+        The hook mid-session token refresh uses: after a :class:`Unauthorized`, the client
+        obtains a fresh bearer and hands it here, then re-sends. A no-op on transports that
+        cannot see a ``401`` (stdio), because there is nothing to swap."""
+        ...
+
     @property
     def alive(self) -> bool:
         """False once a failure has been seen. Never becomes True again — a new
@@ -605,6 +629,10 @@ class StdioTransport:
             raise ValueError("notify() needs a request with no id; use send()")
         async with self._lock:
             await self._write(self._require_streams(), request)
+
+    def set_auth_header(self, headers: Mapping[str, str]) -> None:
+        # A stdio server speaks no HTTP and returns no 401, so there is no bearer to swap.
+        del headers
 
     async def _write(self, streams: StreamPair, request: Request) -> None:
         try:
@@ -766,9 +794,16 @@ class HttpTransport:
         except TimeoutError as exc:
             self._fail(f"{self._url} did not answer {request.method!r} within {self._timeout}s")
             raise TransportTimeout(self._detail) from exc
+        except Unauthorized:
+            # A rejected bearer, not a dead transport: leave `alive` untouched so a refreshed
+            # token can be swapped in and the same request re-sent.
+            raise
         except (OSError, McpError) as exc:
             self._fail(f"{self._url} failed on {request.method!r}: {exc}")
             raise TransportClosed(self._detail) from exc
+
+    def set_auth_header(self, headers: Mapping[str, str]) -> None:
+        self._headers = {**self._headers, **headers}
 
     async def _collect(self, request: Request) -> bytes:
         parts: list[bytes] = []
@@ -846,9 +881,14 @@ class SseTransport:
         except TimeoutError as exc:
             self._fail(f"{self._url} did not answer {request.method!r} within {self._timeout}s")
             raise TransportTimeout(self._detail) from exc
+        except Unauthorized:
+            raise  # a rejected bearer, not a dead transport — see HttpTransport._post
         except (OSError, McpError) as exc:
             self._fail(f"{self._url} failed on {request.method!r}: {exc}")
             raise TransportClosed(self._detail) from exc
+
+    def set_auth_header(self, headers: Mapping[str, str]) -> None:
+        self._headers = {**self._headers, **headers}
 
     async def _stream(self, request: Request) -> Response:
         chunks = self._sender.post(url=self._url, headers=self._headers, body=request.to_wire())
@@ -917,6 +957,13 @@ class HttpxSender:
             httpx.AsyncClient(timeout=self._timeout) as client,
             client.stream("POST", url, headers=dict(headers), json=dict(body)) as resp,
         ):
+            if resp.status_code == 401:
+                # Not a dead connection — a rejected bearer. Carry the challenge up so the
+                # client can refresh the token and re-send, rather than tearing the server down.
+                await resp.aread()
+                raise Unauthorized(
+                    f"{url} returned 401", challenge=resp.headers.get("www-authenticate", "")
+                )
             if resp.status_code >= 400:
                 detail = (await resp.aread()).decode("utf-8", errors="replace")
                 raise TransportClosed(f"{url} returned {resp.status_code}: {detail[:500]}")
@@ -966,6 +1013,7 @@ __all__ = [
     "StreamPair",
     "Transport",
     "TransportTimeout",
+    "Unauthorized",
     "frames_of",
     "join_url",
     "memory_duplex",

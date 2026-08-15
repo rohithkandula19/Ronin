@@ -73,10 +73,20 @@ from ..core.protocols import Policy
 from ..core.types import Budget
 from ..ext.plugins import PluginSurfaces, collect_surfaces, load_installed
 from ..ext.skills import BUILTIN_SKILLS_DIR, SkillSet, SkillSource, SkillTool, load_skills
-from ..mcp.client import TransportProvider, connect_all, default_transport_provider
+from ..mcp.client import (
+    TokenRefresher,
+    TransportProvider,
+    connect_all,
+    default_transport_provider,
+)
 from ..mcp.config import AuthKind, McpServerConfig, TransportKind, load_mcp_config
 from ..mcp.jsonrpc import McpError
-from ..mcp.oauth_driver import OAuthDriver, authorize_servers, default_oauth_driver
+from ..mcp.oauth_driver import (
+    OAuthDriver,
+    authorize_servers,
+    default_oauth_driver,
+    token_refresher,
+)
 from ..mcp.tools import extend_registry
 from ..mcp.transport import HttpxSender
 from ..persistence.index import SessionIndex
@@ -952,12 +962,19 @@ async def _connect_mcp(
     note telling the operator to authorize it, and the session continues regardless.
     """
     oauth_failures: dict[str, str] = {}
+    refresher_for: Callable[[McpServerConfig], TokenRefresher | None] | None = None
+    driver = None
+    if any(config.auth is AuthKind.OAUTH for config in servers):
+        driver = oauth_driver or default_oauth_driver(workspace_root / ".ronin" / "mcp-auth")
+
+        def refresher_for(config: McpServerConfig) -> TokenRefresher | None:
+            return token_refresher(driver, config) if config.auth is AuthKind.OAUTH else None
+
     if transport_provider is not None:
         provider = transport_provider
     else:
         auth_headers: dict[str, Mapping[str, str]] = {}
-        if any(config.auth is AuthKind.OAUTH for config in servers):
-            driver = oauth_driver or default_oauth_driver(workspace_root / ".ronin" / "mcp-auth")
+        if driver is not None:
             resolved = await authorize_servers(servers, driver, interactive=False)
             auth_headers = dict(resolved.headers)
             oauth_failures = dict(resolved.failures)
@@ -967,7 +984,7 @@ async def _connect_mcp(
             else None
         )
         provider = default_transport_provider(sender=sender, auth_headers=auth_headers)
-    toolset = await connect_all(servers, provider)
+    toolset = await connect_all(servers, provider, refresher_for=refresher_for)
     merged_failures = {**oauth_failures, **dict(toolset.failures)}
     notes: list[Note] = [
         Note(

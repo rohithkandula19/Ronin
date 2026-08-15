@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import contextlib
 import json
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse
@@ -355,6 +355,25 @@ class OAuthDriver:
         )
         return fresh
 
+    async def force_refresh(self, config: McpServerConfig) -> TokenSet:
+        """Refresh the stored token now, regardless of its clock expiry.
+
+        This is the mid-session ``401`` path: the server rejected the bearer even though our
+        own clock may still think it is fresh (a revocation, or clock skew), so :meth:`ensure`
+        — which would hand back the not-yet-expired cached token unchanged — is wrong here.
+        Loads the stored token and drives :meth:`refresh` unconditionally; raises if there is
+        nothing to refresh with, which the caller turns into "re-authorize".
+        """
+        self._require_oauth(config)
+        state = self._store.load(config.name)
+        token = state.token if state is not None else None
+        if token is None or not token.refresh_token:
+            raise OAuthError(
+                f"server {config.name!r}: nothing to refresh with (no stored refresh token); "
+                "an interactive re-authorization is required"
+            )
+        return await self.refresh(config, token, state=state)
+
     # ----------------------------------------------------------- internals ----
 
     async def _client_identity(
@@ -424,6 +443,27 @@ class ResolvedAuth:
 
     headers: Mapping[str, Mapping[str, str]]
     failures: Mapping[str, str]
+
+
+def token_refresher(
+    driver: OAuthDriver, config: McpServerConfig
+) -> Callable[[], Awaitable[Mapping[str, str] | None]]:
+    """The no-arg async hook the client fires on a mid-session ``401``.
+
+    It force-refreshes the token and returns the fresh ``Authorization`` header, or ``None``
+    when the token cannot be refreshed (no refresh token, or the refresh itself failed) — the
+    client turns ``None`` into a failed call telling the model to re-authorize, never a hang
+    or a silent retry loop.
+    """
+
+    async def refresh() -> Mapping[str, str] | None:
+        try:
+            token = await driver.force_refresh(config)
+        except (OAuthError, OSError):
+            return None
+        return token.authorization_header()
+
+    return refresh
 
 
 async def authorize_servers(
@@ -690,4 +730,5 @@ __all__ = [
     "ResolvedAuth",
     "authorize_servers",
     "default_oauth_driver",
+    "token_refresher",
 ]

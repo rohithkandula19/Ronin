@@ -55,6 +55,7 @@ from .client import (
     McpClient,
     McpToolset,
     ServerCapabilities,
+    TokenRefresher,
     TransportProvider,
     connect_all,
     default_transport_provider,
@@ -126,6 +127,7 @@ from .oauth_driver import (
     ResolvedAuth,
     authorize_servers,
     default_oauth_driver,
+    token_refresher,
 )
 from .server import (
     DEFAULT_EXPOSED_TOOLS,
@@ -171,6 +173,7 @@ from .transport import (
     StreamPair,
     Transport,
     TransportTimeout,
+    Unauthorized,
     frames_of,
     memory_duplex,
     read_frame,
@@ -252,6 +255,7 @@ __all__ = [
     "SseTransport",
     "StdioTransport",
     "StreamPair",
+    "TokenRefresher",
     "TokenRequest",
     "TokenSet",
     "Transport",
@@ -259,6 +263,7 @@ __all__ = [
     "TransportKind",
     "TransportProvider",
     "TransportTimeout",
+    "Unauthorized",
     "adapt_description",
     "authorization_code_request",
     "authorization_url",
@@ -293,4 +298,5 @@ __all__ = [
     "spec_for",
     "split_namespaced_name",
     "sse_responses",
+    "token_refresher",
 ]

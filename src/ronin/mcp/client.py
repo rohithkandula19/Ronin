@@ -25,7 +25,7 @@ so the only thing this module knows about the network is that someone else does 
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -46,6 +46,7 @@ from .transport import (
     SseTransport,
     StdioTransport,
     Transport,
+    Unauthorized,
 )
 
 #: The version this client asks for. MCP negotiates by the client proposing one
@@ -76,6 +77,13 @@ MAX_TOOL_LIST_PAGES = 50
 #: never reused: a half-read stream looks identical to a healthy one, and reusing
 #: it is how a "reconnect" quietly keeps failing.
 TransportProvider = Callable[[McpServerConfig], Transport]
+
+#: What the client fires on a mid-session ``401``: returns a fresh ``Authorization`` header
+#: to swap in and retry with, or ``None`` when the token cannot be refreshed (the call then
+#: fails with a re-authorize message). Built from the OAuth driver by
+#: :func:`ronin.mcp.oauth_driver.token_refresher`; ``None`` at construction means a server
+#: that carries no OAuth (its ``401``, if any, is a hard failure as before).
+TokenRefresher = Callable[[], Awaitable[Mapping[str, str] | None]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,11 +139,13 @@ class McpClient:
         *,
         max_reconnects: int = DEFAULT_MAX_RECONNECTS,
         client_version: str = CLIENT_VERSION_UNKNOWN,
+        refresher: TokenRefresher | None = None,
     ) -> None:
         self.config = config
         self._provider = provider
         self._max_reconnects = max(0, max_reconnects)
         self._client_version = client_version
+        self._refresher = refresher
         self._transport: Transport | None = None
         self._capabilities: ServerCapabilities | None = None
         self._descriptors: tuple[Mapping[str, Any], ...] = ()
@@ -259,6 +269,8 @@ class McpClient:
             response = await self._send_with_recovery(
                 "tools/call", {"name": name, "arguments": dict(arguments)}
             )
+        except Unauthorized:
+            return ToolResult(ok=False, error=self._auth_lost_message())
         except McpError:
             return ToolResult(ok=False, error=self._unavailable_message())
         if response.error is not None:
@@ -292,9 +304,9 @@ class McpClient:
     # ----------------------------------------------------------- internals --
 
     async def _send_with_recovery(self, method: str, params: Mapping[str, Any]) -> Response:
-        """One request, with at most ``max_reconnects`` re-handshakes behind it."""
+        """One request, behind a token refresh and up to ``max_reconnects`` re-handshakes."""
         try:
-            return await self._send(method, params)
+            return await self._send_refreshing(method, params)
         except (TransportClosed, ProtocolError, OSError) as exc:
             self._die(str(exc))
         if self._reconnects_used >= self._max_reconnects:
@@ -309,6 +321,37 @@ class McpClient:
         except (McpError, OSError) as exc:
             self._die(f"{previous}; reconnect attempt {self._reconnects_used} failed: {exc}")
             raise TransportClosed(self._dead_reason) from exc
+
+    async def _send_refreshing(self, method: str, params: Mapping[str, Any]) -> Response:
+        """One request; on a ``401``, refresh the bearer once and re-send the same request.
+
+        Bounded to a single refresh per call: a token that is still rejected after a fresh
+        one is fetched is a real authorization problem, not a race, so the second
+        :class:`Unauthorized` propagates (``call_tool`` turns it into a re-authorize message).
+        The transport stays alive throughout — a ``401`` swaps a header, it does not
+        reconnect, because an HTTP/SSE request is stateless and the MCP session is unaffected.
+        """
+        try:
+            return await self._send(method, params)
+        except Unauthorized:
+            if self._refresher is None:
+                raise
+            headers = await self._refresh_auth()
+            if headers is None:
+                raise
+            transport = self._transport
+            if transport is not None:
+                transport.set_auth_header(headers)
+            return await self._send(method, params)
+
+    async def _refresh_auth(self) -> Mapping[str, str] | None:
+        """Run the refresh hook, folding any failure into ``None`` (the call then gives up)."""
+        if self._refresher is None:
+            return None
+        try:
+            return await self._refresher()
+        except (McpError, OSError):
+            return None
 
     async def _send(self, method: str, params: Mapping[str, Any]) -> Response:
         transport = self._transport
@@ -355,6 +398,19 @@ class McpClient:
             f"mcp__{self.name}__* tool is unavailable for the rest of this "
             "session. Do not retry them. Use the local tools instead, or tell the "
             "user that the server is down and what you could not do because of it."
+        )
+
+    def _auth_lost_message(self) -> str:
+        """The string a ``401`` that could not be refreshed hands the model. Also a prompt.
+
+        Distinct from :meth:`_unavailable_message`: the server is up, the *authorization* is
+        gone (the token expired or was revoked and there was no refresh token to trade), so
+        the fix is a re-login, not a retry or a fallback to local tools."""
+        return (
+            f"the {self.name!r} MCP server rejected the request with 401 and its OAuth token "
+            "could not be refreshed (it expired or was revoked, with no usable refresh token). "
+            f"Its mcp__{self.name}__* tools need re-authorization before they will work again. "
+            "Do not retry; tell the user they need to log in to this server."
         )
 
 
@@ -459,6 +515,7 @@ async def connect_all(
     *,
     max_reconnects: int = DEFAULT_MAX_RECONNECTS,
     client_version: str = CLIENT_VERSION_UNKNOWN,
+    refresher_for: Callable[[McpServerConfig], TokenRefresher | None] | None = None,
 ) -> McpToolset:
     """Connect to every enabled server and collect their tools.
 
@@ -467,6 +524,9 @@ async def connect_all(
     namespaced are all *recorded* — because the alternative is one bad line in
     ``mcp.json`` taking down a session that would otherwise work fine with its
     local tools.
+
+    ``refresher_for`` supplies each server's mid-session ``401`` token-refresh hook (an
+    ``auth: oauth`` server gets one; everything else gets ``None`` and behaves as before).
     """
     clients: dict[str, McpClient] = {}
     failures: dict[str, str] = {}
@@ -478,6 +538,7 @@ async def connect_all(
             provider,
             max_reconnects=max_reconnects,
             client_version=client_version,
+            refresher=refresher_for(config) if refresher_for is not None else None,
         )
         try:
             capabilities = await client.connect()
@@ -570,6 +631,7 @@ __all__ = [
     "McpClient",
     "McpToolset",
     "ServerCapabilities",
+    "TokenRefresher",
     "TransportProvider",
     "connect_all",
     "default_transport_provider",
