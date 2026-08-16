@@ -5,6 +5,21 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Added
+- **Anti-reward-hacking guards + transcript sampler (`training/rl/guards.py`).** The RLVR
+  reward gates on *paths*; this adds the content- and transcript-aware half, because the
+  interesting hacks hide in what a change contains and what the agent did. Nine detectors,
+  each with a crafted-rollout test: deleting or weakening a test (assertion/`def test_`
+  count drops), editing `pytest.ini`/`conftest.py`/`tox.ini` or the pytest section of
+  `pyproject.toml`/`setup.cfg`, adding `@pytest.mark.skip`/`xfail`, adding `sys.exit(0)` /
+  `raise SystemExit(0)`, a constant-return stub, **hardcoding the exact value a visible test
+  asserts** (AST-matched against the tests the agent could read), farming shaping with
+  padded identical calls, gaming the length norm with giant outputs, and touching
+  `.git`/`verify.sh`/the sandbox or escaping the workspace. `BLOCK` findings hard-gate the
+  reward (a gamed pass can never out-earn honest work); `WARN` findings are surfaced for a
+  human. The other half is the **transcript sampler**: `TranscriptSampler.maybe_dump` writes
+  20 random rollouts (with their findings, giant outputs truncated with a marker) to a
+  readable file every N steps — the non-optional manual eyeball, because the reward curve can
+  climb while the policy learns something insane. All pure and offline.
 - **`ronin mcp login <server>` + keyring-backed token persistence.** The attended entrypoint
   that makes the OAuth flow usable end to end: it reads `.ronin/mcp.json`, finds the named
   `auth: oauth` server, runs the interactive authorization (browser + loopback redirect +
