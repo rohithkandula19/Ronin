@@ -34,7 +34,7 @@ ronin2 = "ronin.cli.main:main"
 # The interactive app. Textual brings Rich transitively, so this is one tree, not
 # two; every pure module in `ronin.ui` (reducer, renderers, command parsing) stays
 # importable without it, which is why almost all of its tests run on a bare install.
-tui = ["textual>=8.0,<9"]
+tui = ["textual>=8.2.8,<9"]
 # Multi-language repo maps. `ronin.context.repomap` ships a stdlib-`ast` parser that
 # is exact for Python and needs nothing, so this extra widens language coverage
 # rather than enabling the feature.
@@ -140,7 +140,7 @@ markers = [
 [dependency-groups]
 dev = [
     "mypy>=1.11",
-    "ruff>=0.6",
+    "ruff>=0.16.3",
     "pytest-cov>=5.0",
 ]
 
