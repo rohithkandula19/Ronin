@@ -5,6 +5,23 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Added
+- **Real `StageRunner` wired into `src/ronin/evals` (`training/adapter/stage_ablation.py`).**
+  The ablation is no longer placeholder-only: it now reduces a genuine `ronin.evals` `RunReport`
+  into a `StageRun`. Tracing the suite end to end surfaced that the five metrics come from **two
+  probes against the same checkpoint**, because the agent loop and the raw decoder answer
+  different questions: the **agent suite** (`run_suite`) gives pass@1 (`overall.passed/attempted`),
+  median turns (`distributions["turns"]`), cost/task (`distributions["cost_usd"]`) and recovery —
+  reconstructed from each task's parsed `ToolCallRecord`s (a failed call is a setback; the next
+  call recovers unless it repeats the fingerprint, an exact fit for `metrics.recovery_rate`);
+  while **tool-syntax validity** cannot come from the loop at all (the format shim parses/repairs
+  `<ronin:tool_call>` before an event is emitted, so a report only holds calls that already
+  parsed), so it is measured by a **decode probe** over raw completions on the held-out prompts
+  (`syntax_probe` → `metrics.check_raw_call`) and passed through as `StageRun.tool_validity`.
+  Every reducer is duck-typed over the report's shape (a wrong attribute name is a named
+  `AblationError`, not an `AttributeError` mid-run), and both the suite call and the probe are
+  injected — the same seam `threeway.target_runner` uses — so the wiring is finished and tested
+  before a checkpoint exists. Verified against real `ronin.evals` objects (a genuine `RunReport`
+  reduced to all five metrics, priced and unpriced cost paths included).
 - **Training-stage ablation table (`training/adapter/stage_ablation.py`).** The gap in the
   adapter eval path: the provider (`ronin --model ronin-qwen-local`), the three-way
   adapter-vs-base-vs-Kimi comparison, and the model-card generator already exist; what was

@@ -20,10 +20,17 @@ from ronin_training.adapter.stage_ablation import (
     AblationTable,
     StageRun,
     assemble_ablation,
+    cost_from_report,
     placeholder_table,
+    recovery_turns_from_outcome,
     render_markdown,
     run_ablation,
     stage_metrics,
+    stage_run_from_report,
+    stage_runner,
+    suite_score_from_report,
+    syntax_probe,
+    task_turns_from_report,
 )
 from ronin_training.adapter.threeway import SuiteScore, TargetRun
 
@@ -210,3 +217,201 @@ def test_placeholder_table_produces_the_full_structure() -> None:
     # the progression actually improves pass@1 in the placeholder
     passes = [r.pass_at_1 for r in table.rows if r.stage in (BASE, SFT, "dpo", GRPO)]
     assert passes == sorted(passes) and passes[0] is not None and passes[-1] > passes[0]
+
+
+# --------------------------------------------------------------------------- #
+# wiring the real ronin.evals suite in — duck-typed fakes, no model, no ronin.evals import
+# --------------------------------------------------------------------------- #
+
+from types import SimpleNamespace  # noqa: E402
+
+
+def _call(name: str, fp: str, *, ok: bool = True) -> SimpleNamespace:
+    """A stand-in for ronin.evals ToolCallRecord — the fields the reducers read."""
+    return SimpleNamespace(name=name, fingerprint=fp, ok=ok, error="" if ok else "boom")
+
+
+def _result(
+    task_id: str,
+    *,
+    passed: bool,
+    turns_used: int,
+    tool_calls: tuple[SimpleNamespace, ...] = (),
+    skipped: bool = False,
+) -> SimpleNamespace:
+    record = SimpleNamespace(turns_used=turns_used, tool_calls=tool_calls)
+    return SimpleNamespace(task_id=task_id, passed=passed, skipped=skipped, record=record)
+
+
+def _report(
+    results: tuple[SimpleNamespace, ...],
+    *,
+    passed: int,
+    attempted: int,
+    cost_total: float | None = None,
+    cost_count: int = 0,
+    model: str = "qwen-ckpt",
+) -> SimpleNamespace:
+    distributions = {}
+    if cost_total is not None:
+        distributions["cost_usd"] = SimpleNamespace(count=cost_count, total=cost_total)
+    return SimpleNamespace(
+        results=results,
+        overall=SimpleNamespace(passed=passed, attempted=attempted),
+        distributions=distributions,
+        model=model,
+    )
+
+
+# --- the pure reducers ---------------------------------------------------- #
+
+
+def test_suite_score_reads_passes_over_attempted() -> None:
+    report = _report((), passed=7, attempted=20)
+    score = suite_score_from_report(report)
+    assert score.cases == 20 and score.passed == 7  # attempted is the denominator, skips excluded
+
+
+def test_suite_score_refuses_a_report_without_an_aggregate() -> None:
+    try:
+        suite_score_from_report(SimpleNamespace(overall=SimpleNamespace()))
+    except AblationError as exc:
+        assert "passed" in str(exc) and "attempted" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("expected AblationError")
+
+
+def test_task_turns_skips_skipped_tasks() -> None:
+    results = (
+        _result("a", passed=True, turns_used=8),
+        _result("b", passed=False, turns_used=12),
+        _result("c", passed=False, turns_used=99, skipped=True),  # excluded
+    )
+    assert task_turns_from_report(_report(results, passed=1, attempted=2)) == (8, 12)
+
+
+def test_cost_is_none_when_nothing_was_priced() -> None:
+    assert cost_from_report(_report((), passed=0, attempted=0)) is None  # no cost_usd dist
+    assert (
+        cost_from_report(_report((), passed=0, attempted=0, cost_total=0.0, cost_count=0)) is None
+    )
+    assert cost_from_report(_report((), passed=1, attempted=1, cost_total=0.6, cost_count=2)) == 0.6
+
+
+# --- recovery reconstruction from parsed tool calls ------------------------ #
+
+
+def test_recovery_turn_after_a_failure_that_tries_something_else() -> None:
+    calls = (_call("read", "read:x", ok=False), _call("read", "read:y"))  # failed, then different
+    turns = recovery_turns_from_outcome(SimpleNamespace(tool_calls=calls), task_id="t")
+    assert len(turns) == 2
+    assert turns[1].setback is Setback.FAILED_RESULT and not turns[1].repeated_setback
+
+
+def test_recovery_not_credited_when_the_failing_call_is_repeated() -> None:
+    calls = (_call("read", "read:x", ok=False), _call("read", "read:x"))  # repeats the failed fp
+    turns = recovery_turns_from_outcome(SimpleNamespace(tool_calls=calls), task_id="t")
+    assert turns[1].repeated_setback  # same fingerprint after a failure → no recovery
+
+
+def test_trailing_failure_is_not_a_recovery_opportunity() -> None:
+    calls = (_call("read", "read:x"), _call("read", "read:x", ok=False))  # fails on the last call
+    turns = recovery_turns_from_outcome(SimpleNamespace(tool_calls=calls), task_id="t")
+    assert all(t.setback is None for t in turns)  # nothing followed the failure → no opportunity
+
+
+# --- the raw-completion decode probe -------------------------------------- #
+
+_SCHEMAS = {
+    "read_file": {
+        "type": "object",
+        "properties": {"path": {"type": "string"}},
+        "required": ["path"],
+    }
+}
+
+
+def _completion(text: str) -> SimpleNamespace:
+    return SimpleNamespace(text=text)
+
+
+def _toolcall(name: str, arguments: dict) -> str:
+    import json
+
+    payload = json.dumps({"name": name, "arguments": arguments})
+    return f"<ronin:tool_call>{payload}</ronin:tool_call>"
+
+
+def test_syntax_probe_scores_raw_completions() -> None:
+    def provider(case: object) -> SimpleNamespace:
+        return _completion(case["out"])  # type: ignore[index]
+
+    cases = [
+        {"out": _toolcall("read_file", {"path": "a"})},  # clean, in-registry, valid schema
+        {"out": _toolcall("nope", {})},  # unknown tool → invalid
+        {"out": "I will just explain, no call here."},  # no attempt → excluded from denominator
+    ]
+    score = syntax_probe(cases, provider, schemas=_SCHEMAS)
+    assert score.attempts == 2 and score.valid == 1  # one clean call, one unknown-tool
+    assert score.no_attempt == 1
+    assert score.rate == 0.5
+
+
+# --- the composed StageRunner (async) ------------------------------------- #
+
+
+def test_stage_runner_binds_suite_and_probe_into_all_five_metrics() -> None:
+    results = (
+        _result("a", passed=True, turns_used=6, tool_calls=(_call("read", "read:x"),)),
+        _result(
+            "b",
+            passed=False,
+            turns_used=10,
+            tool_calls=(_call("read", "read:x", ok=False), _call("read", "read:y")),  # recovered
+        ),
+    )
+    report = _report(results, passed=1, attempted=2, cost_total=0.4, cost_count=2)
+
+    async def run_suite() -> SimpleNamespace:
+        return report
+
+    async def probe() -> object:
+        return syntax_probe(
+            [{"out": _toolcall("read_file", {"path": "a"})}],
+            lambda case: _completion(case["out"]),
+            schemas=_SCHEMAS,
+        )
+
+    runner = stage_runner(stage=BASE, run_suite=run_suite, validity_probe=probe)
+    run = asyncio.run(runner())
+    m = stage_metrics(run)
+    assert m.pass_at_1 == 0.5  # 1 / 2 attempted
+    assert m.median_turns == 8  # median of (6, 10)
+    assert m.cost_per_task == 0.2  # 0.4 total / 2 tasks
+    assert m.recovery == 1.0  # the one setback (task b) was recovered
+    assert m.tool_validity == 1.0  # from the probe, NOT the all-valid recovery turns
+
+
+def test_stage_runner_leaves_validity_unmeasured_without_a_probe() -> None:
+    # No probe: validity must NOT be faked from the recovery turns (which are all "valid").
+    results = (_result("a", passed=True, turns_used=5, tool_calls=(_call("read", "read:x"),)),)
+    report = _report(results, passed=1, attempted=1)
+
+    async def run_suite() -> SimpleNamespace:
+        return report
+
+    run = asyncio.run(stage_runner(stage=BASE, run_suite=run_suite)())
+    # recovery turns are all VALID_CALL, so tool_syntax_validity would read 1.0 — but there is no
+    # override and the runner passed none, so the fallback derives from those turns. Guard that the
+    # runner did not fabricate an override, and that the override channel is what carries a probe.
+    assert run.tool_validity is None
+
+
+def test_stage_run_from_report_passes_validity_override_through() -> None:
+    report = _report(
+        (_result("a", passed=True, turns_used=4, tool_calls=(_call("read", "read:x"),)),),
+        passed=1,
+        attempted=1,
+    )
+    run = stage_run_from_report(SFT, report, tool_validity=0.83)
+    assert stage_metrics(run).tool_validity == 0.83  # override wins over the turn-derived value
