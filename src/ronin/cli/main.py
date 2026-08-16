@@ -85,6 +85,8 @@ from .bench import BenchOptions, default_suite, run_duel_command, run_eval
 from .detect import Detection, detect, real_probe
 from .doctor import run_doctor
 from .harvest import HarvestOptions, run_harvest
+from .mcp_auth import SUBCOMMANDS as MCP_SUBCOMMANDS
+from .mcp_auth import McpLoginOptions, run_mcp_login
 from .repo import SUBCOMMANDS as REPO_SUBCOMMANDS
 from .repo import RepoOptions, run_repo
 from .sdk import Agent, load_router
@@ -128,6 +130,7 @@ class Command(StrEnum):
     HARVEST = "harvest"
     TELEMETRY = "telemetry"
     MCP_SERVE = "mcp-serve"
+    MCP = "mcp"
     ACP = "acp"
     API = "api"
     PLUGIN = "plugin"
@@ -239,6 +242,8 @@ class Options:
     #: Present for ``repo`` only, same rule as ``bench``: ``None`` everywhere else so a
     #: path that reads it without checking the command fails loudly.
     repo: RepoOptions | None = None
+    #: Present for ``mcp login`` only; ``None`` everywhere else, same fail-loud rule.
+    mcp_login: McpLoginOptions | None = None
 
     @property
     def flags(self) -> dict[str, object]:
@@ -667,6 +672,7 @@ def parse(argv: Sequence[str]) -> Options | Usage:
         Command.HARVEST.value,
         Command.TELEMETRY.value,
         Command.MCP_SERVE.value,
+        Command.MCP.value,
         Command.ACP.value,
         Command.API.value,
         Command.PLUGIN.value,
@@ -698,6 +704,8 @@ def parse(argv: Sequence[str]) -> Options | Usage:
         return _sessions_options(namespace, words)
     if command is Command.MCP_SERVE:
         return _mcp_serve_options(namespace, words)
+    if command is Command.MCP:
+        return _mcp_login_options(namespace, words)
     if command is Command.ACP:
         return _acp_options(namespace, words)
     if command is Command.API:
@@ -1119,6 +1127,28 @@ def _repo_options(namespace: argparse.Namespace, words: str) -> Options | Usage:
     return Options(command=Command.REPO, cwd=Path(namespace.cwd), repo=repo)
 
 
+def _mcp_login_options(namespace: argparse.Namespace, words: str) -> Options | Usage:
+    """``mcp login <server>`` — run the attended OAuth flow for one configured server.
+
+    A subcommand group (only ``login`` for now) rather than a top-level verb, so it reads
+    ``ronin mcp login docs`` and leaves room for ``logout``/``status`` later without minting
+    a new verb each time.
+    """
+    parts = words.split()
+    if not parts:
+        return Usage(f"{PROGRAM} mcp: needs a subcommand ({', '.join(MCP_SUBCOMMANDS)})\n")
+    subcommand, *rest = parts
+    if subcommand not in MCP_SUBCOMMANDS:
+        return Usage(
+            f"{PROGRAM} mcp: unknown subcommand {subcommand!r}; "
+            f"expected one of {', '.join(MCP_SUBCOMMANDS)}\n"
+        )
+    if not rest:
+        return Usage(f"{PROGRAM} mcp login: needs a server name from .ronin/mcp.json\n")
+    login = McpLoginOptions(server=rest[0], root=Path(namespace.cwd))
+    return Options(command=Command.MCP, cwd=Path(namespace.cwd), mcp_login=login)
+
+
 async def dispatch(
     options: Options,
     *,
@@ -1165,6 +1195,8 @@ async def dispatch(
         return _plugin(options, paths, streams)
     if options.command is Command.REPO:
         return _repo(options, streams)
+    if options.command is Command.MCP:
+        return await _mcp_login(options, env, streams)
 
     if options.command is Command.DOCTOR:
         report = await run_doctor(
@@ -1257,6 +1289,26 @@ def _repo(options: Options, streams: Streams) -> int:
         streams.err(f"{PROGRAM}: internal error: repo without options\n")
         return EXIT_ERROR
     code, out, err = run_repo(repo)
+    if err:
+        streams.err(err)
+    if out:
+        streams.out(out)
+    return code
+
+
+async def _mcp_login(options: Options, env: Mapping[str, str], streams: Streams) -> int:
+    """``mcp login``: run the attended OAuth flow for one server. Interactive, offline-safe.
+
+    Before the first-run wizard in :func:`dispatch`, like ``repo``: authorizing a server is a
+    self-contained action against ``.ronin/mcp.json`` and must not trigger a wizard that
+    writes into the repo as a side effect. The real driver opens a browser and writes the OS
+    keyring; both are inside the injected driver, so this executor stays a thin edge.
+    """
+    login = options.mcp_login
+    if login is None:  # pragma: no cover - parse always supplies one for this command
+        streams.err(f"{PROGRAM}: internal error: mcp login without options\n")
+        return EXIT_ERROR
+    code, out, err = await run_mcp_login(login, environ=env)
     if err:
         streams.err(err)
     if out:

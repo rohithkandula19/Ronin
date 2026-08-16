@@ -43,6 +43,9 @@ repomap = ["tree-sitter-language-pack>=0.9"]
 # import httpx inside the sender that needs it, and both are fully tested offline
 # against injected transports, so this is only needed to talk to something real.
 http = ["httpx>=0.27"]
+# `ronin mcp login` persists OAuth tokens in the OS keyring (encrypted at rest) rather than a
+# plaintext file; imported lazily with an in-memory fallback, so a bare install still runs.
+oauth = ["keyring>=25"]
 
 # Without this the root is a "virtual" project: uv sync prints "Skipping installation of
 # entry points (`project.scripts`) because this project is not packaged", `uv build
@@ -257,6 +260,7 @@ module = [
     "test_ronin_cli_integration",
     "test_ronin_cli_interactive",
     "test_ronin_cli_main",
+    "test_ronin_cli_mcp_login",
     "test_ronin_cli_repo",
     "test_ronin_cli_repo_render",
     "test_ronin_cli_sdk",
