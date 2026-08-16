@@ -52,9 +52,17 @@ from ronin.core.types import (
 from .app import TEXTUAL_MISSING, Session, initial_state, panels_for, textual_available
 from .commands import ParseError, load_registry, parse, render_help
 from .headless import OutputFormat, run_headless
-from .reduce import ViewState, decision_for, reduce_event, reduce_stream
+from .reduce import (
+    ToolLine,
+    ViewState,
+    advance_activity,
+    decision_for,
+    reduce_event,
+    reduce_stream,
+)
 from .render import (
     ANSI,
+    render_activity,
     render_approval,
     render_diff,
     render_status_for,
@@ -201,6 +209,33 @@ async def main() -> int:
     print(render_todos(state.todos, styles=ANSI))
     print()
     print(render_status_for(state, styles=ANSI))
+
+    section("5b. the activity line — what the screen shows while work is in flight")
+    live = ViewState(turn_state=TurnState.THINKING)
+    print("a turn that has started and produced nothing yet, as the seconds pass:")
+    for elapsed in (0.4, 2.0, 9.0, 41.0):
+        frame = advance_activity(live, now=elapsed, last_event_at=0.0)
+        print(f"  t+{elapsed:>4}s  {render_activity(frame, styles=ANSI)}")
+    print("\nthe clock appears only once the wait is worth reporting; before that the")
+    print("spinner alone says 'working'. twelve concurrent reads name themselves:")
+    reads = ViewState(
+        turn_state=TurnState.THINKING,
+        tool_lines=tuple(
+            ToolLine(tool_use_id=f"c{index}", name="read_file", arguments_summary=f"f{index}.py")
+            for index in range(12)
+        ),
+    )
+    print(f"  {render_activity(advance_activity(reads, now=3.0, last_event_at=0.0), styles=ANSI)}")
+    print("\nand a long command streams its tail under its own line:")
+    running = ViewState(
+        turn_state=TurnState.THINKING,
+        tool_lines=(ToolLine(tool_use_id="t1", name="run_command", arguments_summary="pytest -q"),),
+    )
+    running = running.with_tool_output("t1", "collected 412 items\n....................\n")
+    running = running.with_tool_output("t1", "tests/ui/test_ui_render.py .......")
+    print(render_tool_lines(running.tool_lines, styles=ANSI))
+    settled = ViewState(turn_state=TurnState.DONE)
+    print(f"\na finished turn leaves nothing behind: {render_activity(settled, styles=ANSI)!r}")
 
     section("6. the approval block renders ApprovalRequest.rendered, verbatim")
     request = next(event for event in events if isinstance(event, ApprovalRequest))

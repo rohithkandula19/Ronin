@@ -33,7 +33,7 @@ from typing import Final
 
 from ronin.core.types import ApprovalRequest, Todo, TodoStatus
 
-from .reduce import ToolLine, ViewState, mode_label
+from .reduce import ToolLine, ViewState, activity_label, mode_label, spinner_frame
 
 # --------------------------------------------------------------------------- #
 # Styles
@@ -218,6 +218,18 @@ TOOL_PANE_MAX_LINES = 200
 TODO_MAX_ITEMS = 100
 APPROVAL_MAX_LINES = 200
 STATUS_MAX_WIDTH = 120
+
+#: Marks a streamed output line as belonging to the tool line above it.
+TOOL_OUTPUT_INDENT = "  │ "
+
+#: Between the activity label and its clock. Narrower than the status line's separator:
+#: this is one line's two fields, not a row of independent facts.
+ACTIVITY_SEPARATOR = " · "
+
+#: How long in-flight work must go quiet before the activity line shows a clock. Below
+#: this every ordinary tool would flash a number; above it, the number appearing is the
+#: warning that something is slow.
+ACTIVITY_ELAPSED_AFTER_SECONDS = 2.0
 
 
 def truncate_lines(text: str, max_lines: int, *, what: str, styles: Styles = PLAIN) -> str:
@@ -513,6 +525,25 @@ def render_tool_line(line: ToolLine, *, styles: Styles = PLAIN) -> str:
     return styles.wrap("tool_ok" if line.ok else "tool_error", safe)
 
 
+def render_tool_output(line: ToolLine, *, styles: Styles = PLAIN) -> str:
+    """The expansion under a running tool: the tail of what it has printed so far.
+
+    Indented and dimmed so it reads as subordinate to its tool line rather than as
+    transcript. Returns ``""`` for a tool that has streamed nothing, which keeps the
+    pane exactly as it was for every tool that does not stream.
+    """
+    tail = [item for item in line.output_tail]
+    while tail and not tail[-1]:
+        # A chunk ending in a newline leaves an empty final element. It is a real part
+        # of the buffer (the next chunk continues from it) but a blank row on screen.
+        tail.pop()
+    if not tail:
+        return ""
+    return "\n".join(
+        styles.wrap("meta", styles.text(f"{TOOL_OUTPUT_INDENT}{item}")) for item in tail
+    )
+
+
 def render_tool_lines(
     lines: Sequence[ToolLine],
     *,
@@ -521,8 +552,31 @@ def render_tool_lines(
 ) -> str:
     if not lines:
         return ""
-    rendered = "\n".join(render_tool_line(line, styles=styles) for line in lines)
-    return truncate_lines(rendered, max_lines, what="tool list", styles=styles)
+    blocks: list[str] = []
+    for line in lines:
+        blocks.append(render_tool_line(line, styles=styles))
+        expansion = render_tool_output(line, styles=styles)
+        if expansion:
+            blocks.append(expansion)
+    return truncate_lines("\n".join(blocks), max_lines, what="tool list", styles=styles)
+
+
+def render_activity(state: ViewState, *, styles: Styles = PLAIN) -> str:
+    """The live "what is happening" line: spinner, what is running, and how long.
+
+    Empty whenever nothing is in flight, so a settled screen carries no residue of the
+    last turn. The elapsed clock appears only after
+    :data:`ACTIVITY_ELAPSED_AFTER_SECONDS`: a number that flickers on for every fast
+    tool is noise, while a number that *appears* is itself the signal that something is
+    taking longer than it should.
+    """
+    label = activity_label(state)
+    if not label:
+        return ""
+    head = " ".join(part for part in (spinner_frame(state.tick), styles.text(label)) if part)
+    if state.waiting_seconds >= ACTIVITY_ELAPSED_AFTER_SECONDS:
+        head = f"{head}{ACTIVITY_SEPARATOR}{int(state.waiting_seconds)}s"
+    return styles.wrap("tool_running", head)
 
 
 def render_errors(state: ViewState, *, styles: Styles = PLAIN) -> str:
@@ -549,6 +603,9 @@ class Panels:
     status: str
     approval: str
     errors: str
+    #: The live spinner line. Empty when nothing is in flight — the app clears the
+    #: region rather than leaving the last turn's activity on screen.
+    activity: str = ""
 
 
 def render_panels(
@@ -570,10 +627,12 @@ def render_panels(
         status=render_status_for(state, styles=styles),
         approval=approval,
         errors=render_errors(state, styles=styles),
+        activity=render_activity(state, styles=styles),
     )
 
 
 __all__ = [
+    "ACTIVITY_ELAPSED_AFTER_SECONDS",
     "ANSI",
     "APPROVAL_MAX_LINES",
     "APPROVAL_PROMPT",
@@ -589,10 +648,12 @@ __all__ = [
     "STATUS_SEPARATOR",
     "TODO_GLYPHS",
     "TOKENS",
+    "TOOL_OUTPUT_INDENT",
     "TRAILING_NEWLINE_NOTE",
     "Panels",
     "Styles",
     "escape_markup",
+    "render_activity",
     "render_approval",
     "render_diff",
     "render_errors",
@@ -602,6 +663,7 @@ __all__ = [
     "render_todos",
     "render_tool_line",
     "render_tool_lines",
+    "render_tool_output",
     "render_transcript",
     "strip_controls",
     "truncate_lines",
