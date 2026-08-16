@@ -26,6 +26,7 @@ from ronin.mcp.oauth_driver import (
     HttpReply,
     HttpxFetcher,
     InMemoryAuthStore,
+    KeyringAuthStore,
     LoopbackAuthorizer,
     OAuthDriver,
     PersistedAuth,
@@ -367,12 +368,12 @@ def test_in_memory_store_deletes() -> None:
 
 def test_file_store_persists_the_client_id_but_never_the_token(tmp_path: Path) -> None:
     """The load-bearing security assertion: a bearer token must not reach the disk."""
-    token = TokenSet(access_token="super-secret", resource=RESOURCE, refresh_token="rt-secret")
+    token = TokenSet(access_token="acc-plain", resource=RESOURCE, refresh_token="ref-plain")
     FileAuthStore(tmp_path).save("remote", PersistedAuth(client_id="cid-1", token=token))
 
     on_disk = (tmp_path / "remote.json").read_text(encoding="utf-8")
     assert "cid-1" in on_disk  # the non-secret registration is durable
-    assert "super-secret" not in on_disk and "rt-secret" not in on_disk  # the token is not
+    assert "acc-plain" not in on_disk and "ref-plain" not in on_disk  # the token is not
 
     # A fresh store (a new process) recovers the client_id but not the session-only token.
     reloaded = FileAuthStore(tmp_path).load("remote")
@@ -407,6 +408,90 @@ def test_the_network_adapters_construct_without_touching_their_edges() -> None:
     """Constructing the socket/browser adapters opens nothing — the I/O is deferred."""
     assert isinstance(HttpxFetcher(timeout=1.0), HttpxFetcher)
     assert isinstance(LoopbackAuthorizer(timeout=1.0), LoopbackAuthorizer)
+
+
+# --------------------------------------------------------------------------- #
+# KeyringAuthStore — token durable in an encrypted store, memory fallback
+# --------------------------------------------------------------------------- #
+
+
+class _FakeKeyring:
+    """A stand-in for the ``keyring`` module: a dict keyed by (service, name)."""
+
+    class errors:
+        class KeyringError(Exception):
+            pass
+
+    def __init__(self, *, fail: bool = False) -> None:
+        self._store: dict[tuple[str, str], str] = {}
+        self._fail = fail
+
+    def seed(self, service: str, name: str, value: str) -> None:
+        """Put a raw value in the store directly, bypassing the keyring API."""
+        self._store[(service, name)] = value
+
+    def get_password(self, service: str, name: str) -> str | None:
+        if self._fail:
+            raise self.errors.KeyringError("no backend")
+        return self._store.get((service, name))
+
+    def set_password(self, service: str, name: str, value: str) -> None:
+        if self._fail:
+            raise self.errors.KeyringError("no backend")
+        self._store[(service, name)] = value
+
+    def delete_password(self, service: str, name: str) -> None:
+        if (service, name) not in self._store:
+            raise self.errors.KeyringError("absent")
+        del self._store[(service, name)]
+
+
+def test_keyring_store_round_trips_the_token_through_the_encrypted_store() -> None:
+    store = KeyringAuthStore(backend=_FakeKeyring())
+    assert store.durable
+    token = TokenSet("at", RESOURCE, refresh_token="rt", expires_at=4600.0, scopes=("mcp:read",))
+    store.save("remote", PersistedAuth(client_id="cid", token=token))
+
+    loaded = store.load("remote")
+    assert loaded is not None and loaded.token is not None
+    # Unlike the file store, the token itself survives here — that is the point of the keyring.
+    assert loaded.client_id == "cid"
+    assert loaded.token.access_token == "at" and loaded.token.refresh_token == "rt"
+    assert loaded.token.scopes == ("mcp:read",)
+
+
+def test_keyring_store_without_a_backend_is_memory_only() -> None:
+    store = KeyringAuthStore(backend=None)
+    assert not store.durable
+    store.save("remote", PersistedAuth(client_id="cid", token=TokenSet("at", RESOURCE)))
+    loaded = store.load("remote")
+    assert loaded is not None and loaded.token is not None and loaded.token.access_token == "at"
+    assert store.load("never") is None
+
+
+def test_keyring_store_falls_back_to_memory_when_the_backend_errors() -> None:
+    store = KeyringAuthStore(backend=_FakeKeyring(fail=True))
+    assert store.durable  # a backend is present...
+    store.save("remote", PersistedAuth(client_id="cid", token=TokenSet("at", RESOURCE)))
+    # ...but every call raises, so save/load quietly use the in-memory overlay instead.
+    loaded = store.load("remote")
+    assert loaded is not None and loaded.token is not None and loaded.token.access_token == "at"
+
+
+def test_keyring_store_load_is_none_for_unknown_and_corrupt_values() -> None:
+    backend = _FakeKeyring()
+    store = KeyringAuthStore(backend=backend)
+    assert store.load("never") is None
+    backend.seed("ronin-mcp-oauth", "corrupt", "{ not json")  # a value that will not parse
+    assert store.load("corrupt") is None
+
+
+def test_keyring_store_delete_removes_the_entry() -> None:
+    store = KeyringAuthStore(backend=_FakeKeyring())
+    store.save("remote", PersistedAuth(client_id="cid", token=TokenSet("at", RESOURCE)))
+    store.delete("remote")
+    assert store.load("remote") is None
+    store.delete("remote")  # deleting a missing entry is a no-op, not an error
 
 
 # --------------------------------------------------------------------------- #

@@ -5,6 +5,19 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Added
+- **`ronin mcp login <server>` + keyring-backed token persistence.** The attended entrypoint
+  that makes the OAuth flow usable end to end: it reads `.ronin/mcp.json`, finds the named
+  `auth: oauth` server, runs the interactive authorization (browser + loopback redirect +
+  code exchange), then persists the result. A new `KeyringAuthStore` keeps the token in the
+  **OS keyring** (macOS Keychain / Windows Credential Locker / Secret Service) — an encrypted
+  store, so unlike the file store it can hold a bearer token without the clear-text risk, and
+  a later `ronin` session reads and refreshes it without asking again. `default_oauth_driver`
+  now prefers the keyring and degrades to the client-id-only file store (token in memory) on a
+  host with no keyring backend; `keyring` is a new **optional** dependency (`ronin[oauth]`),
+  lazy-imported with an in-memory fallback so a bare install still runs. Everything impure —
+  browser, socket, HTTPS, keyring — sits behind injected seams, so the command's resolution
+  and every error path (unknown server, non-OAuth server, malformed config, cancelled flow)
+  are tested offline against fakes.
 - **Mid-session OAuth refresh-on-`401` for remote MCP servers.** The reactive half the live
   driver flagged as a follow-up: when a remote server rejects a request with `401` mid-turn
   (its token expired or was revoked), the client now refreshes the bearer and retries the

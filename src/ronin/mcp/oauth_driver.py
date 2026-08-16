@@ -28,10 +28,10 @@ Fail-closed choices, continued from the core:
   only source of PKCE and CSRF entropy and ``now`` the only clock; the real driver wires
   them to :mod:`secrets` and :func:`time.time`, and a test wires them to fixtures so a flow
   is byte-for-byte reproducible.
-* **Tokens are never written to disk.** A refresh/access token is a bearer credential;
-  :class:`FileAuthStore` persists only the non-secret ``client_id`` (so a client registers
-  once) and keeps the token in a session-only in-memory overlay. Encrypted-at-rest token
-  persistence via an OS keyring is a deliberate follow-up, not a plaintext file.
+* **A token is never written to a plaintext file.** :class:`KeyringAuthStore` keeps it in
+  the OS keyring, which encrypts at rest; :class:`FileAuthStore` (the fallback when no
+  keyring backend exists) persists only the non-secret ``client_id`` and keeps the token in
+  a session-only in-memory overlay. Either way, a bearer credential never lands in the clear.
 """
 
 from __future__ import annotations
@@ -41,6 +41,7 @@ import json
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 from .config import AuthKind, McpServerConfig
@@ -144,13 +145,57 @@ class PersistedAuth:
     clients and, on servers that rate-limit registration, eventually fails. The token is the
     sensitive half: a live bearer credential, kept so a still-valid access token is reused
     and an expiring one refreshed without a new browser round trip. How long each half
-    survives is the store's choice — :class:`FileAuthStore` keeps the ``client_id`` on disk
-    but the token in memory only, precisely because a token must not be written in clear text.
+    survives is the store's choice — :class:`FileAuthStore` keeps only the ``client_id`` on
+    disk (a token must never be written in clear text), while :class:`KeyringAuthStore` keeps
+    both in the OS keyring, which encrypts at rest.
+
+    :meth:`to_json` / :meth:`from_json` are the serialisation a keyring value round-trips
+    through; they are deliberately *not* used by :class:`FileAuthStore`, which persists a bare
+    ``client_id`` precisely so no token text reaches a plaintext file.
     """
 
     client_id: str = ""
     client_secret: str = ""
     token: TokenSet | None = None
+
+    def to_json(self) -> Mapping[str, object]:
+        out: dict[str, object] = {"client_id": self.client_id}
+        if self.client_secret:
+            out["client_secret"] = self.client_secret
+        if self.token is not None:
+            out["token"] = {
+                "access_token": self.token.access_token,
+                "resource": self.token.resource,
+                "refresh_token": self.token.refresh_token,
+                "expires_at": self.token.expires_at,
+                "scopes": list(self.token.scopes),
+            }
+        return out
+
+    @classmethod
+    def from_json(cls, data: Mapping[str, object]) -> PersistedAuth:
+        raw = data.get("token")
+        token: TokenSet | None = None
+        if isinstance(raw, Mapping):
+            access = raw.get("access_token")
+            resource = raw.get("resource")
+            if isinstance(access, str) and access and isinstance(resource, str) and resource:
+                expires = raw.get("expires_at")
+                scopes = raw.get("scopes")
+                token = TokenSet(
+                    access_token=access,
+                    resource=resource,
+                    refresh_token=_as_str(raw.get("refresh_token")),
+                    expires_at=float(expires) if isinstance(expires, (int, float)) else None,
+                    scopes=tuple(s for s in scopes if isinstance(s, str))
+                    if isinstance(scopes, Sequence) and not isinstance(scopes, (str, bytes))
+                    else (),
+                )
+        return cls(
+            client_id=_as_str(data.get("client_id")),
+            client_secret=_as_str(data.get("client_secret")),
+            token=token,
+        )
 
 
 class AuthStore:
@@ -631,6 +676,89 @@ class FileAuthStore(AuthStore):
             self._path(key).unlink()
 
 
+#: Sentinel: "detect a keyring backend" vs an explicitly injected one (a fake, or ``None``).
+_AUTODETECT: Any = object()
+
+#: The keyring service name Ronin's MCP tokens live under. One namespace, keyed per server.
+_KEYRING_SERVICE = "ronin-mcp-oauth"
+
+
+def _load_keyring() -> Any:  # pragma: no cover - depends on the host's keyring backend
+    """The ``keyring`` module if a *real* backend is present, else ``None``.
+
+    ``keyring`` falls back to a ``fail.Keyring`` backend when the platform has no secret
+    store (a headless Linux box with no Secret Service, say); that backend raises on every
+    call, so it is treated as "no keyring" here and the caller degrades to memory.
+    """
+    try:
+        import keyring  # type: ignore[import-not-found]
+        from keyring.backends import fail  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    try:
+        if isinstance(keyring.get_keyring(), fail.Keyring):
+            return None
+    except Exception:  # any backend-probe failure means "unusable" — degrade to memory
+        return None
+    return keyring
+
+
+class KeyringAuthStore(AuthStore):
+    """Persists client id **and** token in the OS keyring, which encrypts at rest.
+
+    This is the store that makes ``ronin mcp login`` useful across processes: unlike
+    :class:`FileAuthStore` — which refuses to write a token to a plaintext file — the platform
+    keyring (macOS Keychain, Windows Credential Locker, the Secret Service on Linux) is an
+    encrypted store, so a refresh token kept there is not clear-text storage and *can* be
+    carried from a login to a later session.
+
+    Degrades honestly: if no keyring backend is available (``keyring`` not installed, or a
+    headless host with no secret service) it falls back to an in-memory dict, so a session
+    still works within its own lifetime and a login simply does not persist past the process.
+    :attr:`durable` says which mode it is in. The backend is injectable so the store's logic
+    is tested offline against a fake keyring, never the developer's real one.
+    """
+
+    def __init__(self, backend: Any = _AUTODETECT) -> None:
+        self._memory: dict[str, PersistedAuth] = {}
+        self._keyring = _load_keyring() if backend is _AUTODETECT else backend
+
+    @property
+    def durable(self) -> bool:
+        """True when a real keyring backs this store (a token will survive the process)."""
+        return self._keyring is not None
+
+    def load(self, key: str) -> PersistedAuth | None:
+        if self._keyring is None:
+            return self._memory.get(key)
+        try:
+            raw = self._keyring.get_password(_KEYRING_SERVICE, key)
+        except self._keyring.errors.KeyringError:
+            return self._memory.get(key)
+        if not raw:
+            return None
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            return None
+        return PersistedAuth.from_json(data) if isinstance(data, Mapping) else None
+
+    def save(self, key: str, state: PersistedAuth) -> None:
+        if self._keyring is None:
+            self._memory[key] = state
+            return
+        try:
+            self._keyring.set_password(_KEYRING_SERVICE, key, json.dumps(state.to_json()))
+        except self._keyring.errors.KeyringError:
+            self._memory[key] = state  # a backend that fails a write still leaves a usable session
+
+    def delete(self, key: str) -> None:
+        self._memory.pop(key, None)
+        if self._keyring is not None:
+            with contextlib.suppress(self._keyring.errors.KeyringError):
+                self._keyring.delete_password(_KEYRING_SERVICE, key)
+
+
 class LoopbackAuthorizer(Authorizer):
     """The real :class:`Authorizer`: open a browser, catch the loopback redirect, return the code.
 
@@ -693,10 +821,12 @@ class LoopbackAuthorizer(Authorizer):
 def default_oauth_driver(
     token_dir: str | Path, *, interactive: bool = False
 ) -> OAuthDriver:  # pragma: no cover - wires the impure adapters
-    """A driver backed by the real edges: ``httpx``, a file client-id store, and system entropy.
+    """A driver backed by the real edges: ``httpx``, the OS keyring, and system entropy.
 
-    ``token_dir`` is where each server's non-secret ``client_id`` is persisted (tokens stay
-    in memory — see :class:`FileAuthStore`). ``interactive`` controls whether a browser
+    The store prefers the OS keyring (:class:`KeyringAuthStore`) so an attended ``ronin mcp
+    login`` persists its token for later sessions; on a host with no keyring backend it
+    degrades to :class:`FileAuthStore` under ``token_dir`` (the ``client_id`` stays durable,
+    the token lives only for the process). ``interactive`` controls whether a browser
     authorizer is attached — session startup passes ``False`` so a missing token becomes a
     "log in first" failure rather than a browser that never opens; an attended login passes
     ``True``. Not exercised offline: the fetcher and authorizer it assembles open a socket
@@ -705,9 +835,11 @@ def default_oauth_driver(
     import secrets
     import time
 
+    keyring_store = KeyringAuthStore()
+    store: AuthStore = keyring_store if keyring_store.durable else FileAuthStore(token_dir)
     return OAuthDriver(
         fetcher=HttpxFetcher(),
-        store=FileAuthStore(token_dir),
+        store=store,
         now=time.time,
         new_verifier=lambda: secrets.token_urlsafe(64),
         new_state=lambda: secrets.token_urlsafe(32),
@@ -724,6 +856,7 @@ __all__ = [
     "HttpReply",
     "HttpxFetcher",
     "InMemoryAuthStore",
+    "KeyringAuthStore",
     "LoopbackAuthorizer",
     "OAuthDriver",
     "PersistedAuth",
