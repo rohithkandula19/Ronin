@@ -20,6 +20,21 @@ from .environment import (
     bash_sandbox,
     solution_policy,
 )
+from .guards import (
+    DETECTORS,
+    FileChange,
+    Finding,
+    GuardConfig,
+    GuardReport,
+    GuardRollout,
+    Severity,
+    TranscriptSampler,
+    TranscriptStep,
+    changes_from_trees,
+    render_transcript,
+    sample_transcripts,
+    scan_rollout,
+)
 from .loss import assistant_token_mask, broadcast_reward, dapo_normalize
 from .reward import (
     PROTECTED_FRAGMENTS,
@@ -32,10 +47,16 @@ from .reward import (
 
 __all__ = [
     "DEFAULT_MAX_TURNS",
+    "DETECTORS",
     "PROTECTED_FRAGMENTS",
     "CurriculumBand",
     "Environment",
+    "FileChange",
+    "Finding",
     "GRPOConfig",
+    "GuardConfig",
+    "GuardReport",
+    "GuardRollout",
     "HiddenTest",
     "Policy",
     "PolicyResult",
@@ -45,12 +66,19 @@ __all__ = [
     "Rollout",
     "RolloutOutcome",
     "Sandbox",
+    "Severity",
+    "TranscriptSampler",
+    "TranscriptStep",
     "assistant_token_mask",
     "bash_sandbox",
     "broadcast_reward",
+    "changes_from_trees",
     "compute_reward",
     "curriculum_keep",
     "dapo_normalize",
     "protected_hit",
+    "render_transcript",
+    "sample_transcripts",
+    "scan_rollout",
     "solution_policy",
 ]
