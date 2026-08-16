@@ -5,6 +5,19 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Added
+- **Training-stage ablation table (`training/adapter/stage_ablation.py`).** The gap in the
+  adapter eval path: the provider (`ronin --model ronin-qwen-local`), the three-way
+  adapter-vs-base-vs-Kimi comparison, and the model-card generator already exist; what was
+  missing is the **base → +SFT → +DPO → +GRPO** progression bound to the five metrics the
+  ablation is judged on — **pass@1, tool-syntax validity, median turns, recovery rate,
+  cost/task** — in one table, with Kimi as a ceiling row. It reuses the three-way `TargetRun`
+  and the `metrics.py` functions (pass@1 is `SuiteScore`'s rate; tool validity + recovery are
+  the existing scorers); the only new arithmetic is median-turns and cost/task, because a
+  stage progression is exactly where "passes more but takes twice the turns and costs twice
+  as much" must be visible. A Δ-vs-base block reads each metric in its own direction (more
+  pass@1 wins; fewer turns and less cost win). Pure and offline — a `StageRun` per stage in, a
+  rendered table out; a `placeholder_table()` smoke run produces the full structure before any
+  GPU checkpoint exists, and every unmeasured cell renders `—`, never a fabricated `0`.
 - **Anti-reward-hacking guards + transcript sampler (`training/rl/guards.py`).** The RLVR
   reward gates on *paths*; this adds the content- and transcript-aware half, because the
   interesting hacks hide in what a change contains and what the agent did. Nine detectors,
