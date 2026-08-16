@@ -5,6 +5,16 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Added
+- **End-to-end stage-ablation smoke test (`training/tests/test_stage_ablation_e2e.py`).** Drives
+  the whole wired path over a tiny real suite: four task dirs loaded from disk, run through the
+  real `ronin.evals` runner, passed/failed by the **real `verify.sh` subprocess** against the
+  file each scripted agent actually wrote, folded into a real `RunReport`, reduced by the shipped
+  wiring, and paired with a real decode probe — asserting all five metrics populate and the
+  base→+SFT→+DPO→+GRPO progression comes out as scripted (pass@1 0→.5→.75→1, validity climbing,
+  recovery 0→.75→1 with Kimi's honest `—`, cost/task highest for the frontier ceiling). The
+  counterpart to the placeholder smoke: that proves the table *renders* with no model; this proves
+  it is *produced by the real suite*. Stages are scripted stand-ins for the not-yet-trained
+  checkpoints; everything else is the real machinery. Skips cleanly if `ronin.evals` is absent.
 - **Real `StageRunner` wired into `src/ronin/evals` (`training/adapter/stage_ablation.py`).**
   The ablation is no longer placeholder-only: it now reduces a genuine `ronin.evals` `RunReport`
   into a `StageRun`. Tracing the suite end to end surfaced that the five metrics come from **two
