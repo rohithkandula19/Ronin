@@ -43,6 +43,8 @@ the two agree and that every member of the ``Event`` union appears.
 ``tool_start``       ``tool_use_id`` str, ``name`` str, ``arguments`` object
 ``tool_end``         ``tool_use_id`` str, ``name`` str, ``ok`` bool, ``content`` str,
                      ``error`` str, ``artifacts`` array of str, ``tokens_estimate`` int
+``tool_output``      ``tool_use_id`` str, ``chunk`` str — output a still-running tool has
+                     printed; the complete text still arrives on ``tool_end``
 ``approval_request`` ``tool_use_id`` str, ``name`` str, ``danger_level`` str,
                      ``danger_rank`` int, ``rendered`` str, ``reason`` str
 ``turn_end``         ``turn_index`` int, ``state`` str, ``stop_reason`` str,
@@ -85,6 +87,7 @@ from ronin.core.types import (
     StreamReset,
     TextDelta,
     ToolEnd,
+    ToolOutput,
     ToolSpec,
     ToolStart,
     ToolUse,
@@ -139,6 +142,7 @@ SCHEMA: Mapping[str, tuple[str, ...]] = {
         "rendered",
         "reason",
     ),
+    "tool_output": ("tool_use_id", "chunk"),
     "turn_end": ("turn_index", "state", "stop_reason", "has_agent_state"),
     "compaction": (
         "folded_messages",
@@ -178,6 +182,7 @@ EVENT_TYPE_NAMES: Mapping[type, str] = {
     StreamReset: "stream_reset",
     ToolStart: "tool_start",
     ToolEnd: "tool_end",
+    ToolOutput: "tool_output",
     ApprovalRequest: "approval_request",
     Compaction: "compaction",
     VerifyResult: "verify_result",
@@ -265,6 +270,15 @@ def event_to_json(event: Event) -> dict[str, Any]:
             "checks_failed": event.checks_failed,
             "summary": event.summary,
             "repaired": event.repaired,
+        }
+    if isinstance(event, ToolOutput):
+        # Live output, emitted losslessly so a scripted consumer can follow a long
+        # command as it runs. The complete text still arrives on the tool's ToolEnd,
+        # so a reader that ignores this type loses nothing but the liveness.
+        return {
+            "type": "tool_output",
+            "tool_use_id": event.tool_use_id,
+            "chunk": event.chunk,
         }
     return {
         "type": "error",

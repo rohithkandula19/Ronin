@@ -30,6 +30,7 @@ from ronin.core.types import (
     Todo,
     TodoStatus,
     ToolEnd,
+    ToolOutput,
     ToolResult,
     ToolStart,
     ToolUse,
@@ -96,6 +97,7 @@ def sample_event(event_type: type) -> Event:
             summary="pytest: 1 failed",
             repaired=True,
         ),
+        ToolOutput: ToolOutput(tool_use_id="t1", chunk="collected 412 items\n"),
         Error: Error(message="model stream ended", kind="protocol", recoverable=True),
     }
     if event_type not in samples:  # pragma: no cover - guard for a future union member

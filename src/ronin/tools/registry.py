@@ -15,7 +15,8 @@ that some code path might forget to check.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import replace
 
 from ..core.types import ToolResult, ToolSpec, ToolUse
 from .base import Tool, ToolContext
@@ -61,6 +62,18 @@ class ToolRegistry:
 
     async def execute(self, use: ToolUse) -> ToolResult:
         """Run one call. Returns a result; a hallucinated name is a value, not a raise."""
+        return await self._execute(use, None)
+
+    async def execute_streaming(self, use: ToolUse, on_output: Callable[[str], None]) -> ToolResult:
+        """Run one call, giving the tool somewhere to post output as it goes.
+
+        Satisfies ``core.protocols.StreamingToolRegistry``. Only tools that choose to
+        write to ``ctx.on_output`` stream; every other tool behaves identically to
+        :meth:`execute`.
+        """
+        return await self._execute(use, on_output)
+
+    async def _execute(self, use: ToolUse, on_output: Callable[[str], None] | None) -> ToolResult:
         tool = self._tools.get(use.name)
         if tool is None:
             known = ", ".join(sorted(self._tools))
@@ -68,7 +81,12 @@ class ToolRegistry:
                 ok=False,
                 error=(f"there is no tool called {use.name!r}. Available tools: {known}."),
             )
-        return await tool.execute(use.arguments, self.ctx)
+        # Bound onto a *copy* of the context rather than the shared one, so two
+        # concurrent calls cannot post chunks to each other's line. The copy is shallow
+        # on purpose: `read_files` stays the same set object, so the `write` guard still
+        # sees everything that has been read this session.
+        ctx = self.ctx if on_output is None else replace(self.ctx, on_output=on_output)
+        return await tool.execute(use.arguments, ctx)
 
     def subset(self, names: Sequence[str], *, ctx: ToolContext | None = None) -> ToolRegistry:
         """A registry with only ``names``. How a subagent gets a narrower toolset.

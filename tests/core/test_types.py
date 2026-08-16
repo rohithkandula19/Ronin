@@ -36,6 +36,7 @@ from ronin.core.types import (
     Todo,
     TodoStatus,
     ToolEnd,
+    ToolOutput,
     ToolResult,
     ToolResultBlock,
     ToolSpec,
@@ -564,6 +565,7 @@ def test_the_event_union_is_closed_and_complete() -> None:
         TextDelta("hi"),
         StreamReset(reason="retry"),
         ToolStart(tool_use_id="t1", name="read"),
+        ToolOutput(tool_use_id="t1", chunk="line one\n"),
         ToolEnd(tool_use_id="t1", name="read", result=ToolResult(ok=True)),
         ApprovalRequest(
             tool_use_id="t1", name="rm", danger_level=DangerLevel.DESTRUCTIVE, rendered="rm -rf ."

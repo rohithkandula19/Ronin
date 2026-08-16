@@ -62,6 +62,7 @@ from ..core.types import (
     Todo,
     TodoStatus,
     ToolEnd,
+    ToolOutput,
     ToolResult,
     ToolResultBlock,
     ToolStart,
@@ -513,6 +514,17 @@ def _dec_tool_start(record: Mapping[str, Any]) -> Event:
     )
 
 
+def _enc_tool_output(event: ToolOutput) -> dict[str, Any]:
+    return {"tool_use_id": event.tool_use_id, "chunk": event.chunk}
+
+
+def _dec_tool_output(record: Mapping[str, Any]) -> Event:
+    return ToolOutput(
+        tool_use_id=_req_str(record, "tool_use_id"),
+        chunk=_opt_str(record, "chunk"),
+    )
+
+
 def _enc_tool_end(event: ToolEnd) -> dict[str, Any]:
     return {
         "tool_use_id": event.tool_use_id,
@@ -635,6 +647,7 @@ _EVENT_CODECS: Mapping[type, tuple[str, Callable[[Any], dict[str, Any]]]] = Mapp
         TextDelta: ("text_delta", _enc_text_delta),
         StreamReset: ("stream_reset", _enc_stream_reset),
         ToolStart: ("tool_start", _enc_tool_start),
+        ToolOutput: ("tool_output", _enc_tool_output),
         ToolEnd: ("tool_end", _enc_tool_end),
         ApprovalRequest: ("approval_request", _enc_approval_request),
         Compaction: ("compaction", _enc_compaction),
@@ -656,6 +669,7 @@ _EVENT_DECODERS: Mapping[str, Callable[[Mapping[str, Any]], Event]] = MappingPro
         "text_delta": _dec_text_delta,
         "stream_reset": _dec_stream_reset,
         "tool_start": _dec_tool_start,
+        "tool_output": _dec_tool_output,
         "tool_end": _dec_tool_end,
         "approval_request": _dec_approval_request,
         "compaction": _dec_compaction,

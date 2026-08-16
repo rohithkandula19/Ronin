@@ -11,7 +11,7 @@ protocol cannot force a third-party implementation to behave.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
@@ -106,6 +106,29 @@ class ToolRegistry(Protocol):
 
     async def execute(self, use: ToolUse) -> ToolResult:
         """Run one call. Returns a result; failure is a value, not an exception."""
+        ...
+
+
+@runtime_checkable
+class StreamingToolRegistry(Protocol):
+    """A registry that can report a tool's output *while* the tool is still running.
+
+    Deliberately a **second, optional** protocol rather than another parameter on
+    :meth:`ToolRegistry.execute`. Widening that signature would break every existing
+    registry — the loop would call it with an argument the implementation does not
+    accept, and the resulting ``TypeError`` becomes a failed ``ToolResult``, so a
+    perfectly good tool would silently stop running. Liveness is not worth that: a
+    registry that does not implement this simply does not stream, and the loop falls
+    back to the plain call.
+    """
+
+    async def execute_streaming(self, use: ToolUse, on_output: Callable[[str], None]) -> ToolResult:
+        """Run one call, posting output to ``on_output`` as it is produced.
+
+        The sink is liveness only. Everything the model is shown still comes back in
+        the returned ``ToolResult``, so dropping every chunk changes nothing but what
+        the human sees while waiting.
+        """
         ...
 
 

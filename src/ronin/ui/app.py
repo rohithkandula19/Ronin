@@ -48,9 +48,11 @@ from typing import Any, ClassVar
 from ronin.core.types import ApprovalDecision, ApprovalRequest, Event, Mode, TurnEnd
 
 from .reduce import (
+    SPINNER_INTERVAL_SECONDS,
     EscapeAction,
     EscapeState,
     ViewState,
+    advance_activity,
     decision_for,
     next_mode,
     press_escape,
@@ -78,6 +80,7 @@ APPROVAL_ID = "approval"
 STATUS_ID = "status"
 ERRORS_ID = "errors"
 INPUT_ID = "prompt-input"
+ACTIVITY_ID = "activity"
 
 #: Placeholder shown in the empty input line.
 INPUT_PLACEHOLDER = "type a message, Enter to send — esc interrupt, shift+tab mode, ctrl+c quit"
@@ -170,6 +173,10 @@ class Session:
     #: Unset (demo, a replayed recording) leaves the input inert: nothing consumes a
     #: prompt, so there is no path from a keystroke to a turn that never runs.
     on_submit: Callable[[str], None] | None = None
+    #: The clock the activity line measures silence against. Injected for the same
+    #: reason every other seam here is: a test asserts what the screen says after four
+    #: seconds of nothing without waiting four seconds.
+    clock: Callable[[], float] = time.monotonic
 
 
 def initial_state(session: Session) -> ViewState:
@@ -323,6 +330,9 @@ def _build_app(session: Session) -> Any:
             self.session = session
             self.state = initial_state(session)
             self.keys = KeyController(mode=session.mode)
+            # When the last event landed. The activity line's clock measures silence
+            # from here, so "nothing has happened for 12s" is a fact rather than a guess.
+            self._last_event_at = session.clock()
 
         def compose(self) -> Any:
             yield vertical_scroll(static("", id=TRANSCRIPT_ID), id="transcript-scroll")
@@ -330,6 +340,9 @@ def _build_app(session: Session) -> Any:
             yield static("", id=TODOS_ID)
             yield static("", id=APPROVAL_ID)
             yield static("", id=ERRORS_ID)
+            # Directly above the input, so "what is it doing" sits where the eye already
+            # is between turns rather than at the far edge of the screen.
+            yield static("", id=ACTIVITY_ID)
             # The multi-turn affordance. Docked above the status line so streaming text
             # fills the space between. Present even when `on_submit` is unset (demo /
             # replay); the submit handler simply has nothing to hand a prompt to then.
@@ -354,7 +367,26 @@ def _build_app(session: Session) -> Any:
             self._paint()
             if self.session.on_attach is not None:
                 self.session.on_attach(self._ask_human)
+            # The only repaint not caused by an event. Without it the screen is frozen
+            # between events, and a model that has been thinking for thirty seconds is
+            # indistinguishable from one that has died.
+            self.set_interval(SPINNER_INTERVAL_SECONDS, self._tick)
             self.run_worker(self._consume(), exclusive=True)
+
+        def _tick(self) -> None:
+            """Advance the spinner while work is in flight; do nothing when it is not.
+
+            Gated on ``busy`` so an idle session is not repainting ten times a second
+            for a line that would render empty anyway.
+            """
+            if not self.state.busy:
+                return
+            self.state = advance_activity(
+                self.state,
+                now=self.session.clock(),
+                last_event_at=self._last_event_at,
+            )
+            self._paint()
 
         async def _ask_human(self, request: ApprovalRequest) -> ApprovalDecision:
             """Raise the modal and wait for an answer. Called by the policy's asker.
@@ -377,6 +409,12 @@ def _build_app(session: Session) -> Any:
             # Painting inside the loop, per event, is the no-buffering guarantee:
             # the first TextDelta is on screen before the second one arrives.
             async for event in self.session.events:
+                # Reset the silence clock first: an event *is* progress, so the elapsed
+                # figure must restart from this instant, not from the previous tick.
+                self._last_event_at = self.session.clock()
+                self.state = advance_activity(
+                    self.state, now=self._last_event_at, last_event_at=self._last_event_at
+                )
                 self.state = reduce_event(self.state, event)
                 if isinstance(event, ApprovalRequest) and self.session.on_approval:
                     self.session.on_approval(event)
@@ -392,6 +430,7 @@ def _build_app(session: Session) -> Any:
                 (TODOS_ID, panels.todos),
                 (APPROVAL_ID, panels.approval),
                 (ERRORS_ID, panels.errors),
+                (ACTIVITY_ID, panels.activity),
                 (STATUS_ID, panels.status),
             ):
                 self.query_one(f"#{region}", static).update(text)
@@ -433,6 +472,7 @@ def _build_app(session: Session) -> Any:
 
 
 __all__ = [
+    "ACTIVITY_ID",
     "APPROVAL_ID",
     "APP_CSS",
     "DISMISSED",

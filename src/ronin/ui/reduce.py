@@ -41,6 +41,7 @@ from ronin.core.types import (
     TextDelta,
     Todo,
     ToolEnd,
+    ToolOutput,
     ToolResult,
     ToolStart,
     TurnEnd,
@@ -68,6 +69,39 @@ ERROR_PREFIX = "error: "
 ARGUMENT_SUMMARY_LIMIT = 64
 RESULT_SUMMARY_LIMIT = 64
 ELLIPSIS = "…"
+
+#: The spinner, as data. Frames are single-width braille so the line does not jump
+#: by a column as it animates — a spinner that changes width is worse than none.
+SPINNER_FRAMES: tuple[str, ...] = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+
+#: How often the app advances :attr:`ViewState.tick`. Fast enough to read as motion,
+#: slow enough that a repaint per frame is not the reason a session feels slow.
+SPINNER_INTERVAL_SECONDS = 0.1
+
+#: How many trailing lines of a running tool's output are kept for the expansion under
+#: its line. Bounded because a dev server prints forever and the pane must not grow
+#: without limit; the *complete* output still reaches the model in the ``ToolResult``.
+TOOL_OUTPUT_TAIL_LINES = 8
+
+#: One line of streamed tool output, clipped. Wider than a summary — this is the
+#: expansion, where a test failure's actual text is the point — but still one line.
+TOOL_OUTPUT_LINE_LIMIT = 160
+
+#: What the activity line says when a turn is live but nothing is attributable yet:
+#: the model has been asked and has not started answering.
+WAITING_LABEL = "waiting for the model"
+
+#: What the activity line says while reasoning streams. Deliberately the *label* only:
+#: reasoning content is shown when ``show_thinking`` is on and never merely because a
+#: progress indicator needed something to display.
+THINKING_LABEL = "thinking"
+
+#: Joins a repeated tool name to its count: ``read_file x12``. This is how the activity
+#: line says "reading 12 files" without a table of tool names — see the module docstring's
+#: third invariant. The tool names itself; the reducer only counts. ASCII on purpose: the
+#: multiplication sign is indistinguishable from a letter in most terminal fonts.
+REPEAT_GLYPH = "x"
+
 #: Stands in for a newline inside a one-line summary, so a multi-line command
 #: cannot silently reformat the tool pane.
 NEWLINE_GLYPH = " ⏎ "
@@ -180,6 +214,11 @@ class ToolLine:
     arguments_summary: str = ""
     result_summary: str = ""
     ok: bool | None = None
+    #: The last :data:`TOOL_OUTPUT_TAIL_LINES` lines this tool has printed *so far* —
+    #: the expansion under a running line, so a test suite or a dev server is visible
+    #: while it runs instead of only after it exits. Empty for a tool that streams
+    #: nothing, which is most of them.
+    output_tail: tuple[str, ...] = ()
 
     @property
     def running(self) -> bool:
@@ -227,6 +266,14 @@ class ViewState:
     context_used: float = 0.0
     cost_usd: float = 0.0
     tokens: int = 0
+    #: Animation frame for the spinner, advanced by the orchestrator's timer through
+    #: :meth:`with_activity`. Kept in the state rather than in the widget so that what
+    #: is on screen at frame *n* is a pure function of the state, like everything else.
+    tick: int = 0
+    #: How long the current in-flight work has gone without producing an event. This is
+    #: the number that answers "is it stuck?", and it is supplied rather than derived:
+    #: the reducer has no clock, and giving it one would make every fold untestable.
+    waiting_seconds: float = 0.0
 
     @property
     def text(self) -> str:
@@ -245,6 +292,66 @@ class ViewState:
     @property
     def running_tools(self) -> tuple[ToolLine, ...]:
         return tuple(line for line in self.tool_lines if line.running)
+
+    @property
+    def busy(self) -> bool:
+        """Whether the machine owes the user something right now.
+
+        A turn that has started and not finished — but *not* one parked on an approval:
+        then the session is waiting on the human, and animating a spinner at someone who
+        is being asked a question tells them the wrong thing about who is blocked.
+        """
+        if self.pending_approval is not None:
+            return False
+        return self.turn_state is not None and not self.finished
+
+    def with_activity(self, *, tick: int, waiting_seconds: float) -> ViewState:
+        """Advance the spinner and the stuck-clock. The orchestrator owns the clock.
+
+        The one door through which time enters the view state, so "what does the screen
+        show after 3 seconds of silence" is a pure question a test answers without
+        sleeping.
+        """
+        if waiting_seconds < 0.0:
+            raise ValueError("waiting_seconds must be >= 0.0")
+        return replace(self, tick=tick, waiting_seconds=waiting_seconds)
+
+    def with_tool_output(
+        self,
+        tool_use_id: str,
+        chunk: str,
+        *,
+        max_lines: int = TOOL_OUTPUT_TAIL_LINES,
+    ) -> ViewState:
+        """Append streamed output to a running tool's expansion, keeping the tail.
+
+        Chunks arrive at whatever boundary the pipe produced, so the existing tail and
+        the new chunk are rejoined before splitting: a chunk that starts mid-line
+        continues the line it belongs to instead of appearing as a new one. Only the
+        last ``max_lines`` survive — the model still receives the complete output in the
+        tool's ``ToolResult``; this is the human's peephole, not the record.
+
+        An unknown or already-finished ``tool_use_id`` is a no-op rather than an error:
+        output racing a ``ToolEnd`` is normal, and losing the last few lines of a
+        finished tool is better than raising in a paint path.
+        """
+        if not chunk:
+            return self
+        updated: list[ToolLine] = []
+        changed = False
+        for line in self.tool_lines:
+            if not changed and line.tool_use_id == tool_use_id and line.running:
+                merged = "\n".join(line.output_tail) + chunk.replace("\r\n", "\n")
+                kept = [
+                    _clip(item.rstrip("\r"), TOOL_OUTPUT_LINE_LIMIT) for item in merged.split("\n")
+                ]
+                updated.append(replace(line, output_tail=tuple(kept[-max_lines:])))
+                changed = True
+            else:
+                updated.append(line)
+        if not changed:
+            return self
+        return replace(self, tool_lines=tuple(updated))
 
     def with_status(
         self,
@@ -336,6 +443,8 @@ def reduce_event(state: ViewState, event: Event) -> ViewState:
             arguments_summary=summarize_arguments(event.arguments),
         )
         return replace(state, tool_lines=(*state.tool_lines, line))
+    if isinstance(event, ToolOutput):
+        return state.with_tool_output(event.tool_use_id, event.chunk)
     if isinstance(event, ToolEnd):
         return _with_tool_end(state, event)
     if isinstance(event, ApprovalRequest):
@@ -367,6 +476,71 @@ def reduce_event(state: ViewState, event: Event) -> ViewState:
         # caught exactly that, which is why this branch exists.
         return state
     return replace(state, errors=(*state.errors, event))
+
+
+# --------------------------------------------------------------------------- #
+# What the machine is doing, in words — derived, never looked up
+# --------------------------------------------------------------------------- #
+
+
+def activity_label(state: ViewState) -> str:
+    """One phrase for what is happening right now, or ``""`` when nothing is.
+
+    Derived from the *shape* of what is running, never from a table of tool names —
+    the same rule the tool lines follow, and for the same reason: the tool a user
+    actually installed is the one missing from any table. A tool names itself, so
+    twelve concurrent ``read_file`` calls render as ``read_file x12``, which reads as
+    "reading 12 files" without this module ever having heard of ``read_file``.
+
+    The order is by specificity: a running tool is the most concrete thing to report,
+    reasoning next, and "waiting for the model" is the honest fallback for a live turn
+    that has produced nothing yet — the moment that most looks like a hang.
+    """
+    if not state.busy:
+        return ""
+    running = state.running_tools
+    if running:
+        names = [line.name for line in running]
+        unique = set(names)
+        if len(unique) == 1 and len(names) > 1:
+            return f"{names[0]} {REPEAT_GLYPH}{len(names)}"
+        if len(names) == 1:
+            head = names[0]
+            summary = running[0].arguments_summary
+            return f"{head}({summary})" if summary else head
+        return ", ".join(sorted(unique)[:3]) + (f" {REPEAT_GLYPH}{len(names)}")
+    if state.span_thinking:
+        return THINKING_LABEL
+    if state.span_text:
+        # Text is already streaming onto the screen; the prose itself is the progress
+        # indicator, and labelling it as well would be noise.
+        return ""
+    return WAITING_LABEL
+
+
+def spinner_frame(tick: int, *, frames: tuple[str, ...] = SPINNER_FRAMES) -> str:
+    """The frame for ``tick``. Negative ticks wrap the same way positive ones do."""
+    if not frames:
+        return ""
+    return frames[tick % len(frames)]
+
+
+def advance_activity(
+    state: ViewState,
+    *,
+    now: float,
+    last_event_at: float,
+    interval: float = SPINNER_INTERVAL_SECONDS,
+) -> ViewState:
+    """The timer's whole job, as a pure function the app calls and nothing more.
+
+    ``tick`` is derived from elapsed time rather than incremented, so a dropped or
+    late timer callback shows the frame the clock justifies instead of falling behind.
+    A clock that moves backwards yields zero rather than a negative wait.
+    """
+    waited = max(now - last_event_at, 0.0)
+    tick = int(waited / interval) if interval > 0 else 0
+    return state.with_activity(tick=tick, waiting_seconds=waited)
 
 
 def reduce_all(events: Iterable[Event], state: ViewState | None = None) -> ViewState:
@@ -542,14 +716,23 @@ __all__ = [
     "OK_SUMMARY",
     "PRIMARY_ARGUMENT_KEYS",
     "REMEMBER_KEY",
+    "REPEAT_GLYPH",
     "RESULT_ARROW",
     "RESULT_SUMMARY_LIMIT",
     "RUNNING_MARKER",
+    "SPINNER_FRAMES",
+    "SPINNER_INTERVAL_SECONDS",
+    "THINKING_LABEL",
     "TOOL_MARKER",
+    "TOOL_OUTPUT_LINE_LIMIT",
+    "TOOL_OUTPUT_TAIL_LINES",
+    "WAITING_LABEL",
     "EscapeAction",
     "EscapeState",
     "ToolLine",
     "ViewState",
+    "activity_label",
+    "advance_activity",
     "decision_for",
     "mode_label",
     "next_mode",
@@ -557,6 +740,7 @@ __all__ = [
     "reduce_all",
     "reduce_event",
     "reduce_stream",
+    "spinner_frame",
     "summarize_arguments",
     "summarize_result",
 ]

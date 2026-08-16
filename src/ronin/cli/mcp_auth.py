@@ -31,6 +31,7 @@ MCP_AUTH_SUBDIR = Path(".ronin") / "mcp-auth"
 #: ``ronin mcp login`` rather than a second top-level verb next to ``mcp-serve``.
 SUBCOMMANDS: tuple[str, ...] = ("login",)
 
+
 class LoginDriver(Protocol):
     """The one thing login needs from the OAuth driver: run the attended flow for a server.
 
@@ -84,14 +85,22 @@ async def run_mcp_login(
     if config is None:
         oauth_names = [c.name for c in configs if c.auth is AuthKind.OAUTH]
         available = ", ".join(oauth_names) if oauth_names else "(none declare auth: oauth)"
-        return 2, "", (
-            f"ronin mcp login: no server named {options.server!r} in .ronin/mcp.json; "
-            f"servers that use OAuth: {available}\n"
+        return (
+            2,
+            "",
+            (
+                f"ronin mcp login: no server named {options.server!r} in .ronin/mcp.json; "
+                f"servers that use OAuth: {available}\n"
+            ),
         )
     if config.auth is not AuthKind.OAUTH:
-        return 2, "", (
-            f"ronin mcp login: server {options.server!r} does not use 'auth: oauth' "
-            "(it needs no interactive login)\n"
+        return (
+            2,
+            "",
+            (
+                f"ronin mcp login: server {options.server!r} does not use 'auth: oauth' "
+                "(it needs no interactive login)\n"
+            ),
         )
 
     try:
