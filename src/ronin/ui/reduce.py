@@ -41,6 +41,7 @@ from ronin.core.types import (
     TextDelta,
     Todo,
     ToolEnd,
+    ToolOutput,
     ToolResult,
     ToolStart,
     TurnEnd,
@@ -442,6 +443,8 @@ def reduce_event(state: ViewState, event: Event) -> ViewState:
             arguments_summary=summarize_arguments(event.arguments),
         )
         return replace(state, tool_lines=(*state.tool_lines, line))
+    if isinstance(event, ToolOutput):
+        return state.with_tool_output(event.tool_use_id, event.chunk)
     if isinstance(event, ToolEnd):
         return _with_tool_end(state, event)
     if isinstance(event, ApprovalRequest):

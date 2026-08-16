@@ -33,7 +33,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections import deque
-from collections.abc import AsyncIterator, Iterable, Sequence
+from collections.abc import AsyncIterator, Callable, Iterable, Sequence
 from dataclasses import replace
 from enum import StrEnum
 
@@ -42,6 +42,7 @@ from .protocols import (
     ModelClient,
     Policy,
     ResetChunk,
+    StreamingToolRegistry,
     TextChunk,
     ToolRegistry,
 )
@@ -58,6 +59,7 @@ from .types import (
     Text,
     TextDelta,
     ToolEnd,
+    ToolOutput,
     ToolResult,
     ToolSpec,
     ToolStart,
@@ -394,7 +396,13 @@ async def run_turn(
                 if policy.cancelled():
                     results.append(_interrupted_result())
                     continue
-                results.append(await _execute_one(tools, use))
+                # Serial is where the streaming tools are: a batch only runs in
+                # parallel when every member is read-only, and the tools that print
+                # for minutes (bash) are not.
+                produced: list[ToolResult] = []
+                async for live in _execute_streaming(tools, use, produced):
+                    yield live
+                results.append(produced[0])
 
         for (use, _spec), result in zip(approved, results, strict=True):
             pairs.append((use, result))
@@ -433,19 +441,61 @@ def _render(use: ToolUse) -> str:
     return f"{use.name}({args})"
 
 
-async def _execute_one(tools: ToolRegistry, use: ToolUse) -> ToolResult:
+async def _execute_one(
+    tools: ToolRegistry, use: ToolUse, *, on_output: Callable[[str], None] | None = None
+) -> ToolResult:
     """Execute one call, converting any escape into a value.
 
     A registry is *supposed* to return a ``ToolResult``; a protocol cannot make it,
     so the boundary is enforced here. ``CancelledError`` is caught so the
     conversation still gets a well-formed answer, then re-raised.
+
+    ``on_output`` is honoured only by a registry that advertises
+    :class:`~ronin.core.protocols.StreamingToolRegistry`. Everything else takes the
+    plain call and simply does not stream — liveness is never worth failing a tool over.
     """
     try:
+        if on_output is not None and isinstance(tools, StreamingToolRegistry):
+            return await tools.execute_streaming(use, on_output)
         return await tools.execute(use)
     except asyncio.CancelledError:
         raise
     except Exception as exc:
         return ToolResult(ok=False, error=f"{type(exc).__name__}: {exc}")
+
+
+async def _execute_streaming(
+    tools: ToolRegistry, use: ToolUse, into: list[ToolResult]
+) -> AsyncIterator[ToolOutput]:
+    """Run one call, yielding what it prints *while* it prints it.
+
+    The result cannot be returned — an async generator has no return value — so it is
+    appended to ``into``. The caller runs this to exhaustion and then reads the single
+    element, which keeps the interleaving here and the bookkeeping there.
+
+    The tool runs as a task while a queue collects its chunks, because a generator
+    cannot yield from inside an ``await``. Racing the two is what makes output appear
+    during the command instead of after it. The queue is drained again after the task
+    finishes, so the last lines before a fast exit are not lost.
+    """
+    queue: asyncio.Queue[str] = asyncio.Queue()
+    task = asyncio.create_task(_execute_one(tools, use, on_output=queue.put_nowait))
+    getter: asyncio.Task[str] | None = None
+    try:
+        while True:
+            getter = asyncio.ensure_future(queue.get())
+            done, _pending = await asyncio.wait((task, getter), return_when=asyncio.FIRST_COMPLETED)
+            if getter in done:
+                yield ToolOutput(tool_use_id=use.id, chunk=getter.result())
+                getter = None
+                continue
+            break
+    finally:
+        if getter is not None:
+            getter.cancel()
+    while not queue.empty():
+        yield ToolOutput(tool_use_id=use.id, chunk=queue.get_nowait())
+    into.append(await task)
 
 
 async def _execute_parallel(tools: ToolRegistry, uses: Sequence[ToolUse]) -> list[ToolResult]:

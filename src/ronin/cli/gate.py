@@ -78,7 +78,7 @@ from typing import Any
 from ..agents.hooks import HookEvent, HookReport, HookRunner, cap
 from ..context.budget import ClampMode, OutputBudget, clamp
 from ..context.filestate import FileStateTracker, FileStatus
-from ..core.protocols import ToolRegistry
+from ..core.protocols import StreamingToolRegistry, ToolRegistry
 from ..core.types import ToolResult, ToolSpec, ToolUse
 from ..mcp.tools import is_namespaced
 from ..safety.injection import CLOSE_MARKER, OPEN_MARKER, TaintTracker, wrap_and_scan
@@ -372,9 +372,22 @@ class GatedRegistry:
         the loop's interrupt path unresponsive. A record is still appended first, so
         an interrupted call is visible in ``/doctor`` rather than missing.
         """
+        return await self._gated(use, None)
+
+    async def execute_streaming(self, use: ToolUse, on_output: Callable[[str], None]) -> ToolResult:
+        """Run one call through every stage, forwarding live output as it is produced.
+
+        Satisfies ``core.protocols.StreamingToolRegistry``. The gate itself neither reads
+        nor filters the chunks: what a tool prints while running is the same text its
+        ``ToolResult`` already carries, and the gate's decisions are made on the call, not
+        on its output.
+        """
+        return await self._gated(use, on_output)
+
+    async def _gated(self, use: ToolUse, on_output: Callable[[str], None] | None) -> ToolResult:
         draft = _Draft(tool=use.name, tool_use_id=use.id)
         try:
-            result = await self._run(use, draft)
+            result = await self._run(use, draft, on_output=on_output)
         except asyncio.CancelledError:
             draft.ok = False
             draft.error = "cancelled"
@@ -412,11 +425,13 @@ class GatedRegistry:
 
     # -- the pipeline ------------------------------------------------------- #
 
-    async def _run(self, use: ToolUse, draft: _Draft) -> ToolResult:
+    async def _run(
+        self, use: ToolUse, draft: _Draft, *, on_output: Callable[[str], None] | None = None
+    ) -> ToolResult:
         try:
             pre = await self._fire_pre(use, draft)
             self._check_file_state(use, draft)
-            result = await self._invoke(use, draft)
+            result = await self._invoke(use, draft, on_output=on_output)
             if result.ok:
                 self._record_read(use, draft)
                 result, fenced = self._register_untrusted(use, result, draft)
@@ -589,9 +604,13 @@ class GatedRegistry:
 
     # -- 3: the tool itself ------------------------------------------------- #
 
-    async def _invoke(self, use: ToolUse, draft: _Draft) -> ToolResult:
+    async def _invoke(
+        self, use: ToolUse, draft: _Draft, *, on_output: Callable[[str], None] | None = None
+    ) -> ToolResult:
         draft.stages.append(GateStage.EXECUTE)
         try:
+            if on_output is not None and isinstance(self.inner, StreamingToolRegistry):
+                return await self.inner.execute_streaming(use, on_output)
             return await self.inner.execute(use)
         except asyncio.CancelledError:
             raise

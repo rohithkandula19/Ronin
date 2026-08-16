@@ -41,7 +41,7 @@ import re
 import shutil
 import signal
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
@@ -266,8 +266,16 @@ class PersistentShell:
             self._process = None
             raise ToolError(_DIED) from exc
 
-    async def run(self, command: str, *, timeout: float) -> tuple[str, int]:
-        """Run one command to completion. Returns ``(output, exit_code)``."""
+    async def run(
+        self, command: str, *, timeout: float, on_output: Callable[[str], None] | None = None
+    ) -> tuple[str, int]:
+        """Run one command to completion. Returns ``(output, exit_code)``.
+
+        ``on_output`` receives each line as it is read, so a caller can show a test suite
+        or a build while it runs. It changes nothing about the return value: the complete
+        output is still buffered and returned, and a command with no sink behaves exactly
+        as it did before.
+        """
         async with self._lock:
             await self.start()
             process = self._process
@@ -276,7 +284,7 @@ class PersistentShell:
             await self._write(f"{command}\nprintf '%s %s\\n' {self._sentinel} \"$?\"\n")
             try:
                 output, code = await asyncio.wait_for(
-                    self._read_until_sentinel(process.stdout), timeout=timeout
+                    self._read_until_sentinel(process.stdout, on_output), timeout=timeout
                 )
             except TimeoutError as exc:
                 killed = await self._kill_group()
@@ -288,7 +296,9 @@ class PersistentShell:
                 ) from exc
             return output, code
 
-    async def _read_until_sentinel(self, stream: asyncio.StreamReader) -> tuple[str, int]:
+    async def _read_until_sentinel(
+        self, stream: asyncio.StreamReader, on_output: Callable[[str], None] | None = None
+    ) -> tuple[str, int]:
         collected: list[str] = []
         while True:
             try:
@@ -309,6 +319,14 @@ class PersistentShell:
                 code = int(tail.strip() or 0) if tail.strip().lstrip("-").isdigit() else 0
                 return "".join(collected), code
             collected.append(text)
+            if on_output is not None:
+                # Liveness only. The sink is best-effort by contract, so a consumer that
+                # raises must not turn a working command into a failed one — the buffer
+                # above is what the model is shown either way.
+                try:
+                    on_output(text)
+                except Exception:
+                    on_output = None
 
     async def _kill_group(self) -> bool:
         """Kill the shell's whole process group. Returns whether children existed."""
@@ -436,7 +454,9 @@ class BashTool(Tool):
         if optional_bool(args, "run_in_background"):
             return await self._start_background(command, ctx)
 
-        output, code = await self._session.shell.run(command, timeout=timeout)
+        output, code = await self._session.shell.run(
+            command, timeout=timeout, on_output=ctx.on_output
+        )
         body = clamp_output(output.rstrip("\n"))
         if code == 0:
             return ToolResult(ok=True, content=body or "(no output)")

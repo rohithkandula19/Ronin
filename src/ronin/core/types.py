@@ -575,6 +575,30 @@ class ToolEnd:
 
 
 @dataclass(frozen=True, slots=True)
+class ToolOutput:
+    """A chunk a still-running tool has printed, forwarded while it runs.
+
+    Emitted between a tool's :class:`ToolStart` and its :class:`ToolEnd`, so a test
+    suite or a build is visible as it happens instead of only once it exits. Purely
+    additive: the complete output still arrives in the ``ToolResult`` on ``ToolEnd``,
+    which remains the only thing the *model* is shown. A consumer that ignores this
+    event loses nothing but the liveness.
+
+    Chunks arrive at whatever boundary the pipe produced — a chunk is not a line, and
+    a consumer that assumes it is will split words in half.
+    """
+
+    tool_use_id: str
+    chunk: str
+
+    def __post_init__(self) -> None:
+        if not self.tool_use_id:
+            raise ValueError("ToolOutput.tool_use_id is required")
+        if not isinstance(self.chunk, str):
+            raise TypeError("ToolOutput.chunk must be a str")
+
+
+@dataclass(frozen=True, slots=True)
 class ApprovalRequest:
     """The loop asking a human to decide, and blocking until it hears back.
 
@@ -748,6 +772,7 @@ Event = (
     | TextDelta
     | StreamReset
     | ToolStart
+    | ToolOutput
     | ToolEnd
     | ApprovalRequest
     | Compaction
@@ -761,6 +786,7 @@ EVENT_TYPES: tuple[type, ...] = (
     TextDelta,
     StreamReset,
     ToolStart,
+    ToolOutput,
     ToolEnd,
     ApprovalRequest,
     Compaction,
@@ -800,6 +826,7 @@ __all__ = [
     "Todo",
     "TodoStatus",
     "ToolEnd",
+    "ToolOutput",
     "ToolResult",
     "ToolResultBlock",
     "ToolSpec",

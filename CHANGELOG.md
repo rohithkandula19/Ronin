@@ -5,6 +5,23 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Added
+- **The activity line, and live tool output (`ui/`, `core/`, `tools/`).** X1: between
+  events the TUI was a still image — there is no timer anywhere in `ui/`, so a model
+  thinking for thirty seconds and a dead process looked identical, on every turn. Now a
+  spinner, a name-blind label for what is running (`read_file x12`, derived by counting
+  rather than from a table of tool names), and an elapsed clock that appears only after
+  2s — a number that flickers on for every fast tool is noise; a number that *appears*
+  is the signal. Time enters the pure reducer through one door (`with_activity`), and a
+  turn parked on an approval is deliberately *not* busy: the human is the one being
+  waited on. Reasoning is labelled, never shown — `show_thinking` still decides that.
+  Long commands now stream: a new `ToolOutput` event carries what a running tool has
+  printed, rendered as a bounded tail under its line, so a test suite is visible while
+  it runs. The transport is opt-in by design — `StreamingToolRegistry` is a *second*
+  protocol rather than a wider `execute`, because widening it would make the loop call
+  every existing registry with an argument it does not accept, turning a working tool
+  into a failed `ToolResult`. A registry that does not implement it simply does not
+  stream, and a sink that raises never fails the command.
+
 - **End-to-end stage-ablation smoke test (`training/tests/test_stage_ablation_e2e.py`).** Drives
   the whole wired path over a tiny real suite: four task dirs loaded from disk, run through the
   real `ronin.evals` runner, passed/failed by the **real `verify.sh` subprocess** against the

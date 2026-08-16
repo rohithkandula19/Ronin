@@ -71,6 +71,7 @@ from ..core.types import (
     StreamReset,
     TextDelta,
     ToolEnd,
+    ToolOutput,
     ToolStart,
     TurnEnd,
     TurnStart,
@@ -252,6 +253,11 @@ def transcript_lines(
                     f"verify {outcome} ({event.checks_passed} ok, "
                     f"{event.checks_failed} failed{repaired})"
                 )
+            continue
+        if isinstance(event, ToolOutput):
+            # A duel transcript compares *decisions*, and a tool's partial output is
+            # the same text its ToolEnd already carries. Including it would make two
+            # runs differ on chunk boundaries — a pipe detail, not a behaviour.
             continue
         kind = "recoverable" if event.recoverable else "fatal"
         emit(f"error ({event.kind}, {kind}) {_clip(event.message, max_line_chars)}")

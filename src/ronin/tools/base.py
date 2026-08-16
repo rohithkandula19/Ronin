@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import os
 from abc import ABC, abstractmethod
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
@@ -55,6 +55,15 @@ class ToolContext:
     env: Mapping[str, str] = field(default_factory=lambda: dict(os.environ))
     #: The model's own scratchpad, owned by ``todo_write`` and read by the UI.
     todos: tuple[Any, ...] = ()
+    #: Where a long-running tool may post output *while it runs*, so the interface can
+    #: show a test suite or a build as it happens rather than only once it exits. Bound
+    #: per call by the registry, so a chunk is always attributable to one tool use.
+    #:
+    #: Optional by design: a tool that ignores it behaves exactly as before, and the
+    #: complete output still reaches the model in the returned ``ToolResult``. This is
+    #: liveness, never the record — never route anything through here that the model
+    #: needs, because nothing guarantees a consumer is listening.
+    on_output: Callable[[str], None] | None = None
 
     def resolve(self, path: str) -> Path:
         """Turn a model-supplied path into an absolute one under ``root``.
