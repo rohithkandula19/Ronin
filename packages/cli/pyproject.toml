@@ -31,7 +31,7 @@ dependencies = [
     "pydantic>=2.5,<3",
     "typer>=0.12,<1",
     "rich>=13.7,<16",
-    "textual>=8.0,<9",
+    "textual>=8.2.8,<9",
     "tomli-w>=1.0,<2",
     "ronin-agent-patterns==1.0.0",
     "ronin-dialect==1.0.0",
