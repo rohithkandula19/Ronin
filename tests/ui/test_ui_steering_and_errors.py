@@ -112,7 +112,9 @@ async def test_interrupt_stops_a_command_that_is_already_running() -> None:
             await shell.close()
         elapsed = time.monotonic() - started
 
-    assert elapsed < 5.0, f"esc did not stop the command (took {elapsed:.1f}s)"
+    # Generous: the command would take 30s uninterrupted, so anything under 10 proves
+    # the interrupt landed, without asserting the runner's speed.
+    assert elapsed < 10.0, f"esc did not stop the command (took {elapsed:.1f}s)"
     assert not produced[0].ok
     assert "interrupted" in produced[0].error  # a well-formed result, not an exception
 
@@ -137,7 +139,9 @@ async def test_the_killed_command_leaves_no_orphaned_children() -> None:
                 ToolUse(
                     id="t1",
                     name="bash",
-                    arguments={"command": f"(sleep 2; touch {marker}) & wait"},
+                    # 4s, not 2: a loaded CI runner can delay the kill, and a margin
+                    # that assumes a fast machine turns a real check into a flake.
+                    arguments={"command": f"(sleep 4; touch {marker}) & wait"},
                 ),
                 produced,
                 cancelled=lambda: cancelled["now"],
@@ -145,7 +149,7 @@ async def test_the_killed_command_leaves_no_orphaned_children() -> None:
                 pass
         finally:
             await shell.close()
-        await asyncio.sleep(2.5)  # past when an orphan would have fired
+        await asyncio.sleep(5.0)  # past when an orphan would have fired
         assert not marker.exists(), "the process group was orphaned instead of killed"
 
 
