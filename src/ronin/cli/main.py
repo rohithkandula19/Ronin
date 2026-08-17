@@ -2005,11 +2005,7 @@ async def _slash(line: str, agent: Agent, streams: Streams) -> Slash:
         agent.reset()
         streams.out("transcript dropped; the workspace and tools are unchanged.\n")
     elif name == "cost":
-        budget = agent.conversation.budget
-        streams.out(
-            f"{budget.spent_tokens:,} tokens, ${budget.spent_usd:.4f}, "
-            f"{budget.elapsed_seconds:.0f}s\n"
-        )
+        streams.out(cost_report(agent))
     elif name == "diff":
         result = await agent.runtime.checkpoints.session_diff()
         streams.out((result.diff if result.ok else result.detail) + "\n")
@@ -2312,6 +2308,75 @@ def _sessions_by_cost(directory: Path, wanted: SessionsOptions, *, streams: Stre
     return EXIT_OK
 
 
+#: What a rate limit looks like in a transport message. Named so the user is told to wait
+#: rather than to go debugging their endpoint.
+_RATE_LIMIT_MARKERS = ("429", "rate limit", "rate_limit", "too many requests")
+
+
+def cost_report(agent: Agent) -> str:
+    """``/cost``: the session's spend, broken down when the ledger can break it down.
+
+    The budget line is always shown, because it is what the ceilings are actually checked
+    against. The ledger adds what the budget structurally cannot: a cache-hit rate, the
+    main-versus-subagent split (which is how "the expensive model did the cheap work"
+    becomes visible), and an honest count of requests that were unpriced or reported no
+    usage at all. Absent or empty, only the budget line prints — a missing ledger is not
+    an error, it is a session that has not made a priced request yet.
+    """
+    budget = agent.conversation.budget
+    lines = [
+        f"{budget.spent_tokens:,} tokens, ${budget.spent_usd:.4f}, {budget.elapsed_seconds:.0f}s"
+    ]
+    # The ledger and the session id live on the subagent seam, which is the one
+    # place both the main client and every child write their rows through.
+    subagents = agent.runtime.session.subagents
+    ledger = subagents.ledger
+    if ledger is None:
+        return "\n".join(lines) + "\n"
+    session_id = subagents.session_id
+    totals = ledger.session_totals(session_id)
+    if not totals.requests:
+        return "\n".join(lines) + "\n"
+    lines.append(f"  {totals.summary()}")
+    roles = ledger.role_totals(session_id)
+    if len(roles) > 1:
+        for role, per_role in sorted(roles.items(), key=lambda item: item[0].value):
+            lines.append(f"  {role.value:<6} {per_role.summary()}")
+    return "\n".join(lines) + "\n"
+
+
+def provider_failure_message(exc: ProviderError) -> str:
+    """A transport failure, in words a user can act on. Never a traceback.
+
+    The audit found this reaching the terminal as a raw Python stack trace: retries and
+    failover raise once they give up, and nothing caught it. A stack trace tells the user
+    nothing about whether to wait, switch model, or check their network — which is the only
+    question they have at that moment. Rate limiting is separated out because its answer
+    ("wait, or switch") is different from every other transport failure's.
+    """
+    who = f" [{exc.provider}]" if exc.provider else ""
+    detail = str(exc).strip() or "the provider gave no detail"
+    lowered = detail.lower()
+    if any(marker in lowered for marker in _RATE_LIMIT_MARKERS):
+        wait = f" It asked to wait {exc.retry_after}." if exc.retry_after else ""
+        return (
+            f"rate limited{who} — Ronin retried and the limit was still in force.{wait}\n"
+            f"  {detail}\n"
+            "  wait and run again, or switch model with `/model` (a local model has no "
+            "rate limit).\n"
+        )
+    hint = (
+        "the request is retryable, so this was a persistent outage rather than a bad request"
+        if exc.retryable
+        else "the request was refused outright — check the endpoint, the model name and the key"
+    )
+    return (
+        f"the model could not be reached{who}, after retries and failover.\n"
+        f"  {detail}\n"
+        f"  {hint}. `ronin doctor` checks configuration and reachability.\n"
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Entry point
 # --------------------------------------------------------------------------- #
@@ -2345,6 +2410,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     except KeyboardInterrupt:
         # A ctrl-c at the prompt is a normal way to leave, not a traceback.
         streams.err("\ninterrupted\n")
+        return EXIT_ERROR
+    except ProviderError as exc:
+        # Retries and failover raise once exhausted. Reaching the user as a stack trace is
+        # the worst version of the worst moment, and it lands hardest on the flaky local
+        # endpoints Ronin is aimed at.
+        streams.err(provider_failure_message(exc))
         return EXIT_ERROR
 
 

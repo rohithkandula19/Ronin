@@ -228,6 +228,18 @@ TOOL_OUTPUT_INDENT = "  │ "
 #: this is one line's two fields, not a row of independent facts.
 ACTIVITY_SEPARATOR = " · "
 
+#: When the context gauge starts warning. Just under the 0.8 at which compaction fires, so
+#: the warning arrives *before* the fold rather than reporting it afterwards.
+CONTEXT_WARN_FRACTION = 0.75
+#: Appended to the context percentage once past the warning line.
+CONTEXT_WARN_MARK = " ⚠"
+
+#: What the queued-message line says. Names the timing, because "queued" alone does not
+#: tell the user whether to wait or to interrupt.
+QUEUED_ONE = "queued — runs when this turn ends (esc to interrupt now)"
+QUEUED_MANY = "{n} queued — they run in order when this turn ends (esc to interrupt now)"
+QUEUED_INDENT = "  | "
+
 #: How long in-flight work must go quiet before the activity line shows a clock. Below
 #: this every ordinary tool would flash a number; above it, the number appearing is the
 #: warning that something is slow.
@@ -415,6 +427,11 @@ def render_status(
     if cost_usd < 0.0:
         raise ValueError("cost_usd must be >= 0.0")
     percent = OVER_CAPACITY if context_used > 1.0 else f"{round(context_used * 100)}%"
+    if context_used >= CONTEXT_WARN_FRACTION:
+        # A gauge that only reports is no use at the one moment it matters. Compaction
+        # fires silently at 80%, so the number crossing this line is the user's only
+        # notice that the window is about to be folded under them.
+        percent = f"{percent}{CONTEXT_WARN_MARK}"
     segments = [
         styles.text(model) or NO_MODEL,
         f"{percent} ctx",
@@ -581,6 +598,22 @@ def render_activity(state: ViewState, *, styles: Styles = PLAIN) -> str:
     return styles.wrap("tool_running", head)
 
 
+def render_queued(state: ViewState, *, styles: Styles = PLAIN) -> str:
+    """What the user typed while the agent was working, and what will happen to it.
+
+    Shown because the alternative is what the session audit found: a correction typed
+    mid-turn silently waits with nothing on screen acknowledging it, which reads as the
+    keystroke having been swallowed. Saying *when* it will run is the point — the user
+    decides whether to also press esc.
+    """
+    if not state.queued:
+        return ""
+    head = QUEUED_ONE if len(state.queued) == 1 else QUEUED_MANY.format(n=len(state.queued))
+    lines = [styles.wrap("meta", head)]
+    lines += [styles.wrap("meta", styles.text(f"{QUEUED_INDENT}{item}")) for item in state.queued]
+    return "\n".join(lines)
+
+
 def render_notices(state: ViewState, *, styles: Styles = PLAIN) -> str:
     """Local answers — a slash command's output, a rewind's outcome.
 
@@ -624,6 +657,8 @@ class Panels:
     activity: str = ""
     #: Local answers: slash-command output and other things the session said itself.
     notices: str = ""
+    #: Messages typed mid-turn and waiting their turn. Empty when nothing is queued.
+    queued: str = ""
 
 
 def render_panels(
@@ -647,6 +682,7 @@ def render_panels(
         errors=render_errors(state, styles=styles),
         activity=render_activity(state, styles=styles),
         notices=render_notices(state, styles=styles),
+        queued=render_queued(state, styles=styles),
     )
 
 
@@ -656,6 +692,8 @@ __all__ = [
     "APPROVAL_MAX_LINES",
     "APPROVAL_PROMPT",
     "APPROVAL_TRUNCATION",
+    "CONTEXT_WARN_FRACTION",
+    "CONTEXT_WARN_MARK",
     "CR_GLYPH",
     "DANGER_MARKER",
     "DIFF_MAX_LINES",
@@ -665,6 +703,9 @@ __all__ = [
     "NO_CHANGES_NOTE",
     "OVER_CAPACITY",
     "PLAIN",
+    "QUEUED_INDENT",
+    "QUEUED_MANY",
+    "QUEUED_ONE",
     "STATUS_SEPARATOR",
     "TODO_GLYPHS",
     "TOKENS",
@@ -679,6 +720,7 @@ __all__ = [
     "render_errors",
     "render_notices",
     "render_panels",
+    "render_queued",
     "render_status",
     "render_status_for",
     "render_todos",

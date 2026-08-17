@@ -91,6 +91,7 @@ from ..mcp.tools import extend_registry
 from ..mcp.transport import HttpxSender
 from ..persistence.index import SessionIndex
 from ..persistence.transcript import Transcript, new_session_id
+from ..providers.accounting import Ledger
 from ..providers.router import Role as ModelRole
 from ..providers.router import Router
 from ..safety.denylist import Denylist
@@ -134,6 +135,8 @@ from .stream import extractor_for
 #: largest window any shipped provider offers: compacting earlier than necessary costs
 #: one summarization, while assuming a window the model does not have costs the turn.
 #: The real value belongs in the router config; this is the floor a bare run gets.
+LEDGER_FILENAME = "ledger.db"
+
 DEFAULT_CONTEXT_WINDOW = 128_000
 
 #: Ceiling handed to the gate's :class:`~ronin.context.budget.OutputBudget`. The same
@@ -740,6 +743,10 @@ async def build_runtime(
         router,
         ctx,
         base_tools=base_tools,
+        # The per-request ledger, wired at last. It was written, tested and then never
+        # constructed by the CLI, so `Budget` (provider-reported totals only, no price
+        # fallback, no role split, no cache-hit rate) was all `/cost` could report.
+        ledger=Ledger(paths.cache_dir / LEDGER_FILENAME),
         session_id=sid,
         # Empty on purpose: the map is in `Runtime.system` via `Loaded.system_suffix`,
         # and passing it here as well would put it in the prompt twice. The cost is
