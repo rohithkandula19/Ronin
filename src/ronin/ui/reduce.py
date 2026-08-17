@@ -96,6 +96,10 @@ WAITING_LABEL = "waiting for the model"
 #: progress indicator needed something to display.
 THINKING_LABEL = "thinking"
 
+#: How many local (non-model) answers the notices pane keeps. Small: this is a
+#: scratch area for the last thing asked, not a second transcript.
+NOTICE_HISTORY = 20
+
 #: Joins a repeated tool name to its count: ``read_file x12``. This is how the activity
 #: line says "reading 12 files" without a table of tool names — see the module docstring's
 #: third invariant. The tool names itself; the reducer only counts. ASCII on purpose: the
@@ -274,6 +278,11 @@ class ViewState:
     #: the number that answers "is it stuck?", and it is supplied rather than derived:
     #: the reducer has no clock, and giving it one would make every fold untestable.
     waiting_seconds: float = 0.0
+    #: Output from things that are not the model: a slash command's answer, a rewind's
+    #: outcome. Kept out of the transcript on purpose — the transcript is what the model
+    #: said, and folding `/help` into it would make the conversation a record of two
+    #: different voices with no way to tell them apart.
+    notices: tuple[str, ...] = ()
 
     @property
     def text(self) -> str:
@@ -315,6 +324,23 @@ class ViewState:
         if waiting_seconds < 0.0:
             raise ValueError("waiting_seconds must be >= 0.0")
         return replace(self, tick=tick, waiting_seconds=waiting_seconds)
+
+    def with_notice(self, text: str, *, keep: int = NOTICE_HISTORY) -> ViewState:
+        """Record something the session said that the model did not.
+
+        The door for slash-command output and other local answers. Bounded, because a
+        session that runs `/cost` fifty times should not carry fifty answers; only the
+        most recent ``keep`` survive, newest last.
+        """
+        if not text:
+            return self
+        return replace(self, notices=(*self.notices, text)[-keep:])
+
+    def cleared_notices(self) -> ViewState:
+        """Drop the notices. Called when a new turn starts: a command's answer belongs
+        to the moment it was asked, and leaving it above a running turn reads as though
+        it were part of that turn."""
+        return self if not self.notices else replace(self, notices=())
 
     def with_tool_output(
         self,
@@ -713,6 +739,7 @@ __all__ = [
     "FINISHED_STATES",
     "MODE_CYCLE",
     "MODE_LABELS",
+    "NOTICE_HISTORY",
     "OK_SUMMARY",
     "PRIMARY_ARGUMENT_KEYS",
     "REMEMBER_KEY",

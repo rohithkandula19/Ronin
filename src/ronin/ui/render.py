@@ -217,6 +217,8 @@ TRANSCRIPT_MAX_LINES = 2000
 TOOL_PANE_MAX_LINES = 200
 TODO_MAX_ITEMS = 100
 APPROVAL_MAX_LINES = 200
+#: `/help` is a table and a command may print a diff; generous, but still bounded.
+NOTICE_MAX_LINES = 300
 STATUS_MAX_WIDTH = 120
 
 #: Marks a streamed output line as belonging to the tool line above it.
@@ -579,6 +581,20 @@ def render_activity(state: ViewState, *, styles: Styles = PLAIN) -> str:
     return styles.wrap("tool_running", head)
 
 
+def render_notices(state: ViewState, *, styles: Styles = PLAIN) -> str:
+    """Local answers — a slash command's output, a rewind's outcome.
+
+    Deliberately a region of its own rather than part of the transcript. The transcript
+    is what the *model* said; `/help`'s table folded into it would make the conversation
+    a record of two voices with no way to tell them apart, and an exported session would
+    carry the confusion forward.
+    """
+    if not state.notices:
+        return ""
+    body = "\n".join(styles.text(notice) for notice in state.notices)
+    return truncate_lines(body, NOTICE_MAX_LINES, what="command output", styles=styles)
+
+
 def render_errors(state: ViewState, *, styles: Styles = PLAIN) -> str:
     if not state.errors:
         return ""
@@ -606,6 +622,8 @@ class Panels:
     #: The live spinner line. Empty when nothing is in flight — the app clears the
     #: region rather than leaving the last turn's activity on screen.
     activity: str = ""
+    #: Local answers: slash-command output and other things the session said itself.
+    notices: str = ""
 
 
 def render_panels(
@@ -628,6 +646,7 @@ def render_panels(
         approval=approval,
         errors=render_errors(state, styles=styles),
         activity=render_activity(state, styles=styles),
+        notices=render_notices(state, styles=styles),
     )
 
 
@@ -641,6 +660,7 @@ __all__ = [
     "DANGER_MARKER",
     "DIFF_MAX_LINES",
     "MARKUP",
+    "NOTICE_MAX_LINES",
     "NO_BRANCH",
     "NO_CHANGES_NOTE",
     "OVER_CAPACITY",
@@ -657,6 +677,7 @@ __all__ = [
     "render_approval",
     "render_diff",
     "render_errors",
+    "render_notices",
     "render_panels",
     "render_status",
     "render_status_for",

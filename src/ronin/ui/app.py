@@ -45,8 +45,9 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
-from ronin.core.types import ApprovalDecision, ApprovalRequest, Event, Mode, TurnEnd
+from ronin.core.types import ApprovalDecision, ApprovalRequest, Event, Mode, TurnEnd, TurnStart
 
+from .commands import is_command
 from .reduce import (
     SPINNER_INTERVAL_SECONDS,
     EscapeAction,
@@ -81,6 +82,7 @@ STATUS_ID = "status"
 ERRORS_ID = "errors"
 INPUT_ID = "prompt-input"
 ACTIVITY_ID = "activity"
+NOTICES_ID = "notices"
 
 #: Placeholder shown in the empty input line.
 INPUT_PLACEHOLDER = "type a message, Enter to send — esc interrupt, shift+tab mode, ctrl+c quit"
@@ -92,6 +94,7 @@ Screen { layout: vertical; }
 #todos { height: auto; max-height: 30%; padding: 0 1; }
 #approval { height: auto; padding: 0 1; }
 #errors { height: auto; padding: 0 1; }
+#notices { height: auto; max-height: 40%; overflow-y: auto; padding: 0 1; }
 #prompt-input { dock: bottom; height: 3; margin: 0 1; }
 #status { height: 1; dock: bottom; padding: 0 1; }
 """
@@ -173,6 +176,17 @@ class Session:
     #: Unset (demo, a replayed recording) leaves the input inert: nothing consumes a
     #: prompt, so there is no path from a keystroke to a turn that never runs.
     on_submit: Callable[[str], None] | None = None
+    #: Runs a slash command and returns what to show for it. Set, the input line routes
+    #: anything :func:`~ronin.ui.commands.is_command` recognises here instead of to the
+    #: model — which is what makes ``/help`` in the TUI run the command rather than
+    #: asking the model about it. Unset (demo, replay), a slash command is just text.
+    #:
+    #: Async because a command may touch git or the filesystem (``/diff``, ``/undo``),
+    #: and returning the output rather than printing it keeps the app a skin: the
+    #: orchestrator decides what a command *does*, the app only shows the answer. A
+    #: command that should become a turn (a user-defined command, a skill) is queued by
+    #: the orchestrator through the same submissions queue ``on_submit`` feeds.
+    on_command: Callable[[str], Awaitable[str]] | None = None
     #: The clock the activity line measures silence against. Injected for the same
     #: reason every other seam here is: a test asserts what the screen says after four
     #: seconds of nothing without waiting four seconds.
@@ -204,7 +218,7 @@ TurnRunner = Callable[[str], AsyncIterator[Event]]
 
 
 async def multi_turn_events(
-    first: str,
+    first: str | None,
     submissions: asyncio.Queue[str | None],
     run_turn: TurnRunner,
 ) -> AsyncIterator[Event]:
@@ -220,7 +234,10 @@ async def multi_turn_events(
     Termination by a queued ``None`` is for a clean shutdown and for the tests; in a live
     session the app is torn down by ``ctrl+c``, which cancels the worker awaiting here.
     """
-    prompt: str | None = first
+    # An empty or absent `first` means "started with no prompt": wait for the user's
+    # first message rather than running a turn with nothing in it. This is what lets a
+    # bare `ronin` open the view — the reason the TUI used to require an argv prompt.
+    prompt: str | None = first if first else await submissions.get()
     while prompt is not None:
         async for event in run_turn(prompt):
             yield event
@@ -340,6 +357,7 @@ def _build_app(session: Session) -> Any:
             yield static("", id=TODOS_ID)
             yield static("", id=APPROVAL_ID)
             yield static("", id=ERRORS_ID)
+            yield static("", id=NOTICES_ID)
             # Directly above the input, so "what is it doing" sits where the eye already
             # is between turns rather than at the far edge of the screen.
             yield static("", id=ACTIVITY_ID)
@@ -360,8 +378,23 @@ def _build_app(session: Session) -> Any:
             """
             text = event.value
             event.input.value = ""
-            if text.strip() and self.session.on_submit is not None:
+            if not text.strip():
+                return
+            if is_command(text) and self.session.on_command is not None:
+                # A slash command is answered locally, not sent to the model. Run it on a
+                # worker: `/diff` and `/undo` shell out to git, and blocking the message
+                # pump here would freeze the very screen that shows the answer.
+                self.run_worker(self._run_command(text))
+                return
+            if self.session.on_submit is not None:
                 self.session.on_submit(text)
+
+        async def _run_command(self, text: str) -> None:
+            """Run one slash command and show what it said."""
+            assert self.session.on_command is not None
+            output = await self.session.on_command(text)
+            self.state = self.state.with_notice(output)
+            self._paint()
 
         def on_mount(self) -> None:
             self._paint()
@@ -415,6 +448,10 @@ def _build_app(session: Session) -> Any:
                 self.state = advance_activity(
                     self.state, now=self._last_event_at, last_event_at=self._last_event_at
                 )
+                if isinstance(event, TurnStart):
+                    # A command's answer belongs to the moment it was asked; leaving it
+                    # above a running turn reads as though it were part of that turn.
+                    self.state = self.state.cleared_notices()
                 self.state = reduce_event(self.state, event)
                 if isinstance(event, ApprovalRequest) and self.session.on_approval:
                     self.session.on_approval(event)
@@ -431,6 +468,7 @@ def _build_app(session: Session) -> Any:
                 (APPROVAL_ID, panels.approval),
                 (ERRORS_ID, panels.errors),
                 (ACTIVITY_ID, panels.activity),
+                (NOTICES_ID, panels.notices),
                 (STATUS_ID, panels.status),
             ):
                 self.query_one(f"#{region}", static).update(text)
@@ -481,6 +519,7 @@ __all__ = [
     "INPUT_PLACEHOLDER",
     "MODAL_CSS",
     "MODAL_ID",
+    "NOTICES_ID",
     "STATUS_ID",
     "TEXTUAL_MISSING",
     "TODOS_ID",
