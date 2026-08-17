@@ -109,6 +109,8 @@ EXIT_USAGE = EXIT_ERROR
 #: files in someone's repository without asking is a first run they do not trust.
 WIZARD_QUESTION = "set up .ronin/ for this workspace? [Y/n] "
 
+TUI_QUIT_NOTE = "press ctrl+c to leave."
+
 NO_TUI = (
     "the interactive Textual view needs a prompt to show. Falling back to the "
     "line-oriented session; type a request, or 'exit' to leave."
@@ -1767,19 +1769,23 @@ async def _interactive(
 ) -> int:
     """The default path: the Textual view for a given prompt, else a line session.
 
-    ``ui.app.Session`` consumes one ``AsyncIterator[Event]`` and exposes no input
-    widget, so a *multi-turn* Textual conversation is not expressible from here
-    without changing ``ronin.ui.app``. Rather than pretend, the rule is explicit: a
-    prompt on argv gets the Textual view for that turn, and a session with no prompt
-    gets the line REPL, which can actually read the next request.
+    A bare ``ronin`` now opens the Textual view too, waiting for the first message
+    rather than running a turn with nothing in it. That used to be impossible and the
+    old rule ("no prompt gets the line REPL") was written around the limitation:
+    ``Session`` consumed one event iterator with no way to ask for the next prompt.
+    ``multi_turn_events`` and ``on_submit`` removed that, and a default surface with no
+    history, no slash commands and no rendering was the single biggest daily friction
+    in the session audit — so the default follows the better surface.
+
+    The REPL is still the answer for every case the TUI cannot serve: a pipe or any
+    other non-tty, an install without the ``tui`` extra, and ``--no-tui`` for anyone who
+    prefers it. None of those is a degraded TUI; each is the surface that actually works.
     """
-    if options.tui and options.prompt and streams.isatty:
+    if options.tui and streams.isatty:
         if not textual_available():
             streams.err(TEXTUAL_MISSING + "\n")
         else:
             return await run_app(_app_session(options, agent, handoff))
-    elif options.tui and streams.isatty and not options.prompt:
-        streams.err(NO_TUI + "\n")
     return await _repl(options, agent, streams)
 
 
@@ -1823,6 +1829,42 @@ def _app_session(options: Options, agent: Agent, handoff: Handoff | None) -> App
         outcome = await agent.conversation.rewind(agent.runtime)
         return outcome.detail
 
+    async def on_command(line: str) -> str:
+        """Run one slash command for the TUI and hand back what it printed.
+
+        ``_slash`` already writes through :class:`Streams`, so the whole adaptation is a
+        Streams whose ``out``/``err`` append to a list instead of touching ``sys``. That
+        is why the TUI gets the *real* command set — builtins, user-defined commands from
+        ``.ronin/commands`` and skills — rather than a second implementation that would
+        drift from the REPL's.
+
+        A command that resolves to a prompt (a user-defined command, a skill) is queued
+        as an ordinary turn, exactly as the REPL runs it: this function answers, it does
+        not run turns. ``ask`` refuses rather than blocking — nothing in the TUI can
+        answer a readline, and hanging the worker would freeze the screen.
+        """
+        captured: list[str] = []
+
+        def refuse(_question: str) -> str:
+            return ""
+
+        result = await _slash(
+            line,
+            agent,
+            Streams(
+                out=captured.append,
+                err=captured.append,
+                ask=refuse,
+                flush=lambda: None,
+                isatty=False,
+            ),
+        )
+        if result.prompt:
+            submissions.put_nowait(result.prompt)
+        if result.leave:
+            captured.append(TUI_QUIT_NOTE)
+        return "".join(captured).rstrip("\n")
+
     return AppSession(
         events=multi_turn_events(options.prompt, submissions, run_turn),
         model=agent.runtime.session.router.spec_for(ModelRole.MAIN).model,
@@ -1835,6 +1877,7 @@ def _app_session(options: Options, agent: Agent, handoff: Handoff | None) -> App
         on_attach=handoff.attach if handoff is not None else None,
         on_status=lambda: context_share(agent.conversation.messages, agent.runtime.compaction),
         on_submit=submissions.put_nowait,
+        on_command=on_command,
     )
 
 

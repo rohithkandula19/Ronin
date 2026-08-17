@@ -4,6 +4,25 @@ All notable changes to this project will be documented here. Format follows [Kee
 
 ## [Unreleased]
 
+### Changed
+- **A bare `ronin` now opens the TUI, and slash commands work there
+  (`cli/main.py`, `ui/`).** The session audit's second-biggest friction, and one that
+  was not on any list: the default start landed in the line REPL, while the richer
+  Textual view needed a prompt on argv — and that view silently forwarded `/help` to the
+  *model* as a question. So the default surface was the weaker one, every session. Both
+  halves are fixed together, because fixing the default without the commands would have
+  removed `/help` from the default experience. `multi_turn_events` now waits for a first
+  message instead of running an empty turn (the old rule existed because `Session` could
+  not express that — `on_submit` removed the limitation). A submitted line that
+  `is_command` recognises is answered locally through the *real* dispatcher — builtins,
+  `.ronin/commands`, skills — by handing `_slash` a capturing `Streams`, so the TUI can
+  never drift from the REPL's command set. Output lands in its own notices region rather
+  than the transcript: the transcript is what the model said, and folding `/help`'s table
+  into it would make the conversation a record of two voices with no way to tell them
+  apart. Notices are bounded and clear when the next turn starts. The REPL remains the
+  surface for every case the TUI cannot serve — a pipe or other non-tty, an install
+  without the `tui` extra, and `--no-tui`.
+
 ### Added
 - **The activity line, and live tool output (`ui/`, `core/`, `tools/`).** X1: between
   events the TUI was a still image — there is no timer anywhere in `ui/`, so a model
