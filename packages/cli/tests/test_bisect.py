@@ -76,6 +76,63 @@ def test_default_good_uses_tag(tmp_path: Path) -> None:
     assert default_good(tmp_path) == "v1.0"
 
 
+def test_a_failure_carries_gits_own_words_not_only_a_guess(tmp_path: Path) -> None:
+    """A bisect that finds nothing must say what git said.
+
+    This test exists because of a CI failure that could not be reproduced locally:
+    the note named the most likely cause and discarded the evidence, so three
+    different root causes were indistinguishable in the log.
+    """
+    _git(tmp_path, "init")
+    _git(tmp_path, "config", "user.email", "t@t.t")
+    _git(tmp_path, "config", "user.name", "t")
+    (tmp_path / "value.txt").write_text("PASS\n", encoding="utf-8")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-m", "only commit")
+    good = _git(tmp_path, "rev-parse", "HEAD").strip()
+
+    # A second commit, so `bisect start` has a range to work with, and a command that
+    # passes at both ends — so bisect can never name a first bad commit.
+    (tmp_path / "x.txt").write_text("a\n", encoding="utf-8")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-m", "second")
+
+    res = run_bisect(tmp_path, "true", good=good, bad="HEAD")
+    assert res.culprit is None
+    assert "couldn't isolate" in res.note
+    assert "git exited" in res.note, "the exit code is part of the evidence"
+    # The guess survives, but as a guess rather than as the whole message.
+    assert "Most often" in res.note
+
+
+def test_a_note_that_would_be_enormous_is_cut_with_a_marker() -> None:
+    from ronin_cli.bisect import NOTE_OUTPUT_CHARS, _no_culprit_note
+
+    class _Run:
+        returncode = 1
+        stdout = ""
+        stderr = "x" * (NOTE_OUTPUT_CHARS + 500)
+
+    note = _no_culprit_note(_Run())  # type: ignore[arg-type]
+    assert "more chars" in note
+    assert len(note) < NOTE_OUTPUT_CHARS + 400
+
+
+def test_a_silent_git_is_reported_as_silent_rather_than_as_blank() -> None:
+    """The bug this closes: a note that ended in a colon and said nothing."""
+    from ronin_cli.bisect import _git_note, _no_culprit_note
+
+    class _Run:
+        returncode = 2
+        stdout = ""
+        stderr = ""
+
+    assert "printed nothing" in _no_culprit_note(_Run())  # type: ignore[arg-type]
+    note = _git_note("bisect start failed.", _Run())  # type: ignore[arg-type]
+    assert not note.rstrip().endswith(":")
+    assert "git exited 2" in note
+
+
 def test_run_bisect_outside_git(tmp_path: Path) -> None:
     res = run_bisect(tmp_path, "true", good="x")
     assert res.culprit is None and "git" in res.note.lower()

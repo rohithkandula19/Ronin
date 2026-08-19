@@ -31,6 +31,42 @@ def parse_first_bad(output: str) -> str | None:
     return m.group(1) if m else None
 
 
+#: How much of git's own output travels with a failure. Enough to hold the reason
+#: git gave, short enough that the note is still a note.
+NOTE_OUTPUT_CHARS = 600
+
+
+def _git_note(head: str, proc: subprocess.CompletedProcess[str]) -> str:
+    """One failure note shape: what we were doing, git's exit code, git's own words.
+
+    Every failure in :func:`run_bisect` used to interpolate a bare slice of stderr,
+    which produced ``"bisect start failed: "`` — a message ending in a colon with
+    nothing after it — whenever git failed silently. Worse, the no-culprit case threw
+    the output away entirely and printed the *most likely* cause as though it were the
+    finding, so a clone that checked out nothing, an oracle that could not find its
+    script, and a bisect where every commit tested good all arrived looking identical.
+    That is an unfalsifiable error message, and it is why a CI failure nobody could
+    reproduce locally could not be diagnosed at all.
+
+    Truncation is marked, like every other truncation in this project.
+    """
+    detail = (proc.stderr or proc.stdout or "").strip()
+    if len(detail) > NOTE_OUTPUT_CHARS:
+        cut = len(detail) - NOTE_OUTPUT_CHARS
+        detail = f"{detail[:NOTE_OUTPUT_CHARS]}…[{cut} more chars]"
+    said = f"git said: {detail}" if detail else "git printed nothing."
+    return f"{head} (git exited {proc.returncode}) {said}"
+
+
+def _no_culprit_note(run: subprocess.CompletedProcess[str]) -> str:
+    """Why bisect named no first bad commit. The guess is kept, but labelled."""
+    return _git_note(
+        "couldn't isolate a single bad commit. Most often the command fails on the "
+        "'good' commit too — check that it passes there.",
+        run,
+    )
+
+
 def default_good(root: Path | str) -> str | None:
     """A sensible 'known-good' starting point: the most recent tag, else ~20
     commits back, else the root commit."""
@@ -72,17 +108,16 @@ def run_bisect(root: Path | str, test_cmd: str, *, good: str, bad: str = "HEAD",
                              str(Path(root).resolve()), clone],
                             capture_output=True, text=True, timeout=120)
         if cl.returncode != 0:
-            return BisectResult(None, note=f"clone failed: {cl.stderr.strip()[:120]}")
+            return BisectResult(None, note=_git_note("clone failed.", cl))
         start = _g("bisect", "start", bad, good)
         if start.returncode != 0:
-            return BisectResult(None, note=f"bisect start failed: {start.stderr.strip()[:120]}")
+            return BisectResult(None, note=_git_note("bisect start failed.", start))
         # cwd = the clone so the oracle command reads each checked-out commit's files.
         run = subprocess.run(["git", "-C", clone, "bisect", "run", "sh", "-c", test_cmd],
                              cwd=clone, capture_output=True, text=True, timeout=timeout)
         sha = parse_first_bad(run.stdout + "\n" + run.stderr)
         if not sha:
-            return BisectResult(None, note="couldn't isolate a single bad commit "
-                                "(is the command failing on 'good' too?)")
+            return BisectResult(None, note=_no_culprit_note(run))
         subject = _g("log", "-1", "--pretty=%h %s", sha).stdout.strip()
         diff = _g("show", "--no-color", sha).stdout
         return BisectResult(culprit=sha, subject=subject, diff=diff)
