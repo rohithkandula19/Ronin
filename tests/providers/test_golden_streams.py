@@ -261,7 +261,14 @@ async def test_anthropic_maps_content_block_index_to_tool_ordinal() -> None:
     assert [use.id for use in drained.uses] == ["toolu_01", "toolu_02"]
 
 
-async def test_anthropic_places_the_cache_marker_on_the_last_tool() -> None:
+async def test_anthropic_places_the_cache_marker_on_the_last_stable_block() -> None:
+    """Anthropic renders tools, then system, then messages.
+
+    ``cache_control`` caches everything up to *and including* its own block, so the
+    marker has to sit on the last stable block — the system block when both exist.
+    On the last tool instead, the cached span ends before the system prompt and the
+    repo map, and both are re-billed at full rate on every turn that has tools.
+    """
     transport = ReplayTransport(chunk_by(load("anthropic/happy.sse"), 0))
     client = AnthropicClient(model="claude-x", transport=transport)
     from ronin.core.types import ToolSpec
@@ -269,6 +276,7 @@ async def test_anthropic_places_the_cache_marker_on_the_last_tool() -> None:
     req = ModelRequest(
         model="claude-x",
         system="stable",
+        prefix="the repo map",
         tools=(
             ToolSpec(name="a", description="first"),
             ToolSpec(name="b", description="last"),
@@ -277,12 +285,50 @@ async def test_anthropic_places_the_cache_marker_on_the_last_tool() -> None:
     )
     await drain(client.stream(req))
     body = transport.last_body
-    tools = body["tools"]
-    assert "cache_control" not in tools[0]
-    assert tools[1]["cache_control"] == {"type": "ephemeral"}
-    # With tools present the system block must NOT also be marked: two markers
-    # would cost two cache writes for one prefix.
-    assert all("cache_control" not in block for block in body["system"])
+    assert body["system"][-1]["cache_control"] == {"type": "ephemeral"}
+    # Exactly one marker: a second would buy a second cache write for one prefix.
+    assert all("cache_control" not in tool for tool in body["tools"])
+    assert sum("cache_control" in block for block in body["system"]) == 1
+
+
+async def test_the_repo_map_is_inside_the_cached_span_not_after_it() -> None:
+    # The repo map is the largest stable segment after the tool specs. It rides on
+    # `prefix`, which renders as the *last* system block — so the marker must land
+    # on it, not on the system prompt before it.
+    transport = ReplayTransport(chunk_by(load("anthropic/happy.sse"), 0))
+    client = AnthropicClient(model="claude-x", transport=transport)
+    from ronin.core.types import ToolSpec
+
+    req = ModelRequest(
+        model="claude-x",
+        system="the system prompt",
+        prefix="the repo map",
+        tools=(ToolSpec(name="a", description="first"),),
+        cache_marker=2,
+    )
+    await drain(client.stream(req))
+    blocks = transport.last_body["system"]
+    assert blocks[-1]["text"] == "the repo map"
+    assert "cache_control" in blocks[-1]
+    assert "cache_control" not in blocks[0]
+
+
+async def test_tools_carry_the_marker_only_when_there_is_no_system_block() -> None:
+    # Then the last tool genuinely *is* the last stable block.
+    transport = ReplayTransport(chunk_by(load("anthropic/happy.sse"), 0))
+    client = AnthropicClient(model="claude-x", transport=transport)
+    from ronin.core.types import ToolSpec
+
+    req = ModelRequest(
+        model="claude-x",
+        tools=(ToolSpec(name="a", description="first"), ToolSpec(name="b", description="last")),
+        cache_marker=0,
+    )
+    await drain(client.stream(req))
+    body = transport.last_body
+    assert "system" not in body
+    assert "cache_control" not in body["tools"][0]
+    assert body["tools"][1]["cache_control"] == {"type": "ephemeral"}
 
 
 async def test_anthropic_marks_the_system_block_when_there_are_no_tools() -> None:
