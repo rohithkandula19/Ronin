@@ -79,7 +79,13 @@ from ..ui.headless import (
     run_headless,
 )
 from ..ui.reduce import ViewState, reduce_event, summarize_arguments, summarize_result
-from ..ui.render import strip_controls
+from ..ui.render import (
+    MARKUP,
+    NO_COLOUR_MARKUP,
+    PLAIN,
+    render_banner,
+    strip_controls,
+)
 from .approve import Handoff, PromptAsker
 from .bench import BenchOptions, default_suite, run_duel_command, run_eval
 from .detect import Detection, detect, real_probe
@@ -116,7 +122,33 @@ NO_TUI = (
     "line-oriented session; type a request, or 'exit' to leave."
 )
 
-REPL_BANNER = "ronin — line session. type a request, /help for commands, 'exit' to leave."
+#: What the line session says on the way in. The wordmark, then the two facts a
+#: first-time user needs. Rendered rather than hardcoded so the identity has one
+#: definition; ``PLAIN`` because the line path emits no escapes at all.
+REPL_HINT = "line session · type a request, /help for commands, 'exit' to leave"
+
+#: The startup hint for the TUI, where the keys are the thing worth naming.
+TUI_HINT = "/help for commands  ·  esc interrupts  ·  shift+tab changes mode"
+
+#: Honoured at the two places that choose a dialect. ``render.py`` is pure and may
+#: not read the environment, so the decision is made here — the same place
+#: ``Streams.isatty`` already lives.
+NO_COLOR_ENV = "NO_COLOR"
+
+
+def wants_colour(env: Mapping[str, str]) -> bool:
+    """Whether to colour output. ``NO_COLOR`` set to anything non-empty means no.
+
+    Follows the no-color.org convention: presence is the signal, and the value is not
+    parsed — ``NO_COLOR=0`` still means no colour, because a user who set it at all
+    meant it.
+    """
+    return not env.get(NO_COLOR_ENV, "")
+
+
+def repl_banner(*, version: str = "") -> str:
+    """The line session's greeting."""
+    return render_banner(version=version, hint=REPL_HINT, styles=PLAIN)
 
 
 class Command(StrEnum):
@@ -1878,6 +1910,12 @@ def _app_session(options: Options, agent: Agent, handoff: Handoff | None) -> App
         on_status=lambda: context_share(agent.conversation.messages, agent.runtime.compaction),
         on_submit=submissions.put_nowait,
         on_command=on_command,
+        banner=render_banner(
+            version=_version(),
+            hint=TUI_HINT,
+            styles=MARKUP if wants_colour(os.environ) else NO_COLOUR_MARKUP,
+        ),
+        styles=MARKUP if wants_colour(os.environ) else NO_COLOUR_MARKUP,
     )
 
 
@@ -1887,7 +1925,7 @@ async def _repl(options: Options, agent: Agent, streams: Streams) -> int:
     Deliberately plain — it exists so a bare install (and every test) has a working
     interactive path, and so the slash commands are reachable without Textual.
     """
-    streams.out(REPL_BANNER + "\n")
+    streams.out(repl_banner(version=_version()) + "\n")
     exit_code = EXIT_OK
     pending = options.prompt
     while True:
@@ -2422,7 +2460,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 __all__ = [
     "EXIT_USAGE",
     "PROGRAM",
-    "REPL_BANNER",
+    "REPL_HINT",
+    "TUI_HINT",
     "WIZARD_QUESTION",
     "Command",
     "ExportFormat",
@@ -2433,6 +2472,8 @@ __all__ = [
     "dispatch",
     "main",
     "parse",
+    "repl_banner",
+    "wants_colour",
 ]
 
 

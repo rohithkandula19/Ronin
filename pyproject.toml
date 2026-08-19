@@ -344,6 +344,7 @@ module = [
     "test_ui_controls",
     "test_ui_demo",
     "test_ui_headless",
+    "test_ui_identity",
     "test_ui_input_surfaces",
     "test_ui_integration",
     "test_ui_keys",
