@@ -96,6 +96,10 @@ WAITING_LABEL = "waiting for the model"
 #: progress indicator needed something to display.
 THINKING_LABEL = "thinking"
 
+#: Prefixes a stream-reset notice. The user sees partial text disappear; without a reason
+#: attached that reads as a bug rather than as a provider retry.
+RETRY_PREFIX = "retrying — "
+
 #: How many local (non-model) answers the notices pane keeps. Small: this is a
 #: scratch area for the last thing asked, not a second transcript.
 NOTICE_HISTORY = 20
@@ -278,6 +282,10 @@ class ViewState:
     #: the number that answers "is it stuck?", and it is supplied rather than derived:
     #: the reducer has no clock, and giving it one would make every fold untestable.
     waiting_seconds: float = 0.0
+    #: Messages the user typed while a turn was running. They run as the next turn — the
+    #: queue is how you redirect without killing what is in flight — but until this field
+    #: existed nothing on screen said they had been received, so a correction looked lost.
+    queued: tuple[str, ...] = ()
     #: Output from things that are not the model: a slash command's answer, a rewind's
     #: outcome. Kept out of the transcript on purpose — the transcript is what the model
     #: said, and folding `/help` into it would make the conversation a record of two
@@ -335,6 +343,15 @@ class ViewState:
         if not text:
             return self
         return replace(self, notices=(*self.notices, text)[-keep:])
+
+    def with_queued(self, text: str) -> ViewState:
+        """Record a message typed mid-turn, so the user can see it landed."""
+        return self if not text.strip() else replace(self, queued=(*self.queued, text))
+
+    def cleared_queued(self) -> ViewState:
+        """Drop the queue. Called when a turn starts: whatever was waiting is now running,
+        and showing it as still-pending would be a lie about which turn is in flight."""
+        return self if not self.queued else replace(self, queued=())
 
     def cleared_notices(self) -> ViewState:
         """Drop the notices. Called when a new turn starts: a command's answer belongs
@@ -461,7 +478,11 @@ def reduce_event(state: ViewState, event: Event) -> ViewState:
             return replace(state, span_thinking=state.span_thinking + event.text)
         return replace(state, span_text=state.span_text + event.text)
     if isinstance(event, StreamReset):
-        return replace(state, span_text="", span_thinking="", resets=state.resets + 1)
+        # The reason used to be discarded, which is why a retry looked like text vanishing
+        # mid-answer for no reason. It is a notice rather than transcript: the model did not
+        # say it, and the discarded span is already gone from the screen.
+        reset = replace(state, span_text="", span_thinking="", resets=state.resets + 1)
+        return reset.with_notice(f"{RETRY_PREFIX}{event.reason}") if event.reason else reset
     if isinstance(event, ToolStart):
         line = ToolLine(
             tool_use_id=event.tool_use_id,
@@ -746,6 +767,7 @@ __all__ = [
     "REPEAT_GLYPH",
     "RESULT_ARROW",
     "RESULT_SUMMARY_LIMIT",
+    "RETRY_PREFIX",
     "RUNNING_MARKER",
     "SPINNER_FRAMES",
     "SPINNER_INTERVAL_SECONDS",

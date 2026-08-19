@@ -83,6 +83,7 @@ ERRORS_ID = "errors"
 INPUT_ID = "prompt-input"
 ACTIVITY_ID = "activity"
 NOTICES_ID = "notices"
+QUEUED_ID = "queued"
 
 #: Placeholder shown in the empty input line.
 INPUT_PLACEHOLDER = "type a message, Enter to send — esc interrupt, shift+tab mode, ctrl+c quit"
@@ -95,6 +96,7 @@ Screen { layout: vertical; }
 #approval { height: auto; padding: 0 1; }
 #errors { height: auto; padding: 0 1; }
 #notices { height: auto; max-height: 40%; overflow-y: auto; padding: 0 1; }
+#queued { height: auto; padding: 0 1; }
 #prompt-input { dock: bottom; height: 3; margin: 0 1; }
 #status { height: 1; dock: bottom; padding: 0 1; }
 """
@@ -358,6 +360,7 @@ def _build_app(session: Session) -> Any:
             yield static("", id=APPROVAL_ID)
             yield static("", id=ERRORS_ID)
             yield static("", id=NOTICES_ID)
+            yield static("", id=QUEUED_ID)
             # Directly above the input, so "what is it doing" sits where the eye already
             # is between turns rather than at the far edge of the screen.
             yield static("", id=ACTIVITY_ID)
@@ -388,6 +391,11 @@ def _build_app(session: Session) -> Any:
                 return
             if self.session.on_submit is not None:
                 self.session.on_submit(text)
+                if self.state.busy:
+                    # Mid-turn: it will run as the next turn. Say so, rather than letting
+                    # the keystroke look swallowed.
+                    self.state = self.state.with_queued(text)
+                    self._paint()
 
         async def _run_command(self, text: str) -> None:
             """Run one slash command and show what it said."""
@@ -451,7 +459,7 @@ def _build_app(session: Session) -> Any:
                 if isinstance(event, TurnStart):
                     # A command's answer belongs to the moment it was asked; leaving it
                     # above a running turn reads as though it were part of that turn.
-                    self.state = self.state.cleared_notices()
+                    self.state = self.state.cleared_notices().cleared_queued()
                 self.state = reduce_event(self.state, event)
                 if isinstance(event, ApprovalRequest) and self.session.on_approval:
                     self.session.on_approval(event)
@@ -469,6 +477,7 @@ def _build_app(session: Session) -> Any:
                 (ERRORS_ID, panels.errors),
                 (ACTIVITY_ID, panels.activity),
                 (NOTICES_ID, panels.notices),
+                (QUEUED_ID, panels.queued),
                 (STATUS_ID, panels.status),
             ):
                 self.query_one(f"#{region}", static).update(text)
@@ -520,6 +529,7 @@ __all__ = [
     "MODAL_CSS",
     "MODAL_ID",
     "NOTICES_ID",
+    "QUEUED_ID",
     "STATUS_ID",
     "TEXTUAL_MISSING",
     "TODOS_ID",

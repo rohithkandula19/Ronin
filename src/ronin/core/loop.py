@@ -34,6 +34,7 @@ import asyncio
 import json
 from collections import deque
 from collections.abc import AsyncIterator, Callable, Iterable, Sequence
+from contextlib import suppress
 from dataclasses import replace
 from enum import StrEnum
 
@@ -84,6 +85,12 @@ NUDGE = (
 
 INTERRUPTED_ERROR = "interrupted by user"
 STALL_ABORTED = "not run: the turn was aborted because the model stalled"
+
+#: How often a running tool is checked against the cancel flag. The cooperative check at
+#: loop boundaries cannot help a command that runs for minutes, so the tool task is polled
+#: at this interval instead — short enough that `esc` feels immediate, long enough that the
+#: poll is not the reason a turn is slow.
+CANCEL_POLL_SECONDS = 0.05
 
 
 class StopReason(StrEnum):
@@ -400,7 +407,9 @@ async def run_turn(
                 # parallel when every member is read-only, and the tools that print
                 # for minutes (bash) are not.
                 produced: list[ToolResult] = []
-                async for live in _execute_streaming(tools, use, produced):
+                async for live in _execute_streaming(
+                    tools, use, produced, cancelled=policy.cancelled
+                ):
                     yield live
                 results.append(produced[0])
 
@@ -465,7 +474,12 @@ async def _execute_one(
 
 
 async def _execute_streaming(
-    tools: ToolRegistry, use: ToolUse, into: list[ToolResult]
+    tools: ToolRegistry,
+    use: ToolUse,
+    into: list[ToolResult],
+    *,
+    cancelled: Callable[[], bool] | None = None,
+    poll: float = CANCEL_POLL_SECONDS,
 ) -> AsyncIterator[ToolOutput]:
     """Run one call, yielding what it prints *while* it prints it.
 
@@ -477,6 +491,12 @@ async def _execute_streaming(
     cannot yield from inside an ``await``. Racing the two is what makes output appear
     during the command instead of after it. The queue is drained again after the task
     finishes, so the last lines before a fast exit are not lost.
+
+    ``cancelled`` is polled every ``poll`` seconds *while the tool runs*, and this is the
+    only place an interrupt can reach a tool that has already started. The cooperative
+    check the rest of the loop uses sits at iteration boundaries, which a command running
+    for minutes never reaches — so ``esc`` during a long build used to do nothing visible
+    until the command finished on its own.
     """
     queue: asyncio.Queue[str] = asyncio.Queue()
     task = asyncio.create_task(_execute_one(tools, use, on_output=queue.put_nowait))
@@ -484,12 +504,25 @@ async def _execute_streaming(
     try:
         while True:
             getter = asyncio.ensure_future(queue.get())
-            done, _pending = await asyncio.wait((task, getter), return_when=asyncio.FIRST_COMPLETED)
+            done, _pending = await asyncio.wait(
+                (task, getter), timeout=poll, return_when=asyncio.FIRST_COMPLETED
+            )
             if getter in done:
                 yield ToolOutput(tool_use_id=use.id, chunk=getter.result())
                 getter = None
                 continue
-            break
+            getter.cancel()
+            getter = None
+            if task in done:
+                break
+            if cancelled is not None and cancelled():
+                # Cancelling unwinds the tool; the shell kills its process group on the
+                # way out, so the subprocess dies rather than being orphaned.
+                task.cancel()
+                with suppress(asyncio.CancelledError, Exception):
+                    await task
+                into.append(_interrupted_result())
+                return
     finally:
         if getter is not None:
             getter.cancel()

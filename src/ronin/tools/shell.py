@@ -286,6 +286,13 @@ class PersistentShell:
                 output, code = await asyncio.wait_for(
                     self._read_until_sentinel(process.stdout, on_output), timeout=timeout
                 )
+            except asyncio.CancelledError:
+                # An interrupt reached us. The subprocess does not die on its own — the
+                # pipe would stay open and the next command would read this one's output —
+                # so the group is killed before the cancellation propagates. This is what
+                # makes `esc` able to stop a running command rather than only being noted.
+                await self._kill_group()
+                raise
             except TimeoutError as exc:
                 killed = await self._kill_group()
                 raise ToolError(

@@ -12,6 +12,7 @@ from ronin.ui.reduce import ViewState, reduce_all
 from ronin.ui.render import (
     ANSI,
     APPROVAL_TRUNCATION,
+    CONTEXT_WARN_MARK,
     CR_GLYPH,
     MARKUP,
     NO_CHANGES_NOTE,
@@ -217,7 +218,9 @@ def test_the_branch_is_passed_in_and_a_missing_one_is_labelled() -> None:
 
 def test_a_context_percentage_over_one_hundred_is_marked_not_invented() -> None:
     out = render_status(model="m", context_used=1.37, cost_usd=0.0, cwd=".", branch="b")
-    assert f"{OVER_CAPACITY} ctx" in out
+    # Over capacity also crosses the warning line, so the two markers sit together.
+    assert OVER_CAPACITY in out
+    assert f"{CONTEXT_WARN_MARK} ctx" in out
 
 
 def test_a_negative_context_fraction_is_a_programming_error() -> None:

@@ -24,6 +24,24 @@ All notable changes to this project will be documented here. Format follows [Kee
   without the `tui` extra, and `--no-tui`.
 
 ### Added
+- **The rest of the session-audit queue: steering, error surfacing, cost visibility.**
+  Frictions 3–5 from the X0 audit, closing it out.
+  **`esc` now stops a command that is already running.** The cooperative cancel flag is
+  only checked at loop boundaries, which a build running for minutes never reaches — so a
+  running tool is now polled against it and cancelled, and the shell kills its process
+  group on the way out rather than orphaning children. Measured: a 30s command interrupted
+  at 0.6s returns in 0.61s with a well-formed interrupted result. **A correction typed
+  mid-turn is visible**, with when it will run and that `esc` is the alternative — it used
+  to queue with nothing on screen acknowledging it. **An exhausted provider reads as a
+  message, not a stack trace**: rate limiting is named separately (with the server's own
+  `Retry-After`) because its answer differs from every other transport failure's, and a
+  retry now says why the partial text vanished instead of leaving it unexplained.
+  **The per-request ledger is wired into the live CLI at last** — it was written, tested,
+  and never constructed, so `/cost` could only report coarse `Budget` totals; it now shows
+  a cache-hit rate and the main-versus-cheap split, which is how "the expensive model did
+  the cheap work" becomes visible. The context gauge warns at 75%, before compaction folds
+  the window at 80%, rather than reporting the fold afterwards.
+
 - **The activity line, and live tool output (`ui/`, `core/`, `tools/`).** X1: between
   events the TUI was a still image — there is no timer anywhere in `ui/`, so a model
   thinking for thirty seconds and a dead process looked identical, on every turn. Now a
