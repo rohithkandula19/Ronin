@@ -277,8 +277,8 @@ multi_edit(path="src/app.py", edits=[
 | argument | type | required | meaning |
 |---|---|---|---|
 | `path` | string | yes | File to read, absolute or relative. |
-| `offset` | integer | no | 1-indexed line to start at. Use with limit for a big file. |
-| `limit` | integer | no | How many lines to read. |
+| `offset` | integer | no | 1-indexed line to start at. Pair with limit to read a window instead of a whole file — the cheapest way to look at one function in a large module. |
+| `limit` | integer | no | How many lines to read. A window of 60-120 lines around a grep hit is usually enough; the default reads up to 2000. |
 
 ### description, as the model receives it
 
@@ -289,13 +289,13 @@ WHEN TO USE
 Before editing anything — write and edit both need to know what is already there, and write refuses to overwrite a file you have not read. Also for reading config, tests, or any file a grep hit pointed you at.
 
 WHEN NOT TO USE
-Do not read a file you already read this session unless you changed it. Do not read a whole directory tree hoping to find something; use glob or grep to narrow first, then read the two or three files that matter. Do not use read to check whether a file exists — ls or glob answers that far cheaper.
+Do not read a file you already read this session unless you changed it. Do not read a whole directory tree hoping to find something; use glob or grep to narrow first, then read the two or three files that matter. Do not use read to check whether a file exists — ls or glob answers that far cheaper. Do not read a large file whole when you already know which part you need: grep for the symbol, then read with offset and limit around the hit. A 2000-line module costs roughly 6000 tokens of context that stays spent for the rest of the session.
 
 EXAMPLE
 read(path="src/main.py")
 → 1	import sys
-     2	
-     3	def main() -> None:
+2	
+3	def main() -> None:
 
 EXAMPLE
 read(path="logs/big.log", offset=4000, limit=100)

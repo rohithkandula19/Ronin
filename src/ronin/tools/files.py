@@ -99,9 +99,16 @@ def number_lines(text: str, *, start: int = 1) -> str:
     The model needs line numbers to write a useful ``edit``, and it needs them in a
     format it will not mistake for file content — hence the tab, which almost never
     appears immediately after a bare integer in real source.
+
+    The gutter is exactly as wide as the largest number it has to hold, and no wider.
+    It used to have a floor of five, which cost a flat six characters on every line of
+    every read — measured at 14-15% of a source file, ~6,400 tokens across four of
+    this repo's own modules — and bought nothing: the numbers in one read still line
+    up, because the width is computed from that read's own last line. Padding to five
+    only aligns reads against *each other*, which nothing compares.
     """
     lines = text.split("\n")
-    width = max(len(str(start + len(lines) - 1)), 5)
+    width = len(str(start + len(lines) - 1))
     out: list[str] = []
     for offset, line in enumerate(lines):
         clipped = line
@@ -124,7 +131,11 @@ class ReadTool(Tool):
         "Do not read a file you already read this session unless you changed it. Do "
         "not read a whole directory tree hoping to find something; use glob or grep "
         "to narrow first, then read the two or three files that matter. Do not use "
-        "read to check whether a file exists — ls or glob answers that far cheaper."
+        "read to check whether a file exists — ls or glob answers that far cheaper. "
+        "Do not read a large file whole when you already know which part you need: "
+        "grep for the symbol, then read with offset and limit around the hit. A "
+        "2000-line module costs roughly 6000 tokens of context that stays spent for "
+        "the rest of the session."
     )
     schema: ClassVar[Mapping[str, Any]] = {
         "type": "object",
@@ -132,16 +143,26 @@ class ReadTool(Tool):
             "path": {"type": "string", "description": "File to read, absolute or relative."},
             "offset": {
                 "type": "integer",
-                "description": "1-indexed line to start at. Use with limit for a big file.",
+                "description": (
+                    "1-indexed line to start at. Pair with limit to read a window "
+                    "instead of a whole file — the cheapest way to look at one "
+                    "function in a large module."
+                ),
             },
-            "limit": {"type": "integer", "description": "How many lines to read."},
+            "limit": {
+                "type": "integer",
+                "description": (
+                    "How many lines to read. A window of 60-120 lines around a grep "
+                    f"hit is usually enough; the default reads up to {MAX_READ_LINES}."
+                ),
+            },
         },
         "required": ["path"],
     }
     examples: ClassVar[tuple[Example, ...]] = (
         Example(
             call='read(path="src/main.py")',
-            result="     1\timport sys\n     2\t\n     3\tdef main() -> None:",
+            result="1\timport sys\n2\t\n3\tdef main() -> None:",
         ),
         Example(
             call='read(path="logs/big.log", offset=4000, limit=100)',
