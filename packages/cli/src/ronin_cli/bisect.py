@@ -14,7 +14,20 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-_FIRST_BAD_RE = re.compile(r"\b([0-9a-f]{7,40}) is the first bad commit", re.IGNORECASE)
+#: git's "we found it" line. Three things vary and all three have to be tolerated:
+#:
+#: * **The term is quoted on newer git.** 2.43 prints ``is the first bad commit``;
+#:   2.55 prints ``is the first 'bad' commit``. This is not cosmetic — it silently
+#:   broke `ronin bisect` for everyone on a modern git, because the parse failed on
+#:   a bisect that had *succeeded* and the failure was reported as "couldn't isolate
+#:   a single bad commit".
+#: * **The term itself is configurable.** ``git bisect start --term-new=broken``
+#:   makes the line say ``is the first broken commit``, and the old/new spelling
+#:   prints ``new`` rather than ``bad``.
+#: * Case, which was already handled.
+_FIRST_BAD_RE = re.compile(
+    r"\b([0-9a-f]{7,40}) is the first ['\"]?[\w-]+['\"]? commit", re.IGNORECASE
+)
 
 
 @dataclass

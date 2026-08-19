@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -26,14 +25,15 @@ def _git(root: Path, *a: str, **kw) -> str:
                           check=kw.get("check", True)).stdout
 
 
-@pytest.mark.skipif(
-    sys.platform == "darwin",
-    reason="git-bisect disposable-clone harness fails on macOS CI runners "
-    "('good' commit fails the check too — the throwaway checkout doesn't surface "
-    "value.txt as expected on macOS). Passes on Linux; needs a macOS box to "
-    "diagnose the clone/checkout difference. Tracked as a cross-platform gap.",
-)
 def test_run_bisect_finds_the_breaking_commit(tmp_path: Path) -> None:
+    """A real git bisect round trip, on every platform.
+
+    This used to be skipped on macOS, blamed on "the throwaway checkout doesn't
+    surface value.txt as expected on macOS". That diagnosis was wrong: the harness was
+    fine and bisect was succeeding, but `parse_first_bad` could not read git's answer
+    because newer git quotes the term name (`is the first 'bad' commit`). macOS
+    runners simply shipped that git first. The skip is gone with the cause.
+    """
     # build a repo: good commits, then a commit that breaks a marker file, then more
     _git(tmp_path, "init")
     _git(tmp_path, "config", "user.email", "t@t.t")
@@ -63,6 +63,44 @@ def test_run_bisect_finds_the_breaking_commit(tmp_path: Path) -> None:
     assert "BREAK" in res.subject
     # the user's working tree is untouched (bisect ran in a throwaway clone)
     assert (tmp_path / "value.txt").read_text() == "FAIL\n"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        # git <= 2.43
+        "4bd85ea9640af8c3c8f479264b4662f8cec0cab8 is the first bad commit",
+        # git 2.55 quotes the term, which is what broke this in CI
+        "4bd85ea9640af8c3c8f479264b4662f8cec0cab8 is the first 'bad' commit",
+        # `git bisect start --term-new=...`, and the old/new spelling
+        "4bd85ea9640af8c3c8f479264b4662f8cec0cab8 is the first new commit",
+        "4bd85ea9640af8c3c8f479264b4662f8cec0cab8 is the first 'broken' commit",
+        # case, which was already tolerated
+        "4bd85ea9640af8c3c8f479264b4662f8cec0cab8 IS THE FIRST BAD COMMIT",
+    ],
+)
+def test_every_spelling_of_gits_answer_is_understood(line: str) -> None:
+    """The term is quoted on newer git and renameable on any git.
+
+    Getting this wrong does not look like a parse bug from the outside: bisect
+    succeeds, the sha is right there in the output, and `ronin bisect` reports that it
+    could not isolate a commit.
+    """
+    assert parse_first_bad(line) == "4bd85ea9640af8c3c8f479264b4662f8cec0cab8"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "",
+        "nothing to see here",
+        # No term at all is not git's format, and matching it would let a stray sha in.
+        "4bd85ea9640af8c3c8f479264b4662f8cec0cab8 is the first commit",
+        "not a sha is the first bad commit",
+    ],
+)
+def test_text_that_is_not_gits_answer_is_rejected(line: str) -> None:
+    assert parse_first_bad(line) is None
 
 
 def test_default_good_uses_tag(tmp_path: Path) -> None:
