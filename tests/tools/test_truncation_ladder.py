@@ -101,8 +101,7 @@ async def test_a_successful_command_carries_no_error_preamble() -> None:
 async def test_a_huge_failure_keeps_the_end_where_the_reason_is() -> None:
     """40k lines of noise, then the reason. Head-only truncation loses the reason."""
     script = (
-        'for i in $(seq 1 40000); do echo "noise line $i"; done; '
-        f'echo "{TRACEBACK_TAIL}"; (exit 1)'
+        f'for i in $(seq 1 40000); do echo "noise line $i"; done; echo "{TRACEBACK_TAIL}"; (exit 1)'
     )
     result = await _bash(script)
     assert not result.ok

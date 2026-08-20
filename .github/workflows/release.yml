@@ -43,6 +43,7 @@ jobs:
       - name: Lint and typecheck (publish gate)
         run: |
           uv run --frozen ruff check src/ronin tests scripts
+          uv run --frozen ruff format --check src/ronin tests scripts
           uv run --frozen mypy
 
       - name: Generated files are current (publish gate)
