@@ -56,6 +56,68 @@ class Capabilities:
             )
 
 
+#: The capability keys a config file may override, and the type each must be.
+#: Closed on purpose: a key nobody recognizes is a capability the user believes
+#: they granted.
+CAPABILITY_OVERRIDE_KEYS: Mapping[str, type] = {
+    "native_tools": bool,
+    "parallel_tools": bool,
+    "prompt_cache": bool,
+    "thinking": bool,
+    "max_context": int,
+    "vision": bool,
+}
+
+
+def apply_capability_overrides(
+    base: Capabilities, overrides: Mapping[str, Any], *, model: str = ""
+) -> Capabilities:
+    """Merge config-supplied overrides onto an adapter's own defaults.
+
+    A config that names one capability must not silently reset the rest. Setting
+    ``max_context`` on an Anthropic model used to turn prompt caching, thinking and
+    vision *off*, because the parser filled every unmentioned key with its own
+    pessimistic fallback instead of merging — so the config said one thing and the
+    request did another. This is the merge that was documented and missing.
+
+    Types are checked rather than coerced. ``bool("false")`` is ``True``, so a
+    ``prompt_cache = "no"`` that was quietly accepted as *yes* is exactly the class
+    of bug this function exists to stop.
+
+    ``native_tools=False`` also switches ``parallel_tools`` off unless the config
+    says otherwise, because :class:`Capabilities` refuses that pair — the format
+    shim is strictly sequential. Turning off native tools is a thing users ask for;
+    being told about an invariant they never mentioned is not a useful answer.
+    """
+    if not overrides:
+        return base
+    where = f" for model {model!r}" if model else ""
+    unknown = sorted(set(overrides) - set(CAPABILITY_OVERRIDE_KEYS))
+    if unknown:
+        raise ProviderError(
+            f"unknown capability {'keys' if len(unknown) > 1 else 'key'} "
+            f"{', '.join(repr(key) for key in unknown)}{where} — settable "
+            f"capabilities are {', '.join(sorted(CAPABILITY_OVERRIDE_KEYS))}"
+        )
+    values: dict[str, Any] = {}
+    for key, raw in overrides.items():
+        expected = CAPABILITY_OVERRIDE_KEYS[key]
+        if expected is bool and not isinstance(raw, bool):
+            raise ProviderError(f"capability {key!r}{where} must be true or false, found {raw!r}")
+        # bool is an int subclass, and `max_context = true` is not a window.
+        if expected is int and (not isinstance(raw, int) or isinstance(raw, bool) or raw <= 0):
+            raise ProviderError(
+                f"capability {key!r}{where} must be a positive integer, found {raw!r}"
+            )
+        values[key] = raw
+    if values.get("native_tools") is False and "parallel_tools" not in values:
+        values["parallel_tools"] = False
+    try:
+        return replace(base, **values)
+    except ValueError as exc:  # the frozen dataclass's own invariants
+        raise ProviderError(f"capability overrides{where} are contradictory: {exc}") from exc
+
+
 #: What we assume when a provider tells us nothing. Deliberately the *narrow*
 #: end of every axis: a wrong "can't do that" costs a slower path, a wrong "can"
 #: costs a failed request the user has to debug.

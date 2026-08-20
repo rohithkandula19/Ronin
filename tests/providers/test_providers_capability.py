@@ -18,7 +18,6 @@ from ronin.providers.capability import (
     pricing_tier,
 )
 from ronin.providers.router import ModelSpec, Role, RouterConfig
-from ronin.providers.types import Capabilities
 
 
 def _spec(name: str, **kw: object) -> ModelSpec:
@@ -67,24 +66,25 @@ def test_hosted_without_price_is_unknown_not_free() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_matrix_is_sorted_and_carries_tier_and_capabilities() -> None:
-    caps = Capabilities(
-        native_tools=True,
-        parallel_tools=False,
-        prompt_cache=True,
-        thinking=False,
-        max_context=200_000,
-        vision=True,
-    )
-    free = _spec("aaa-local", provider="mlx", capabilities=caps)
+def test_matrix_is_sorted_and_carries_tier_and_declared_capabilities() -> None:
+    """The row reports what config *declared*, which is not what the model can do.
+
+    The full picture lives on the built client, which merges these over the
+    adapter's own defaults — and building every configured model to print a table
+    would load model weights for a row of text. So the row is honest about being
+    partial: an empty mapping means "the adapter decides", the same way an absent
+    price means UNKNOWN rather than free.
+    """
+    overrides = {"native_tools": False, "max_context": 32_768}
+    free = _spec("aaa-local", provider="mlx", capability_overrides=overrides)
     paid = _spec("zzz-claude", api_key_env="ANTHROPIC_API_KEY", price_in=3.0, price_out=15.0)
     config = RouterConfig(
         roles={Role.MAIN: "aaa-local"}, models={"aaa-local": free, "zzz-claude": paid}
     )
     rows = capability_matrix(config)
     assert [r.name for r in rows] == ["aaa-local", "zzz-claude"]  # sorted by name
-    assert rows[0].tier is PricingTier.FREE and rows[0].capabilities == caps
-    assert rows[1].tier is PricingTier.PAID and rows[1].capabilities is None
+    assert rows[0].tier is PricingTier.FREE and rows[0].capability_overrides == overrides
+    assert rows[1].tier is PricingTier.PAID and rows[1].capability_overrides == {}
 
 
 # --------------------------------------------------------------------------- #
