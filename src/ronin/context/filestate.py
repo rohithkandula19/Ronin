@@ -13,7 +13,22 @@ outcomes, four messages, each written for a model to act on rather than for a lo
 * ``DELETED`` — the file is gone; do not recreate it from memory.
 * ``NEVER_READ`` — read it first; an edit computed from a guess is a guess.
 
-Two details that look like nitpicks and are not:
+A record also answers a second question, which is not the same one: **does the
+model still have this file's content in front of it?** "Read at some point" and
+"still in context" diverge the moment compaction folds the middle of a session, and
+conflating them is how the guard above starts asserting something false —
+``UNCHANGED`` reads "safe to edit against the content you have" to a model that no
+longer has it. :meth:`FileStateTracker.retain_only` is how the session keeps the two
+in step; the caller decides what "visible" means, because the transcript is not
+something this layer can see.
+
+The same record is what makes a repeat read answerable with a stub instead of the
+bytes, and the honesty condition there is exact: *re-running the call would return
+what the model already has*. That needs the **window** as well as the digest — a
+whole-file stub after a twenty-line read would claim content the model never saw —
+which is why :class:`ReadWindow` is recorded alongside the digest.
+
+Three details that look like nitpicks and are not:
 
 * **The digest is over bytes.** ``Path.read_text()`` applies universal-newline
   translation, so a CRLF→LF rewrite of the whole file compares equal as text and
@@ -22,6 +37,10 @@ Two details that look like nitpicks and are not:
   a formatter that rewrites a file byte-for-byte identically likewise. Content is
   what the model reasoned about, so content is what decides — the stat is only a
   fast path to skip hashing.
+* **The window is compared as requested, not as served.** Both calls hit the same
+  line cap on the same file, so the cap cancels out; comparing what was *asked for*
+  keeps the rule a two-field equality instead of a re-derivation that could drift
+  from the read tool.
 """
 
 from __future__ import annotations
@@ -90,6 +109,31 @@ class FileCheck:
 
 
 @dataclass(frozen=True, slots=True)
+class ReadWindow:
+    """The slice of a file a read asked for. ``WHOLE_FILE`` is the default.
+
+    Stored as *requested* rather than as served: a read of a 50,000-line file is
+    capped by the read tool either way, so the cap is the same on both calls and
+    cancels out of the comparison. Re-deriving the served window here would mean
+    this module owning a copy of that cap, which is one more thing to drift.
+    """
+
+    #: First line, 1-based. Normalized so ``read(path)`` and ``read(path, offset=1)``
+    #: are the same window rather than two that merely mean the same thing.
+    offset: int = 1
+    #: Maximum lines requested, or ``None`` for "as much as the tool will give".
+    limit: int | None = None
+
+    @classmethod
+    def of(cls, offset: int | None = None, limit: int | None = None) -> ReadWindow:
+        return cls(offset=max(offset, 1) if offset else 1, limit=limit)
+
+
+#: What a bare ``read(path)`` asks for.
+WHOLE_FILE = ReadWindow()
+
+
+@dataclass(frozen=True, slots=True)
 class ReadRecord:
     """What one read observed. ``size``/``mtime_ns`` are the hash-skipping fast path."""
 
@@ -97,6 +141,9 @@ class ReadRecord:
     digest: str
     size: int
     mtime_ns: int
+    #: The slice that was asked for. Two reads of one file are interchangeable only
+    #: if they asked for the same lines.
+    window: ReadWindow = WHOLE_FILE
 
 
 def digest_bytes(data: bytes) -> str:
@@ -117,12 +164,20 @@ class FileStateTracker:
     read_bytes: BytesReader = field(default=Path.read_bytes)
     _records: dict[str, ReadRecord] = field(default_factory=dict)
 
-    def record_read(self, path: Path, data: bytes | None = None) -> ReadRecord:
-        """Remember that ``path`` was read, and what it contained.
+    def record_read(
+        self, path: Path, data: bytes | None = None, *, window: ReadWindow = WHOLE_FILE
+    ) -> ReadRecord:
+        """Remember that ``path`` was read, what it contained, and which lines were asked for.
 
         ``data`` is accepted so a caller that already has the bytes does not pay a
         second read — and, more importantly, so the digest is of the bytes the model
         was actually shown rather than of a re-read that may already have raced.
+
+        The digest stays over the **whole file** even for a windowed read. That is
+        deliberate: it is the change-detection baseline, and a digest of twenty lines
+        would call a file unchanged after an edit five hundred lines away. ``window``
+        is the separate fact — what the model actually saw — and the two are kept
+        apart because they answer different questions.
         """
         payload = self.read_bytes(path) if data is None else data
         stat = path.stat()
@@ -131,9 +186,48 @@ class FileStateTracker:
             digest=digest_bytes(payload),
             size=len(payload),
             mtime_ns=stat.st_mtime_ns,
+            window=window,
         )
         self._records[record.path] = record
         return record
+
+    def satisfies(self, path: Path, window: ReadWindow = WHOLE_FILE) -> bool:
+        """Whether re-reading ``window`` of ``path`` would return what the model has.
+
+        The whole condition for answering a repeat read with a stub instead of the
+        bytes, in one place so nothing can implement half of it: the path was read,
+        the read asked for these exact lines, and the file has not moved since.
+
+        A record the session has dropped — see :meth:`retain_only` — is not a read,
+        so a file whose content compaction folded away answers ``False`` here and the
+        model gets the bytes.
+        """
+        record = self._records.get(str(path))
+        if record is None or record.window != window:
+            return False
+        return self.check(path).status is FileStatus.UNCHANGED
+
+    def retain_only(self, visible: Iterable[str]) -> tuple[str, ...]:
+        """Forget every recorded read whose content is no longer in front of the model.
+
+        Called after a compaction with the paths whose read results survived the fold.
+        What it fixes is a guard that had grown quietly false: ``check`` compares
+        digests against disk and cannot see a transcript, so a file whose content was
+        folded away still reported ``UNCHANGED`` — "safe to edit against the content
+        you have" — to a model holding nothing of the kind.
+
+        Forgetting is the right verb rather than a separate "not visible" flag: every
+        question a caller asks of a record ("may I edit blind", "may I answer this
+        read with a stub") has the same answer once the content is gone, and the one
+        that does not — ``NEVER_READ`` — is already the honest one.
+
+        Returns what it dropped, sorted, so the caller can say so.
+        """
+        keep = {str(path) for path in visible}
+        dropped = tuple(sorted(set(self._records) - keep))
+        for path in dropped:
+            del self._records[path]
+        return dropped
 
     def forget(self, path: Path) -> None:
         """Drop a record — for a file the session deliberately replaced wholesale."""

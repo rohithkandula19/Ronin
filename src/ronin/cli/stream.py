@@ -533,7 +533,7 @@ class Conversation:
         self.last_compaction = result
         if not result.compacted:
             return
-        self._adopt_compaction(result)
+        self._adopt_compaction(result, runtime)
         step = self._next_step(COMPACT_STEP)
         arguments = {
             "tokens_before": result.token_estimate_before,
@@ -552,7 +552,7 @@ class Conversation:
             ),
         )
 
-    def _adopt_compaction(self, result: CompactionResult) -> None:
+    def _adopt_compaction(self, result: CompactionResult, runtime: Runtime) -> None:
         """Take a fold's messages as the transcript, and record what it cost to get them.
 
         Shared by the triggered fold and by ``/compact``, so a forced compaction cannot
@@ -580,6 +580,14 @@ class Conversation:
                 f"room: {given_up}. Those files are no longer in context — re-read one "
                 "if you need it again."
             )
+        forgotten = self._sync_file_state(runtime)
+        if forgotten:
+            self.notes.append(
+                f"{len(forgotten)} file(s) whose contents the fold removed are no longer "
+                f"treated as read, so an edit to one will ask you to read it again first: "
+                f"{', '.join(forgotten)}. Before this, the stale-edit guard would have "
+                "called them safe to edit against contents you no longer have."
+            )
         if result.still_over_trigger:
             self.notes.append(
                 "the transcript is still at or above the compaction trigger after "
@@ -589,6 +597,29 @@ class Conversation:
                 "again would change nothing — start a fresh session, or raise the "
                 "model's context window."
             )
+
+    def _sync_file_state(self, runtime: Runtime) -> tuple[str, ...]:
+        """Tell the gate which reads survived the fold. Never fatal.
+
+        A compaction that succeeded and then raised while tidying bookkeeping would
+        lose the fold, and the session is at 80% of its window precisely because it
+        cannot afford to lose one. The cost of skipping is the pre-existing
+        behaviour, which is a guard that is too generous rather than one that blocks.
+        """
+        registry = runtime.registry
+        sync = getattr(registry, "sync_file_state", None)
+        if sync is None:
+            return ()
+        try:
+            forgotten: tuple[str, ...] = sync(self.messages)
+        except Exception as exc:  # pragma: no cover - defensive; see the docstring
+            self.notes.append(
+                f"file-state bookkeeping after the fold failed ({type(exc).__name__}: "
+                f"{exc}); the stale-edit guard may report a folded-away file as safe "
+                "to edit, so re-read before editing anything from earlier in the session"
+            )
+            return ()
+        return forgotten
 
     async def compact_now(
         self, runtime: Runtime, summarizer: Summarizer | None = None
@@ -609,7 +640,7 @@ class Conversation:
         result = await compact(self.messages, policy=runtime.compaction, summarizer=summarize)
         self.last_compaction = result
         if result.compacted:
-            self._adopt_compaction(result)
+            self._adopt_compaction(result, runtime)
         return result
 
     async def rewind(self, runtime: Runtime) -> RewindOutcome:

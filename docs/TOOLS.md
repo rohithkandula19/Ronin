@@ -36,6 +36,53 @@ every command and eventually gets it wrong.
 
 ---
 
+## Re-reading a file you already read
+
+A repeat `read` of an unchanged file is answered with a short note instead of the
+contents — the gate returns it without running the tool at all. The contents are still
+above in the conversation, and sending a second copy spends the window on a duplicate.
+
+The condition is narrow, because the failure mode of getting it wrong is telling a model
+it has something it does not. `FileStateTracker.satisfies` is the whole of it, and all
+four parts have to hold:
+
+* the path was read this session,
+* the read asked for the **same window** — a whole-file note after a twenty-line read
+  would claim lines the model never saw,
+* the file has not changed on disk since,
+* and the record has not been dropped because compaction folded the contents away.
+
+That last one is what makes the rest safe. `FileStateTracker` compares digests against
+*disk*; it cannot see a transcript. "Read at some point" and "still in front of the
+model" stop being the same fact the moment the middle of a session is folded, so after
+every compaction the session tells the gate which reads survived
+(`paths_with_visible_read` → `GatedRegistry.sync_file_state` → `retain_only`) and the
+gate forgets the rest.
+
+Content leaves in three ways and the one rule covers all of them: folded into the
+summary, given up by the retention budget, or **displaced** — retention keeps the most
+recent tool result *per path*, so a `grep` scoped to a file the model already read
+overwrites the read that had the contents. The third needs no configuration at all.
+
+Forgetting also repairs the stale-edit guard, which had the same confusion: it reported
+`UNCHANGED` — "safe to edit against the content you have" — for files whose contents the
+fold had removed.
+
+Set `force=true` to get the contents anyway. Every input to the condition is a fact about
+the world that this process could be wrong about, so the note names the override:
+
+```
+src/main.py is unchanged since you read it, and the whole file is already in this
+conversation above — re-sending it would spend context on a copy. Scroll back for the
+contents. If you no longer have them, call read again with force=true and the file
+will be re-sent.
+```
+
+One wasted call is recoverable. An edit written against a file the model never saw is
+not, which is why the escape hatch exists and why the note always mentions it.
+
+---
+
 ## Tools
 
 | Tool | Danger | Gated | Notes |
