@@ -258,11 +258,27 @@ class ToolResult:
         if not isinstance(self.artifacts, tuple):
             raise TypeError("ToolResult.artifacts must be a tuple (frozen)")
 
+    def model_text(self) -> str:
+        """The text the model sees for this result. One definition, one place.
+
+        On failure the reason leads and the output follows it. ``error`` on its own
+        is usually a single line — ``command exited 1`` — which tells the model
+        that something broke and nothing at all about what: the traceback is in
+        ``content``. Sending only the reason is why a failing test used to be
+        unactionable. The reason goes first so it survives a head-biased cut
+        anywhere downstream.
+        """
+        if self.ok:
+            return self.content
+        if not self.content:
+            return self.error
+        return f"{self.error}\n{self.content}"
+
     def as_block(self, tool_use_id: str) -> ToolResultBlock:
         """Project into the transcript, preserving the ok/error distinction."""
         return ToolResultBlock(
             tool_use_id=tool_use_id,
-            content=self.content if self.ok else self.error,
+            content=self.model_text(),
             is_error=not self.ok,
         )
 

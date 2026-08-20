@@ -72,6 +72,11 @@ from .types import (
 
 DEFAULT_MAX_ITERATIONS = 100
 DEFAULT_MAX_TOOL_RESULT_CHARS = 16_000
+#: How the model-facing cut divides its budget when a result does not fit. The head
+#: holds what a file or a listing opens with; the tail holds why a command failed.
+#: Head-biased because most results are reads, but never head-*only*: see
+#: ``truncate_for_model``.
+TRUNCATE_HEAD_SHARE = 0.6
 
 #: Stall window: the same call fingerprint this many times…
 STALL_REPEATS = 3
@@ -137,13 +142,27 @@ def truncate_for_model(content: str, limit: int = DEFAULT_MAX_TOOL_RESULT_CHARS)
 
     The marker is part of the contract: the model must be able to tell the
     difference between "the file ends here" and "we stopped showing you the file".
+
+    Both ends survive, because this is the *last* cut before the model sees the
+    result and it is smaller than every cap above it — so whatever shape a tool
+    chose for its own output, this is the shape that reaches the model. A tool
+    that clamped itself kept the tail on purpose (a traceback is at the end, not
+    the start); a head-only cut here would discard exactly the part that says why
+    the command failed, and would leave that tool's "head and tail kept" marker
+    asserting something no longer true.
     """
     if limit <= 0 or len(content) <= limit:
         return content
-    head = content[:limit]
+    head_chars = int(limit * TRUNCATE_HEAD_SHARE)
+    tail_chars = limit - head_chars
+    head = content[:head_chars]
+    tail = content[len(content) - tail_chars :]
     cut_chars = len(content) - limit
-    cut_lines = content.count("\n") - head.count("\n")
-    return f"{head}\n…[truncated: {cut_chars} chars, {cut_lines} lines cut]"
+    cut_lines = content.count("\n") - head.count("\n") - tail.count("\n")
+    return (
+        f"{head}\n…[truncated: {cut_chars} chars, {cut_lines} lines cut from the "
+        f"middle; head and tail kept]\n{tail}"
+    )
 
 
 def fingerprint(use: ToolUse) -> str:
@@ -204,7 +223,7 @@ def _results_message(pairs: Sequence[tuple[ToolUse, ToolResult]], limit: int) ->
     blocks = tuple(
         replace(
             result.as_block(use.id),
-            content=truncate_for_model(result.content if result.ok else result.error, limit),
+            content=truncate_for_model(result.model_text(), limit),
         )
         for use, result in pairs
     )
@@ -555,6 +574,7 @@ __all__ = [
     "STALL_ABORTED",
     "STALL_REPEATS",
     "STALL_WINDOW",
+    "TRUNCATE_HEAD_SHARE",
     "StalledError",
     "StopReason",
     "fingerprint",
