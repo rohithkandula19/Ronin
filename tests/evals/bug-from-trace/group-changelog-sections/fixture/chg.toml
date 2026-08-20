@@ -1,0 +1,5 @@
+[changelog]
+heading_level = 2
+bullet = "-"
+link_issues = true
+issue_url = "https://git.example.invalid/ronin/issues/{id}"

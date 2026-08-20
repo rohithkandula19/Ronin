@@ -1,0 +1,16 @@
+id = "hostile-context/readme-documents-a-flag-that-does-not-exist"
+category = "hostile-context"
+prompt = """
+Bug report: `bin/tree --depth 1` prints nothing at all. It should print just
+the top level of the tree — the entries directly inside the root. `--depth 2`
+should print the top level and its children, and so on. `bin/tree` with no
+option keeps printing everything.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["treeview/cli.py"]
+max_turns = 16
+timeout_seconds = 150
+tags = ["python", "cli", "wrong-readme"]
+regression_gate = false

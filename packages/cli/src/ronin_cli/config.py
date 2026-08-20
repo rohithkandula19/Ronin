@@ -15,6 +15,8 @@ from typing import Any
 import tomli_w
 from pydantic import BaseModel, Field, model_validator
 
+from .presence import normalize_interaction_style
+
 
 CONFIG_FILENAME = "config.toml"
 PROJECT_DIR = Path(".ronin")
@@ -98,6 +100,20 @@ PROVIDER_PRESETS: dict[str, dict[str, str]] = {
     "openrouter": {"model": "qwen/qwen3-coder:free", "base_url": "https://openrouter.ai/api/v1"},
 }
 
+# Provider-specific environment variables are discovered at read time rather
+# than copied into config files. ``OPENAI_API_KEY`` remains a backward-compatible
+# fallback for OpenAI-compatible hosts, but never masks a provider's own key.
+PROVIDER_ENV_KEYS: dict[str, str] = {
+    "anthropic": "ANTHROPIC_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "together": "TOGETHER_API_KEY",
+    "groq": "GROQ_API_KEY",
+    "fireworks": "FIREWORKS_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+    "cerebras": "CEREBRAS_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+}
+
 
 class RoninConfig(BaseModel):
     """csk configuration. Each service is optional — only configured ones get tools registered."""
@@ -138,6 +154,9 @@ class RoninConfig(BaseModel):
     # the most relevant files (from the repo map) so the model starts aimed at
     # the right code. Non-blocking; set False to disable.
     auto_context: bool = True
+    # Optional project-local context-window override. None uses Ronin's conservative
+    # provider/model catalog; /context <tokens> persists an explicit override.
+    context_window: int | None = Field(default=None, ge=4_096, le=2_000_000)
     # Full-access mode (opt-in, `--full-access`): lifts the guards — filesystem
     # access beyond the project root, auto-approve (no y/n gate), longer command
     # timeouts + bigger output caps. Powerful and unsandboxed; off by default.
@@ -168,6 +187,12 @@ class RoninConfig(BaseModel):
     # e.g. "dracula", "monokai", "github-dark", "nord"). None → ronin's default
     # (dracula). Set live + persisted via /theme; applied at session start.
     theme: str | None = None
+    # Interactive delivery preference. This applies only when a person is using
+    # Ronin directly; headless workers and evaluations remain task-focused.
+    interaction_style: str = "balanced"  # balanced | direct | supportive | quiet
+    # Permit an occasional, task-relevant check-in. Inferred feelings are never
+    # persisted and never affect safety or approval decisions.
+    relational_checkins: bool = True
 
     anthropic_api_key: str | None = None
     openai_api_key: str | None = None  # legacy shared slot (openai/together/groq/…)
@@ -213,6 +238,11 @@ class RoninConfig(BaseModel):
         self.faithfulness = mode
         return self
 
+    @model_validator(mode="after")
+    def _normalize_interaction_style(self) -> "RoninConfig":
+        self.interaction_style = normalize_interaction_style(self.interaction_style)
+        return self
+
     def resolved_model(self) -> str:
         if self.model:
             return self.model
@@ -250,11 +280,32 @@ class RoninConfig(BaseModel):
         provider = provider or self.provider
         if provider in self.provider_keys and self.provider_keys[provider]:
             return self.provider_keys[provider]
-        if provider == "anthropic":
-            return self.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY")
         if provider in ("ollama", "local"):
             return None  # local, no key
+        if provider == "anthropic" and self.anthropic_api_key:
+            return self.anthropic_api_key
+        env_key = PROVIDER_ENV_KEYS.get(provider)
+        if env_key and os.environ.get(env_key):
+            return os.environ[env_key]
         return self.openai_api_key or os.environ.get("OPENAI_API_KEY")
+
+    def provider_key_source(self, provider: str | None = None) -> str:
+        """Return an honest, non-secret credential source for provider health."""
+        provider = provider or self.provider
+        if provider in ("ollama", "local"):
+            return "keyless"
+        if self.provider_keys.get(provider):
+            return "config"
+        if provider == "anthropic" and self.anthropic_api_key:
+            return "config"
+        env_key = PROVIDER_ENV_KEYS.get(provider)
+        if env_key and os.environ.get(env_key):
+            return "environment"
+        if self.openai_api_key:
+            return "config"
+        if os.environ.get("OPENAI_API_KEY"):
+            return "environment"
+        return "missing"
 
     def set_key_for(self, provider: str, key: str) -> None:
         """Store ``key`` for ``provider`` without disturbing other providers'

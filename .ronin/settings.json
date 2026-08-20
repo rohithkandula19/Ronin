@@ -1,0 +1,14 @@
+{
+  "mode": "ask",
+  "sandbox": true,
+  "protected_branches": ["main", "master", "release"],
+  "default_decision": "ask",
+  "rules": [
+    {"tool": "bash", "decision": "allow", "command": "^(pytest|uv run pytest)\\b"},
+    {"tool": "bash", "decision": "allow", "command": "^git (status|diff|log|show)\\b"},
+    {"tool": "bash", "decision": "deny", "command": "\\brm -rf\\b"},
+    {"tool": "bash", "decision": "deny", "command": "\\bgit push --force\\b"},
+    {"tool": "read_file", "decision": "deny", "path": "**/.env*"},
+    {"tool": "write", "decision": "ask", "path": "**/migrations/**"}
+  ]
+}

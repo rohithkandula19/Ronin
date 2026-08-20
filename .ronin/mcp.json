@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
+      "danger_level": "read_only",
+      "requires_approval": false
+    }
+  }
+}

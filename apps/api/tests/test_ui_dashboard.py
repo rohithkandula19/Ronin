@@ -255,3 +255,209 @@ def test_skills_returns_real_crystallized_skills(client: TestClient) -> None:
     assert len(skills) == 1
     assert skills[0]["name"] == "deploy-staging"
     assert "deploy to staging" in skills[0]["body"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Real data: agent operations
+# ---------------------------------------------------------------------------
+
+def test_agent_operation_endpoints_return_real_saved_data(client: TestClient) -> None:
+    from ronin_cli.agent_catalog import AgentProfile, RepositorySignals
+    from ronin_cli.agent_fleet import FleetPlanStore, plan_fleet
+    from ronin_cli.agent_proposals import AgentProposalStore
+
+    profiles = (
+        AgentProfile("researcher", "research", "research", ("research",)),
+        AgentProfile("implementer", "implement", "implement", ("implementation",), tier="write"),
+        AgentProfile("reviewer", "review", "review", ("review",)),
+        AgentProfile("tester", "test", "test", ("testing",), tier="test"),
+    )
+    plan = plan_fleet(
+        "improve dashboard observability", profiles,
+        core_keys=("researcher", "implementer", "reviewer", "tester"),
+        repository=RepositorySignals(tags=("dashboard",)), write=True,
+        max_profiles=4, max_parallel=2,
+    )
+    FleetPlanStore(Path.cwd()).save(plan)
+    proposal = AgentProposalStore(Path.cwd()).record(
+        run_id="agent-ui-1", base_revision="a" * 40,
+        diffs={"implementer": "diff --git a/a b/a\n"}, success=True,
+        subtask_results=[{"success": True}],
+    )
+
+    plans = client.get("/ui/fleet-plans").json()
+    assert plans == [
+        {
+            "id": plan.id,
+            "created": plan.created,
+            "goal": "improve dashboard observability",
+            "write": True,
+            "catalog_size": 4,
+            "member_count": 4,
+            "max_parallel": 2,
+            "waves": [
+                {
+                    "number": wave.number,
+                    "phase": wave.phase,
+                    "parallelism": wave.parallelism,
+                    "waits_for": list(wave.waits_for),
+                }
+                for wave in plan.waves
+            ],
+        }
+    ]
+
+    proposals = client.get("/ui/proposals").json()
+    assert proposals == [
+        {
+            "run_id": "agent-ui-1",
+            "created": proposal.created,
+            "status": "ready",
+            "base_revision": "a" * 40,
+            "roles": ["implementer"],
+            "patch_count": 1,
+            "failed_subtasks": 0,
+        }
+    ]
+
+
+def test_persistent_handoffs_return_safe_real_metadata(client: TestClient) -> None:
+    from ronin_cli.persistent_agents import HandoffEvidenceInput, PersistentAgentStore
+
+    store = PersistentAgentStore(Path.cwd())
+    store.bootstrap(("architect", "implementer"))
+    store.assign("architect-01", "mission-ui", "Design the UI handoff")
+    store.assign("implementer-01", "mission-ui", "Implement the UI handoff")
+    store.start("architect-01")
+    store.complete("architect-01", "Design evidence recorded.")
+    handoff = store.create_handoff(
+        "architect-01", "implementer-01", "mission-ui", "Use the approved accessibility plan.",
+        (HandoffEvidenceInput(kind="plan", reference="mission-ui:accessibility-plan"),),
+    )
+    accepted = store.acknowledge_handoff(handoff.handoff_id, "implementer-01")
+
+    assert client.get("/ui/persistent-handoffs").json() == [
+        {
+            "handoff_id": handoff.handoff_id,
+            "mission_id": "mission-ui",
+            "from_agent_id": "architect-01",
+            "to_agent_id": "implementer-01",
+            "status": "accepted",
+            "evidence_count": 1,
+            "created_at": handoff.created_at,
+            "accepted_at": accepted.accepted_at,
+            "updated_at": accepted.updated_at,
+        }
+    ]
+    body = str(client.get("/ui/persistent-handoffs").json())
+    assert "approved accessibility" not in body and "accessibility-plan" not in body
+
+
+def test_fleet_runs_return_real_execution_state(client: TestClient) -> None:
+    from ronin_cli.agent_catalog import AgentProfile, RepositorySignals
+    from ronin_cli.agent_fleet import FleetPlanStore, plan_fleet
+    from ronin_cli.agent_fleet_runs import FleetRunStore, FleetWaveResult
+
+    profiles = (
+        AgentProfile("researcher", "research", "research", ("research",)),
+        AgentProfile("implementer", "implement", "implement", ("implementation",), tier="write"),
+        AgentProfile("reviewer", "review", "review", ("review",)),
+        AgentProfile("tester", "test", "test", ("testing",), tier="test"),
+    )
+    plan = plan_fleet(
+        "execute dashboard reliability work", profiles,
+        core_keys=("researcher", "implementer", "reviewer", "tester"),
+        repository=RepositorySignals(tags=("dashboard",)), write=True,
+        max_profiles=4, max_parallel=2,
+    )
+    FleetPlanStore(Path.cwd()).save(plan)
+    store = FleetRunStore(Path.cwd())
+    run = store.create(plan)
+    _claimed, wave = store.claim_next(run.id)
+    assert wave is not None
+    completed = store.finish_wave(run.id, wave.number, FleetWaveResult(True, agent_run_id="agent-dashboard-1"))
+
+    rows = client.get("/ui/fleet-runs").json()
+    assert rows == [
+        {
+            "id": completed.id,
+            "plan_id": plan.id,
+            "goal": "execute dashboard reliability work",
+            "write": True,
+            "status": "running",
+            "created": completed.created,
+            "updated": completed.updated,
+            "error": None,
+            "waves": [
+                {
+                    "number": item.number,
+                    "phase": item.phase,
+                    "status": item.status,
+                    "attempts": item.attempts,
+                    "parallelism": len(item.profile_keys),
+                    "agent_run_id": item.agent_run_id,
+                    "proposal_run_id": item.proposal_run_id,
+                    "error": item.error,
+                }
+                for item in completed.waves
+            ],
+        }
+    ]
+
+
+def test_missions_and_candidates_return_real_local_state(client: TestClient) -> None:
+    import subprocess
+
+    from ronin_cli.candidate_workspace import CandidateWorkspaceService
+    from ronin_cli.mission_models import MissionSpec, MissionStage
+    from ronin_cli.mission_store import MissionStore
+
+    project = Path.cwd()
+    subprocess.run(["git", "init", "-q"], check=True, capture_output=True, text=True)
+    subprocess.run(["git", "config", "user.email", "dashboard@example.invalid"], check=True, capture_output=True, text=True)
+    subprocess.run(["git", "config", "user.name", "Dashboard tests"], check=True, capture_output=True, text=True)
+    (project / "example.py").write_text("VALUE = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "example.py"], check=True, capture_output=True, text=True)
+    subprocess.run(["git", "commit", "-qm", "initial"], check=True, capture_output=True, text=True)
+
+    missions = MissionStore(project)
+    mission = missions.create(MissionSpec(title="Verify UI mission", issue_text="Show real mission data."))
+    mission = missions.transition(mission.id, MissionStage.INSPECTING)
+    candidate = CandidateWorkspaceService(project).create(mission.id, image="python:3.14-alpine")
+    mission = missions.set_candidate_workspace(mission.id, candidate.id)
+
+    rows = client.get("/ui/missions").json()
+    assert rows == [
+        {
+            "id": mission.id,
+            "title": "Verify UI mission",
+            "source": "manual",
+            "source_id": "",
+            "stage": "inspecting",
+            "created": mission.created,
+            "updated": mission.updated,
+            "candidate_workspace_id": candidate.id,
+            "event_count": 3,
+            "audit_valid": True,
+            "plan_recorded": False,
+            "test_verdict": "unknown",
+            "review_verdict": "unknown",
+            "security_verdict": "unknown",
+            "evaluation_eligible": False,
+            "pr_draft_status": "not_drafted",
+        }
+    ]
+    candidates = client.get("/ui/candidates").json()
+    assert candidates == [
+        {
+            "id": candidate.id,
+            "mission_id": mission.id,
+            "base_revision": candidate.base_revision,
+            "image": "python:3.14-alpine",
+            "status": "active",
+            "created": candidate.created,
+            "updated": candidate.updated,
+            "destroyed": None,
+        }
+    ]
+    CandidateWorkspaceService(project).destroy(candidate.id)

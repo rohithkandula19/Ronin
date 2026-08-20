@@ -2,9 +2,15 @@
 
 ```bash
 pipx install ronin-cli
-ronin init --demo
-ronin chat
+ronin1 init --demo
+ronin1 chat
 ```
+
+> **The command is `ronin1`.** It used to be `ronin`, and that name now belongs to the
+> v2 tree at the repository root. Console scripts are not namespaced, so two installed
+> distributions declaring one name means whichever was installed second silently wins —
+> the rename is what stops `ronin` from meaning different agents on different machines.
+> Everything below is otherwise unchanged.
 
 `ronin` is a **Claude-Code-style AI coding agent** — it reads, edits, and runs
 your code from the terminal — built on a **provider-agnostic agent framework**
@@ -12,6 +18,11 @@ with first-class evals, memory, security hardening, and MCP tool integrations.
 
 Plug in Claude for top quality, or run it **free** on Gemini, Cerebras, Groq,
 or Ollama.
+
+Provider keys can stay outside config files. Ronin discovers standard
+provider-specific environment variables such as `GROQ_API_KEY`,
+`GEMINI_API_KEY`, `CEREBRAS_API_KEY`, and `OPENROUTER_API_KEY`; `/provider`
+reports readiness without printing secret values.
 
 ## Install
 
@@ -25,18 +36,19 @@ pip install ronin-cli
 
 ## What you get
 
-- **Claude-Code-style coding agent** — `ronin code` opens a REPL where Claude
+- **Claude-Code-style coding agent** — `ronin1 code` opens a REPL where Claude
   reads, edits, and runs your code under a sandbox. Parallel tool calls,
   prompt caching, `/context` fullness bar, in-session `/cost` and `/router`,
-  per-file syntax-highlighted diffs, checkpoint & rewind, vision-in-the-loop.
+  incremental, syntax-highlighted diff previews with literal file content,
+  checkpoint & rewind, vision-in-the-loop.
 - **Provider-agnostic** — Claude, Gemini, Cerebras, Groq, Ollama, OpenRouter,
   OpenAI. Switch with `/model`, or let the **Self-tuning Router** pick the
   cheapest blade that reliably wins on your repo.
 - **200+ built-in plugins** — currency, crypto, weather, GitHub, recipes,
-  NASA, Luhn, WCAG contrast, … plus a `ronin plugin from-api` generator that
+  NASA, Luhn, WCAG contrast, … plus a `ronin1 plugin from-api` generator that
   turns ANY REST endpoint into an agent tool.
 - **MCP catalog** — 24 first-party servers (Stripe, Linear, Slack, Notion,
-  Postgres, GitHub, Playwright, …) — `ronin mcp catalog` then `install`.
+  Postgres, GitHub, Playwright, …) — `ronin1 mcp catalog` then `install`.
   Supports both stdio and remote (HTTP/SSE) transports.
 - **Nightshift autonomous mode** — works your backlog into reviewable patches
   overnight (worktree-isolated, idempotent, cron-schedulable, opens real PRs).
@@ -50,10 +62,10 @@ pip install ronin-cli
 ## Quickstart (no credentials needed)
 
 ```bash
-ronin init --demo
-ronin ask "how many active subscriptions do we have?"
-ronin chat
-ronin code      # the Claude-Code-style coding agent
+ronin1 init --demo
+ronin1 ask "how many active subscriptions do we have?"
+ronin1 chat
+ronin1 code      # the Claude-Code-style coding agent
 ```
 
 Demo mode answers from in-process fixtures — calls don't leave your machine.
@@ -61,8 +73,8 @@ Demo mode answers from in-process fixtures — calls don't leave your machine.
 ## Bring your own keys
 
 ```bash
-ronin init           # interactive — prompts for each provider's credentials
-ronin login          # set/refresh provider keys later
+ronin1 init           # interactive — prompts for each provider's credentials
+ronin1 login          # set/refresh provider keys later
 ```
 
 Or write `~/.ronin/config.toml` directly:
@@ -77,20 +89,20 @@ model = "claude-sonnet-4-6"
 ## Highlights
 
 ```bash
-ronin code                       # Claude-Code-style coding REPL
-ronin commit                     # Conventional Commit message from your diff
-ronin pr                         # open a PR with a title + body from your diff
-ronin nightshift                 # autonomous teammate works your backlog
-ronin mcp catalog                # browse 24 popular MCP integrations
-ronin plugin library             # 200+ ready-to-add plugins
-ronin plugin from-api <url>      # turn any REST endpoint into an agent tool
-ronin scan                       # block secrets at commit time
+ronin1 code                       # Claude-Code-style coding REPL
+ronin1 commit                     # Conventional Commit message from your diff
+ronin1 pr                         # open a PR with a title + body from your diff
+ronin1 nightshift                 # autonomous teammate works your backlog
+ronin1 mcp catalog                # browse 24 popular MCP integrations
+ronin1 plugin library             # 200+ ready-to-add plugins
+ronin1 plugin from-api <url>      # turn any REST endpoint into an agent tool
+ronin1 scan                       # block secrets at commit time
 ```
 
 ## Safety
 
-`ronin code` writes only inside the project. The MCP servers shipped with
-ronin are read-only by default; write paths require explicit opt-in.
+`ronin1 code` writes only inside the project. The MCP servers shipped with
+Ronin are read-only by default; write paths require explicit opt-in.
 Prompt-injection scanning is on by default for tool outputs.
 
 ## Project

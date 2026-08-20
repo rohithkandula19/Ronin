@@ -20,6 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -29,10 +31,26 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
-      - name: Run tests (publish gate)
+      # The publish gate must be at least as strong as the PR gate, or a release can
+      # ship code that would have been rejected on a pull request. It previously ran
+      # `pytest packages` only — 10 of 23 workspace paths — so src/ronin, apps/ and
+      # training/ were unguarded at exactly the moment they became immutable.
+      - name: Run tests (publish gate — full workspace, same as CI)
         run: |
           uv sync --all-packages --all-groups
-          uv run --frozen pytest packages -q
+          uv run --frozen pytest packages apps training tests -q
+
+      - name: Lint and typecheck (publish gate)
+        run: |
+          uv run --frozen ruff check src/ronin tests scripts
+          uv run --frozen mypy
+
+      - name: Generated files are current (publish gate)
+        run: |
+          uv run --frozen python scripts/sync_typecheck_paths.py --check
+          uv run --frozen python scripts/generate_readme_stats.py --check
+          uv run --frozen python scripts/gen_eval_manifest.py --check
+          uv run --frozen python docs/site/generate.py --check
 
       - name: Build all packages
         run: |
@@ -52,12 +70,25 @@ jobs:
       - name: Validate artifacts (twine check)
         run: uvx twine check dist/*
 
+      # A missing token used to `exit 0` here. On a tag push that is the worst
+      # available outcome: the release reports success, the packages are never
+      # published, and the tag now looks released. Fail instead, loudly — and only
+      # allow the skip when a human asked for a dry run via workflow_dispatch.
       - name: Publish to PyPI
         env:
           UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
-          if [ -z "$UV_PUBLISH_TOKEN" ]; then
-            echo "PYPI_TOKEN secret is not set. Skipping publish."
+          if [ -n "$UV_PUBLISH_TOKEN" ]; then
+            uv publish dist/*
             exit 0
           fi
-          uv publish dist/*
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "::notice::PYPI_TOKEN is not set; this manual run built and validated"
+            echo "::notice::the artifacts but published nothing. That is a dry run."
+            exit 0
+          fi
+          echo "::error::PYPI_TOKEN is not set, so tag ${GITHUB_REF#refs/tags/} built" >&2
+          echo "::error::successfully and published NOTHING. Add the secret and re-run;" >&2
+          echo "::error::a green release that shipped no package is worse than a red one." >&2
+          exit 1

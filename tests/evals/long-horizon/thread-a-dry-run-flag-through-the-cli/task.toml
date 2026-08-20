@@ -1,0 +1,30 @@
+id = "long-horizon/thread-a-dry-run-flag-through-the-cli"
+category = "long-horizon"
+prompt = """
+Twice this month somebody has run atticus against the wrong box and deleted logs we
+needed. Add a global `--dry-run` — used as `python3 -m atticus --dry-run prune ...`,
+before the subcommand like the other run-wide flags — that makes the two commands
+which write to disk report what they would have done and change nothing. It should
+still exit 0, and each file it would have touched should be named in the output.
+
+It also needs to be settable per box: a `dry_run` key in `config/atticus.json`,
+shipped as false, and passing the flag turns it on regardless of the file.
+
+`inspect` and `verify` never write anything, so they should not need touching. Leave
+the existing tests passing.
+"""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = [
+    "config/atticus.json",
+    "atticus/cli/parser.py",
+    "atticus/cli/options.py",
+    "atticus/cli/config_file.py",
+    "atticus/commands/prune.py",
+    "atticus/commands/rotate.py",
+]
+max_turns = 50
+timeout_seconds = 900
+tags = ["python", "cli", "argparse", "multi-file", "config"]
+regression_gate = false

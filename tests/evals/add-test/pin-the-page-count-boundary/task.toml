@@ -1,0 +1,13 @@
+id = "add-test/pin-the-page-count-boundary"
+category = "add-test"
+prompt = """pagelet/paging.py does the offset maths for our list endpoints. `page_count` is the part I do not trust: the interesting case is when the number of items divides exactly into the page size, because that is exactly where a rounding-up expression grows a trailing empty page, and tests/test_paging.py never checks it.
+
+Add a test to tests/test_paging.py that pins that case down (and its immediate neighbours, if you want to be thorough)."""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = ["tests/test_paging.py"]
+max_turns = 10
+timeout_seconds = 180
+tags = ["python", "pytest", "boundary"]
+regression_gate = false

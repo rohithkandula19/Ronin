@@ -1,0 +1,19 @@
+id = "single-file/quote-embedded-quotes-in-the-csv-export"
+category = "single-file"
+prompt = """
+Finance opened last night's export and everything after the "Cable 3" jack" row
+is shifted into the wrong columns. Any item description with a double quote or a
+line break in it derails the whole file - commas are handled, the rest is not.
+
+Make the export survive those characters, so a normal CSV reader gets back
+exactly the values we put in. Rows that were already fine must come out
+byte-for-byte as before, and the file still has to open cleanly in Excel.
+"""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = ["src/exports/csv_writer.py"]
+max_turns = 10
+timeout_seconds = 120
+tags = ["python", "bom", "encoding", "csv"]
+regression_gate = false

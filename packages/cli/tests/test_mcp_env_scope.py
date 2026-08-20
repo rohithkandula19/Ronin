@@ -30,7 +30,7 @@ from ronin_cli.mcp_client import (
 def fake_secrets(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
     monkeypatch.setenv("HOME", "/home/tester")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-SECRET-must-not-leak")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-" + "SECRET-must-not-leak")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "AWS-SECRET-must-not-leak")
     monkeypatch.setenv("GITHUB_TOKEN", "ghp-declared-and-allowed")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-must-not-leak")

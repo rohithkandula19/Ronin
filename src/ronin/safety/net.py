@@ -1,0 +1,577 @@
+"""Where a fetch may go, and what a URL is allowed to say in a log.
+
+Two jobs, both about the same string.
+
+**Where a fetch may go.** A URL the *model* chose is a request this machine makes
+from inside the network the user trusts, which is the shape of every SSRF. The
+target that matters is not a secret host: it is ``http://169.254.169.254/``, the
+cloud metadata endpoint, which answers unauthenticated HTTP with the instance's
+role credentials. A fetch tool without this check turns "summarize this page" into
+credential exfiltration, and the model does not have to be malicious for it to
+happen — a fetched page that *asks* for it is enough, which is exactly the case
+:mod:`~ronin.safety.injection` exists for.
+
+The check before this one was a literal comparison against five spellings of
+localhost. Every address in the table below reached the fetcher:
+
+===============================  ==========================================
+``169.254.169.254``              link-local — the metadata endpoint itself
+``10.0.0.5`` ``192.168.1.1``     private ranges: the user's own network
+``127.1`` ``2130706433``         loopback in the notations ``curl`` accepts
+``[::ffff:127.0.0.1]``           loopback wearing IPv6
+``metadata.google.internal``     an internal *name*, no literal address at all
+===============================  ==========================================
+
+So: classify with :mod:`ipaddress` rather than by string, and parse the legacy
+numeric notations ourselves rather than trusting ``inet_aton``, whose acceptance of
+octal and hex differs between platforms — a check that blocks on Linux and passes on
+macOS is not a check, and this project's CI runs both.
+
+**Fail closed on anything unclassifiable.** A host that is neither a legal DNS name
+nor an address we can parse is refused. The alternative — pass it through and hope
+the resolver agrees with us — is how a bypass gets written as a one-character
+notation nobody thought of.
+
+**What a URL may say in a log.** Secrets travel in query strings (``?token=…``,
+a presigned S3 signature, an OAuth ``code``) and in userinfo (``https://user:pw@``).
+:func:`redact_url` keeps the scheme, host and path and replaces *every* query value
+and any fragment, rather than the values whose names look secret-ish. The broad rule
+is the same argument as the one in :func:`ronin.ui.render.strip_controls`: "no query
+value appears in a log" is one sentence that can be tested exhaustively, while "no
+*secret* query value" is a list of parameter names that has to be maintained against
+every API anyone integrates, and a missed name is silent. The cost is that
+``?page=2`` is redacted too; parameter *names* stay visible, so the shape of a URL
+survives for debugging.
+
+**Two checks, because a URL has two truths.** :func:`check_url` judges the URL as
+written; :func:`resolve_and_check` also judges what the hostname *resolves to*, and
+returns those addresses so the caller can connect to them instead of to the name. The
+second is not optional politeness: publishing an ``A`` record that points at
+``169.254.169.254`` is the ordinary way to reach a metadata endpoint, and such a URL
+passes every literal test here because nothing about it is malformed.
+
+Pinning is what makes the resolved check real rather than advisory. A fetcher that
+vets an address and then hands the *name* to a socket has checked one DNS answer and
+connected on another — the rebinding window. :class:`Resolution` therefore carries
+the vetted addresses, and :func:`ronin.tools.fetcher.pinned_fetcher` dials them while
+keeping the hostname in the ``Host`` header and the TLS handshake.
+
+Known gaps, named rather than papered over:
+
+* **A resolver that cannot answer is allowed through**, not refused — a deliberate
+  choice, and the weaker of the two available ones. Argued in :class:`Resolution`.
+* **6rd** (RFC 5969) embeds an IPv4 address at a provider-chosen offset in a
+  provider-chosen prefix and cannot be recognised from the address alone. The six other
+  IPv4-in-IPv6 forms — 6to4, Teredo, NAT64, IPv4-compatible, IPv4-mapped and ISATAP —
+  are unwrapped and judged by :func:`embedded_ipv4`.
+* **Resolution is not cached and not shared with the connection's own lookup.** The
+  pinned fetcher closes that by connecting to what was vetted, but anything else
+  built on :func:`resolve_and_check` alone inherits the rebinding window.
+
+Depends on :mod:`ipaddress` and :mod:`re` from the standard library, and nothing
+else. No new dependency: the classification is a property lookup on a stdlib type.
+"""
+
+from __future__ import annotations
+
+import ipaddress
+import re
+import socket
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from typing import Final
+
+#: Turns a hostname into the addresses it points at. Injected everywhere it is used:
+#: DNS is the one thing in this module that touches the network, and a test suite that
+#: is required to be offline cannot be allowed to depend on what a real resolver says
+#: about a real name today.
+Resolver = Callable[[str], Sequence[str]]
+
+#: Schemes a fetch may use. ``file://`` is a read, not a fetch, and ``gopher://``
+#: and friends are request-smuggling primitives in a URL parser's clothing.
+ALLOWED_SCHEMES: Final = ("http://", "https://")
+
+#: Ranges :mod:`ipaddress` does not call private but which are not the public
+#: internet either. Checked in addition to the property lookups in
+#: :func:`address_reason`, because ``100.64.0.1`` reports ``is_private=False``:
+#: carrier-grade NAT is shared address space, and on a home connection behind it
+#: the neighbours are reachable.
+#:
+#: The two IPv6 tunnel prefixes stay here even though :func:`embedded_ipv4` now looks
+#: *inside* those addresses. The two rules answer different questions and the blunt one
+#: is the stricter: this refuses every 6to4 and Teredo address, including the ones
+#: wrapping a perfectly public IPv4, while the unwrapping only adds refusals for tunnel
+#: forms that no prefix identifies. Deleting these would turn ``2002:5db8:d822::`` from
+#: refused into allowed, which is not a change this module should make quietly.
+EXTRA_BLOCKED: Final = tuple(
+    ipaddress.ip_network(cidr)
+    for cidr in (
+        "100.64.0.0/10",  # RFC 6598 carrier-grade NAT
+        "192.0.0.0/24",  # RFC 6890 IETF protocol assignments
+        "192.0.2.0/24",  # RFC 5737 documentation ranges — never a real host
+        "198.51.100.0/24",
+        "203.0.113.0/24",
+        "2002::/16",  # 6to4: an IPv4 address wearing IPv6
+        "2001::/32",  # Teredo, same
+    )
+)
+
+#: The well-known NAT64 prefix (RFC 6052). The low 32 bits are an IPv4 address that a
+#: NAT64 gateway on the path will translate to and connect to on this machine's behalf.
+NAT64_PREFIX: Final = ipaddress.IPv6Network("64:ff9b::/96")
+
+#: The interface identifiers that mark an ISATAP address (RFC 5214 §6.1):
+#: ``<prefix>:0:5efe:<ipv4>``, with ``0200:5efe`` the same thing spelled with the
+#: EUI-64 universal bit set. Unlike 6to4 and Teredo, the *prefix* of an ISATAP address
+#: is whatever the site uses — ordinary global unicast — so no prefix test can find one,
+#: which is why this looks at bytes 8..12 instead.
+ISATAP_INTERFACE_IDS: Final = (b"\x00\x00\x5e\xfe", b"\x02\x00\x5e\xfe")
+
+#: Hostname suffixes that mean "inside", by convention rather than by address.
+#: ``.internal`` is what GCP's metadata server answers to, and mDNS ``.local``
+#: names resolve on the user's LAN.
+BLOCKED_SUFFIXES: Final = (".internal", ".local", ".localhost", ".home.arpa")
+
+#: Bare names that are loopback by definition.
+BLOCKED_NAMES: Final = frozenset({"localhost", "ip6-localhost", "ip6-loopback"})
+
+#: One DNS label: letters, digits, hyphen, not starting or ending with a hyphen.
+_LABEL: Final = re.compile(r"(?!-)[A-Za-z0-9-]{1,63}(?<!-)\Z")
+
+#: Query parameter and fragment values are replaced with this, so a redacted URL
+#: reads as deliberately redacted rather than as an empty value.
+REDACTED: Final = "<redacted>"
+
+
+class UrlNotAllowed(ValueError):
+    """A URL this program refuses to fetch.
+
+    ``ValueError`` because the URL is bad input, not a failure of the machine. The
+    message is written for the model that supplied it — it says which property was
+    disqualifying and what to do instead, since a refusal the model cannot act on
+    just becomes a retry of the same call.
+    """
+
+
+def _numeric_address(host: str) -> ipaddress.IPv4Address | None:
+    """The legacy IPv4 notations, parsed here rather than by the platform.
+
+    ``curl http://2130706433/`` and ``curl http://0x7f.1/`` both reach 127.0.0.1:
+    ``inet_aton`` accepts one to four parts, each decimal, octal (leading zero) or
+    hex (leading ``0x``), with the final part filling all remaining octets. Python's
+    :func:`ipaddress.ip_address` accepts none of it, which is why a check built only
+    on that function passes ``http://2130706433/`` straight through.
+
+    Implemented rather than delegated to :func:`socket.inet_aton` because glibc,
+    musl and macOS disagree about which of these forms they accept, and a check whose
+    verdict depends on the host OS is a check that fails open on one of them.
+    """
+    parts = host.split(".")
+    if len(parts) > 4 or not all(parts):
+        return None
+    values: list[int] = []
+    for part in parts:
+        try:
+            if part.lower().startswith(("0x", "-0x")):
+                values.append(int(part, 16))
+            elif part.startswith("0") and part != "0":
+                values.append(int(part, 8))
+            else:
+                values.append(int(part, 10))
+        except ValueError:
+            return None
+    if any(value < 0 for value in values):
+        return None
+    # The last part fills every octet the earlier parts did not name: in `10.1`,
+    # `1` is the low *three* octets, so the address is 10.0.0.1.
+    packed = 0
+    for value in values[:-1]:
+        if value > 0xFF:
+            return None
+        packed = (packed << 8) | value
+    tail_octets = 4 - (len(values) - 1)
+    if values[-1] >= 1 << (8 * tail_octets):
+        return None
+    packed = (packed << (8 * tail_octets)) | values[-1]
+    try:
+        return ipaddress.IPv4Address(packed)
+    except ipaddress.AddressValueError:  # pragma: no cover - packed is in range by construction
+        return None
+
+
+def parse_address(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    """``host`` as an IP address, in any notation, or ``None`` if it is a name.
+
+    IPv6 arrives bracketed in a URL (``http://[::1]/``); the brackets are the URL's
+    syntax, not part of the address, and are stripped before parsing. A mapped
+    address (``::ffff:127.0.0.1``) is unwrapped to the IPv4 address it carries so
+    that one loopback check covers both spellings.
+    """
+    candidate = host[1:-1] if host.startswith("[") and host.endswith("]") else host
+    try:
+        address = ipaddress.ip_address(candidate)
+    except ValueError:
+        return _numeric_address(candidate)
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        return address.ipv4_mapped
+    return address
+
+
+@dataclass(frozen=True, slots=True)
+class Embedded:
+    """An IPv4 address carried inside an IPv6 address, and the form carrying it.
+
+    ``kind`` is a noun phrase written to be dropped into a refusal message, because
+    "this is an ISATAP address" is the part of the explanation the reader cannot work
+    out from the hex. ``role`` names *which* embedded address this is for the forms that
+    carry more than one, and is empty for the forms that carry exactly one.
+    """
+
+    address: ipaddress.IPv4Address
+    kind: str
+    role: str = ""
+
+
+def embedded_ipv4(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> tuple[Embedded, ...]:
+    """Every IPv4 address ``address`` carries inside it, in transition-form order.
+
+    Six IPv6 forms exist to carry an IPv4 address through IPv6 syntax, and each is a
+    way to write a v4 destination that a v6-shaped check does not read: 6to4
+    (``2002::/16``), Teredo (``2001::/32``, which embeds *two* — the relay's and the
+    client's), NAT64 (:data:`NAT64_PREFIX`), IPv4-compatible (``::a.b.c.d``),
+    IPv4-mapped (``::ffff:a.b.c.d``) and ISATAP (:data:`ISATAP_INTERFACE_IDS`).
+
+    All but the last are refused before their payload is read — the first four by prefix,
+    IPv4-mapped because :func:`parse_address` unwraps it — so for those this only improves
+    the *message*. ISATAP is the one that matters: its prefix is the site's own global
+    unicast prefix, so ``2001:db8:1:2:0:5efe:c0a8:0101`` looks like an ordinary public
+    IPv6 address and, on a host with an ISATAP interface up, routes to ``192.168.1.1``.
+    Nothing in the property chain sees it, because there is nothing in the prefix to see.
+
+    Returns every carried address rather than the first, so a caller judges all of them.
+    ``()`` for an IPv4 address, and for an IPv6 address carrying nothing.
+
+    Not covered: **6rd** (RFC 5969) embeds an IPv4 address at a provider-chosen bit
+    offset inside a provider-chosen prefix, so recognising one requires the provider's
+    configuration. It is undetectable from the address alone, and guessing an offset
+    would refuse public addresses at random. Left as a known gap rather than approximated.
+    """
+    if not isinstance(address, ipaddress.IPv6Address):
+        return ()
+    found: list[Embedded] = []
+    packed = address.packed
+    if address.ipv4_mapped is not None:
+        found.append(Embedded(address.ipv4_mapped, "an IPv4-mapped address"))
+    if address.sixtofour is not None:
+        found.append(Embedded(address.sixtofour, "a 6to4 tunnel address"))
+    if address.teredo is not None:
+        server, client = address.teredo
+        found.append(Embedded(server, "a Teredo tunnel address", role="relay "))
+        found.append(Embedded(client, "a Teredo tunnel address", role="client "))
+    if address in NAT64_PREFIX:
+        found.append(Embedded(ipaddress.IPv4Address(packed[12:16]), "a NAT64 address"))
+    if packed[:12] == bytes(12) and int.from_bytes(packed[12:16], "big") > 1:
+        # `::a.b.c.d`, the deprecated IPv4-compatible form. `::` and `::1` are excluded
+        # because they are the unspecified and loopback addresses, not a wrapped
+        # `0.0.0.0` and `0.0.0.1` — both are refused on their own properties anyway, and
+        # reporting a wrapped address for them would be a lie in the message.
+        found.append(Embedded(ipaddress.IPv4Address(packed[12:16]), "an IPv4-compatible address"))
+    if packed[8:12] in ISATAP_INTERFACE_IDS:
+        found.append(Embedded(ipaddress.IPv4Address(packed[12:16]), "an ISATAP tunnel address"))
+    return tuple(found)
+
+
+def _direct_reason(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> str:
+    """:func:`address_reason` for the address as written, ignoring what it wraps.
+
+    Split out because :func:`address_reason` needs to apply this same chain to an
+    embedded address, and a second copy of the ranges is a second thing to keep right.
+    """
+    if address.is_unspecified:
+        return "the unspecified address (0.0.0.0 / ::), which routes to this machine"
+    if address.is_loopback:
+        return "a loopback address — this machine"
+    if address.is_link_local:
+        return "a link-local address, which is where cloud metadata endpoints live"
+    if address.is_multicast:
+        return "a multicast address, not a host"
+    if address.is_private:
+        return "a private address, inside the network this machine sits in"
+    if address.is_reserved:
+        return "a reserved address"
+    if any(address in network for network in EXTRA_BLOCKED):
+        return "shared or reserved address space, not a public host"
+    return ""
+
+
+def address_reason(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> str:
+    """Why this address is not a fetch target, or ``""`` if it is fine.
+
+    Property lookups on the stdlib type rather than a table of CIDRs, so the ranges
+    stay correct as :mod:`ipaddress` tracks the RFCs — with :data:`EXTRA_BLOCKED` for
+    the ones it does not classify the way this check needs.
+
+    Then the same chain again on any IPv4 address the outer one *wraps*
+    (:func:`embedded_ipv4`), under one rule: **unwrapping may add a refusal and may
+    improve a message, never grant permission.** An address already disqualified by its
+    own properties stays disqualified whatever it carries — which is why
+    ``2002:5db8:d822::``, a 6to4 address wrapping a public IPv4, is still refused. Read
+    the other way round it would be a downgrade dressed as a feature: judging tunnels by
+    their payload alone would open every 6to4 and Teredo address whose payload is public,
+    and the outer form is itself a reason not to go there.
+
+    What the unwrapping genuinely closes is ISATAP, whose prefix is ordinary global
+    unicast — see :func:`embedded_ipv4`.
+    """
+    direct = _direct_reason(address)
+    for carried in embedded_ipv4(address):
+        inner = _direct_reason(carried.address)
+        if inner:
+            return f"{carried.kind}, and the {carried.role}{carried.address} it wraps is {inner}"
+    return direct
+
+
+def host_reason(host: str) -> str:
+    """Why this host is not a fetch target, or ``""`` if it is fine.
+
+    Addresses are classified numerically; names are checked against the suffixes
+    that mean "inside" and then validated as DNS names. The validation is the
+    fail-closed half: a host that is neither a name nor an address we can parse is
+    refused rather than handed to a resolver whose interpretation we do not know.
+    """
+    if not host:
+        return "no host at all"
+    lowered = host.lower()
+    address = parse_address(lowered)
+    if address is not None:
+        return address_reason(address)
+    if lowered in BLOCKED_NAMES:
+        return "a loopback name — this machine"
+    if lowered.endswith(BLOCKED_SUFFIXES):
+        return "an internal hostname, which resolves inside the network, not on the internet"
+    name = lowered.removesuffix(".")
+    if not name or len(name) > 253 or not all(_LABEL.match(label) for label in name.split(".")):
+        return "not a hostname this program can classify, so it is refused rather than guessed at"
+    if name.rsplit(".", 1)[-1].isdigit():
+        # `999.1.1.1` and `1.2.3.4.5` are not addresses — `parse_address` rejected
+        # both — but every label is legal in a hostname, so without this they arrive
+        # here classified as *names* and pass. A top-level label cannot be all digits
+        # (RFC 3696), so anything ending in one is a malformed address rather than a
+        # host, and a malformed address is exactly the kind of input this module
+        # refuses instead of handing to a resolver to interpret. Found by the table in
+        # `tests/safety/test_safety_net.py`, which is the argument for writing the
+        # blocked cases out as data rather than picking a few examples.
+        return "a malformed numeric address — no top-level domain is all digits"
+    return ""
+
+
+def split_host(url: str) -> str:
+    """The host out of a URL, with userinfo and port removed.
+
+    Hand-rolled rather than :func:`urllib.parse.urlsplit` because the userinfo rule
+    is the whole point: in ``http://expected.example.com@169.254.169.254/`` the host
+    is the *last* ``@``-separated field, and a check that reads the first one is
+    reading the attacker's decoration. The port is discarded — a blocked address is
+    blocked on every port.
+    """
+    remainder = url.split("://", 1)[1] if "://" in url else url
+    authority = re.split(r"[/?#]", remainder, maxsplit=1)[0]
+    host = authority.rsplit("@", 1)[-1]
+    if host.startswith("["):
+        return host[: host.index("]") + 1] if "]" in host else host
+    return host.rsplit(":", 1)[0] if ":" in host else host
+
+
+def redact_url(url: str) -> str:
+    """A URL safe to write down: no userinfo, no query values, no fragment.
+
+    Parameter names survive, so ``?token=abc&page=2`` becomes
+    ``?token=<redacted>&page=<redacted>`` — enough to see what was called with what
+    shape, and nothing to lift out of a log file.
+
+    Note where this is *not* applied: the session transcript records tool arguments
+    verbatim, because it is the replay source and a redacted argument would make a
+    session unreplayable. ``.ronin/sessions`` is therefore as sensitive as the work
+    done in it, which is why it lives in the workspace rather than anywhere shared.
+    """
+    stripped = url.strip()
+    head, _, fragment = stripped.partition("#")
+    base, _, query = head.partition("?")
+    if "://" in base:
+        scheme, _, rest = base.partition("://")
+        base = f"{scheme}://{rest.rsplit('@', 1)[-1]}" if "@" in rest.split("/", 1)[0] else base
+    if query:
+        pairs = []
+        for field in query.split("&"):
+            if not field:
+                continue
+            name, sep, _ = field.partition("=")
+            pairs.append(f"{name}={REDACTED}" if sep else f"{name}")
+        base = f"{base}?{'&'.join(pairs)}" if pairs else base
+    return f"{base}#{REDACTED}" if fragment else base
+
+
+def check_scheme(url: str) -> str:
+    """``url`` stripped, if its scheme is one this program speaks.
+
+    Split out of :func:`check_url` so a caller with a *configured* endpoint — a
+    self-hosted search instance, say — can apply this half without the address half,
+    and be seen to be applying exactly this half. The alternative was for such a caller
+    to hand-roll a scheme check, which is how a second, laxer copy of a security rule
+    gets written. See :mod:`ronin.tools.searcher` for the one caller that wants the
+    subset, and why a configured host is not the case the address rules exist for.
+    """
+    stripped = url.strip()
+    if not stripped.lower().startswith(ALLOWED_SCHEMES):
+        raise UrlNotAllowed(
+            f"{redact_url(stripped)!r} is not an http(s) URL. Only http and https are "
+            "fetched — a file:// path should be read with the read tool."
+        )
+    return stripped
+
+
+def check_url(url: str) -> str:
+    """``url`` if it may be fetched, else raise :exc:`UrlNotAllowed`.
+
+    The returned string is the stripped original: this function decides, it does not
+    rewrite. Every message quotes the URL through :func:`redact_url`, because a
+    refusal is text that gets shown, copied into an issue and written to a log, and a
+    secret in a rejected URL is still a secret.
+    """
+    stripped = check_scheme(url)
+    reason = host_reason(split_host(stripped))
+    if reason:
+        raise UrlNotAllowed(
+            f"refusing to fetch {redact_url(stripped)!r}: it points at {reason}. If you "
+            "meant a local or internal service, run the request through bash so it is "
+            "explicit and gets reviewed on its own terms."
+        )
+    return stripped
+
+
+def system_resolver(host: str) -> tuple[str, ...]:
+    """Every address ``host`` currently resolves to, via the system resolver.
+
+    The only function in this package that touches the network, which is why it is a
+    named default rather than an inline call: everything that resolves takes a
+    :data:`Resolver`, so every test injects one and the suite stays offline.
+
+    ``AF_UNSPEC`` on purpose — both families, because a name with a harmless ``A``
+    record and a loopback ``AAAA`` record is a name that reaches this machine on any
+    client that prefers IPv6, which is most of them. Deduplicated with order kept so
+    an error message reads the way the resolver answered.
+    """
+    try:
+        found = socket.getaddrinfo(host, 80, proto=socket.IPPROTO_TCP)
+    except UnicodeError as exc:  # an IDNA name the encoder rejects
+        raise OSError(f"cannot encode the hostname {host!r}: {exc}") from exc
+    return tuple(dict.fromkeys(str(entry[4][0]) for entry in found))
+
+
+@dataclass(frozen=True, slots=True)
+class Resolution:
+    """Where a hostname actually points, as far as we were able to find out.
+
+    ``addresses`` is what a fetcher should **pin**: connecting to a name it resolves
+    again is how a check gets bypassed between the check and the connection, since the
+    second answer need not match the first (DNS rebinding). A fetcher that dials
+    ``addresses`` and carries ``host`` in the ``Host`` header and TLS SNI is doing the
+    only version of this that is not advisory.
+
+    ``resolved`` is ``False`` when the resolver could not answer — and the URL is then
+    **allowed** through, which is a deliberate choice with a real cost:
+
+        A resolver that fails open is a resolver an attacker can arrange to fail.
+        Someone who can make resolution fail for a name they control gets the same
+        pass as someone whose name simply does not exist.
+
+    The reason for accepting that: refusing would make every fetch on a machine with a
+    flaky or absent resolver a security refusal, which reads as a bug and teaches
+    people to disable the check. The mitigation is that ``addresses`` is empty, so a
+    pinning fetcher has nothing to pin and must resolve at connect time — where the
+    connection itself fails for a name that genuinely does not resolve.
+    """
+
+    host: str
+    addresses: tuple[str, ...] = ()
+    resolved: bool = True
+    note: str = ""
+
+    @property
+    def pinnable(self) -> bool:
+        """Whether a fetcher can connect by address instead of by name."""
+        return bool(self.addresses)
+
+
+def resolve_and_check(url: str, *, resolve: Resolver = system_resolver) -> Resolution:
+    """:func:`check_url`, then the same check again on what the name resolves to.
+
+    This is the half :func:`check_url` cannot do. ``http://evil.example.com/`` passes
+    every literal test in this module and is the standard way to reach a metadata
+    endpoint anyway: publish an ``A`` record pointing at ``169.254.169.254`` and let
+    the victim's own resolver do the work. Nothing about the URL looks wrong, because
+    nothing about it *is* wrong — the address is.
+
+    Refuses if **any** returned address is disqualified, not merely if all of them
+    are. A name that answers with one public address and one loopback address is not
+    a name that is half safe; it is a name whose answer depends on which address the
+    client happens to try, and an attacker choosing the mix gets to pick.
+
+    Raises :exc:`UrlNotAllowed` for a literal-form failure (via :func:`check_url`) or
+    for a hostile address. Returns a :class:`Resolution` otherwise, including for the
+    case where resolution failed — see that class for why that is not a refusal.
+    """
+    checked = check_url(url)
+    host = split_host(checked).lower()
+    literal = parse_address(host)
+    if literal is not None:
+        # Already an address, already vetted by `check_url`. Returned as pinnable so a
+        # fetcher has one path for both shapes rather than two.
+        return Resolution(host=host, addresses=(str(literal),))
+    try:
+        found = tuple(resolve(host))
+    except OSError as exc:
+        return Resolution(host=host, resolved=False, note=str(exc))
+    if not found:
+        return Resolution(host=host, resolved=False, note="the resolver returned no addresses")
+    for text in found:
+        address = parse_address(text)
+        if address is None:
+            raise UrlNotAllowed(
+                f"refusing to fetch {redact_url(checked)!r}: its host resolved to "
+                f"{text!r}, which is not an address this program can classify"
+            )
+        reason = address_reason(address)
+        if reason:
+            raise UrlNotAllowed(
+                f"refusing to fetch {redact_url(checked)!r}: the name {host!r} resolves "
+                f"to {text}, which is {reason}. A public hostname pointing at an "
+                f"internal address is how a fetch tool is turned into a request from "
+                f"inside your network — the URL looks fine, and that is the point."
+            )
+    return Resolution(host=host, addresses=found)
+
+
+__all__ = [
+    "ALLOWED_SCHEMES",
+    "BLOCKED_NAMES",
+    "BLOCKED_SUFFIXES",
+    "EXTRA_BLOCKED",
+    "ISATAP_INTERFACE_IDS",
+    "NAT64_PREFIX",
+    "REDACTED",
+    "Embedded",
+    "Resolution",
+    "Resolver",
+    "UrlNotAllowed",
+    "address_reason",
+    "check_scheme",
+    "check_url",
+    "embedded_ipv4",
+    "host_reason",
+    "parse_address",
+    "redact_url",
+    "resolve_and_check",
+    "split_host",
+    "system_resolver",
+]

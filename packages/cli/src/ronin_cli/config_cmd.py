@@ -15,11 +15,14 @@ SETTABLE: dict[str, tuple[str, str]] = {
     "budget": ("float", "session spend cap in USD (or '-' to clear)"),
     "sentinel": ("bool", "abstain-over-bluff mode (true/false)"),
     "faithfulness": ("enum", "grounding harness mode (off/warn/gate)"),
+    "interaction_style": ("enum", "interactive delivery (balanced/direct/supportive/quiet)"),
+    "relational_checkins": ("bool", "allow occasional task-relevant check-ins (true/false)"),
 }
 
 # Allowed values for "enum"-kind settings.
 ENUM_CHOICES: dict[str, tuple[str, ...]] = {
     "faithfulness": ("off", "warn", "gate"),
+    "interaction_style": ("balanced", "direct", "supportive", "quiet"),
 }
 
 _TRUE = {"true", "1", "yes", "on", "y"}

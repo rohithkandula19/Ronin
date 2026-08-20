@@ -1,0 +1,5 @@
+Reading both.
+<ronin:tool_call>
+{"name": "read_file", "arguments": {"path": "a.py"}}
+{"name": "read_file", "arguments": {"path": "b.py"}}
+</ronin:tool_call>

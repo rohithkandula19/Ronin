@@ -1,0 +1,18 @@
+id = "single-file/teach-the-legacy-size-parser-terabytes"
+category = "single-file"
+prompt = """
+Our size helper tops out at gigabytes: a 2T quota string is rejected outright,
+and printing a two-terabyte disk gives "2048G", which nobody reads as two
+terabytes.
+
+Teach it terabytes in both directions. Everything that parses or prints today
+must keep giving the same answer.
+"""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = ["src/legacy/units.py"]
+max_turns = 10
+timeout_seconds = 120
+tags = ["python", "tabs", "whitespace", "legacy"]
+regression_gate = false

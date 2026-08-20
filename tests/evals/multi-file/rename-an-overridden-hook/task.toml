@@ -1,0 +1,25 @@
+id = "multi-file/rename-an-overridden-hook"
+category = "multi-file"
+prompt = """
+plugkit's plugin hooks are all called `on_something` -- `on_start`, `on_flush` --
+except the one that actually matters, which is `handle_event`. That inconsistency
+trips up everyone writing their first plugin.
+
+Rename the event hook to `on_event` so it matches the rest of the contract. Dispatch
+has to keep working for the plugins that ship with the package, and no `handle_event`
+should be left anywhere.
+"""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = [
+  "plugkit/base.py",
+  "plugkit/registry.py",
+  "plugkit/plugins/audit.py",
+  "plugkit/plugins/metrics.py",
+  "tests/test_registry.py",
+]
+max_turns = 14
+timeout_seconds = 180
+tags = ["python", "rename", "subclass-override", "getattr-dispatch"]
+regression_gate = false

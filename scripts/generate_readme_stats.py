@@ -9,13 +9,14 @@ README (default) or verifies it is current (``--check``, wired into CI so a
 stale number fails the build).
 
 Numbers owned here:
-  * test count      — ``pytest --collect-only`` across packages + apps
+  * test count      — ``pytest --collect-only`` across packages + apps + training + tests
   * total packages  — directories under ``packages/``
   * arcade games    — entries in ``ronin_arcade.games.GAMES``
 
 Prose (which packages, what they do) stays human-authored; only the digits are
 generated, via idempotent, anchored substitutions.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -30,9 +31,20 @@ README = ROOT / "README.md"
 
 def test_count() -> int:
     out = subprocess.run(
-        [sys.executable, "-m", "pytest", "--collect-only", "-q",
-         "packages", "apps", "training"],
-        cwd=ROOT, capture_output=True, text=True,
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "--collect-only",
+            "-q",
+            "packages",
+            "apps",
+            "training",
+            "tests",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
     ).stdout
     m = re.search(r"(\d+)\s+tests? collected", out)
     if not m:
@@ -46,7 +58,10 @@ def package_count() -> int:
 
 def game_count() -> int:
     sys.path.insert(0, str(ROOT / "packages" / "cli" / "src"))
-    from ronin_arcade.games import GAMES  # noqa: E402
+    # No `noqa: E402` needed — the rule is about module-level imports, and this one is
+    # inside a function, so ruff flags the suppression itself as unused (RUF100).
+    from ronin_arcade.games import GAMES
+
     return len(GAMES)
 
 
@@ -66,15 +81,17 @@ def apply(text: str, tests: int, pkgs: int, games: int) -> str:
     # "N-package workspace" -> "<pkgs>-package workspace"
     text = re.sub(r"\b\d+-package workspace\b", f"{pkgs}-package workspace", text)
     # "the other N are platform packages" -> total minus the 7 core
-    text = re.sub(r"the other \d+ are platform packages",
-                  f"the other {pkgs - 7} are platform packages", text)
+    text = re.sub(
+        r"the other \d+ are platform packages", f"the other {pkgs - 7} are platform packages", text
+    )
     return text
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--check", action="store_true",
-                    help="exit 1 if the README is not already current")
+    ap.add_argument(
+        "--check", action="store_true", help="exit 1 if the README is not already current"
+    )
     args = ap.parse_args()
 
     tests, pkgs, games = test_count(), package_count(), game_count()

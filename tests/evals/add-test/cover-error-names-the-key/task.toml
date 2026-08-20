@@ -1,0 +1,19 @@
+id = "add-test/cover-error-names-the-key"
+category = "add-test"
+prompt = """
+`settings/lookup.py` raises `KeyError` for an unknown setting, and the message
+deliberately includes the key that was asked for and the sorted list of keys
+that do exist — an error message is a prompt for whoever reads it. Nothing
+tests that. Add a test function named exactly
+`test_unknown_key_error_names_the_key_and_the_alternatives` to
+`tests/test_lookup.py`. It must fail if the message is reduced to a bare
+"unknown setting". Do not change `settings/lookup.py`.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["tests/test_lookup.py"]
+max_turns = 12
+timeout_seconds = 120
+tags = ["python", "errors"]
+regression_gate = false

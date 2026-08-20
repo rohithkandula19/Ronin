@@ -13,6 +13,19 @@ Two artifacts land in --out:
 
 `--check` validates config, data presence, and the frozen-split hash WITHOUT
 importing torch — safe to run anywhere (CI does).
+
+**Hyperparameters: pass --config.** The constants below are the *v1* ronin-code-1.5b
+settings and they contradict `training/config/adapter_sft.yaml` — lr 2e-4 against
+1.0e-5 (20x) and max_seq_len 2048 against 4096. Two files claiming to describe one
+training run, disagreeing by a factor of twenty on the single most consequential
+number, is not a drift to reconcile later: whichever you did not read is silently
+wrong, and the artifact is named the same either way.
+
+So `--config training/config/adapter_sft.yaml` is the supported path for the phase-12
+adapter. It loads through `ronin_training.adapter.config`, which validates before a
+GPU is touched, and projects to exactly the peft/trl vocabulary used below via
+`to_peft_kwargs()`. The constants remain the default only so the v1 recipe stays
+reproducible; the run report records which of the two was used.
 """
 from __future__ import annotations
 
@@ -25,6 +38,9 @@ from pathlib import Path
 
 BASE_MODEL = "Qwen/Qwen2.5-Coder-1.5B-Instruct"
 SEED = 42
+
+#: The v1 ronin-code-1.5b recipe, kept so that run is reproducible. NOT the phase-12
+#: adapter recipe — see the module docstring and pass --config for that one.
 LORA = {"r": 16, "alpha": 32, "dropout": 0.05,
         "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj",
                            "gate_proj", "up_proj", "down_proj"]}
@@ -62,8 +78,66 @@ def check(data_dir: Path) -> list[str]:
     return errs
 
 
+def resolve(config_path: str) -> tuple[str, dict, dict, int, list[str]]:
+    """``(base_model, lora_kwargs, train_kwargs, seed, problems)`` for a run.
+
+    With no ``--config`` this returns the v1 constants projected into the same peft/trl
+    vocabulary, so the two lanes are structurally identical below and there is exactly
+    one place that builds a trainer.
+
+    With one, the YAML is loaded and **validated before any GPU work** — an invalid
+    config should cost nothing, and on a rented box a config error discovered forty
+    minutes in costs real money. Validation errors are returned rather than raised so
+    ``--check`` can print all of them at once.
+    """
+    if not config_path:
+        return (
+            BASE_MODEL,
+            {"r": LORA["r"], "lora_alpha": LORA["alpha"],
+             "lora_dropout": LORA["dropout"],
+             "target_modules": list(LORA["target_modules"]),
+             "task_type": "CAUSAL_LM"},
+            {"num_train_epochs": TRAIN["epochs"], "learning_rate": TRAIN["lr"],
+             "per_device_train_batch_size": TRAIN["batch"],
+             "gradient_accumulation_steps": TRAIN["grad_accum"],
+             "max_length": TRAIN["max_seq_len"],
+             "warmup_ratio": TRAIN["warmup_ratio"]},
+            SEED,
+            [],
+        )
+
+    # Imported here so the no-config lane does not require ronin_training on the path.
+    try:
+        from ronin_training.adapter.config import load_config, validate
+    except ImportError as exc:
+        return BASE_MODEL, {}, {}, SEED, [
+            f"--config needs the ronin-training package importable ({exc}). "
+            "Run with `uv run --package ronin-training python training/cuda/train_cuda.py`"
+        ]
+
+    try:
+        cfg = load_config(config_path)
+    except (OSError, ValueError) as exc:
+        return BASE_MODEL, {}, {}, SEED, [f"{config_path}: {exc}"]
+
+    report = validate(cfg)
+    if getattr(report, "errors", ()):
+        return BASE_MODEL, {}, {}, SEED, [f"{config_path}: {e}" for e in report.errors]
+
+    blocks = cfg.to_peft_kwargs()
+    train = dict(blocks["train"])
+    # `output_dir` comes from --out below, which is the flag a human actually passes.
+    train.pop("output_dir", None)
+    seed = int(train.pop("seed", SEED))
+    return cfg.base_model, dict(blocks["lora"]), train, seed, []
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--config", default="",
+                    help="an adapter config YAML (training/config/adapter_sft.yaml). "
+                         "Without it the v1 ronin-code-1.5b constants are used, which "
+                         "differ from the committed configs — see the module docstring")
     ap.add_argument("--data", default="training/data/merged")
     ap.add_argument("--out", default="training/adapters/ronin-code-1.5b-v4")
     ap.add_argument("--check", action="store_true",
@@ -80,10 +154,13 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     data_dir = Path(args.data)
 
-    errs = check(data_dir)
+    base_model, lora_kwargs, train_kwargs, seed, config_errs = resolve(args.config)
+    errs = [*config_errs, *check(data_dir)]
     if args.check:
-        print(json.dumps({"base_model": BASE_MODEL, "seed": SEED, "lora": LORA,
-                          "train": TRAIN, "data": str(data_dir),
+        print(json.dumps({"config": args.config or "(built-in v1 constants)",
+                          "base_model": base_model, "seed": seed,
+                          "lora": lora_kwargs, "train": train_kwargs,
+                          "data": str(data_dir),
                           "qlora": args.qlora, "fp16": args.fp16,
                           "save_steps": args.save_steps,
                           "errors": errs}, indent=2))
@@ -98,8 +175,8 @@ def main(argv: list[str] | None = None) -> int:
     from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
     from trl import SFTConfig, SFTTrainer
 
-    set_seed(SEED)
-    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
+    set_seed(seed)
+    tokenizer = AutoTokenizer.from_pretrained(base_model)
 
     def render(row):
         # THE load-bearing line: rows are rendered by the model's own chat
@@ -116,14 +193,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.qlora:
         from transformers import BitsAndBytesConfig
         model = AutoModelForCausalLM.from_pretrained(
-            BASE_MODEL, device_map="auto",
+            base_model, device_map="auto",
             quantization_config=BitsAndBytesConfig(
                 load_in_4bit=True, bnb_4bit_quant_type="nf4",
                 bnb_4bit_compute_dtype=torch.float16,
                 bnb_4bit_use_double_quant=True))
     else:
         model = AutoModelForCausalLM.from_pretrained(
-            BASE_MODEL, dtype=torch.float16 if args.fp16 else torch.bfloat16,
+            base_model, dtype=torch.float16 if args.fp16 else torch.bfloat16,
             device_map="auto")
 
     out = Path(args.out)
@@ -131,21 +208,14 @@ def main(argv: list[str] | None = None) -> int:
         model=model,
         train_dataset=ds["train"],
         eval_dataset=ds["valid"],
-        peft_config=LoraConfig(
-            r=LORA["r"], lora_alpha=LORA["alpha"], lora_dropout=LORA["dropout"],
-            target_modules=LORA["target_modules"], task_type="CAUSAL_LM"),
+        peft_config=LoraConfig(**lora_kwargs),
         args=SFTConfig(
             output_dir=str(out / "adapters"),
-            num_train_epochs=TRAIN["epochs"],
-            learning_rate=TRAIN["lr"],
-            per_device_train_batch_size=TRAIN["batch"],
-            gradient_accumulation_steps=TRAIN["grad_accum"],
-            max_length=TRAIN["max_seq_len"],
-            warmup_ratio=TRAIN["warmup_ratio"],
+            **train_kwargs,
             logging_steps=20, eval_strategy="epoch",
             save_strategy="steps" if args.save_steps else "epoch",
             save_steps=args.save_steps or 500,
-            fp16=args.fp16, bf16=not args.fp16, seed=SEED, report_to=[],
+            fp16=args.fp16, bf16=not args.fp16, seed=seed, report_to=[],
             dataset_text_field="text"),
     )
     result = trainer.train(resume_from_checkpoint=True if args.resume else None)
@@ -157,8 +227,12 @@ def main(argv: list[str] | None = None) -> int:
 
     report = {
         "date": datetime.datetime.now().isoformat(timespec="seconds"),
-        "base_model": BASE_MODEL, "git_sha": _git_sha(), "seed": SEED,
-        "lora": LORA, "train": TRAIN,
+        # Which recipe actually ran, not which one is in the file someone read. A
+        # report that cannot answer "was this the 2e-4 run or the 1e-5 run" is a
+        # report that cannot be compared to any other run.
+        "config": args.config or "(built-in v1 constants)",
+        "base_model": base_model, "git_sha": _git_sha(), "seed": seed,
+        "lora": lora_kwargs, "train": train_kwargs,
         "qlora": args.qlora, "fp16": args.fp16,
         "rows": {"train": sum(1 for _ in open(data_dir / "train.jsonl")),
                  "valid": sum(1 for _ in open(data_dir / "valid.jsonl"))},

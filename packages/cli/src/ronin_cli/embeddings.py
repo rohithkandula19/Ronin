@@ -7,9 +7,10 @@ embeddings backend you already have — local **Ollama** (offline-friendly) or a
 **OpenAI-compatible** ``/embeddings`` endpoint — with cosine similarity over
 one vector per file.
 
-It's strictly optional and additive: ``get_backend`` returns ``None`` when no
-embeddings backend is configured, and callers fall back to BM25. Embeddings are
-cached on disk by content hash, so only changed files are ever re-embedded.
+It is local-first and additive: Ollama or a configured compatible endpoint can
+provide model vectors, while an always-available local hashing backend keeps
+semantic retrieval available without credentials or network access. Embeddings
+are cached on disk by content hash, so only changed files are re-embedded.
 """
 from __future__ import annotations
 
@@ -75,13 +76,33 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
             return [row["embedding"] for row in r.json()["data"]]
 
 
-def get_backend(config: RoninConfig) -> EmbeddingBackend | None:
-    """Pick an embeddings backend from the config, or None if none is available.
+class LocalHashingBackend(EmbeddingBackend):
+    """Dependency-free fallback for local semantic retrieval.
 
-    Local Ollama is preferred (free + offline); otherwise an OpenAI-compatible
-    key enables the hosted endpoint. Returns None for providers without a known
-    embeddings route, so callers fall back to BM25."""
+    This deliberately skips the optional Ollama probe: a coding turn must not
+    pause on a localhost request merely because no embedding model is installed.
+    The deterministic hashing vectors come from ``local_embed`` and never leave
+    the machine.
+    """
+
+    name = "local-hashing"
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        from .local_embed import embed
+
+        return embed(texts, prefer_local=False)
+
+
+def get_backend(config: RoninConfig) -> EmbeddingBackend:
+    """Pick an embeddings backend, always retaining a local fallback.
+
+    Offline mode and providers without an embedding endpoint use hashing vectors
+    locally. Hosted embeddings remain opt-in through a configured OpenAI
+    compatible provider; no fallback path ever sends an embedding remotely.
+    """
     extra = config.extra or {}
+    if config.offline:
+        return LocalHashingBackend()
     if config.provider == "ollama" or extra.get("embed_provider") == "ollama":
         base = config.resolved_base_url() or "http://localhost:11434/v1"
         base = base.replace("/v1", "")  # ollama embeddings live off the root
@@ -94,7 +115,7 @@ def get_backend(config: RoninConfig) -> EmbeddingBackend | None:
             return OpenAIEmbeddingBackend(
                 model=extra.get("embed_model", "text-embedding-3-small"),
                 base_url=base, api_key=key)
-    return None
+    return LocalHashingBackend()
 
 
 # --------------------------------------------------------------------------- #
@@ -189,12 +210,9 @@ _INDEX_CACHE: dict[str, SemanticIndex] = {}
 
 
 def semantic_search(query: str, root: Path | str, config: RoninConfig,
-                    k: int = 5) -> list[tuple[float, str]] | None:
-    """Top-k (score, path) by semantic similarity, or None if no backend is
-    configured (caller should fall back to BM25)."""
+                    k: int = 5) -> list[tuple[float, str]]:
+    """Top-k files by semantic similarity using a local-safe backend."""
     backend = get_backend(config)
-    if backend is None:
-        return None
     key = str(Path(root).resolve()) + "::" + backend.name
     idx = _INDEX_CACHE.get(key)
     if idx is None:
@@ -204,10 +222,7 @@ def semantic_search(query: str, root: Path | str, config: RoninConfig,
 
 
 def build_semantic_tools(config: RoninConfig, root: Path | str = ".") -> list:
-    """A ``semantic_search`` tool — but only when an embeddings backend exists, so
-    the agent never sees a capability that can't run. Returns [] otherwise."""
-    if get_backend(config) is None:
-        return []
+    """Return the always-local-safe ``semantic_search`` coding tool."""
 
     from ronin_agent_patterns import Tool
 

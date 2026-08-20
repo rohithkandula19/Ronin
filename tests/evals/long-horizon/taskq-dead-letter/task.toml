@@ -1,0 +1,27 @@
+id = "long-horizon/taskq-dead-letter"
+category = "long-horizon"
+prompt = """
+Jobs that exhaust their retries currently sit in `failed` forever and the
+scheduler silently ignores them, so there is no way to see what gave up. Add a
+dead-letter state. Read the package first.
+
+Spec:
+
+* `State` gains `DEAD = "dead"`.
+* When a job's executor raises and the policy has no retry left for it,
+  `run_one` puts the job in `DEAD` instead of `FAILED`. When a retry is left,
+  it still goes to `FAILED`. The attempt count is still incremented exactly
+  once per run.
+* `Store` gains `dead()`, returning the dead jobs in insertion order.
+* `bin/taskq dead` prints one status line per dead job, or exactly
+  `no dead jobs` when there are none, and exits 0.
+* `bin/taskq status` and `bin/taskq run` keep working; `run` must terminate.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["taskq/model.py", "taskq/runner.py", "taskq/store.py", "taskq/cli.py"]
+max_turns = 30
+timeout_seconds = 300
+tags = ["python", "layers", "state-machine"]
+regression_gate = false

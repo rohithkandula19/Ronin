@@ -1,0 +1,85 @@
+# ronin-adapter-qwen1.5b — pass 1 of 2: supervised fine-tune.
+#
+# What this adapter is for: making a 1.5B model ronin-NATIVE — correct tool syntax,
+# correct approval-gate behaviour, correct recovery after a failure, correct planning
+# in Ronin's harness format. It does NOT add coding knowledge. See
+# training/MODEL_CARD_ronin-adapter-qwen1.5b.md.
+#
+# Validate before running (no GPU, no ML stack needed):
+#   uv run --package ronin-training python -m ronin_training.adapter.config \
+#       training/config/adapter_sft.yaml
+#
+# Then project it to the backend you actually have:
+#   mlx (Apple silicon):  ronin_training.adapter.config.dump_mlx_config(cfg, "mlx_sft.yaml",
+#                         train_rows=<rows>)  ->  python -m mlx_lm.lora -c mlx_sft.yaml
+#   peft/trl (free T4):   cfg.to_peft_kwargs()  — the vocabulary training/cuda/train_cuda.py uses
+#
+# Every value below is either specified by the user, carried over from a value already
+# in this repo (noted where so), or a structural constant. Nothing is a placeholder and
+# nothing is a measured number — no training run has happened.
+
+pass: sft
+
+# Base model. Apache-2.0, which is why this base: the adapter inherits the base's
+# licence, so a non-commercial base would make the published adapter non-commercial.
+base_model: Qwen/Qwen2.5-Coder-1.5B-Instruct
+base_model_mlx: mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit
+base_model_licence: apache-2.0
+
+# The harvested corpus (ronin_training.harvest output, split by task — see `holdout`).
+data_dir: training/data/adapter
+adapter_out: training/adapters/ronin-adapter-qwen1.5b/sft
+resume_adapter: ""
+
+lora:
+  rank: 16
+  alpha: 32
+  # Not user-specified: carried over from training/cuda/train_cuda.py rather than picked here.
+  dropout: 0.05
+  # q/k/v/o teaches the model WHERE to look in a long harness prompt; gate/up/down
+  # teaches it WHAT to write. Attention-only LoRA picks the right tool and still
+  # mis-serializes the arguments, so all seven are required by the validator.
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  # -1 = every transformer block. mlx-lm reads -1 the same way.
+  num_layers: -1
+
+train:
+  # The user specified 2-3 epochs. 3 is carried here; the validator rejects anything
+  # outside that range so a drift is an error rather than a surprise.
+  epochs: 3
+  learning_rate: 1.0e-5
+  schedule: cosine
+  # Not user-specified: carried over from training/cuda/train_cuda.py.
+  warmup_ratio: 0.03
+  # batch_size 1 x grad_accum 4 is what fits a free T4 / an 8 GB Mac. Raise batch_size
+  # only where you have measured the headroom; the validator warns on > 1.
+  batch_size: 1
+  grad_accum: 4
+  # 4096 is the default. The documented opt-in is 8192 WITH grad_checkpoint: true —
+  # `ronin_training.adapter.config.with_long_context()` applies both together, and the
+  # validator errors if 8192 is set without checkpointing rather than letting the run
+  # OOM forty minutes in. It is a toggle, not a silent default.
+  max_seq_length: 4096
+  grad_checkpoint: true
+  seed: 0
+  steps_per_eval: 50
+  save_every: 100
+  # 0 = derive the mlx-lm iteration count from `epochs` and the real row count.
+  # Pinning a number here would make `epochs` a lie; the validator says so.
+  iters: 0
+
+holdout:
+  # THE load-bearing line. `task` means whole tasks go to one side or the other.
+  # `example` would put two examples of the same task in train and holdout, and the
+  # reported score would then be partly a memorisation score — invisibly. The
+  # validator rejects `example` by name and split_by_task() asserts disjointness on
+  # its own output.
+  by: task
+  fraction: 0.10
+  seed: 0
+
+# The dialect the adapter must learn to emit. This is src/ronin's format-shim tag and
+# NOT the bare <tool_call> that packages/dialect (the v1 ronin-code-1.5b model) uses.
+# An adapter trained on the wrong tag scores zero on tool-syntax validity.
+dialect_open_tag: "<ronin:tool_call>"
+dialect_close_tag: "</ronin:tool_call>"

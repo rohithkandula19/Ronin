@@ -1,0 +1,17 @@
+id = "add-feature/reject-bad-emails-at-signup"
+category = "add-feature"
+prompt = """`register()` will cheerfully accept "not-an-email" as an email address, and we only find out much later when the welcome mail bounces.
+
+Make it reject anything that is not one "@" with something on both sides of it. When it rejects, raise a ValueError whose message is exactly
+
+    invalid email address: <the value it was given>
+
+using the raw value as passed in, before any lower-casing, and leave the store untouched. Addresses that are fine must go on being normalised exactly the way they are now."""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = ["signup/register.py"]
+max_turns = 12
+timeout_seconds = 180
+tags = ["python", "validation"]
+regression_gate = false

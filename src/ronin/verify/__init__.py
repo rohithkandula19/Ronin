@@ -1,0 +1,211 @@
+"""The verification loop: the reason a turn does not end because the model said so.
+
+Four pieces, in the order a turn uses them:
+
+1. :mod:`ronin.verify.spec` — what "verified" means in this repo, detected from
+   evidence in the tree, with the provenance of every command kept.
+2. :mod:`ronin.verify.checkpoints` — a shadow git repo, committed before every
+   mutating turn, that never touches the user's index. This is what makes
+   accepting edits cheap.
+3. :mod:`ronin.verify.runner` — run the relevant subset for the files that
+   changed, and hand failures back as a ``ToolResult`` (an observation) rather
+   than a user message (an instruction).
+4. :mod:`ronin.verify.repair` — retry under a hard cap, detect "the same failure
+   again" through a noise-stripped signature, and produce an honest report when it
+   cannot be fixed.
+5. :mod:`ronin.verify.critique` — one cheap fast-model pass asking whether the
+   change does what was asked, worth exactly one more iteration.
+
+Everything model-shaped or subprocess-shaped arrives as an injected callable, so
+this package imports ``ronin.core`` and nothing else from Ronin.
+"""
+
+from __future__ import annotations
+
+from .checkpoints import (
+    CHECKPOINT_DIR,
+    SHADOW_EXCLUDES,
+    Availability,
+    Checkpoint,
+    CheckpointReason,
+    CheckpointResult,
+    CheckpointStore,
+    DiffResult,
+    RestoreResult,
+    changed_paths_from_diff,
+    unavailable_note,
+)
+from .contract import (
+    ArtifactContract,
+    ArtifactRule,
+    ContractResult,
+    ContractViolation,
+    validate_contract,
+)
+from .critique import (
+    CRITIQUE_PROMPT,
+    MAX_DIFF_CHARS,
+    MAX_EXTRA_ITERATIONS,
+    Critique,
+    CritiqueGate,
+    CritiqueModel,
+    IterateStep,
+    clamp_diff,
+    critique_change,
+    critique_gate,
+    parse_critique,
+)
+from .flaky import FlakeResult, Stability, classify, probe
+from .repair import (
+    DEFAULT_MAX_ATTEMPTS,
+    IDENTICAL_LIMIT,
+    NOISE_RULES,
+    Attempt,
+    Failure,
+    FailureKind,
+    FailureSnapshot,
+    FixStep,
+    RepairReport,
+    RepairVerdict,
+    VerifyStep,
+    failure_count,
+    failure_signature,
+    normalize_line,
+    parse_failures,
+    repair_loop,
+)
+from .runner import (
+    DEFAULT_COMMAND_TIMEOUT,
+    JAVASCRIPT_RULES,
+    LANGUAGE_RULES,
+    MAX_OUTPUT_CHARS,
+    MAX_TOOL_RESULT_CHARS,
+    PYTHON_RULES,
+    TYPESCRIPT_RULES,
+    CommandFailure,
+    CommandOutcome,
+    CommandRunner,
+    LanguageRules,
+    PlanStep,
+    Scope,
+    Scoping,
+    StepResult,
+    TestTargets,
+    VerifyOutcome,
+    VerifyPlan,
+    as_tool_result,
+    candidate_test_paths,
+    clamp_output,
+    owning_rules,
+    plan_for_changes,
+    resolve_test_targets,
+    root_relative,
+    rules_for_path,
+    run_command,
+    run_plan,
+    should_verify,
+)
+from .spec import (
+    INDIRECT_RUNNERS,
+    KIND_ORDER,
+    CommandKind,
+    DetectedCommand,
+    VerifySpec,
+    detect_verify_spec,
+    from_declaration,
+    is_scopable,
+    parse_command,
+)
+from .suites import SuiteResult, SuiteTier, TieredOutcome, aggregate
+
+__all__ = [
+    "CHECKPOINT_DIR",
+    "CRITIQUE_PROMPT",
+    "DEFAULT_COMMAND_TIMEOUT",
+    "DEFAULT_MAX_ATTEMPTS",
+    "IDENTICAL_LIMIT",
+    "INDIRECT_RUNNERS",
+    "JAVASCRIPT_RULES",
+    "KIND_ORDER",
+    "LANGUAGE_RULES",
+    "MAX_DIFF_CHARS",
+    "MAX_EXTRA_ITERATIONS",
+    "MAX_OUTPUT_CHARS",
+    "MAX_TOOL_RESULT_CHARS",
+    "NOISE_RULES",
+    "PYTHON_RULES",
+    "SHADOW_EXCLUDES",
+    "TYPESCRIPT_RULES",
+    "ArtifactContract",
+    "ArtifactRule",
+    "Attempt",
+    "Availability",
+    "Checkpoint",
+    "CheckpointReason",
+    "CheckpointResult",
+    "CheckpointStore",
+    "CommandFailure",
+    "CommandKind",
+    "CommandOutcome",
+    "CommandRunner",
+    "ContractResult",
+    "ContractViolation",
+    "Critique",
+    "CritiqueGate",
+    "CritiqueModel",
+    "DetectedCommand",
+    "DiffResult",
+    "Failure",
+    "FailureKind",
+    "FailureSnapshot",
+    "FixStep",
+    "FlakeResult",
+    "IterateStep",
+    "LanguageRules",
+    "PlanStep",
+    "RepairReport",
+    "RepairVerdict",
+    "RestoreResult",
+    "Scope",
+    "Scoping",
+    "Stability",
+    "StepResult",
+    "SuiteResult",
+    "SuiteTier",
+    "TestTargets",
+    "TieredOutcome",
+    "VerifyOutcome",
+    "VerifyPlan",
+    "VerifySpec",
+    "VerifyStep",
+    "aggregate",
+    "as_tool_result",
+    "candidate_test_paths",
+    "changed_paths_from_diff",
+    "clamp_diff",
+    "clamp_output",
+    "classify",
+    "critique_change",
+    "critique_gate",
+    "detect_verify_spec",
+    "failure_count",
+    "failure_signature",
+    "from_declaration",
+    "is_scopable",
+    "normalize_line",
+    "owning_rules",
+    "parse_command",
+    "parse_critique",
+    "parse_failures",
+    "plan_for_changes",
+    "probe",
+    "repair_loop",
+    "resolve_test_targets",
+    "root_relative",
+    "rules_for_path",
+    "run_command",
+    "run_plan",
+    "should_verify",
+    "unavailable_note",
+    "validate_contract",
+]

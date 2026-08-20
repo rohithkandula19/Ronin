@@ -1,0 +1,10 @@
+{
+  "name": "pricing",
+  "version": "0.4.1",
+  "private": true,
+  "description": "Money formatting for invoices and the admin tables",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "node --test"
+  }
+}

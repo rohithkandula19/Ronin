@@ -1,0 +1,63 @@
+# The $0 lane. Copy to .ronin/models.toml and every role runs on your own machine.
+#
+#   cp examples/models.local.toml .ronin/models.toml
+#   ronin eval --dry-run --regression-gate      # no model loaded, no key, no network
+#   ronin eval --model ronin-qwen-local --regression-gate
+#
+# No API key. No network at inference time. No cost — the zero prices below are a
+# measurement, not a placeholder, which is why this is the only config in the repo
+# that can run the eval suite under an absolute $0 constraint.
+#
+# What it needs on disk: the base weights (~1.5B, fetched once by mlx_lm or
+# transformers from Hugging Face) and, optionally, a trained adapter.
+
+[roles]
+# All three roles, not just main. A config that points `fast` at a hosted model needs
+# a key, which defeats the entire purpose of this file — and `fast` is where subagents
+# and compaction go, so it is the role most likely to be hit without you noticing.
+main = "ronin-qwen-local"
+plan = "ronin-qwen-local"
+fast = "ronin-qwen-local"
+
+
+[models.ronin-qwen-local]
+provider = "local-adapter"
+
+# The base model. Swap for the MLX 4-bit repo on Apple silicon:
+#   mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit
+# The backend is auto-detected (mlx on Apple silicon, transformers elsewhere);
+# RONIN_LOCAL_BACKEND=mlx|hf overrides it.
+model = "Qwen/Qwen2.5-Coder-1.5B-Instruct"
+
+# Zero is true here. Every other model in examples/models.toml carries a real price
+# because an invented one becomes a wrong number in your cost report; local generation
+# genuinely costs nothing, so `ronin util cost` reporting $0.00 for this lane is
+# accurate rather than unmeasured. The report says "unpriced" to keep the two apart.
+price_in = 0.0
+price_out = 0.0
+
+# No api_key_env line, deliberately. There is no key to name.
+
+
+# --------------------------------------------------------------------------- #
+# Serving a trained adapter
+# --------------------------------------------------------------------------- #
+#
+# Leave RONIN_ADAPTER unset and this serves the bare base model — useful, and the
+# honest baseline to compare a fine-tune against:
+#
+#   ronin duel --model ronin-qwen-local --model kimi-k2 --seed 7
+#
+# To serve a checkpoint:
+#
+#   export RONIN_ADAPTER=/path/to/adapters
+#
+# A directory holding adapter_config.json but no weights is REFUSED at startup rather
+# than quietly falling back to the base model. That fallback would produce a number
+# that reads as the fine-tune's score and is not one, which is the most damaging thing
+# this lane could do silently.
+#
+# What the adapter teaches: ronin-native behaviour — correct tool-call syntax, correct
+# gate handling, recovery after a failed edit, planning. It does NOT add coding
+# knowledge, and a 1.5B model is not a substitute for a frontier one on hard tasks.
+# See docs/site/providers.md and training/README.md.

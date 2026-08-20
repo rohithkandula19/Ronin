@@ -1,0 +1,9 @@
+[
+  { "tag": "v1.0", "date": "2024-01-08", "stats": { "gzip": "120.5 kB" } },
+  { "tag": "v1.4", "date": "2024-04-02", "stats": { "gzip": "98 kB" } },
+  { "tag": "v1.2", "date": "2024-02-19", "stats": { "gzip": null } },
+  { "tag": "v1.3", "date": "2024-03-11", "stats": { "gzip": "1024 kB" } },
+  { "tag": "v1.6", "date": "2024-05-27", "stats": { "gzip": "unknown" } },
+  { "tag": "v1.1", "date": "2024-01-29", "stats": { "gzip": "98 kB" } },
+  { "tag": "v1.5", "date": "2024-05-06" }
+]

@@ -1,0 +1,22 @@
+id = "bug-from-trace/unhashable-label-list-as-key"
+category = "bug-from-trace"
+prompt = """
+Traceback (most recent call last):
+  File "/workspace/bin/labels", line 11, in <module>
+    main()
+  File "/workspace/labelcount/cli.py", line 15, in main
+    counts = count_labels(ISSUES)
+             ^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/labelcount/count.py", line 16, in count_labels
+    counts[key] = counts.get(key, 0) + 1
+                  ^^^^^^^^^^^^^^^^^^
+TypeError: unhashable type: 'list'
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["labelcount/count.py"]
+max_turns = 14
+timeout_seconds = 120
+tags = ["python", "typeerror"]
+regression_gate = false

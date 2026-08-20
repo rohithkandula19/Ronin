@@ -1,0 +1,39 @@
+# Agentic GRPO with a verifiable (verify.sh) reward — the RF.4 pass.
+#
+# This is NOT training/config/adapter_grpo.yaml. That one drives trl.GRPOTrainer over
+# single completions for the dialect-validity reward. This one drives a multi-turn agentic
+# RL loop on verl/SkyRL: one sample is a whole 24-turn rollout in a container, the reward
+# is ronin_training.rl.reward (verify.sh pass on a HIDDEN held-out test), and the policy is
+# served by vLLM with weights synced each step. The GPU loop runs separately; this file is
+# validated offline by:
+#
+#   uv run --package ronin-training python -c \
+#     "from ronin_training.rl.config import GRPOConfig; print(GRPOConfig.load('training/config/rl_grpo.yaml'))"
+#
+# Every value is the one the spec named. No GPU here ran this loop to tune any of them.
+
+group_size: 16
+prompts_per_batch: 32
+learning_rate: 1.0e-6
+kl_coef: 0.001
+clip_low: 0.2
+clip_high: 0.28
+max_turns: 24
+max_seq_length: 32768
+min_steps: 300
+max_steps: 800
+rollout_backend: vllm
+async_rollouts_min: 64
+async_rollouts_max: 256
+
+# The pool the rollouts draw tasks from — the generated pool (ronin.evals.poolgen), NEVER
+# the eval suite. The eval suite stays held out so a post-RL benchmark still means something.
+pool_dir: pool
+
+seed: 0
+
+# Keep only tasks the policy passes sometimes-but-not-always; re-filter as it improves.
+curriculum:
+  low: 0.15
+  high: 0.85
+  refilter_every_steps: 50

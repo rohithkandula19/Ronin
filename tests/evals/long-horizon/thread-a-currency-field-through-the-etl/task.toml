@@ -1,0 +1,34 @@
+id = "long-horizon/thread-a-currency-field-through-the-etl"
+category = "long-horizon"
+prompt = """
+Finance can no longer reconcile our order feed: every exported line has an `amount`
+but nothing says what currency it is in, and we now sell in USD, EUR and GBP. The
+nightly retail CSV has always had a `currency_code` column and we are throwing it
+away somewhere in the import.
+
+Please carry it through so that:
+
+- the exported feed carries a `currency` key immediately after `amount`
+- the code comes out upper case however the shop wrote it (we have seen `usd` and
+  ` eur ` with padding)
+- only USD, EUR and GBP are accepted, constrained the same way our other
+  restricted columns are, and a row with anything else is rejected and reported
+  like any other bad row rather than killing the run
+- a row with no currency at all is rejected too
+
+The project's existing tests should still pass unchanged.
+"""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = [
+    "config/pipeline.json",
+    "etl/schema.py",
+    "etl/readers/csv_reader.py",
+    "etl/transforms/normalize.py",
+    "etl/writers/jsonl_writer.py",
+]
+max_turns = 45
+timeout_seconds = 900
+tags = ["python", "etl", "multi-file", "layered", "schema"]
+regression_gate = false

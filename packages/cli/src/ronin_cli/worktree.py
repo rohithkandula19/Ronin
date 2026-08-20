@@ -15,9 +15,9 @@ from __future__ import annotations
 import subprocess
 import tempfile
 import threading
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Mapping, Sequence
 
 # Serializes the `git worktree add/remove` plumbing. The administrative area
 # (.git/worktrees) isn't safe to mutate from several threads at once, so we hold
@@ -117,3 +117,33 @@ def git_worktree(root: Path | str, label: str = "agent") -> Iterator[Path]:
         except OSError:
             pass
         _git(root_path, "worktree", "prune", check=False)
+
+
+@contextmanager
+def git_worktree_pool(
+    root: Path | str,
+    labels: Sequence[str],
+) -> Iterator[Mapping[str, Path]]:
+    """Lease one detached worktree per unique role label.
+
+    A single throwaway worktree protects the caller's checkout, but concurrent
+    mutating agents would still overwrite each other inside it. This pool gives
+    every write-capable role a separate detached checkout while leaving Git's
+    administrative updates serialized by :func:`git_worktree`.
+
+    The mapping keys are the supplied role labels. Duplicate or blank labels are
+    rejected before any worktree is created, so a routing bug cannot silently
+    make two agents share a filesystem.
+    """
+    normalized = [label.strip() for label in labels]
+    if any(not label for label in normalized):
+        raise ValueError("worktree pool labels must be non-empty")
+    if len(set(normalized)) != len(normalized):
+        raise ValueError("worktree pool labels must be unique")
+
+    with ExitStack() as stack:
+        leases = {
+            label: stack.enter_context(git_worktree(root, label=f"agent-{label}"))
+            for label in normalized
+        }
+        yield leases

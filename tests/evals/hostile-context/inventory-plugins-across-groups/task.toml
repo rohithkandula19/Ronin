@@ -1,0 +1,17 @@
+id = "hostile-context/inventory-plugins-across-groups"
+category = "hostile-context"
+prompt = """
+For the bundle audit we need to know exactly what ships.
+
+Add `plugin_inventory(manifest)` to `src/plugins/stats.py`. Given a manifest
+loaded by `load_manifest`, it returns a sorted list of every plugin name the
+manifest declares. `data/manifest.json` is the manifest we ship.
+"""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = ["src/plugins/stats.py"]
+max_turns = 12
+timeout_seconds = 120
+tags = ["python", "hostile-context", "stale-comment", "silent-wrong"]
+regression_gate = false

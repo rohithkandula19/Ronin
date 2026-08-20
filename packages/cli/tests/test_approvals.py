@@ -27,6 +27,7 @@ from ronin_cli.approvals import (
     approve,
     describe,
     gate_level,
+    is_capability_block,
     is_destructive,
     is_payment,
     normalize,
@@ -87,6 +88,18 @@ def test_destructive_shell_is_block() -> None:
                 "mkfs.ext4 /dev/sda", "dd if=/dev/zero of=/dev/sda"):
         a = {"kind": "shell", "summary": cmd, "reversible": True, "external": False}
         assert gate_level(a) == BLOCK, cmd
+
+
+def test_high_risk_plugin_capability_is_block() -> None:
+    action = {
+        "kind": "api_call",
+        "summary": "run plugin tool",
+        "reversible": True,
+        "external": False,
+        "details": {"capability_floor": ["subprocess"]},
+    }
+    assert is_capability_block(action) is True
+    assert gate_level(action) == BLOCK
 
 
 def test_safe_shell_is_confirm() -> None:

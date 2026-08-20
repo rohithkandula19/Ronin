@@ -9,6 +9,11 @@ surfaces data the rest of ronin actually wrote to disk:
                         per-subtask results, faithfulness)
 - memory entries     -> ``ronin_cli.memory_store`` (``~/.ronin/memory.json``)
 - skills             -> ``ronin_cli.muscle_memory`` (``.ronin/commands/*.md``)
+- fleet plans        -> ``ronin_cli.agent_fleet`` (``.ronin/fleet-plans``)
+- missions           -> ``ronin_cli.mission_store`` (``.ronin/missions``)
+- candidate workspaces -> ``ronin_cli.candidate_workspace`` (local metadata only)
+- patch proposals    -> ``ronin_cli.agent_proposals`` (``.ronin/agent-proposals``)
+- remote workers     -> ``ronin_cli.remote_workers`` (status-only lease metadata)
 
 Everything honours ``RONIN_HOME``/the current working directory exactly as the
 CLI does, so a test can point a temp ``.ronin`` home at these helpers and get the
@@ -219,3 +224,298 @@ def skill_entries(root: str | Path = ".") -> list[dict[str, Any]]:
             body = ""
         out.append({"name": name, "body": body[:4000]})
     return out
+
+
+# ---------------------------------------------------------------------------
+# Agent operations
+# ---------------------------------------------------------------------------
+
+def fleet_plan_entries(root: str | Path = ".", limit: int = 50) -> list[dict[str, Any]]:
+    """Inspectable summaries of saved agent-fleet plans for ``root``.
+
+    Planning a fleet does not start workers. The dashboard deliberately exposes
+    only stored plan metadata and wave scheduling so viewing it remains read-only.
+    """
+    try:
+        from ronin_cli.agent_fleet import FleetPlanStore
+    except Exception:  # noqa: BLE001
+        return []
+
+    try:
+        plans = FleetPlanStore(root).list(limit=limit)
+    except Exception:  # noqa: BLE001
+        return []
+    return [
+        {
+            "id": plan.id,
+            "created": plan.created,
+            "goal": plan.goal,
+            "write": plan.write,
+            "catalog_size": plan.catalog_size,
+            "member_count": len(plan.members),
+            "max_parallel": plan.max_parallel,
+            "waves": [
+                {
+                    "number": wave.number,
+                    "phase": wave.phase,
+                    "parallelism": wave.parallelism,
+                    "waits_for": list(wave.waits_for),
+                }
+                for wave in plan.waves
+            ],
+        }
+        for plan in plans
+    ]
+
+
+def fleet_run_entries(root: str | Path = ".", limit: int = 50) -> list[dict[str, Any]]:
+    """Inspectable execution state for locally claimed fleet waves.
+
+    The API intentionally returns status and identifiers only. Executing,
+    retrying, recovering, staging, and merging remain explicit CLI actions.
+    """
+    try:
+        from ronin_cli.agent_fleet_runs import FleetRunStore
+    except Exception:  # noqa: BLE001
+        return []
+
+    try:
+        runs = FleetRunStore(root).list(limit=limit)
+    except Exception:  # noqa: BLE001
+        return []
+    return [
+        {
+            "id": run.id,
+            "plan_id": run.plan_id,
+            "goal": run.goal,
+            "write": run.write,
+            "status": run.status,
+            "created": run.created,
+            "updated": run.updated,
+            "error": run.error,
+            "waves": [
+                {
+                    "number": wave.number,
+                    "phase": wave.phase,
+                    "status": wave.status,
+                    "attempts": wave.attempts,
+                    "parallelism": len(wave.profile_keys),
+                    "agent_run_id": wave.agent_run_id,
+                    "proposal_run_id": wave.proposal_run_id,
+                    "error": wave.error,
+                }
+                for wave in run.waves
+            ],
+        }
+        for run in runs
+    ]
+
+
+def mission_entries(root: str | Path = ".", limit: int = 50) -> list[dict[str, Any]]:
+    """Status-only mission records for the local Mission Control panel.
+
+    Issue bodies and artifact content are deliberately excluded: this page is an
+    operational overview, while the typed record remains in the project-local
+    mission store. Audit validation is included so an operator can see whether
+    the durable snapshot still agrees with its append-only evidence.
+    """
+    try:
+        from ronin_cli.mission_store import MissionStore
+    except Exception:  # noqa: BLE001
+        return []
+
+    try:
+        store = MissionStore(root)
+        missions = store.list(limit=limit)
+    except Exception:  # noqa: BLE001
+        return []
+    return [
+        {
+            "id": mission.id,
+            "title": mission.spec.title,
+            "source": mission.spec.source,
+            "source_id": mission.spec.source_id,
+            "stage": mission.stage.value,
+            "created": mission.created,
+            "updated": mission.updated,
+            "candidate_workspace_id": mission.candidate_workspace_id,
+            "event_count": mission.event_count,
+            "audit_valid": store.verify_audit(mission.id).valid,
+            "plan_recorded": mission.artifacts.plan is not None,
+            "test_verdict": mission.artifacts.test_report.verdict if mission.artifacts.test_report else "unknown",
+            "review_verdict": mission.artifacts.review_report.verdict if mission.artifacts.review_report else "unknown",
+            "security_verdict": mission.artifacts.security_scan.verdict if mission.artifacts.security_scan else "unknown",
+            "evaluation_eligible": bool(
+                mission.artifacts.evaluation_gate and mission.artifacts.evaluation_gate.eligible
+            ),
+            "pr_draft_status": mission.artifacts.pull_request_draft.status if mission.artifacts.pull_request_draft else "not_drafted",
+        }
+        for mission in missions
+    ]
+
+
+def mission_event_entries(root: str | Path = ".", limit: int = 100) -> list[dict[str, Any]]:
+    """Recent safe bus envelopes for Mission Control; never exposes payload content."""
+    try:
+        from ronin_cli.mission_events import MissionEventBus
+    except Exception:  # noqa: BLE001
+        return []
+    try:
+        events = MissionEventBus(root).events(limit=limit)
+    except Exception:  # noqa: BLE001
+        return []
+    return [
+        {
+            "id": event.id,
+            "sequence": event.sequence,
+            "topic": event.topic,
+            "mission_id": event.mission_id,
+            "producer": event.producer,
+            "from_stage": event.payload.from_stage,
+            "to_stage": event.payload.to_stage,
+            "occurred_at": event.occurred_at,
+        }
+        for event in events
+    ]
+
+
+def persistent_agent_entries(root: str | Path = ".", limit: int = 50) -> list[dict[str, Any]]:
+    """Safe persistent-team lifecycle metadata for Mission Control.
+
+    Working task text, summaries, scratchpads, and experience content stay in
+    the project-local supervisor database and are intentionally excluded.
+    """
+    try:
+        from ronin_cli.persistent_agents import PersistentAgentStore
+    except Exception:  # noqa: BLE001
+        return []
+    try:
+        agents = PersistentAgentStore(root).list(limit=limit)
+    except Exception:  # noqa: BLE001
+        return []
+    return [
+        {
+            "agent_id": agent.agent_id,
+            "role": agent.role,
+            "status": agent.status,
+            "mission_id": agent.current_mission_id or "",
+            "restart_count": agent.restart_count,
+            "health_check_at": agent.health_check_at,
+            "updated_at": agent.updated_at,
+        }
+        for agent in agents
+    ]
+
+
+def persistent_handoff_entries(root: str | Path = ".", limit: int = 50) -> list[dict[str, Any]]:
+    """Safe persistent-team handoff metadata for Mission Control.
+
+    Handoff summaries, evidence references, and their digests remain in the
+    project-local supervisor database. The read-only UI needs only ownership,
+    mission correlation, state, and evidence count to track work progression.
+    """
+    try:
+        from ronin_cli.persistent_agents import PersistentAgentStore
+    except Exception:  # noqa: BLE001
+        return []
+    try:
+        handoffs = PersistentAgentStore(root).list_handoffs(limit=limit)
+    except Exception:  # noqa: BLE001
+        return []
+    return [
+        {
+            "handoff_id": handoff.handoff_id,
+            "mission_id": handoff.mission_id,
+            "from_agent_id": handoff.from_agent_id,
+            "to_agent_id": handoff.to_agent_id,
+            "status": handoff.status,
+            "evidence_count": len(handoff.evidence),
+            "created_at": handoff.created_at,
+            "accepted_at": handoff.accepted_at,
+            "updated_at": handoff.updated_at,
+        }
+        for handoff in handoffs
+    ]
+
+
+def remote_worker_job_entries(root: str | Path = ".", limit: int = 50) -> list[dict[str, Any]]:
+    """Safe lifecycle state for remote candidate verification jobs.
+
+    Patch content, command text, repository URLs, and lease-token digests are
+    intentionally private to the authenticated worker protocol.
+    """
+    try:
+        from ronin_cli.remote_workers import RemoteWorkerStore
+    except Exception:  # noqa: BLE001
+        return []
+    try:
+        jobs = RemoteWorkerStore(root).list(limit=limit)
+    except Exception:  # noqa: BLE001
+        return []
+    return [
+        {
+            "id": job.id,
+            "mission_id": job.mission_id,
+            "candidate_id": job.candidate_id,
+            "status": job.status,
+            "attempts": job.attempts,
+            "worker_id": job.worker_id,
+            "lease_expires": job.lease_expires,
+            "outcome": job.evidence.outcome if job.evidence else "pending",
+            "duration_seconds": job.evidence.duration_seconds if job.evidence else 0.0,
+            "error": job.error,
+            "updated": job.updated,
+        }
+        for job in jobs
+    ]
+
+
+def candidate_workspace_entries(root: str | Path = ".", limit: int = 50) -> list[dict[str, Any]]:
+    """Safe candidate lifecycle metadata; checkout paths and content stay private."""
+    try:
+        from ronin_cli.candidate_workspace import CandidateWorkspaceService
+    except Exception:  # noqa: BLE001
+        return []
+
+    try:
+        candidates = CandidateWorkspaceService(root).list(limit=limit)
+    except Exception:  # noqa: BLE001
+        return []
+    return [
+        {
+            "id": candidate.id,
+            "mission_id": candidate.mission_id,
+            "base_revision": candidate.base_revision,
+            "image": candidate.image,
+            "status": candidate.status,
+            "created": candidate.created,
+            "updated": candidate.updated,
+            "destroyed": candidate.destroyed,
+        }
+        for candidate in candidates
+    ]
+
+
+def proposal_entries(root: str | Path = ".", limit: int = 50) -> list[dict[str, Any]]:
+    """Inspectable summaries of retained isolated-worktree patch proposals."""
+    try:
+        from ronin_cli.agent_proposals import AgentProposalStore
+    except Exception:  # noqa: BLE001
+        return []
+
+    try:
+        proposals = AgentProposalStore(root).list()
+    except Exception:  # noqa: BLE001
+        return []
+    return [
+        {
+            "run_id": proposal.run_id,
+            "created": proposal.created,
+            "status": proposal.status,
+            "base_revision": proposal.base_revision,
+            "roles": [patch.role for patch in proposal.patches],
+            "patch_count": len(proposal.patches),
+            "failed_subtasks": proposal.failed_subtasks,
+        }
+        for proposal in proposals[: max(1, limit)]
+    ]

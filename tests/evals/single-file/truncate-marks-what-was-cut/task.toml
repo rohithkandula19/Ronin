@@ -1,0 +1,22 @@
+id = "single-file/truncate-marks-what-was-cut"
+category = "single-file"
+prompt = """
+`tools/output.py` truncates long command output before it is shown. It cuts
+silently, so a reader cannot tell whether they are looking at everything.
+Change `truncate` so that when it drops content it appends a marker line of
+exactly the form
+
+    [truncated: N of M lines omitted]
+
+where N is the number of lines dropped and M is the number of lines in the
+input. When nothing is dropped the output must be byte-identical to the
+input. The kept lines must be the first `keep` lines.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["tools/output.py"]
+max_turns = 10
+timeout_seconds = 90
+tags = ["python", "truncation"]
+regression_gate = true

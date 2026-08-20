@@ -1,0 +1,16 @@
+id = "add-test/cover-clamp-upper-bound"
+category = "add-test"
+prompt = """
+`bounds/clamp.py` clamps a value into a range. `tests/test_clamp.py` covers
+the lower bound but not the upper one. Add a test function named exactly
+`test_clamp_caps_at_the_upper_bound` to `tests/test_clamp.py` that fails if
+the upper clamp is removed. Do not change `bounds/clamp.py`.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["tests/test_clamp.py"]
+max_turns = 12
+timeout_seconds = 120
+tags = ["python", "coverage"]
+regression_gate = true

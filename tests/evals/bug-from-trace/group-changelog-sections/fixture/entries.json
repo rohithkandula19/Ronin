@@ -1,0 +1,10 @@
+{
+  "version": "1.4.0",
+  "entries": [
+    {"kind": "added", "summary": "`chg render` writes to stdout", "issue": 214},
+    {"kind": "fixed", "summary": "keep trailing newline in generated markdown"},
+    {"kind": "added", "summary": "read overrides from chg.toml", "issue": 219},
+    {"kind": "removed", "summary": "drop the legacy YAML entry format"},
+    {"kind": "changed", "summary": "sort entries by kind, not by insertion order"}
+  ]
+}

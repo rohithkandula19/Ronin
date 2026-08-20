@@ -1,0 +1,29 @@
+id = "bug-from-trace/report-transfer-throughput"
+category = "bug-from-trace"
+prompt = """
+Traceback (most recent call last):
+  File "throughput.py", line 25, in <module>
+    sys.exit(main(sys.argv))
+             ^^^^^^^^^^^^^^
+  File "throughput.py", line 18, in main
+    for line in report(result.samples):
+                ^^^^^^^^^^^^^^^^^^^^^^
+  File "thru/metrics.py", line 18, in report
+    lines = [f"{sample.job:<16}{rate_mb_s(sample):8.2f} MB/s" for sample in samples]
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "thru/metrics.py", line 18, in <listcomp>
+    lines = [f"{sample.job:<16}{rate_mb_s(sample):8.2f} MB/s" for sample in samples]
+                                ^^^^^^^^^^^^^^^^^
+  File "thru/metrics.py", line 14, in rate_mb_s
+    return sample.bytes_out / MEBIBYTE / sample.seconds
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~
+ZeroDivisionError: float division by zero
+"""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = ["thru/records.py"]
+max_turns = 12
+timeout_seconds = 120
+tags = ["python", "zerodivisionerror", "input-validation", "localization"]
+regression_gate = false

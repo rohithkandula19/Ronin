@@ -1,0 +1,18 @@
+id = "multi-file/propagate-half-up-rounding"
+category = "multi-file"
+prompt = """
+Money is rounded in two places: `money/tax.py` and `money/split.py`. Both use
+python's built-in `round`, which rounds halves to even, so 2.5 cents becomes
+2 and our totals disagree with the ledger. Add `half_up(value: float) -> int`
+to `money/rounding.py` implementing round-half-away-from-zero, and use it in
+both modules instead of `round`. `round(` must not appear in either module
+afterwards.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["money/rounding.py", "money/tax.py", "money/split.py"]
+max_turns = 16
+timeout_seconds = 150
+tags = ["python", "money"]
+regression_gate = false

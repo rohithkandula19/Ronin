@@ -1,0 +1,13 @@
+id = "add-feature/limit-the-note-search-results"
+category = "add-feature"
+prompt = """`search_notes` hands back every hit at once, which is unusable against a notebook of any size — the UI wants to show a page at a time.
+
+Let me page through the results: `search_notes(notes, "db", limit=2)` should give the first two hits, and `search_notes(notes, "db", limit=2, skip=2)` the next two, in the same order the function uses today. Calling it with no limit must behave exactly as it does now, and skipping past the end of the results should just come back empty rather than raising."""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = ["notebook/search.py"]
+max_turns = 12
+timeout_seconds = 180
+tags = ["python", "pagination"]
+regression_gate = false

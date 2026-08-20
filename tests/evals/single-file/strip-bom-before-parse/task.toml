@@ -1,0 +1,16 @@
+id = "single-file/strip-bom-before-parse"
+category = "single-file"
+prompt = """
+`feeds/reader.py` fails to read the first key of a config file exported from a
+Windows editor, because the file starts with a UTF-8 byte order mark. Make
+`parse_kv` tolerate a leading BOM on the first line so the first key parses
+under its real name. Everything else must keep working unchanged.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["feeds/reader.py"]
+max_turns = 10
+timeout_seconds = 90
+tags = ["python", "encoding"]
+regression_gate = true

@@ -16,18 +16,21 @@ import pytest
 from ronin_agent_patterns import (
     FakeProvider,
     LLMResponse,
+    BudgetLimits,
     OrchestrationPlan,
     OrchestratorAgent,
     OrchestratorSubAgent,
     Subtask,
+    RunBudget,
+    RunJournal,
     Tool,
     ToolCall,
 )
 from ronin_agent_patterns.orchestrator import SubtaskResult
 
 
-def _plan_response(json_text: str) -> LLMResponse:
-    return LLMResponse(text=f"<plan>{json_text}</plan>", stop_reason="end_turn")
+def _plan_response(json_text: str, *, usage: dict[str, int] | None = None) -> LLMResponse:
+    return LLMResponse(text=f"<plan>{json_text}</plan>", stop_reason="end_turn", usage=usage or {})
 
 
 # --------------------------------------------------------------------------
@@ -348,3 +351,111 @@ def test_on_subtask_start_hook_fires_with_label() -> None:
     )
     orch.run("g", on_subtask_start=lambda st, label: started.append((st.id, label)))
     assert started == [("t", "w@worker-7")]
+
+
+def test_orchestration_journal_checkpoints_each_wave_and_shared_budget(tmp_path) -> None:
+    planner = FakeProvider(responses=[
+        _plan_response(
+            '{"goal": "g", "subtasks": ['
+            '{"id": "research", "description": "inspect", "assignee": "r", "depends_on": []},'
+            '{"id": "implement", "description": "change", "assignee": "i", "depends_on": ["research"]}'
+            ']}'
+        ),
+        LLMResponse(text="done", stop_reason="end_turn", usage={"input_tokens": 2, "output_tokens": 1}),
+    ])
+    researcher = FakeProvider(responses=[
+        LLMResponse(text="facts", stop_reason="end_turn", usage={"input_tokens": 3, "output_tokens": 1}),
+    ])
+    implementer = FakeProvider(responses=[
+        LLMResponse(text="changed", stop_reason="end_turn", usage={"input_tokens": 4, "output_tokens": 2}),
+    ])
+    orchestration = OrchestratorAgent(
+        provider=planner,
+        sub_agents=[
+            OrchestratorSubAgent(role="r", description="research", system="r", provider=researcher),
+            OrchestratorSubAgent(role="i", description="implement", system="i", provider=implementer),
+        ],
+    )
+    journal = RunJournal(tmp_path / "orchestrations.sqlite")
+    budget = RunBudget(BudgetLimits(max_tokens=100, max_tool_calls=10))
+
+    result = orchestration.run("g", journal=journal, journal_run_id="orchestration-1", budget=budget)
+
+    assert result.success and result.run_id == "orchestration-1"
+    assert result.usage["total_tokens"] == 13
+    kinds = [event.kind for event in journal.events("orchestration-1")]
+    assert kinds.count("orchestration_wave_completed") == 2
+    assert "orchestration_planned" in kinds
+    assert journal.interrupted_runs() == []
+
+
+def test_orchestration_resume_runs_only_unfinished_waves(tmp_path) -> None:
+    completed = SubtaskResult(
+        subtask_id="research", assignee="r", success=True, output="known facts", provider="research-model",
+    )
+    plan = OrchestrationPlan(
+        goal="g",
+        subtasks=[
+            Subtask(id="research", description="inspect", assignee="r"),
+            Subtask(id="implement", description="change", assignee="i", depends_on=["research"]),
+        ],
+    )
+    journal = RunJournal(tmp_path / "orchestrations.sqlite")
+    run_id = journal.start({
+        "schema_version": 1,
+        "runtime": "orchestrator",
+        "goal": "g",
+        "phase": "executing",
+        "plan": plan.model_dump(mode="json"),
+        "subtask_results": [completed.model_dump(mode="json")],
+        "trace": [],
+        "usage": {"input_tokens": 0, "output_tokens": 0},
+        "budget": {},
+        "final_output": "",
+    }, run_id="orchestration-resume")
+    planner = FakeProvider(responses=[LLMResponse(text="done", stop_reason="end_turn")])
+    researcher = FakeProvider(responses=[])
+    implementer = FakeProvider(responses=[LLMResponse(text="changed", stop_reason="end_turn")])
+    orchestration = OrchestratorAgent(
+        provider=planner,
+        sub_agents=[
+            OrchestratorSubAgent(role="r", description="research", system="r", provider=researcher),
+            OrchestratorSubAgent(role="i", description="implement", system="i", provider=implementer),
+        ],
+    )
+
+    result = orchestration.resume(run_id, journal)
+
+    assert result.success
+    assert len(researcher.calls) == 0
+    assert len(implementer.calls) == 1
+    assert len(planner.calls) == 1
+    assert any(event.kind == "orchestration_resumed" for event in journal.events(run_id))
+
+
+def test_orchestration_stops_before_later_agent_work_when_shared_budget_is_spent(tmp_path) -> None:
+    planner = FakeProvider(responses=[
+        _plan_response(
+            '{"goal": "g", "subtasks": ['
+            '{"id": "work", "description": "work", "assignee": "w", "depends_on": []}'
+            ']}', usage={"input_tokens": 1},
+        ),
+    ])
+    worker = FakeProvider(responses=[LLMResponse(text="must not run", stop_reason="end_turn")])
+    orchestration = OrchestratorAgent(
+        provider=planner,
+        sub_agents=[OrchestratorSubAgent(role="w", description="work", system="w", provider=worker)],
+    )
+    journal = RunJournal(tmp_path / "orchestrations.sqlite")
+
+    result = orchestration.run(
+        "g",
+        journal=journal,
+        journal_run_id="orchestration-budget",
+        budget=RunBudget(BudgetLimits(max_tokens=1)),
+    )
+
+    assert not result.success
+    assert "budget" in (result.error or "")
+    assert len(worker.calls) == 0
+    assert journal.interrupted_runs() == []

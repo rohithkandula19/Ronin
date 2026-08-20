@@ -1,0 +1,13 @@
+id = "add-test/name-the-missing-setting-error"
+category = "add-test"
+prompt = """When the worker starts with a required setting missing, hoplite raises its own SettingsError and the message names the key that is missing — support walks people through the fix by reading that message out, so both the class and the wording matter.
+
+tests/test_settings.py does not cover that at all. Add a test to it that locks down the failure for a missing `retries` key: the type of the error and the text of the message."""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = ["tests/test_settings.py"]
+max_turns = 10
+timeout_seconds = 180
+tags = ["python", "pytest", "exceptions"]
+regression_gate = false

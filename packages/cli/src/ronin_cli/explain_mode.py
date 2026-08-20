@@ -97,12 +97,15 @@ def run_explain(
 
     tools = [t for t in build_code_tools(root) if t.name in _READONLY_TOOLS]
     system = EXPLAIN_SYSTEM.format(diagram_clause=_DIAGRAM_CLAUSE if diagram else "")
+    from .context_policy import resolve_context_policy
+
+    context_policy = resolve_context_policy(config)
     agent = ReActAgent(
         system=system,
         tools=tools,
         provider=build_provider(config),
         max_iterations=max_iterations,
-        compact_after_tokens=120_000,
+        compact_after_tokens=context_policy.compaction_threshold_tokens,
         compact_keep_recent=6,
     )
 

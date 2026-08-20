@@ -1,0 +1,17 @@
+id = "add-test/cover-stable-ordering-of-ties"
+category = "add-test"
+prompt = """
+`rank/order.py` sorts entries by score descending and, when two entries tie,
+keeps their original relative order — the report it feeds is diffed between
+runs, so an unstable tie-break shows up as spurious churn. Add a test function
+named exactly `test_entries_with_equal_scores_keep_their_input_order` to
+`tests/test_order.py`. Do not change `rank/order.py`.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["tests/test_order.py"]
+max_turns = 12
+timeout_seconds = 120
+tags = ["python", "determinism"]
+regression_gate = false

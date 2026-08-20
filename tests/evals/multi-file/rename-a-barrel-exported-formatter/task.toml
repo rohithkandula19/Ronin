@@ -1,0 +1,25 @@
+id = "multi-file/rename-a-barrel-exported-formatter"
+category = "multi-file"
+prompt = """
+`formatAmount` is a confusing name in this package -- there is a `formatPercent`
+right next to it and neither name says anything about money, so people keep calling
+the wrong one for tax rates.
+
+Rename it to `formatMoney` throughout the package and get rid of the old name. Both
+the invoice renderer and the admin tables have to keep working.
+"""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = [
+  "src/format.js",
+  "src/index.js",
+  "src/invoice.js",
+  "src/report.js",
+  "config/columns.json",
+  "test/format.test.js",
+]
+max_turns = 14
+timeout_seconds = 180
+tags = ["javascript", "node", "rename", "barrel-export", "json-config"]
+regression_gate = false

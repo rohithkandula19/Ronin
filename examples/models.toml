@@ -1,0 +1,106 @@
+# Ronin provider config — the file that makes "swap Claude for Kimi K2" a one-line
+# edit rather than a code change.
+#
+#   uv run python -m ronin.providers.demo    # see all of this run, offline
+#
+# Two sections. [roles] says which model does which kind of work; [models] says how
+# to reach each one. Nothing here holds a secret: `api_key_env` names an environment
+# variable, because a config file with a key in it ends up in a git history.
+
+[roles]
+# The model that writes code and drives the turn.
+main = "kimi-k2"
+# The model that thinks before acting. A reasoning model earns its latency here and
+# nowhere else.
+plan = "deepseek-r1"
+# The model that does mechanical work: search triage, summarizing, compaction.
+# Subagents and compaction are hard-wired to this role — see Router.for_subagent().
+# Pointing `fast` at your main model is how a session costs 10x for no benefit.
+fast = "qwen-local"
+
+
+# --------------------------------------------------------------------------- #
+# Models
+# --------------------------------------------------------------------------- #
+
+# Kimi K2 on Moonshot. OpenAI-shaped with quirky tool-call ids and finish reasons;
+# the `moonshot` provider handles those. Prices are per million tokens.
+[models.kimi-k2]
+provider = "moonshot"
+model = "kimi-k2-0711-preview"
+api_key_env = "MOONSHOT_API_KEY"
+price_in = 0.60
+price_out = 2.50
+
+[models.claude]
+provider = "anthropic"
+model = "claude-sonnet-4-6"
+api_key_env = "ANTHROPIC_API_KEY"
+price_in = 3.00
+price_out = 15.00
+# Cached reads are billed at a tenth of the input rate. Set this or the ledger
+# charges cache hits at the full rate — the conservative direction, but wrong.
+price_cache_read = 0.30
+
+# DeepSeek-R1 streams its reasoning on a separate field; the openai-compatible
+# adapter surfaces that as thinking rather than as the answer.
+#
+# Naming one capability changes only that one: everything unmentioned stays at the
+# adapter's own default, so this entry keeps the 128k window it would have had.
+[models.deepseek-r1]
+provider = "deepseek"
+model = "deepseek-reasoner"
+api_key_env = "DEEPSEEK_API_KEY"
+thinking = true
+price_in = 0.55
+price_out = 2.19
+
+# A local MLX model on Apple silicon. No server, no port, no HTTP — the adapter
+# drives mlx_lm in process. `native_tools = false` routes it through the format
+# shim automatically; you do not have to remember to wrap it.
+[models.qwen-local]
+provider = "mlx"
+model = "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit"
+native_tools = false
+max_context = 32768
+# Point this at a fine-tuned adapter to use it.
+# adapter_path = "training/adapters/ronin-code-v1"
+
+# Anything speaking /chat/completions. `provider` may be a known alias (openai,
+# deepseek, together, groq, openrouter, ollama, lmstudio, vllm, llamacpp) or
+# "openai-compatible" with an explicit base_url.
+[models.local-server]
+provider = "openai-compatible"
+model = "qwen2.5-coder-7b-instruct"
+base_url = "http://localhost:8080/v1"
+# A local server needs no key. Leaving api_key_env unset is correct, not an omission.
+native_tools = false
+
+[models.groq-fast]
+provider = "groq"
+model = "llama-3.3-70b-versatile"
+api_key_env = "GROQ_API_KEY"
+price_in = 0.59
+price_out = 0.79
+
+# Ollama, for a fully local setup with zero config beyond the model name.
+[models.ollama-local]
+provider = "ollama"
+model = "qwen2.5-coder:7b"
+native_tools = false
+max_context = 32768
+
+
+# --------------------------------------------------------------------------- #
+# A fully-free configuration, for reference
+# --------------------------------------------------------------------------- #
+# Replace the [roles] block above with this to run at no cost. Every role points at
+# a local model, so there is nothing to bill and nothing to leak.
+#
+#   [roles]
+#   main = "ollama-local"
+#   plan = "ollama-local"
+#   fast = "ollama-local"
+#
+# A model with no price is recorded as *unpriced*, not as free: the ledger prints
+# "+N unpriced" so a $0.00 total is never mistaken for a measured one.

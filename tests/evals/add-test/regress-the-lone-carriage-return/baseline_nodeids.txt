@@ -1,0 +1,6 @@
+tests/test_textnorm.py::test_adds_a_missing_trailing_newline
+tests/test_textnorm.py::test_collapses_crlf_in_bytes
+tests/test_textnorm.py::test_collapses_crlf_to_lf
+tests/test_textnorm.py::test_does_not_double_the_trailing_newline
+tests/test_textnorm.py::test_empty_text_stays_empty
+tests/test_textnorm.py::test_leaves_lf_only_text_alone

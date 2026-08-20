@@ -1,0 +1,18 @@
+id = "single-file/make-the-generated-hook-block-a-commit"
+category = "single-file"
+prompt = """
+The pre-commit hook we install prints which check failed, but the commit goes
+through anyway - people only notice on CI an hour later.
+
+Make the installed hook actually stop the commit when a check fails. It should
+still run every check first, so one commit reports every problem rather than
+just the first one, and a clean run must stay silent and succeed.
+"""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = ["src/hooks/render.py"]
+max_turns = 12
+timeout_seconds = 180
+tags = ["python", "template-string", "codegen"]
+regression_gate = false

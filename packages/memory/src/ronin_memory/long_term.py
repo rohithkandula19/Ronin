@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
+import sqlite3
+import time
+from pathlib import Path
 import uuid
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -59,6 +63,135 @@ class InMemoryBackend:
 
     def delete(self, namespace: str, record_id: str) -> bool:
         return self._records.pop((namespace, record_id), None) is not None
+
+
+ScoreFn = Callable[[str, str], float]
+
+
+class SqliteBackend:
+    """Persistent local backend with deterministic lexical retrieval.
+
+    Records are stored in one SQLite file and scoped by namespace. Querying is
+    intentionally local and dependency-free: by default it uses the same Jaccard
+    scorer as ``InMemoryBackend``. Callers that have embeddings or a stronger
+    ranker can pass ``score_fn`` without changing the ``LongTermMemory`` API.
+    """
+
+    def __init__(
+        self,
+        path: Path | str,
+        *,
+        score_fn: ScoreFn | None = None,
+        max_records_per_namespace: int | None = None,
+    ) -> None:
+        self.path = Path(path).expanduser()
+        self.score_fn = score_fn or _jaccard
+        self.max_records_per_namespace = max_records_per_namespace
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._init_db()
+
+    def _connect(self) -> sqlite3.Connection:
+        con = sqlite3.connect(self.path)
+        con.row_factory = sqlite3.Row
+        return con
+
+    def _init_db(self) -> None:
+        with self._connect() as con:
+            con.execute(
+                """
+                CREATE TABLE IF NOT EXISTS memories (
+                    namespace TEXT NOT NULL,
+                    id TEXT NOT NULL,
+                    text TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL,
+                    PRIMARY KEY (namespace, id)
+                )
+                """
+            )
+            con.execute(
+                "CREATE INDEX IF NOT EXISTS idx_memories_namespace_updated "
+                "ON memories(namespace, updated_at DESC)"
+            )
+
+    def upsert(self, record: MemoryRecord) -> None:
+        now = time.time()
+        metadata_json = json.dumps(record.metadata, sort_keys=True, separators=(",", ":"))
+        with self._connect() as con:
+            existing = con.execute(
+                "SELECT created_at FROM memories WHERE namespace = ? AND id = ?",
+                (record.namespace, record.id),
+            ).fetchone()
+            created_at = float(existing["created_at"]) if existing else now
+            con.execute(
+                """
+                INSERT INTO memories(namespace, id, text, metadata_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(namespace, id) DO UPDATE SET
+                    text = excluded.text,
+                    metadata_json = excluded.metadata_json,
+                    updated_at = excluded.updated_at
+                """,
+                (record.namespace, record.id, record.text, metadata_json, created_at, now),
+            )
+            self._prune_namespace(con, record.namespace)
+
+    def query(self, namespace: str, text: str, k: int = 5) -> list[MemoryRecord]:
+        if k <= 0:
+            return []
+        scored: list[tuple[float, float, MemoryRecord]] = []
+        with self._connect() as con:
+            rows = con.execute(
+                "SELECT id, text, metadata_json, updated_at FROM memories WHERE namespace = ?",
+                (namespace,),
+            ).fetchall()
+        for row in rows:
+            score = self.score_fn(text, row["text"])
+            if score <= 0:
+                continue
+            try:
+                metadata = json.loads(row["metadata_json"])
+            except json.JSONDecodeError:
+                metadata = {}
+            if not isinstance(metadata, dict):
+                metadata = {}
+            record = MemoryRecord(
+                id=row["id"],
+                namespace=namespace,
+                text=row["text"],
+                metadata=metadata,
+                score=round(float(score), 4),
+            )
+            scored.append((float(score), float(row["updated_at"]), record))
+        scored.sort(key=lambda item: (item[0], item[1], item[2].id), reverse=True)
+        return [record for _, _, record in scored[:k]]
+
+    def delete(self, namespace: str, record_id: str) -> bool:
+        with self._connect() as con:
+            cur = con.execute(
+                "DELETE FROM memories WHERE namespace = ? AND id = ?",
+                (namespace, record_id),
+            )
+            return cur.rowcount > 0
+
+    def _prune_namespace(self, con: sqlite3.Connection, namespace: str) -> None:
+        if self.max_records_per_namespace is None:
+            return
+        limit = max(int(self.max_records_per_namespace), 0)
+        con.execute(
+            """
+            DELETE FROM memories
+            WHERE namespace = ?
+              AND id NOT IN (
+                SELECT id FROM memories
+                WHERE namespace = ?
+                ORDER BY updated_at DESC
+                LIMIT ?
+              )
+            """,
+            (namespace, namespace, limit),
+        )
 
 
 class LongTermMemory(BaseModel):

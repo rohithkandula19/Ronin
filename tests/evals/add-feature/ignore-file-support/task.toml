@@ -1,0 +1,25 @@
+id = "add-feature/ignore-file-support"
+category = "add-feature"
+prompt = """
+`walker/scan.py`'s `scan(root)` returns every file path under `root`, relative
+to `root`, sorted. Add support for an ignore file:
+
+* If `<root>/.scanignore` exists, each non-empty line that does not start with
+  `#` is a `fnmatch` pattern.
+* A path is skipped when the pattern matches either its full relative path or
+  its basename.
+* `.scanignore` itself is always excluded from the result, whether or not a
+  pattern matches it.
+* With no `.scanignore`, behaviour is unchanged.
+
+Use `fnmatch` from the standard library. Paths in the result use `/` as the
+separator.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["walker/scan.py"]
+max_turns = 16
+timeout_seconds = 150
+tags = ["python", "filesystem"]
+regression_gate = false

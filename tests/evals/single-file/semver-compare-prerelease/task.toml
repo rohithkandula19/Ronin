@@ -1,0 +1,18 @@
+id = "single-file/semver-compare-prerelease"
+category = "single-file"
+prompt = """
+`release/version.py` compares semantic versions. `compare("1.0.0",
+"1.0.0-rc1")` currently returns 0 because the prerelease part is thrown
+away, so our release gate happily treats a release candidate as the final
+release. Make a version with a prerelease sort *before* the same version
+without one, and compare two prereleases by ASCII order of their prerelease
+strings. Return -1, 0 or 1.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["release/version.py"]
+max_turns = 10
+timeout_seconds = 90
+tags = ["python", "versions"]
+regression_gate = false

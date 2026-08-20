@@ -3,8 +3,10 @@ name: CI
 on:
   push:
     branches: [main]
+  # No base filter: stacked PRs (base = another feature branch) must get the
+  # same matrix — PR #119 shipped with zero Actions runs until it was
+  # retargeted to main, which is exactly the gap this closes.
   pull_request:
-    branches: [main]
 
 # Least privilege: CI only reads the repo (tests, build, smoke) — no write scope.
 permissions:
@@ -40,7 +42,35 @@ jobs:
       # release tag. `pytest packages apps training` mirrors the Makefile and
       # collects the full suite.
       - name: Test (Python — full workspace)
-        run: uv run --python ${{ matrix.python }} pytest packages apps training -q
+        run: uv run --python ${{ matrix.python }} pytest packages apps training tests -q
+
+  # Its own job rather than a step in the matrix: coverage is one number for the tree, so
+  # measuring it six times over would be six chances to disagree with itself and six
+  # times the runtime for one answer. Single OS, single Python, one threshold.
+  coverage:
+    name: coverage (gate 85% on src/ronin)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install Python deps (with dev groups)
+        run: uv sync --all-packages --all-groups
+
+      # The threshold lives in `[tool.coverage.report] fail_under` in pyproject.toml, not
+      # in this flag — one number, in the file the local `make coverage` also reads, so a
+      # contributor cannot pass locally and fail here. pytest-cov exits non-zero on its
+      # own when the gate is missed; there is nothing to compare by hand.
+      #
+      # Only `tests` is collected: it is the suite that exercises src/ronin. Adding the
+      # v1 `packages` tree would pull thousands of tests that touch none of the measured
+      # code and dilute the number toward meaninglessness.
+      - name: Coverage gate
+        run: uv run pytest tests -q --cov --cov-report=term
 
   gates:
     name: gates (build · smoke · docs-stats)
@@ -76,8 +106,65 @@ jobs:
 
       # README headline numbers (tests / packages / games) are generated from
       # the repo; fail the build if they drift from the committed README.
+      # Strict typing + lint for the src/ronin contract tree (see pyproject).
+      # A test directory absent from mypy's `files` is a directory with no type
+      # checking at all, and nothing else reports that. This check runs before
+      # mypy so the failure names the real cause instead of showing zero errors.
+      - name: Type-check paths cover every test dir
+        run: uv run python scripts/sync_typecheck_paths.py --check
+
+      - name: Lint (ruff)
+        run: uv run ruff check src/ronin tests
+
+      - name: Typecheck (mypy --strict)
+        run: uv run mypy
+
       - name: README stats are current
         run: uv run python scripts/generate_readme_stats.py --check
+
+      # The reference pages under docs/site/ are derived from the real objects — the
+      # tool registry, the settings loader, the hook events, the provider table — so a
+      # page cannot disagree with the code without this going red. It earned the slot
+      # immediately: registering the local-adapter provider made providers.md stale and
+      # this is what said so.
+      - name: Docs site pages are current
+        run: uv run python docs/site/generate.py --check
+
+      # The manifest is what makes a *deleted* eval fixture detectable: the loader
+      # refuses a tree that disagrees with it. Generated, so it must be current.
+      - name: Eval manifest is current
+        run: uv run python scripts/gen_eval_manifest.py --check
+
+      # Two-way proof that every task discriminates: verify.sh must FAIL on the bare
+      # fixture and PASS with the author's solution overlaid. A verify.sh that passes
+      # on the untouched fixture inflates every score derived from the suite, forever,
+      # and nothing about the run looks wrong. ~10s for 118 tasks, so it runs on every
+      # push rather than on a schedule nobody reads.
+      #
+      # This is the *harness* gate. The pass-rate regression gate over the 20
+      # `regression_gate` tasks needs a model, so it cannot run here — the suite is
+      # required to work offline with no credentials. See docs/EVALS.md for that
+      # command; a CI step that silently skipped would be worse than none.
+      - name: Eval tasks discriminate (bare fails, solution passes)
+        run: uv run python scripts/check_eval_tasks.py --parallel 4 --quiet
+
+      # `ronin eval` is how anyone actually reaches the suite, and for most of its
+      # life the runner was complete, tested and unreachable from a command line.
+      # --dry-run is the branch that needs no model, no key and no network, so it is
+      # the branch CI can prove still works. PYTHONPATH=src because the v2 tree is
+      # not the installed console script yet (see docs/ARCHITECTURE.md).
+      - name: Eval is reachable from argv (--dry-run, no model)
+        env:
+          PYTHONPATH: src
+        run: |
+          uv run python -m ronin eval --dry-run --regression-gate
+          uv run python -m ronin duel --dry-run --limit 2
+          # A selection that matches nothing must fail rather than report 0/0, which
+          # would read as a clean run over an empty suite.
+          if uv run python -m ronin eval --dry-run --task no/such-task; then
+            echo "expected a nonexistent task id to exit non-zero" >&2
+            exit 1
+          fi
 
       - name: Build packages (sdist + wheel)
         run: uv build --all-packages
@@ -85,14 +172,39 @@ jobs:
       - name: Standalone clean-install smoke (outside the repo, no source tree)
         run: bash scripts/test_clean_install.sh
 
-      - name: Smoke test ronin CLI
+      # `ronin1`, the v1 console script. It was `ronin` until the v2 tree at the
+      # repository root took that name; in this workspace venv both are installed, so
+      # invoking `ronin` here would silently run v2's parser against v1's verbs and
+      # fail on `init --demo`. Renaming the entry point is what makes which one runs a
+      # decision rather than an install-order accident.
+      - name: Smoke test the v1 CLI (ronin1)
         run: |
           mkdir -p /tmp/ronin-smoke && cd /tmp/ronin-smoke
-          uv --project "$GITHUB_WORKSPACE" run ronin init --demo -y
-          uv --project "$GITHUB_WORKSPACE" run ronin util tools
-          uv --project "$GITHUB_WORKSPACE" run ronin util doctor
-          uv --project "$GITHUB_WORKSPACE" run ronin util version
-          uv --project "$GITHUB_WORKSPACE" run ronin update --check
-          uv --project "$GITHUB_WORKSPACE" run ronin util relay --help
-          uv --project "$GITHUB_WORKSPACE" run ronin util relay connect --help
-          uv --project "$GITHUB_WORKSPACE" run ronin util telegram --help
+          uv --project "$GITHUB_WORKSPACE" run ronin1 init --demo -y
+          uv --project "$GITHUB_WORKSPACE" run ronin1 util tools
+          uv --project "$GITHUB_WORKSPACE" run ronin1 util doctor
+          uv --project "$GITHUB_WORKSPACE" run ronin1 util version
+          uv --project "$GITHUB_WORKSPACE" run ronin1 update --check
+          uv --project "$GITHUB_WORKSPACE" run ronin1 util relay --help
+          uv --project "$GITHUB_WORKSPACE" run ronin1 util relay connect --help
+          uv --project "$GITHUB_WORKSPACE" run ronin1 util telegram --help
+
+      # The v2 console script, which nothing checked before: `ronin2` was declared and
+      # `pyproject.toml` was only proved importable by a unit test. Both names now have
+      # to actually launch, from the venv, the way a user reaches them.
+      - name: Smoke test the v2 CLI (ronin / ronin2)
+        run: |
+          mkdir -p /tmp/ronin2-smoke && cd /tmp/ronin2-smoke
+          uv --project "$GITHUB_WORKSPACE" run ronin --version
+          uv --project "$GITHUB_WORKSPACE" run ronin2 --version
+          uv --project "$GITHUB_WORKSPACE" run ronin --help
+          # `doctor` exits 1 on a box with no provider key and no local model server —
+          # which this runner is, by design. That non-zero is doctor working correctly
+          # (`providers` is a FAIL, deliberately: no model, no session), so the smoke
+          # proves the command RAN to completion — it printed its report and named the
+          # builtin skills that had to survive the wheel build — rather than demanding a
+          # healthy environment it does not have.
+          report="$(uv --project "$GITHUB_WORKSPACE" run ronin doctor || true)"
+          echo "$report"
+          echo "$report" | grep -q "^ronin doctor" || { echo "::error::ronin doctor produced no report"; exit 1; }
+          echo "$report" | grep -q "autoplan" || { echo "::error::builtin role skills missing from a clean install"; exit 1; }

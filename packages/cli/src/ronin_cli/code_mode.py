@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterable, Mapping
 
 from rich.console import Console
 
@@ -27,7 +27,7 @@ from .code_tools import (
 )
 from .config import RoninConfig
 from .media import build_image_tool
-from .project_memory import load_project_memory, memory_system_block, write_memory_template
+from .project_memory import load_project_memory, write_memory_template
 from .self_command import detect_self_command
 from .sentinel import confidence_badge, is_low
 from .prompt_box import read_prompt
@@ -173,7 +173,7 @@ _MENTION_RE = _re.compile(r"(?:^|\s)@([\w./\-]+)")
 _URL_MENTION_RE = _re.compile(r"(?:^|\s)@(https?://[^\s]+)")
 
 # read-only tool subset (for plan mode — explore but don't mutate)
-_READONLY_CODE_TOOLS = {"read_file", "list_files", "search_files", "glob"}
+_READONLY_CODE_TOOLS = {"read_file", "list_files", "search_files", "glob", "project_memory_recall"}
 # Fast mode keeps only the essential coding tools — the heavy extras (LSP, web,
 # git, vision, semantic, background, checkpoint, …) are dropped so the per-call
 # tool payload (and thus latency + token cost) is a fraction of the full set.
@@ -321,7 +321,7 @@ def _list_provider_models(config: RoninConfig) -> list[str]:
     base = config.resolved_base_url()
     if not base:
         return []
-    key = config.openai_api_key or _os.environ.get("OPENAI_API_KEY")
+    key = config.key_for(config.provider)
     try:
         import httpx
         headers = {"User-Agent": "ronin"}
@@ -406,79 +406,14 @@ def _status_line(config: RoninConfig, result: "CodeRunResult", elapsed: float,
     return line
 
 
-_EXT_LANG = {
-    ".py": "python", ".js": "javascript", ".ts": "typescript", ".tsx": "tsx",
-    ".jsx": "jsx", ".json": "json", ".md": "markdown", ".sh": "bash", ".bash": "bash",
-    ".toml": "toml", ".yaml": "yaml", ".yml": "yaml", ".html": "html", ".css": "css",
-    ".go": "go", ".rs": "rust", ".java": "java", ".rb": "ruby", ".c": "c", ".h": "c",
-    ".cpp": "cpp", ".sql": "sql", ".php": "php", ".swift": "swift", ".kt": "kotlin",
-}
-
-
-def _lang_for(path: str | None) -> str:
-    if not path:
-        return "text"
-    import os
-    return _EXT_LANG.get(os.path.splitext(path)[1].lower(), "text")
-
-
 def _render_diff(console: Console, diff: str, path: str | None = None) -> None:
-    """Print a clean, line-numbered diff — Claude-Code style: a dim line-number
-    gutter, full-width green/red row backgrounds, **syntax-highlighted code**, and
-    no git ``--- a/`` / ``@@`` noise."""
+    """Print a fixed-width, markup-safe unified-diff preview."""
     if not diff.strip():
         return
-    from rich.syntax import Syntax
-    from rich.text import Text
+    from .streaming_diff import render_unified_diff
 
-    from .code_tools import diff_rows
-    rows = diff_rows(diff)
-    if not rows:  # not a unified diff we can parse → show raw, dimmed
-        for line in diff.splitlines():
-            console.print(f"[dim]{line}[/dim]")
-        return
-
-    # Collapse long writes/edits so a big new file does not flood the terminal:
-    # show a head, then a "... N more lines" summary (Claude-Code style).
-    MAX_DIFF_ROWS = 14
-    hidden = 0
-    if len(rows) > MAX_DIFF_ROWS + 2:
-        hidden = len(rows) - MAX_DIFF_ROWS
-        rows = rows[:MAX_DIFF_ROWS]
-
-    from .theme import CODE_THEME
-    syn = Syntax("", _lang_for(path), theme=CODE_THEME, background_color="default")
-    width = min(console.width or 100, 120)
-    add_bg, del_bg = "#15291c", "#2c161b"   # subtle full-row tints
-    sign_style = {"add": "bold #73daca", "del": "bold #f7768e", "ctx": "#3b4261"}
-
-    for r in rows:
-        if r["kind"] == "sep":
-            console.print(Text("       ⋮", style="#3b4261"))
-            continue
-        ln = f"{r['lineno']:>4}" if r["lineno"] is not None else "    "
-        sign = {"add": "+", "del": "-", "ctx": " "}[r["kind"]]
-        # syntax-highlight the code content (keywords/strings/numbers coloured)
-        code = r["text"]
-        hl = syn.highlight(code) if code.strip() else Text(code)
-        hl.rstrip()  # highlight() appends a newline — drop it
-        if r["kind"] == "del":            # dim the highlight a touch on removals
-            hl.stylize("dim")
-
-        row = Text(f" {ln} ", style="#3b4261")
-        row.append(f"{sign} ", style=sign_style[r["kind"]])
-        row.append_text(hl)
-        if r["kind"] in ("add", "del"):
-            pad = width - row.cell_len
-            if pad > 0:
-                row.append(" " * pad)
-            console.print(row, style=f"on {add_bg if r['kind'] == 'add' else del_bg}")
-        else:
-            console.print(row)
-
-    if hidden:
-        console.print(Text(f"       ... {hidden} more lines (full file written on approve)",
-                           style="#3b4261"))
+    for row in render_unified_diff(diff, path=path, width=console.width or 100):
+        console.print(row)
 
 
 def _is_floored_command(name: str, args: dict) -> bool:
@@ -511,9 +446,40 @@ def _floored_payload(args: dict) -> str:
     return ""
 
 
+def _high_risk_plugin_capabilities(
+    name: str, capabilities_by_tool: Mapping[str, Iterable[str]] | None,
+) -> tuple[str, ...]:
+    """Declared plugin capabilities that require explicit confirmation."""
+    if not capabilities_by_tool:
+        return ()
+    from .plugin_manifest import HIGH_RISK_CAPABILITIES
+
+    values = capabilities_by_tool.get(name, ())
+    return tuple(sorted({str(value) for value in values} & HIGH_RISK_CAPABILITIES))
+
+
+def _approve_plugin_capability_floor(
+    console: Console | None, name: str, capabilities: tuple[str, ...],
+) -> "bool | str":
+    """Require a block-level approval for a high-risk plugin capability."""
+    if console is None:
+        return ("blocked: plugin declares " + ", ".join(capabilities)
+                + " capability; explicit interactive approval is required.")
+    from .approvals import approve
+
+    return approve({
+        "kind": "api_call",
+        "summary": f"run plugin tool '{name}' (declares {', '.join(capabilities)})",
+        "reversible": False,
+        "external": "payment" in capabilities,
+        "details": {"capability_floor": list(capabilities)},
+    }, console=console)
+
+
 def _selective_gate(
     console: Console | None, yolo: bool, root: _Path,
     *, extra_gated: set[str] | None = None, rules: "PermissionRules | None" = None,
+    capabilities_by_tool: Mapping[str, Iterable[str]] | None = None,
 ) -> Callable[[str, dict], "bool | str"]:
     """Auto-approve read tools; gate SENSITIVE_TOOLS (and ``extra_gated`` — the
     sensitive MCP/plugin tools) unless yolo.
@@ -569,6 +535,9 @@ def _selective_gate(
                 return ("blocked: destructive command not confirmed — pick a safer "
                         "approach (the safer alternative was shown above).")
             return True  # explicitly, deliberately confirmed
+        high_risk = _high_risk_plugin_capabilities(name, capabilities_by_tool)
+        if high_risk:
+            return _approve_plugin_capability_floor(console, name, high_risk)
         if name not in SENSITIVE_TOOLS and name not in gated:
             return True  # reads + media generation run freely (never destructive:
             #              the floor above already had its say on every tool)
@@ -746,6 +715,10 @@ def run_code_agent(
     if _blocked is not None:
         return _blocked
 
+    from .context_policy import resolve_context_policy
+
+    context_policy = resolve_context_policy(config)
+
     # A read-only role (researcher / reviewer / architect) restricts the agent to
     # read-only tools — guidance that's also enforced, never a safety bypass.
     from .roles import role_is_read_only
@@ -755,7 +728,21 @@ def run_code_agent(
     # Full-access mode lifts the filesystem sandbox (and auto-approve is set by
     # the session via yolo). Otherwise stay confined to the project root.
     _sandbox = not getattr(config, "full_access", False)
-    tools = build_code_tools(root, undo_stack=undo_stack, sandbox=_sandbox, deny=deny)
+    try:
+        from .constitution import load_constitution
+
+        constitution = load_constitution(root)
+    except ValueError as exc:
+        return CodeRunResult(
+            success=False, output=f"[blocked] invalid repository constitution: {exc}",
+            iterations=0, error=str(exc), blocked=True,
+        )
+    tools = build_code_tools(
+        root, undo_stack=undo_stack, sandbox=_sandbox, deny=deny,
+        write_deny=lambda target: constitution.protects(target, root=root),
+    )
+    from .project_memory import build_project_memory_tools
+    tools = tools + build_project_memory_tools(root)
     if read_only:
         # plan mode: explore but never mutate
         tools = [t for t in tools if t.name in _READONLY_CODE_TOOLS]
@@ -763,6 +750,11 @@ def run_code_agent(
     # are read-only, so they're available even in plan mode and to sub-agents.
     from .lsp import build_lsp_tools
     tools = tools + build_lsp_tools(root)
+    # Semantic file retrieval stays available without credentials. Its fallback
+    # is a deterministic local hashing index, so offline runs never send project
+    # content to an embedding provider.
+    from .embeddings import build_semantic_tools
+    tools = tools + build_semantic_tools(config, root)
     # Web tools (web_search + fetch_url): read-only and safe, so the coding
     # agent gets them even in plan mode — look up docs/errors while it works.
     # Offline mode strips them below (NETWORK_TOOLS).
@@ -839,6 +831,15 @@ def run_code_agent(
     if console is not None:
         from .capabilities import capability_block
         system += "\n\n" + capability_block([t.name for t in tools])
+        # Presence applies only to a person-facing interactive turn. Background
+        # workers, sub-agents, and evaluation runs retain their deterministic
+        # task prompt without inferred conversational cues.
+        from .presence import interaction_system_block
+        system += "\n\n" + interaction_system_block(
+            getattr(config, "interaction_style", "balanced"),
+            checkins=bool(getattr(config, "relational_checkins", True)),
+            task=task,
+        )
     # Bushido: the user's global code of honor, carried across every repo. Folded
     # in BEFORE project memory so a repo's own notes always override it.
     from .bushido import bushido_system_block
@@ -849,74 +850,51 @@ def run_code_agent(
     if getattr(config, "sentinel", False):
         from .sentinel import SENTINEL_SYSTEM
         system += SENTINEL_SYSTEM
-    mem = memory_system_block(root)
-    if mem is not None:
-        block, mem_name = mem
-        system += block
-        if console is not None and not history_prefix:
-            console.print(f"[dim]📄 loaded project memory from [bold]{mem_name}[/bold][/dim]")
-
-    # Context engineering: front-load the files most relevant to THIS request so
-    # the model starts aimed at the right code (non-blocking; interactive turns
-    # only — sub-agents/evals pass console=None and stay deterministic).
-    # Auto-context front-loads relevant files — skipped in fast mode (leaner
-    # context = faster turns; the agent can still read what it needs on demand).
-    # Only on the FIRST turn (no structured history yet): injecting query-specific
-    # files into `system` every turn would change the system block each time and
-    # invalidate the prompt-cache prefix — defeating the point of persistent
-    # history. Once history exists, the agent already carries what it read forward.
-    if (console is not None and getattr(config, "auto_context", False)
-            and not getattr(config, "fast", False) and not message_history):
-        _ctx = ""
-        # Scalable path: if the user built a repo index (`ronin index`), pull a
-        # BUDGETED, ranked set of files from the persistent index — context stays
-        # bounded even on a huge monorepo. Falls back to the in-memory map when
-        # there's no index, so default behaviour is unchanged.
-        try:
-            from .repo_index import index_db_path, query_index
-            _db = index_db_path(root)
-            if _db.exists():
-                _paths = query_index(task, _db, token_budget=8000)
-                if _paths:
-                    _ctx = ("## Relevant code (ronin repo index)\n"
-                            + "\n".join(f"- {p}" for p in _paths))
-        except Exception:  # noqa: BLE001 - index is best-effort; never break a run
-            _ctx = ""
-        if not _ctx:
-            from .context_engine import relevant_context
-            _ctx = relevant_context(task, root)
-        if _ctx:
-            system += "\n\n" + _ctx
-            console.print("[dim]📎 added relevant files to context[/dim]")
+    # Existing project memory and repository retrieval now enter through the
+    # shared typed contract used by every durable ReAct run. Retrieval remains a
+    # first-turn interactive optimization, preserving the prompt-cache behavior.
+    from .agent_context import build_code_context_providers
+    _include_retrieval = bool(
+        console is not None and getattr(config, "auto_context", False)
+        and not getattr(config, "fast", False) and not message_history
+    )
+    _context_providers = build_code_context_providers(
+        root,
+        include_retrieval=_include_retrieval,
+        retrieval_token_budget=context_policy.retrieval_budget_tokens,
+    )
+    if console is not None and not history_prefix:
+        _instructions = load_project_memory(root)
+        if _instructions is not None:
+            console.print(f"[dim]📄 loaded project memory from [bold]{_instructions[0]}[/bold][/dim]")
 
     provider = build_provider(config)
     # Surface rate-limit backoff so a (up to ~60s) retry wait doesn't look frozen.
     if console is not None:
         from .runner import attach_retry_notifier
         attach_retry_notifier(provider, console)
-    # Compact old tool output before the context window fills. Claude has a 200k
-    # window; most free/open models are far smaller (some 8–32k), so they'd error
-    # long before a Claude-sized threshold — compact much earlier off-Anthropic.
     _fast = getattr(config, "fast", False)
-    _compact_at = 120_000 if config.provider == "anthropic" else 28_000
-    if _fast:
-        _compact_at = min(_compact_at, 16_000)   # compact sooner → leaner context
     agent = ReActAgent(
         system=system,
         tools=tools,
         provider=provider,
         max_iterations=max_iterations,
-        compact_after_tokens=_compact_at,
+        compact_after_tokens=context_policy.compaction_threshold_tokens,
         compact_keep_recent=4 if _fast else 6,
         # Fast mode caps each tool result tighter, so file dumps / command output
         # don't balloon the per-call payload.
         max_tool_result_chars=6000 if _fast else 16000,
+        context_providers=_context_providers,
     )
 
     # The set of tools that must pass the approval gate: the built-in mutators
     # plus any tool that flags itself sensitive=True (MCP writes, user plugins).
     # These used to bypass approval entirely. Read-only MCP tools stay out of it.
     _sensitive_names = set(SENSITIVE_TOOLS) | {t.name for t in tools if getattr(t, "sensitive", False)}
+    _capabilities_by_tool = {
+        t.name: tuple(getattr(t, "capabilities", ())) for t in tools
+        if getattr(t, "capabilities", ())
+    }
     # Fail-closed drift guard: a known-mutating tool that reached the toolbelt but
     # not the gate would bypass approval. Refuse rather than run ungated.
     _ungated = ungated_mutators({t.name for t in tools}, _sensitive_names)
@@ -950,6 +928,13 @@ def run_code_agent(
             # entirely. The floor is the outermost authority or it is not a floor.
             if _is_floored_command(name, args):
                 return gate_cb(name, args)
+            high_risk = _high_risk_plugin_capabilities(name, _capabilities_by_tool)
+            if high_risk:
+                # The front end owns the confirmation UI. This metadata is used
+                # only for display by the callback, never passed to the handler.
+                approval_args = dict(args)
+                approval_args["__ronin_capability_floor"] = list(high_risk)
+                return gate_cb(name, approval_args)
             if name not in _sensitive_names:
                 return True
             if yolo:
@@ -959,7 +944,8 @@ def run_code_agent(
             return gate_cb(name, args)
     else:
         before_tool = _selective_gate(console, yolo, _gate_root,
-                                      extra_gated=_sensitive_names)
+                                      extra_gated=_sensitive_names,
+                                      capabilities_by_tool=_capabilities_by_tool)
 
     # Stream the model's reasoning + summary live (the Claude-Code feel) when we
     # have a console; fall back to the step-narrator for non-interactive runs.
@@ -1008,7 +994,8 @@ def run_code_agent(
         result = agent.run(prompt, history=message_history or None,
                            on_step=on_step, before_tool=before_tool,
                            on_text=on_text, on_reset=on_reset, after_tool=after_tool,
-                           parallel_safe=lambda n: n in _PARALLEL_TOOLS)
+                           parallel_safe=lambda n: n in _PARALLEL_TOOLS,
+                           runtime_context={"root": str(_Path(root).resolve()), "mode": "code"})
     except KeyboardInterrupt:
         # Ctrl-C during a turn → stop THIS turn, keep the session alive.
         if renderer is not None:
@@ -1318,6 +1305,7 @@ SLASH_COMMANDS: dict[str, str] = {
     "provider": "show providers (free/paid + key health), or switch: /provider <name>",
     "free": "free-mode status, or switch to a $0 provider: /free [on]",
     "theme": "show or switch the code syntax-highlight theme: /theme [name]",
+    "presence": "set conversation style: /presence [balanced|direct|supportive|quiet]",
     "role": "set a coding role (researcher/implementer/reviewer/tester/architect/debugger): /role <name>",
     "mode": "show or set the edit mode: /mode normal|plan|auto-accept (same as Shift+Tab)",
     "plan": "enter plan (read-only) mode — explore without mutating",
@@ -1365,7 +1353,7 @@ _HELP_GROUPS: list[tuple[str, list[str]]] = [
     ("🔒  safety", ["permissions"]),
     ("🔌  integrations", ["mcp", "integrations", "tools", "agents", "voice"]),
     ("📁  memory & context", ["memory", "init", "context", "compact", "export", "copy"]),
-    ("⚙️  session", ["theme", "vim", "config", "quit"]),
+    ("⚙️  session", ["theme", "presence", "vim", "config", "quit"]),
 ]
 
 
@@ -1730,7 +1718,7 @@ def run_code_session(
                     # Count the structured history (Message objects, not dicts) —
                     # content + tool-call arguments — so the gauge actually ticks.
                     _used = _history_token_estimate(message_history)
-                    _left = max(0, 100 - int(_used * 100 / 128000))
+                    _left = resolve_context_policy(config).remaining_percent(_used)
                     # Always-visible chip strip: [FREE] [provider:model] [mode]
                     # [branch*] [write-gated] [role:x], width-aware.
                     from .prompt_box import current_mode
@@ -2029,7 +2017,7 @@ def run_unified_session(
     from .mcp_client import build_mcp_tools
 
     media_tools = build_media_tools(artifacts, root=root)
-    data_tools = build_tools(config)
+    data_tools = build_tools(config, include_plugins=False)
     # console=None → load MCP tools silently (no "🔌 MCP fs · N tool(s)" chrome
     # at launch; Claude Code doesn't announce its tool wiring either).
     mcp_tools = build_mcp_tools(root, console=None)  # tools from .ronin/mcp.json servers
@@ -2092,7 +2080,7 @@ def run_unified_session(
                     # Count the structured history (Message objects, not dicts) —
                     # content + tool-call arguments — so the gauge actually ticks.
                     _used = _history_token_estimate(message_history)
-                    _left = max(0, 100 - int(_used * 100 / 128000))
+                    _left = resolve_context_policy(config).remaining_percent(_used)
                     # Always-visible chip strip: [FREE] [provider:model] [mode]
                     # [branch*] [write-gated] [role:x], width-aware.
                     from .prompt_box import current_mode

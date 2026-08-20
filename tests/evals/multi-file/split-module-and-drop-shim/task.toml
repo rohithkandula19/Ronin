@@ -1,0 +1,17 @@
+id = "multi-file/split-module-and-drop-shim"
+category = "multi-file"
+prompt = """
+`store/db.py` holds two unrelated classes, `Reader` and `Writer`. Split it:
+put `Reader` in `store/reader.py`, `Writer` in `store/writer.py`, delete
+`store/db.py`, and update `store/service.py` to import from the new modules.
+After the change `store/db.py` must not exist and nothing may import
+`store.db`.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["store/reader.py", "store/writer.py", "store/service.py", "store/db.py"]
+max_turns = 16
+timeout_seconds = 150
+tags = ["python", "split"]
+regression_gate = false

@@ -1,0 +1,5 @@
+{
+  "name": "cancelled while running",
+  "job": { "id": "job-3", "priority": "low", "label": "backfill" },
+  "events": ["start", "cancel"]
+}

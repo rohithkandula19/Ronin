@@ -1,0 +1,23 @@
+id = "bug-from-trace/split-orders-into-shards"
+category = "bug-from-trace"
+prompt = """
+Traceback (most recent call last):
+  File "shard_orders.py", line 31, in <module>
+    sys.exit(main(sys.argv))
+             ^^^^^^^^^^^^^^
+  File "shard_orders.py", line 25, in main
+    for chunk in iter_chunks(rows, DEFAULT_CHUNK_SIZE):
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "shard/batching.py", line 34, in iter_chunks
+    first = rows[start]
+            ~~~~^^^^^^^
+IndexError: list index out of range
+"""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = ["shard/sizing.py"]
+max_turns = 12
+timeout_seconds = 120
+tags = ["python", "indexerror", "off-by-one", "localization"]
+regression_gate = false

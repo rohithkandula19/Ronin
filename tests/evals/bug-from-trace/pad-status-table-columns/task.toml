@@ -1,0 +1,35 @@
+id = "bug-from-trace/pad-status-table-columns"
+category = "bug-from-trace"
+prompt = """
+Traceback (most recent call last):
+  File "status_board.py", line 25, in <module>
+    sys.exit(main(sys.argv))
+             ^^^^^^^^^^^^^^
+  File "status_board.py", line 20, in main
+    print(render(records, settings))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "opsboard/table.py", line 18, in render
+    lines = [format_row(HEADERS, settings)]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "opsboard/table.py", line 14, in format_row
+    return settings.separator.join(pad_cell(cell, settings.column_width) for cell in cells)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "opsboard/table.py", line 14, in <genexpr>
+    return settings.separator.join(pad_cell(cell, settings.column_width) for cell in cells)
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "opsboard/layout.py", line 23, in pad_cell
+    clipped = truncate(text, width)
+              ^^^^^^^^^^^^^^^^^^^^^
+  File "opsboard/layout.py", line 14, in truncate
+    if len(text) <= width:
+       ^^^^^^^^^^^^^^^^^^
+TypeError: '<=' not supported between instances of 'int' and 'str'
+"""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = ["opsboard/settings.py"]
+max_turns = 12
+timeout_seconds = 120
+tags = ["python", "typeerror", "localization", "config"]
+regression_gate = false

@@ -1,0 +1,16 @@
+id = "single-file/retry-backoff-cap"
+category = "single-file"
+prompt = """
+`net/backoff.py` computes the delay before retry N. It grows without bound,
+so attempt 20 asks the caller to sleep for days. Cap the returned delay at
+`max_delay` seconds. `delay_for(0)` must stay at `base`, and the sequence must
+stay deterministic — do not add jitter.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["net/backoff.py"]
+max_turns = 10
+timeout_seconds = 90
+tags = ["python", "retry"]
+regression_gate = false

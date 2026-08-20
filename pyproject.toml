@@ -5,7 +5,75 @@ description = "ronin — a masterless, terminal-native Claude agent: a Claude-Co
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
+# Deliberately zero hard dependencies. Every optional capability below is reached
+# through a lazy import inside the one function that needs it, and degrades with a
+# named error rather than an ImportError traceback — so `pip install ronin` gives a
+# working agent and each extra adds a capability rather than repairing a broken one.
 dependencies = []
+
+[project.scripts]
+# Both names, and both point here. `ronin2` was the only one for as long as taking the
+# short name would have been a silent swap: v1 (`packages/cli`, ~300 modules) declared
+# `ronin`, and two distributions declaring one console script means whichever was
+# installed second wins, quietly.
+#
+# That is now decided rather than deferred. v1's entry point is renamed to `ronin1` in
+# `packages/cli/pyproject.toml` — an explicit name, not a removal, so an existing user
+# has something to type — and `ronin` means this tree. `ronin2` stays as well: it is what
+# the docs, the eval harness and anyone who already installed it invoke, and breaking a
+# name to tidy up a name is a poor trade.
+#
+# `main` rather than an app object because `ronin.cli.main.main` returns an int and never
+# calls `sys.exit` — see its module docstring. The console-script wrapper turns the
+# return value into the process status, so the exit codes (0 done, 1 error, 2 an approval
+# was refused) survive the packaging layer unchanged.
+ronin = "ronin.cli.main:main"
+ronin2 = "ronin.cli.main:main"
+
+[project.optional-dependencies]
+# The interactive app. Textual brings Rich transitively, so this is one tree, not
+# two; every pure module in `ronin.ui` (reducer, renderers, command parsing) stays
+# importable without it, which is why almost all of its tests run on a bare install.
+tui = ["textual>=8.2.8,<9"]
+# Multi-language repo maps. `ronin.context.repomap` ships a stdlib-`ast` parser that
+# is exact for Python and needs nothing, so this extra widens language coverage
+# rather than enabling the feature.
+repomap = ["tree-sitter-language-pack>=0.9"]
+# Real sockets: provider HTTP/SSE streaming and MCP's network transports. Both
+# import httpx inside the sender that needs it, and both are fully tested offline
+# against injected transports, so this is only needed to talk to something real.
+http = ["httpx>=0.27"]
+# `ronin mcp login` persists OAuth tokens in the OS keyring (encrypted at rest) rather than a
+# plaintext file; imported lazily with an in-memory fallback, so a bare install still runs.
+oauth = ["keyring>=25"]
+
+# Without this the root is a "virtual" project: uv sync prints "Skipping installation of
+# entry points (`project.scripts`) because this project is not packaged", `uv build
+# --all-packages` emits a wheel for every workspace member and none for the root, and so
+# the `ronin2` console script declared above existed in no venv anywhere. `pipx install
+# ronin` — the install path docs/STACK.md names as the end state — had no distribution
+# to install either.
+#
+# hatchling because it is the lightest backend that can be told "the package is at
+# src/ronin" without a src-layout convention fight, and it is already what every
+# packaged member of this workspace uses.
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ronin"]
+# The built-in role-workflow skills are Markdown data files under the package, and the
+# `packages` entry above already carries every file it finds there — Python and data
+# alike — into the wheel. A `force-include` of the same directory would add each SKILL.md
+# a *second* time and hatchling aborts on the duplicate path, so the data files ride along
+# on the package inclusion and nothing extra is declared. The clean-install smoke test is
+# what proves they actually shipped, rather than a config comment asserting they did.
+
+[tool.uv]
+# Build and install the root project itself, not just its dependencies — this is the
+# half of the fix that makes `ronin2` appear in the workspace venv.
+package = true
 
 [tool.uv.workspace]
 members = [
@@ -45,8 +113,330 @@ members = [
 # headless GitHub Actions runner).
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["packages", "apps"]
+# `src` is on the path so the new core contract (src/ronin/core/) is importable
+# as `ronin.core.*` without a build step — it is pure stdlib dataclasses and has
+# no install-time dependencies. `tests` collects the contract's invariant tests.
+pythonpath = ["src"]
+testpaths = ["packages", "apps", "tests"]
+# `tests/evals/` holds eval *task fixtures*, not tests: small repos the agent is
+# pointed at, several of which legitimately contain their own `test_*.py`. Collecting
+# them would run another project's tests as if they were ours — and the "add a test"
+# category deliberately ships tests that FAIL until the agent fixes the code, so the
+# suite would go red by design. `tests/evals/conftest.py` also sets
+# `collect_ignore_glob`; this is the belt to that braces, because the two mechanisms
+# fail in different ways (a deleted conftest vs. a renamed directory).
+norecursedirs = ["tests/evals"]
 faulthandler_timeout = 90
 markers = [
     "adapter_smoke: LIVE fine-tuned-adapter smoke tests (need mlx-lm + a trained adapter; skipped elsewhere)",
+]
+
+# Strict typing + lint for the new src/ronin contract tree. Three dev deps, each
+# justified in one line:
+#   mypy — the only way "strict typing" is a gate rather than an intention.
+#   ruff — lint + format in one fast binary, replacing nothing we already have.
+#   pytest-cov — the only way a coverage number is measured rather than asserted; see
+#     docs/STACK.md, which refuses to state a threshold it has no baseline for.
+[dependency-groups]
+dev = [
+    "mypy>=2.3.1",
+    "ruff>=0.16.3",
+    "pytest-cov>=5.0",
+]
+
+# The four lists below have to agree with the filesystem, and a test directory
+# missing from mypy's `files` is a directory with no type checking at all — a
+# silent gap. `scripts/sync_typecheck_paths.py` regenerates them from disk and
+# `--check` fails CI when they drift, so the list is no longer hand-maintained.
+# The legacy packages/* tree is not strict-clean yet; this gate covers the new
+# contract only, and widens as code moves into src/ronin.
+# >>> generated by scripts/sync_typecheck_paths.py — do not edit by hand
+[tool.mypy]
+python_version = "3.11"
+files = [
+    "src/ronin",
+    "tests/agents",
+    "tests/cli",
+    "tests/context",
+    "tests/core",
+    "tests/evalsuite",
+    "tests/ext",
+    "tests/mcp",
+    "tests/obs",
+    "tests/persistence",
+    "tests/providers",
+    "tests/repo",
+    "tests/safety",
+    "tests/scripts",
+    "tests/telemetry",
+    "tests/tools",
+    "tests/ui",
+    "tests/verify",
+]
+strict = true
+warn_unreachable = true
+explicit_package_bases = true
+mypy_path = "src:scripts:tests/agents:tests/cli:tests/context:tests/core:tests/evalsuite:tests/ext:tests/mcp:tests/obs:tests/persistence:tests/providers:tests/repo:tests/safety:tests/scripts:tests/telemetry:tests/tools:tests/ui:tests/verify"
+
+# pytest's @parametrize is an untyped decorator as far as mypy is concerned;
+# that is a property of pytest, not a hole in our typing. Enumerated rather
+# than wildcarded because mypy rejects a partial-component pattern.
+[[tool.mypy.overrides]]
+module = [
+    "agents_harness",
+    "context_harness",
+    "duel_harness",
+    "evals_harness",
+    "fakes",
+    "gate_harness",
+    "harness",
+    "mcp_harness",
+    "persistence_harness",
+    "replay",
+    "safety_harness",
+    "stream_harness",
+    "telemetry_harness",
+    "test_accounting",
+    "test_agent_hooks",
+    "test_agents_demo",
+    "test_assembly",
+    "test_base",
+    "test_boundaries",
+    "test_bridge",
+    "test_capability_overrides",
+    "test_check_test_imports",
+    "test_cli_cost_visibility",
+    "test_context_budget",
+    "test_context_compaction",
+    "test_context_edges",
+    "test_context_filestate",
+    "test_context_integration",
+    "test_context_memory",
+    "test_context_repomap",
+    "test_context_repomap_edges",
+    "test_context_repomap_paths",
+    "test_context_retention_reach",
+    "test_context_scan_repo",
+    "test_core_demo",
+    "test_definitions",
+    "test_definitions_edges",
+    "test_fetcher",
+    "test_files",
+    "test_files_edges",
+    "test_golden_streams",
+    "test_integration",
+    "test_jsonargs",
+    "test_jsonargs_escapes",
+    "test_loop",
+    "test_loop_provider_error",
+    "test_net",
+    "test_net_untrusted",
+    "test_normalize",
+    "test_openai_request",
+    "test_persistence_codec",
+    "test_persistence_edges",
+    "test_persistence_end_to_end",
+    "test_persistence_export",
+    "test_persistence_index",
+    "test_persistence_resume",
+    "test_persistence_transcript",
+    "test_persistence_versions",
+    "test_plan_mode",
+    "test_providers_capability",
+    "test_providers_demo",
+    "test_registry",
+    "test_repo_analyze",
+    "test_resilience",
+    "test_ronin_agents_hook_normalize",
+    "test_ronin_cli_acp",
+    "test_ronin_cli_approve",
+    "test_ronin_cli_bench",
+    "test_ronin_cli_demo",
+    "test_ronin_cli_detect",
+    "test_ronin_cli_doctor",
+    "test_ronin_cli_doctor_detect",
+    "test_ronin_cli_doctor_pricing",
+    "test_ronin_cli_ext_commands",
+    "test_ronin_cli_gate",
+    "test_ronin_cli_harvest",
+    "test_ronin_cli_http_api",
+    "test_ronin_cli_integration",
+    "test_ronin_cli_interactive",
+    "test_ronin_cli_main",
+    "test_ronin_cli_mcp_login",
+    "test_ronin_cli_read_dedup",
+    "test_ronin_cli_repo",
+    "test_ronin_cli_repo_render",
+    "test_ronin_cli_sdk",
+    "test_ronin_cli_serve",
+    "test_ronin_cli_skills",
+    "test_ronin_cli_slash",
+    "test_ronin_cli_spine",
+    "test_ronin_cli_status",
+    "test_ronin_cli_stream",
+    "test_ronin_cli_telemetry",
+    "test_ronin_cli_wire",
+    "test_ronin_cli_wizard",
+    "test_ronin_cli_wizard_detect",
+    "test_ronin_eval_harvest",
+    "test_ronin_eval_taxonomy",
+    "test_ronin_evals_duel",
+    "test_ronin_evals_integration",
+    "test_ronin_evals_poolgen",
+    "test_ronin_evals_report",
+    "test_ronin_evals_runner",
+    "test_ronin_evals_suite_shape",
+    "test_ronin_evals_swebench",
+    "test_ronin_evals_task",
+    "test_ronin_evals_taxonomy",
+    "test_ronin_ext_plugins",
+    "test_ronin_ext_role_skills",
+    "test_ronin_ext_skills",
+    "test_ronin_ext_trust",
+    "test_ronin_local_adapter",
+    "test_ronin_mcp_client",
+    "test_ronin_mcp_config",
+    "test_ronin_mcp_integration",
+    "test_ronin_mcp_jsonrpc",
+    "test_ronin_mcp_oauth",
+    "test_ronin_mcp_oauth_driver",
+    "test_ronin_mcp_oauth_refresh",
+    "test_ronin_mcp_server",
+    "test_ronin_mcp_tools",
+    "test_ronin_mcp_transport",
+    "test_ronin_obs_boundary",
+    "test_ronin_obs_logs",
+    "test_ronin_obs_metrics",
+    "test_ronin_obs_recorder",
+    "test_ronin_obs_timing",
+    "test_ronin_telemetry_consent",
+    "test_ronin_telemetry_docsite",
+    "test_ronin_telemetry_payload",
+    "test_ronin_telemetry_transport",
+    "test_ronin_ui_approvals",
+    "test_router",
+    "test_safety_command",
+    "test_safety_demo",
+    "test_safety_denylist",
+    "test_safety_edges",
+    "test_safety_injection",
+    "test_safety_integration",
+    "test_safety_net",
+    "test_safety_policy",
+    "test_safety_sandbox",
+    "test_safety_settings",
+    "test_safety_suites",
+    "test_search",
+    "test_search_edges",
+    "test_searcher",
+    "test_session",
+    "test_shell",
+    "test_shell_failures",
+    "test_shim",
+    "test_shim_edges",
+    "test_shim_surface",
+    "test_task",
+    "test_tool_output_streaming",
+    "test_tools_demo",
+    "test_truncation_ladder",
+    "test_types",
+    "test_ui_activity",
+    "test_ui_app",
+    "test_ui_commands",
+    "test_ui_controls",
+    "test_ui_demo",
+    "test_ui_headless",
+    "test_ui_identity",
+    "test_ui_input_surfaces",
+    "test_ui_integration",
+    "test_ui_keys",
+    "test_ui_reduce",
+    "test_ui_render",
+    "test_ui_steering_and_errors",
+    "test_ui_textual",
+    "test_verify_checkpoints",
+    "test_verify_critique",
+    "test_verify_demo",
+    "test_verify_integration",
+    "test_verify_invariants",
+    "test_verify_isolation",
+    "test_verify_quality",
+    "test_verify_repair",
+    "test_verify_runner",
+    "test_verify_spec",
+    "ui_harness",
+    "verify_harness",
+    "wire_harness",
+]
+disallow_untyped_decorators = false
+
+# mlx-lm is an Apple-silicon-only optional dependency imported inside a
+# function so nothing else in the tree needs it. It ships no stubs and CI is
+# Linux, so there is nothing to type against.
+[[tool.mypy.overrides]]
+module = ["mlx_lm.*"]
+ignore_missing_imports = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+include = [
+    "src/ronin/**/*.py",
+    "tests/agents/**/*.py",
+    "tests/cli/**/*.py",
+    "tests/context/**/*.py",
+    "tests/core/**/*.py",
+    "tests/evalsuite/**/*.py",
+    "tests/ext/**/*.py",
+    "tests/mcp/**/*.py",
+    "tests/obs/**/*.py",
+    "tests/persistence/**/*.py",
+    "tests/providers/**/*.py",
+    "tests/repo/**/*.py",
+    "tests/safety/**/*.py",
+    "tests/scripts/**/*.py",
+    "tests/telemetry/**/*.py",
+    "tests/tools/**/*.py",
+    "tests/ui/**/*.py",
+    "tests/verify/**/*.py",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+# <<< generated
+
+# Coverage gate: 85% over ALL of src/ronin. Measured before being written down — the
+# reading at the time this landed was 86.0% (14,752 of 17,160 statements), so the gate
+# has **1.0 point of headroom** and that is a deliberate, known-tight choice.
+#
+# What that tightness means, stated plainly rather than discovered later: eleven
+# `demo.py` modules totalling 1,506 statements sit at exactly 0%, because every
+# subsystem ships a demo command by standing convention and no test runs one. The next
+# demo module somebody adds is therefore likelier to trip this gate than a real
+# regression is. The alternative — excluding demos and setting 90% — is argued for in
+# docs/STACK.md; scope here is "all", so a failing build may mean "add a test for your
+# demo" rather than "you broke something", and the fix in that case is a test, not a
+# lower number.
+#
+# `providers/local_adapter.py` is the one genuine low spot at 58%: its generation paths
+# need mlx_lm or transformers and CI has neither. That is a real limit of an offline
+# suite, not an oversight, and it is why the $0 lane's inference code is the least
+# exercised code in the tree.
+[tool.coverage.run]
+source = ["src/ronin"]
+branch = false
+omit = ["*/__pycache__/*"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = false
+skip_covered = true
+# `if TYPE_CHECKING:` blocks and `@overload` stubs never execute by construction, so
+# counting them as uncovered would measure the type annotations rather than the tests.
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "@overload",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
 ]

@@ -1,0 +1,25 @@
+id = "bug-from-trace/valueerror-int-of-empty-field"
+category = "bug-from-trace"
+prompt = """
+Traceback (most recent call last):
+  File "/workspace/bin/ports", line 11, in <module>
+    main()
+  File "/workspace/ports/cli.py", line 11, in main
+    print(",".join(str(port) for port in parse_ports(ALLOW)))
+                                         ^^^^^^^^^^^^^^^^^^
+  File "/workspace/ports/parse.py", line 11, in parse_ports
+    return [int(part.strip()) for part in text.split(",")]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/ports/parse.py", line 11, in <listcomp>
+    return [int(part.strip()) for part in text.split(",")]
+            ^^^^^^^^^^^^^^^^^
+ValueError: invalid literal for int() with base 10: ''
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["ports/parse.py"]
+max_turns = 14
+timeout_seconds = 120
+tags = ["python", "valueerror"]
+regression_gate = false

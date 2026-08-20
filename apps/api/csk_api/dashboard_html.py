@@ -159,6 +159,13 @@ h2.dh{font-size:16px;margin:0 0 4px;font-weight:700}
 .transcript .line{padding:4px 0;border-bottom:1px solid #1b2129;white-space:pre-wrap;word-break:break-word}
 .transcript .line.user{color:var(--accent)}
 .transcript .line.assistant{color:var(--fg)}
+.ops-list{list-style:none;margin:0;padding:0}
+.ops-item{padding:10px 0;border-bottom:1px solid #1b2129}
+.ops-item:last-child{border-bottom:0}
+.ops-title{font-weight:700;word-break:break-word}
+.ops-meta{display:flex;gap:7px;flex-wrap:wrap;margin-top:5px;color:var(--dim);font-size:11px;word-break:break-word}
+.wave-list{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}
+.wave{font-size:10.5px;padding:2px 6px;border:1px solid var(--border);border-radius:4px;color:var(--muted);background:var(--panel2);word-break:break-word}
 </style>
 </head>
 <body>
@@ -176,6 +183,7 @@ h2.dh{font-size:16px;margin:0 0 4px;font-weight:700}
   <main class="main">
     <div class="tabs">
       <div class="tab active" data-pane="run">Run detail</div>
+      <div class="tab" data-pane="operations">Operations</div>
       <div class="tab" data-pane="memory">Memory</div>
       <div class="tab" data-pane="skills">Skills</div>
     </div>
@@ -185,6 +193,7 @@ h2.dh{font-size:16px;margin:0 0 4px;font-weight:700}
         <div>Select a run on the left to see its sub-agent tree.</div>
       </div>
     </div>
+    <div class="panel-pane" id="pane-operations"><div class="loading">loading...</div></div>
     <div class="panel-pane" id="pane-memory"><div class="loading">loading...</div></div>
     <div class="panel-pane" id="pane-skills"><div class="loading">loading...</div></div>
   </main>
@@ -196,7 +205,16 @@ var API = {
   runs: "/ui/runs",
   run: function(id){ return "/ui/runs/" + encodeURIComponent(id); },
   memory: "/ui/memory",
-  skills: "/ui/skills"
+  skills: "/ui/skills",
+  fleetPlans: "/ui/fleet-plans",
+  fleetRuns: "/ui/fleet-runs",
+  missions: "/ui/missions",
+  missionEvents: "/ui/mission-events",
+  persistentAgents: "/ui/persistent-agents",
+  persistentHandoffs: "/ui/persistent-handoffs",
+  candidates: "/ui/candidates",
+  remoteWorkerJobs: "/ui/remote-worker-jobs",
+  proposals: "/ui/proposals"
 };
 var state = { runs: [], activeId: null };
 
@@ -369,6 +387,151 @@ function renderSessionDetail(pane, d){
   pane.innerHTML = html;
 }
 
+// ---- agent operations ----
+function operationsEmpty(message){
+  return '<div class="empty"><span class="big">&#9783;</span>'+message+'</div>';
+}
+
+function fleetPlanHtml(plan){
+  var mode = plan.write ? "write-enabled" : "read-only";
+  var waves = (plan.waves || []).map(function(wave){
+    var wait = (wave.waits_for || []).length ? ' after '+wave.waits_for.join(",") : "";
+    return '<span class="wave">wave '+esc(wave.number)+' '+esc(wave.phase)+' &middot; '+esc(wave.parallelism)+' agents'+esc(wait)+'</span>';
+  }).join("");
+  return '<li class="ops-item">'+
+    '<div class="ops-title">'+esc(plan.goal)+'</div>'+
+    '<div class="ops-meta"><span class="badge neutral">'+mode+'</span><span>'+esc(plan.member_count)+' selected of '+esc(plan.catalog_size)+'</span><span>max '+esc(plan.max_parallel)+' parallel</span><span>'+esc(fmtDate(plan.created))+'</span></div>'+
+    '<div class="wave-list">'+waves+'</div>'+
+  '</li>';
+}
+
+function proposalHtml(proposal){
+  var ready = proposal.status === "ready";
+  var status = '<span class="badge '+(ready ? "green" : "amber")+'">'+esc(proposal.status)+'</span>';
+  var failed = proposal.failed_subtasks ? '<span>'+esc(proposal.failed_subtasks)+' failed subtasks</span>' : "";
+  return '<li class="ops-item">'+
+    '<div class="ops-title">'+esc(proposal.run_id)+'</div>'+
+    '<div class="ops-meta">'+status+'<span>'+esc((proposal.roles || []).join(", "))+'</span><span>'+esc(proposal.patch_count)+' patches</span>'+failed+'<span>base '+esc((proposal.base_revision || "").slice(0,12))+'</span><span>'+esc(fmtDate(proposal.created))+'</span></div>'+
+  '</li>';
+}
+
+function fleetRunHtml(run){
+  var statusClass = run.status === "completed" ? "green" : (run.status === "failed" ? "red" : "amber");
+  var waves = (run.waves || []).map(function(wave){
+    var extra = wave.agent_run_id ? ' &middot; agent '+esc(wave.agent_run_id) : "";
+    var error = wave.error ? ' &middot; '+esc(wave.error) : "";
+    return '<span class="wave">wave '+esc(wave.number)+' '+esc(wave.phase)+' &middot; '+esc(wave.status)+' &middot; '+esc(wave.parallelism)+' agents'+extra+error+'</span>';
+  }).join("");
+  var error = run.error ? '<span>'+esc(run.error)+'</span>' : "";
+  return '<li class="ops-item">'+
+    '<div class="ops-title">'+esc(run.goal)+'</div>'+
+    '<div class="ops-meta"><span class="badge '+statusClass+'">'+esc(run.status)+'</span><span>'+esc(run.id)+'</span><span>plan '+esc(run.plan_id)+'</span><span>'+esc(fmtDate(run.updated))+'</span>'+error+'</div>'+
+    '<div class="wave-list">'+waves+'</div>'+
+  '</li>';
+}
+
+function missionHtml(mission){
+  var stageClass = mission.stage === "completed" ? "green" : (mission.stage === "failed" ? "red" : "amber");
+  var audit = mission.audit_valid ? '<span class="badge green">audit valid</span>' : '<span class="badge red">audit invalid</span>';
+  var candidate = mission.candidate_workspace_id ? '<span>candidate '+esc(mission.candidate_workspace_id)+'</span>' : '<span>no candidate</span>';
+  var evidence = '<span>plan '+(mission.plan_recorded ? 'recorded' : 'pending')+'</span>'+
+    '<span>test '+esc(mission.test_verdict)+'</span><span>review '+esc(mission.review_verdict)+'</span>'+
+    '<span>security '+esc(mission.security_verdict)+'</span>'+
+    '<span>evaluation '+(mission.evaluation_eligible ? 'eligible' : 'pending')+'</span>'+
+    '<span>PR '+esc(mission.pr_draft_status)+'</span>';
+  return '<li class="ops-item">'+
+    '<div class="ops-title">'+esc(mission.title)+'</div>'+
+    '<div class="ops-meta"><span class="badge '+stageClass+'">'+esc(mission.stage)+'</span>'+audit+
+    '<span>'+esc(mission.id)+'</span><span>'+esc(mission.source)+(mission.source_id ? ' '+esc(mission.source_id) : '')+'</span>'+candidate+
+    '<span>'+esc(mission.event_count)+' events</span><span>'+esc(fmtDate(mission.updated))+'</span></div>'+
+    '<div class="wave-list">'+evidence+'</div>'+
+  '</li>';
+}
+
+function missionEventHtml(event){
+  var transition = [event.from_stage, event.to_stage].filter(Boolean).join(" to ") || "recorded";
+  return '<li class="ops-item">'+
+    '<div class="ops-title">'+esc(event.topic)+'</div>'+
+    '<div class="ops-meta"><span>'+esc(event.mission_id)+'</span><span>'+esc(event.producer)+'</span>'+
+    '<span>'+esc(transition)+'</span><span>'+esc(fmtDate(event.occurred_at))+'</span></div>'+
+  '</li>';
+}
+
+function persistentAgentHtml(agent){
+  var stateClass = agent.status === "running" ? "amber" : agent.status === "crashed" ? "red" : "neutral";
+  var mission = agent.mission_id ? 'mission '+esc(agent.mission_id) : 'unassigned';
+  return '<li class="ops-item">'+
+    '<div class="ops-title">'+esc(agent.agent_id)+'</div>'+
+    '<div class="ops-meta"><span class="badge '+stateClass+'">'+esc(agent.status)+'</span>'+
+    '<span>'+esc(agent.role)+'</span><span>'+mission+'</span><span>'+esc(agent.restart_count)+' restarts</span>'+
+    '<span>'+esc(fmtDate(agent.health_check_at))+'</span></div>'+
+  '</li>';
+}
+
+function persistentHandoffHtml(handoff){
+  var stateClass = handoff.status === "accepted" ? "green" : "amber";
+  return '<li class="ops-item">'+
+    '<div class="ops-title">'+esc(handoff.from_agent_id)+' to '+esc(handoff.to_agent_id)+'</div>'+
+    '<div class="ops-meta"><span class="badge '+stateClass+'">'+esc(handoff.status)+'</span>'+
+    '<span>mission '+esc(handoff.mission_id)+'</span><span>'+esc(handoff.evidence_count)+' evidence reference(s)</span>'+
+    '<span>'+esc(fmtDate(handoff.updated_at))+'</span></div>'+
+  '</li>';
+}
+
+function candidateHtml(candidate){
+  var stateClass = candidate.status === "active" ? "amber" : "neutral";
+  var image = candidate.image ? esc(candidate.image) : 'image not set';
+  return '<li class="ops-item">'+
+    '<div class="ops-title">'+esc(candidate.id)+'</div>'+
+    '<div class="ops-meta"><span class="badge '+stateClass+'">'+esc(candidate.status)+'</span>'+
+    '<span>mission '+esc(candidate.mission_id)+'</span><span>'+image+'</span>'+
+    '<span>base '+esc((candidate.base_revision || "").slice(0,12))+'</span><span>'+esc(fmtDate(candidate.updated))+'</span></div>'+
+  '</li>';
+}
+
+function remoteWorkerJobHtml(job){
+  var stateClass = job.status === "completed" ? "green" : (job.status === "failed" ? "red" : "amber");
+  var worker = job.worker_id ? '<span>worker '+esc(job.worker_id)+'</span>' : '<span>unclaimed</span>';
+  var error = job.error ? '<span>'+esc(job.error)+'</span>' : '';
+  return '<li class="ops-item">'+
+    '<div class="ops-title">'+esc(job.id)+'</div>'+
+    '<div class="ops-meta"><span class="badge '+stateClass+'">'+esc(job.status)+'</span>'+worker+
+    '<span>mission '+esc(job.mission_id)+'</span><span>'+esc(job.attempts)+' attempts</span>'+error+
+    '<span>'+esc(fmtDate(job.updated))+'</span></div>'+
+    '<div class="wave-list"><span>evidence '+esc(job.outcome)+' &middot; '+esc(job.duration_seconds)+'s</span></div>'+
+  '</li>';
+}
+
+async function loadOperations(){
+  var pane = document.getElementById("pane-operations");
+  pane.innerHTML = '<div class="loading">loading...</div>';
+  try{
+    var data = await Promise.all([getJSON(API.missions), getJSON(API.missionEvents), getJSON(API.persistentAgents), getJSON(API.persistentHandoffs), getJSON(API.candidates), getJSON(API.fleetPlans), getJSON(API.fleetRuns), getJSON(API.remoteWorkerJobs), getJSON(API.proposals)]);
+    var missions = data[0], missionEvents = data[1], persistentAgents = data[2], handoffs = data[3], candidates = data[4], plans = data[5], runs = data[6], workerJobs = data[7], proposals = data[8];
+    var html = '<div class="card"><h3>Missions ('+missions.length+')</h3>';
+    html += missions.length ? '<ul class="ops-list">'+missions.map(missionHtml).join("")+'</ul>' : operationsEmpty('No durable issue-to-PR missions saved for this project.');
+    html += '</div><div class="card"><h3>Mission events ('+missionEvents.length+')</h3>';
+    html += missionEvents.length ? '<ul class="ops-list">'+missionEvents.map(missionEventHtml).join("")+'</ul>' : operationsEmpty('No durable mission bus events saved for this project.');
+    html += '</div><div class="card"><h3>Persistent team ('+persistentAgents.length+')</h3>';
+    html += persistentAgents.length ? '<ul class="ops-list">'+persistentAgents.map(persistentAgentHtml).join("")+'</ul>' : operationsEmpty('No persistent specialist team initialized for this project.');
+    html += '</div><div class="card"><h3>Evidence handoffs ('+handoffs.length+')</h3>';
+    html += handoffs.length ? '<ul class="ops-list">'+handoffs.map(persistentHandoffHtml).join("")+'</ul>' : operationsEmpty('No acknowledged persistent-team evidence handoffs yet.');
+    html += '</div><div class="card"><h3>Candidate workspaces ('+candidates.length+')</h3>';
+    html += candidates.length ? '<ul class="ops-list">'+candidates.map(candidateHtml).join("")+'</ul>' : operationsEmpty('No disposable candidate workspaces created for this project.');
+    html += '</div><div class="card"><h3>Fleet plans ('+plans.length+')</h3>';
+    html += plans.length ? '<ul class="ops-list">'+plans.map(fleetPlanHtml).join("")+'</ul>' : operationsEmpty('No fleet plans saved for this project.');
+    html += '</div><div class="card"><h3>Fleet runs ('+runs.length+')</h3>';
+    html += runs.length ? '<ul class="ops-list">'+runs.map(fleetRunHtml).join("")+'</ul>' : operationsEmpty('No fleet executions started for this project.');
+    html += '</div><div class="card"><h3>Remote verification jobs ('+workerJobs.length+')</h3>';
+    html += workerJobs.length ? '<ul class="ops-list">'+workerJobs.map(remoteWorkerJobHtml).join("")+'</ul>' : operationsEmpty('No remote candidate verification jobs queued for this project.');
+    html += '</div><div class="card"><h3>Retained patch proposals ('+proposals.length+')</h3>';
+    html += proposals.length ? '<ul class="ops-list">'+proposals.map(proposalHtml).join("")+'</ul>' : operationsEmpty('No isolated-worktree proposals saved for this project.');
+    pane.innerHTML = html;
+  }catch(e){
+    pane.innerHTML = '<div class="empty">Could not load operations ('+esc(e.message)+').</div>';
+  }
+}
+
 // ---- memory ----
 async function loadMemory(){
   var pane = document.getElementById("pane-memory");
@@ -431,6 +594,7 @@ function switchTab(name){
   document.querySelectorAll(".panel-pane").forEach(function(p){
     p.classList.toggle("active", p.id==="pane-"+name);
   });
+  if(name==="operations") loadOperations();
   if(name==="memory") loadMemory();
   if(name==="skills") loadSkills();
 }

@@ -42,12 +42,14 @@ def test_valid_name(n, ok) -> None:
 
 def test_generated_plugin_parses_and_loads(tmp_path) -> None:
     from ronin_cli.plugins import build_plugin_tools
+    from ronin_cli.plugin_manifest import read_manifest
     src = generate_api_plugin("dog_pic", "https://dog.ceo/api/breeds/image/random",
                               fields=["message", "status"], blurb="A random dog")
     ast.parse(src)                                   # valid python
     pdir = tmp_path / ".ronin" / "plugins"
     pdir.mkdir(parents=True)
     (pdir / "dog_pic.py").write_text(src, encoding="utf-8")
+    assert read_manifest(pdir / "dog_pic.py").capabilities == ("network",)
     tools = _trusted_build(tmp_path)             # loads through the agent loader
     assert [t.name for t in tools] == ["dog_pic"]
 

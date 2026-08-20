@@ -539,28 +539,23 @@ def index(
 
 
 # --------------------------------------------------------------------------- #
-# Integration note (requested — NOT wired here).
+# Integration note for the code-mode context policy.
 # --------------------------------------------------------------------------- #
 CODE_MODE_INTEGRATION_NOTE = """\
-How code_mode's context step could use this on LARGE repos
-==========================================================
+How code_mode uses this on LARGE repos
+======================================
 
-Today code_mode front-loads context via `context_engine.relevant_context(task,
-root)`, which builds an in-memory BM25 `RepoIndex` (repo_map). That holds the
-whole map in RAM and re-walks per session — fine for small/medium repos, heavy on
-a huge monorepo, and it doesn't *cap* how much it injects.
-
-For large repos, the first-turn block in code_mode.py (the
-`if console and auto_context and not fast and not message_history:` branch around
-line 703, which appends `relevant_context(...)` to `system`) could instead pull a
-*budgeted* set from the persistent index:
+On the first interactive turn, `code_mode.py` prefers the persistent index when
+it exists and falls back to the in-memory repo map when it does not. The shared
+`context_policy.resolve_context_policy(config)` supplies the retrieval budget, so
+the indexed set stays aligned with the selected model's available input window:
 
     from .repo_index import index_db_path, query_index, build_index
+    from .context_policy import resolve_context_policy
 
     db = index_db_path(root)
-    if not db.exists():
-        build_index(root, db)                 # one-time; later runs are incremental
-    paths = query_index(task, db, token_budget=8000)   # bounded, ranked
+    policy = resolve_context_policy(config)
+    paths = query_index(task, db, token_budget=policy.retrieval_budget_tokens)
     if paths:
         block = "## Relevant code (ronin repo index)\\n" + \\
                 "\\n".join(f"- {p}" for p in paths)

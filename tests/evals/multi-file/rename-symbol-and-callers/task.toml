@@ -1,0 +1,17 @@
+id = "multi-file/rename-symbol-and-callers"
+category = "multi-file"
+prompt = """
+`calc_total` in `billing/totals.py` is misnamed — everything else in this
+package uses a `compute_` prefix for functions that derive a value. Rename it
+to `compute_total` and update every caller and every import so the name
+`calc_total` does not appear anywhere in the repository. Behaviour must not
+change.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["billing/totals.py", "billing/invoice.py", "billing/report.py"]
+max_turns = 16
+timeout_seconds = 150
+tags = ["python", "rename"]
+regression_gate = true

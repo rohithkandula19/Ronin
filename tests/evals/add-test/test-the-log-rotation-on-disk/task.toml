@@ -1,0 +1,13 @@
+id = "add-test/test-the-log-rotation-on-disk"
+category = "add-test"
+prompt = """loggy rotates a log by size. It deliberately copies the contents aside to `<name>.1` and then truncates the live file in place, instead of renaming it, so that anything still holding the file open keeps writing to the right place. After a rotation, `app.log.1` holds what the log had and `app.log` is empty.
+
+tests/test_rotate.py only ever checks the boolean that rotate_if_needed returns — nothing checks what actually lands on disk. Add that test to tests/test_rotate.py. Use a temporary directory; do not write files into the project."""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = ["tests/test_rotate.py"]
+max_turns = 10
+timeout_seconds = 180
+tags = ["python", "pytest", "tmp_path", "filesystem"]
+regression_gate = false

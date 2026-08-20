@@ -1,0 +1,17 @@
+id = "add-test/cover-negative-offset-rejected"
+category = "add-test"
+prompt = """
+`slice_/window.py` rejects a negative offset with `ValueError` rather than
+letting python's negative indexing quietly return items from the end of the
+list. Nothing tests that. Add a test function named exactly
+`test_a_negative_offset_is_rejected` to `tests/test_window.py`. Do not change
+`slice_/window.py`.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["tests/test_window.py"]
+max_turns = 12
+timeout_seconds = 120
+tags = ["python", "validation"]
+regression_gate = false

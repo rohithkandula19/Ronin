@@ -75,3 +75,25 @@ def test_worktree_cleanup_on_error(tmp_path) -> None:
             raise RuntimeError("agent blew up")
     # even though the block raised, the worktree was removed
     assert not captured["path"].exists()
+
+
+def test_worktree_pool_separates_each_writer_and_cleans_up(tmp_path) -> None:
+    _init_repo(tmp_path)
+    with worktree.git_worktree_pool(tmp_path, ["implementer", "tester"]) as trees:
+        assert set(trees) == {"implementer", "tester"}
+        assert trees["implementer"] != trees["tester"]
+        (trees["implementer"] / "main.py").write_text("print('implementation')\n", encoding="utf-8")
+        (trees["tester"] / "test_main.py").write_text("def test_ok(): pass\n", encoding="utf-8")
+        assert "implementation" in worktree.worktree_diff(trees["implementer"])
+        assert "test_main.py" not in worktree.worktree_diff(trees["implementer"])
+        assert "test_main.py" in worktree.worktree_diff(trees["tester"])
+    assert (tmp_path / "main.py").read_text(encoding="utf-8") == "print('hello')\n"
+    assert not trees["implementer"].exists()
+    assert not trees["tester"].exists()
+
+
+def test_worktree_pool_rejects_ambiguous_labels(tmp_path) -> None:
+    _init_repo(tmp_path)
+    with pytest.raises(ValueError, match="unique"):
+        with worktree.git_worktree_pool(tmp_path, ["writer", "writer"]):
+            pass

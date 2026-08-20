@@ -75,3 +75,28 @@ def test_create_issue_none_on_failure(monkeypatch, tmp_path) -> None:
         stdout = ""
     monkeypatch.setattr(gh_helper, "_gh", lambda *a, **k: P())
     assert gh_helper.create_issue("t", "b", root=tmp_path) is None
+
+
+def test_issue_details_parses_a_single_api_issue(monkeypatch, tmp_path) -> None:
+    captured: list[str] = []
+
+    class P:
+        returncode = 0
+        stdout = '{"number": 42, "title": "Typed import"}'
+
+    def fake_gh(*args, **kwargs):
+        captured.extend(args)
+        return P()
+
+    monkeypatch.setattr(gh_helper, "_gh", fake_gh)
+    assert gh_helper.issue_details("openai/ronin", 42, tmp_path) == {
+        "number": 42,
+        "title": "Typed import",
+    }
+    assert captured == ["api", "--method", "GET", "repos/openai/ronin/issues/42"]
+
+
+def test_issue_details_rejects_invalid_references(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(gh_helper, "_gh", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not run")))
+    assert gh_helper.issue_details("-owner/repo", 1, tmp_path) is None
+    assert gh_helper.issue_details("owner/repo", 0, tmp_path) is None

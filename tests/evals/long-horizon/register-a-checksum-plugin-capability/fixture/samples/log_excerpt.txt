@@ -1,0 +1,4 @@
+2024-03-01 02:00:01 INFO  scan started root=/var/log/inspector files=412
+2024-03-01 02:00:04 WARN  duplicate fingerprint crc32:9a4c11de for 2 files, keeping the first and skipping the second because the report only needs one copy of each
+2024-03-01 02:00:04 INFO  scan finished duration=3.4s warnings=1
+2024-03-01 02:00:04 INFO  scan finished duration=3.4s warnings=1

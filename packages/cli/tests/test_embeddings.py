@@ -52,9 +52,9 @@ def test_index_caches_embeddings(tmp_path) -> None:
     assert backend.calls == calls_after_first  # served entirely from disk cache
 
 
-def test_get_backend_none_for_anthropic() -> None:
-    # anthropic has no embeddings route here → None → callers fall back to BM25
-    assert embeddings.get_backend(RoninConfig(provider="anthropic", anthropic_api_key="x")) is None
+def test_get_backend_uses_local_hashing_for_unknown_embedding_route() -> None:
+    backend = embeddings.get_backend(RoninConfig(provider="anthropic", anthropic_api_key="x"))
+    assert backend.name == "local-hashing"
 
 
 def test_get_backend_ollama() -> None:
@@ -69,16 +69,16 @@ def test_get_backend_openai() -> None:
     assert backend is not None and backend.name == "openai"
 
 
-def test_semantic_search_returns_none_without_backend(tmp_path) -> None:
+def test_semantic_search_uses_local_fallback_without_backend(tmp_path) -> None:
+    _seed(tmp_path)
     cfg = RoninConfig(provider="anthropic", anthropic_api_key="x")
-    assert embeddings.semantic_search("q", tmp_path, cfg) is None
+    results = embeddings.semantic_search("login credentials", tmp_path, cfg)
+    assert results and results[0][1] == "auth.py"
 
 
-def test_build_semantic_tools_gated_on_backend(tmp_path) -> None:
-    # no backend → no tool exposed
-    assert embeddings.build_semantic_tools(
-        RoninConfig(provider="anthropic", anthropic_api_key="x"), tmp_path) == []
-    # backend present → the tool appears
+def test_build_semantic_tools_always_has_a_local_safe_backend(tmp_path) -> None:
+    assert [tool.name for tool in embeddings.build_semantic_tools(
+        RoninConfig(provider="anthropic", anthropic_api_key="x"), tmp_path)] == ["semantic_search"]
     tools = embeddings.build_semantic_tools(RoninConfig(provider="ollama"), tmp_path)
     assert [t.name for t in tools] == ["semantic_search"]
 

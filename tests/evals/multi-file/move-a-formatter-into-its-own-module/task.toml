@@ -1,0 +1,25 @@
+id = "multi-file/move-a-formatter-into-its-own-module"
+category = "multi-file"
+prompt = """
+textkit/util.py has become a junk drawer, and the slug code is over half of it --
+the regex, the stopword list, the separator and slugify itself.
+
+Pull all of that out into a new module `textkit/slug.py`. Afterwards textkit.util
+should have nothing slug-related left in it at all, and `from textkit import
+slugify` must still work for the docs site, which is the one caller I cannot change.
+"""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = [
+  "textkit/slug.py",
+  "textkit/util.py",
+  "textkit/__init__.py",
+  "textkit/render.py",
+  "textkit/index.py",
+  "tests/test_slug.py",
+]
+max_turns = 14
+timeout_seconds = 180
+tags = ["python", "move-symbol", "import-alias", "public-api"]
+regression_gate = false

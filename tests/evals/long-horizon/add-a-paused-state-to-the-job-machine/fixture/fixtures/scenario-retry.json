@@ -1,0 +1,6 @@
+{
+  "name": "two failures, then success",
+  "job": { "id": "job-2", "priority": "high", "label": "invoice export" },
+  "context": { "maxAttempts": 3 },
+  "events": ["start", "fail", "retry", "start", "fail", "retry", "start", "succeed"]
+}

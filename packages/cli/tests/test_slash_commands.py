@@ -658,6 +658,26 @@ def test_theme_rejects_unknown(tmp_path: Path, monkeypatch) -> None:
     assert cfg.theme is None
 
 
+# --- /presence --------------------------------------------------------------
+
+def test_presence_switches_delivery_style_and_persists(tmp_path: Path, monkeypatch) -> None:
+    saved = {}
+    monkeypatch.setattr("ronin_cli.config.save_config", lambda c: saved.setdefault("cfg", c))
+    cfg = RoninConfig(provider="anthropic")
+    action, out = _call_cfg("/presence supportive", cfg, root=tmp_path)
+    assert action == "handled"
+    assert cfg.interaction_style == "supportive"
+    assert saved.get("cfg") is cfg and "supportive" in out
+
+
+def test_presence_checkins_can_be_disabled(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("ronin_cli.config.save_config", lambda c: tmp_path / "config.toml")
+    cfg = RoninConfig(provider="anthropic")
+    action, out = _call_cfg("/presence checkins off", cfg, root=tmp_path)
+    assert action == "handled"
+    assert cfg.relational_checkins is False and "off" in out
+
+
 # --- /role (Wave 3) ----------------------------------------------------------
 
 import pytest as _pytest

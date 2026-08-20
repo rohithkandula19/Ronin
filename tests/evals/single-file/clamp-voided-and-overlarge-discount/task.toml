@@ -1,0 +1,17 @@
+id = "single-file/clamp-voided-and-overlarge-discount"
+category = "single-file"
+prompt = """
+`orders/pricing.py` has one function, `line_total`. Its docstring states two
+rules that the body does not implement: a line with a quantity of zero or less
+contributes nothing, and a discount percentage is capped so a line can never
+come out negative. Make the body match the docstring. Do not change the
+signature and do not change the docstring.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["orders/pricing.py"]
+max_turns = 10
+timeout_seconds = 90
+tags = ["python", "arithmetic"]
+regression_gate = true

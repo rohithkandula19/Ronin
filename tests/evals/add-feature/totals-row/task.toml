@@ -1,0 +1,20 @@
+id = "add-feature/totals-row"
+category = "add-feature"
+prompt = """
+`ledger/report.py` renders one line per account as `<name> <cents>`. Add a
+totals row:
+
+* It comes last and is separated from the account rows by a line of exactly
+  as many `-` characters as the longest account row is wide.
+* Its text is `TOTAL <sum-of-cents>`.
+* With no accounts, `render` returns an empty list — no separator, no total.
+* Account rows and their order are unchanged.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["ledger/report.py"]
+max_turns = 16
+timeout_seconds = 150
+tags = ["python", "formatting"]
+regression_gate = false

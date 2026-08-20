@@ -51,4 +51,3 @@ below treats a missing report as a score.
 **Evidence phase incomplete.** Score the v3b checkpoints on the frozen set
 before recommending any adapter change. Until then, **v2 iter-150 remains
 the shipped adapter** — its score is the only frozen-set evidence on file.
-

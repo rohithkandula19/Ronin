@@ -1,0 +1,18 @@
+id = "single-file/human-bytes-rounding"
+category = "single-file"
+prompt = """
+`report/units.py` renders byte counts for humans. Two things are wrong:
+1023 bytes is reported as "1.0 KB" instead of "1023 B", and the unit ladder
+stops at MB so a terabyte-sized value prints an absurd number of MB. Fix
+`human_bytes` so it switches unit only at 1024 of the current unit, and
+supports B, KB, MB, GB and TB, with one decimal place for every unit above
+bytes and no decimal for bytes.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["report/units.py"]
+max_turns = 10
+timeout_seconds = 90
+tags = ["python", "formatting"]
+regression_gate = false

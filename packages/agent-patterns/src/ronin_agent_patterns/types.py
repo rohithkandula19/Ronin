@@ -25,6 +25,9 @@ class Tool(BaseModel):
     # Built-in file/shell tools are gated by name on the host side, so they leave
     # this False; it's the signal for tools the host can't enumerate ahead of time.
     sensitive: bool = False
+    # Host-only metadata. Plugin loaders populate this after inspecting a
+    # non-executing manifest; providers do not receive it.
+    capabilities: tuple[str, ...] = ()
 
     def to_anthropic(self) -> dict[str, Any]:
         return {
@@ -61,7 +64,7 @@ class AgentResult(BaseModel):
     iterations: int = 0
     trace: list[Step] = Field(default_factory=list)
     error: str | None = None
-    usage: dict[str, int] = Field(default_factory=dict)
+    usage: dict[str, int | float] = Field(default_factory=dict)
     # The full structured conversation after the run — the seeded ``history`` (if
     # any), this turn's user message, every assistant/tool exchange, and the final
     # assistant reply. Callers persist this and feed it back as ``history`` on the

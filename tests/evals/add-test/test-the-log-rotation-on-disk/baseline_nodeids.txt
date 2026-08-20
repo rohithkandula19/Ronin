@@ -1,0 +1,4 @@
+tests/test_rotate.py::test_a_log_at_the_limit_is_rotated
+tests/test_rotate.py::test_a_missing_log_is_not_rotated
+tests/test_rotate.py::test_a_small_log_is_not_rotated
+tests/test_rotate.py::test_rejects_a_zero_limit

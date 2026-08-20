@@ -1,0 +1,16 @@
+id = "single-file/dedupe-preserving-order"
+category = "single-file"
+prompt = """
+`pipeline/collect.py` deduplicates a list of hostnames with `set()`, which
+makes the output order depend on hash randomisation, so the report it feeds
+changes between runs. Rewrite `unique_hosts` so it removes duplicates while
+keeping the first occurrence of each host in input order. Keep the signature.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["pipeline/collect.py"]
+max_turns = 10
+timeout_seconds = 90
+tags = ["python", "determinism"]
+regression_gate = true

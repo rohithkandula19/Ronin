@@ -1,0 +1,18 @@
+id = "add-feature/add-a-json-flag-to-the-tally-cli"
+category = "add-feature"
+prompt = """`python tally.py data/october.json` prints a tidy table, which is fine for reading but useless for piping into jq.
+
+Add a `--json` option to the script. With it, stdout should be a JSON array of objects with the keys "name" and "total" — same people, same alphabetical order, totals as numbers — and nothing else printed around it, e.g.
+
+    $ python tally.py data/october.json --json
+    [{"name": "alice", "total": 7.5}, ...]
+
+Without the flag the output must stay exactly what it is today."""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = ["tally.py"]
+max_turns = 12
+timeout_seconds = 180
+tags = ["python", "cli", "argparse"]
+regression_gate = false

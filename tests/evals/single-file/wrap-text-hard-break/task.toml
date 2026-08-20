@@ -1,0 +1,17 @@
+id = "single-file/wrap-text-hard-break"
+category = "single-file"
+prompt = """
+`render/wrap.py` wraps a paragraph to a column width. A single word longer
+than the width currently produces a line that overflows the width. Change
+`wrap` so an over-long word is hard-broken into width-sized pieces, and no
+returned line is ever longer than `width`. Words are separated by single
+spaces on output.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["render/wrap.py"]
+max_turns = 10
+timeout_seconds = 90
+tags = ["python", "formatting"]
+regression_gate = false

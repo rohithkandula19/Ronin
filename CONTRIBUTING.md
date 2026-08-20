@@ -2,18 +2,35 @@
 
 Glad you're here. This is a small, opinionated project — contributions are welcome, but please read this once before opening a PR so we don't waste each other's time.
 
+## Read this first
+
+**[`docs/RULES.md`](docs/RULES.md) is the bible.** It is one page of non-negotiables — the
+`$0` constraint, never inventing a number, offline tests, errors as values, "two
+reasonable options → ask" — and where it disagrees with anything below, it wins. This
+file covers *how* to open a PR; that one covers what the code has to be before it merges.
+
+Two companions worth reading once: [`docs/STACK.md`](docs/STACK.md) for what the stack is
+and, honestly labelled, what is decided but not yet implemented; and
+[`docs/POSITIONING.md`](docs/POSITIONING.md) for what the project is actually arguing.
+
 ## Quick start
 
 ```bash
 git clone https://github.com/rohithkandula19/Ronin
 cd Ronin
-uv sync --all-packages --all-groups
-uv run pytest packages/agent-patterns packages/eval-suite packages/memory \
-    packages/hardening packages/mcp-servers packages/cli packages/relay \
-    apps/demo apps/api training -q
+make install     # uv sync --all-packages --all-groups, plus pre-commit hooks
+make test        # the full suite: packages, apps, training, tests
 ```
 
-CI runs the same command. If it's green locally, it'll be green in CI.
+`make install` installs the pre-commit hooks, so lint, types, the offline-tests check and
+the generated-file gates all run before a commit rather than in CI. If you skip it, CI
+will tell you the same things more slowly.
+
+Other targets: `make lint`, `make typecheck`, `make coverage`, `make eval` (the demo — no
+key, no model, no cost), `make run ARGS='"fix the failing test"'`.
+
+CI runs `pytest packages apps training tests -q`, which is exactly what `make test` runs.
+If it's green locally, it'll be green in CI.
 
 ## What we welcome
 
@@ -22,6 +39,7 @@ CI runs the same command. If it's green locally, it'll be green in CI.
 - **New providers** — add a class subclassing `LLMProvider` in `packages/agent-patterns/src/ronin_agent_patterns/providers/`. See `openai_compat.py` for the template.
 - **Documentation** — typos, clarifications, new cookbook recipes in `apps/docs/`.
 - **CLI commands** — keep them small and composable. `ronin` should feel like `git`, not `kubectl`.
+- **Roadmap workstreams** — use `docs/CONTRIBUTION_ROADMAP.md` to pick substantial areas that can become several focused PRs.
 
 ## What we don't want (please don't open PRs for these)
 
@@ -33,9 +51,11 @@ CI runs the same command. If it's green locally, it'll be green in CI.
 
 ## Conventions
 
-- **Python**: 3.11+. Type hints everywhere. Pydantic v2 for state.
-- **Imports**: standard library, then third-party, then local. Sorted alphabetically within each group.
-- **Tests**: pytest. Mock the network with `MagicMock(spec=httpx.Client)` or `FakeProvider`. No real API calls in tests.
+See [`docs/RULES.md`](docs/RULES.md) for the ones that are enforced. These are the rest:
+
+- **Python**: 3.11+. Type hints everywhere. Pydantic v2 for state in the v1 `packages/` tree; plain frozen dataclasses in `src/ronin`.
+- **Imports**: standard library, then third-party, then local. Sorted alphabetically within each group — `ruff` does this for you.
+- **Tests**: pytest. No real API calls, and **no network import in a test file at all** — `scripts/check_test_imports.py` fails the commit. Mock with `FakeProvider` or an injected transport rather than `MagicMock(spec=httpx.Client)`, which needs the import the hook forbids.
 - **Commits**: imperative mood ("add X", not "added X"). One logical change per commit.
 - **PR titles**: `<area>: <what changed>`. Examples: `cli: add --json flag to ask`, `mcp-servers: support Stripe usage records`.
 

@@ -1,0 +1,18 @@
+id = "add-test/cover-crlf-is-preserved"
+category = "add-test"
+prompt = """
+`eol/rewrite.py` rewrites a file's contents while preserving the line ending
+style it found — a CRLF file must stay CRLF. `tests/test_rewrite.py` only ever
+uses LF, so a regression that normalises everything to LF would go unnoticed.
+Add a test function named exactly `test_crlf_line_endings_survive_a_rewrite`
+to `tests/test_rewrite.py`. Compare bytes, not text. Do not change
+`eol/rewrite.py`.
+"""
+fixture = "fixture"
+git_url = ""
+git_sha = ""
+files_expected = ["tests/test_rewrite.py"]
+max_turns = 12
+timeout_seconds = 120
+tags = ["python", "line-endings"]
+regression_gate = false

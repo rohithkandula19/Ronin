@@ -2,6 +2,995 @@
 
 All notable changes to this project will be documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+- **A bare `ronin` now opens the TUI, and slash commands work there
+  (`cli/main.py`, `ui/`).** The session audit's second-biggest friction, and one that
+  was not on any list: the default start landed in the line REPL, while the richer
+  Textual view needed a prompt on argv — and that view silently forwarded `/help` to the
+  *model* as a question. So the default surface was the weaker one, every session. Both
+  halves are fixed together, because fixing the default without the commands would have
+  removed `/help` from the default experience. `multi_turn_events` now waits for a first
+  message instead of running an empty turn (the old rule existed because `Session` could
+  not express that — `on_submit` removed the limitation). A submitted line that
+  `is_command` recognises is answered locally through the *real* dispatcher — builtins,
+  `.ronin/commands`, skills — by handing `_slash` a capturing `Streams`, so the TUI can
+  never drift from the REPL's command set. Output lands in its own notices region rather
+  than the transcript: the transcript is what the model said, and folding `/help`'s table
+  into it would make the conversation a record of two voices with no way to tell them
+  apart. Notices are bounded and clear when the next turn starts. The REPL remains the
+  surface for every case the TUI cannot serve — a pipe or other non-tty, an install
+  without the `tui` extra, and `--no-tui`.
+
+### Added
+- **The rest of the session-audit queue: steering, error surfacing, cost visibility.**
+  Frictions 3–5 from the X0 audit, closing it out.
+  **`esc` now stops a command that is already running.** The cooperative cancel flag is
+  only checked at loop boundaries, which a build running for minutes never reaches — so a
+  running tool is now polled against it and cancelled, and the shell kills its process
+  group on the way out rather than orphaning children. Measured: a 30s command interrupted
+  at 0.6s returns in 0.61s with a well-formed interrupted result. **A correction typed
+  mid-turn is visible**, with when it will run and that `esc` is the alternative — it used
+  to queue with nothing on screen acknowledging it. **An exhausted provider reads as a
+  message, not a stack trace**: rate limiting is named separately (with the server's own
+  `Retry-After`) because its answer differs from every other transport failure's, and a
+  retry now says why the partial text vanished instead of leaving it unexplained.
+  **The per-request ledger is wired into the live CLI at last** — it was written, tested,
+  and never constructed, so `/cost` could only report coarse `Budget` totals; it now shows
+  a cache-hit rate and the main-versus-cheap split, which is how "the expensive model did
+  the cheap work" becomes visible. The context gauge warns at 75%, before compaction folds
+  the window at 80%, rather than reporting the fold afterwards.
+
+- **The activity line, and live tool output (`ui/`, `core/`, `tools/`).** X1: between
+  events the TUI was a still image — there is no timer anywhere in `ui/`, so a model
+  thinking for thirty seconds and a dead process looked identical, on every turn. Now a
+  spinner, a name-blind label for what is running (`read_file x12`, derived by counting
+  rather than from a table of tool names), and an elapsed clock that appears only after
+  2s — a number that flickers on for every fast tool is noise; a number that *appears*
+  is the signal. Time enters the pure reducer through one door (`with_activity`), and a
+  turn parked on an approval is deliberately *not* busy: the human is the one being
+  waited on. Reasoning is labelled, never shown — `show_thinking` still decides that.
+  Long commands now stream: a new `ToolOutput` event carries what a running tool has
+  printed, rendered as a bounded tail under its line, so a test suite is visible while
+  it runs. The transport is opt-in by design — `StreamingToolRegistry` is a *second*
+  protocol rather than a wider `execute`, because widening it would make the loop call
+  every existing registry with an argument it does not accept, turning a working tool
+  into a failed `ToolResult`. A registry that does not implement it simply does not
+  stream, and a sink that raises never fails the command.
+
+- **End-to-end stage-ablation smoke test (`training/tests/test_stage_ablation_e2e.py`).** Drives
+  the whole wired path over a tiny real suite: four task dirs loaded from disk, run through the
+  real `ronin.evals` runner, passed/failed by the **real `verify.sh` subprocess** against the
+  file each scripted agent actually wrote, folded into a real `RunReport`, reduced by the shipped
+  wiring, and paired with a real decode probe — asserting all five metrics populate and the
+  base→+SFT→+DPO→+GRPO progression comes out as scripted (pass@1 0→.5→.75→1, validity climbing,
+  recovery 0→.75→1 with Kimi's honest `—`, cost/task highest for the frontier ceiling). The
+  counterpart to the placeholder smoke: that proves the table *renders* with no model; this proves
+  it is *produced by the real suite*. Stages are scripted stand-ins for the not-yet-trained
+  checkpoints; everything else is the real machinery. Skips cleanly if `ronin.evals` is absent.
+- **Real `StageRunner` wired into `src/ronin/evals` (`training/adapter/stage_ablation.py`).**
+  The ablation is no longer placeholder-only: it now reduces a genuine `ronin.evals` `RunReport`
+  into a `StageRun`. Tracing the suite end to end surfaced that the five metrics come from **two
+  probes against the same checkpoint**, because the agent loop and the raw decoder answer
+  different questions: the **agent suite** (`run_suite`) gives pass@1 (`overall.passed/attempted`),
+  median turns (`distributions["turns"]`), cost/task (`distributions["cost_usd"]`) and recovery —
+  reconstructed from each task's parsed `ToolCallRecord`s (a failed call is a setback; the next
+  call recovers unless it repeats the fingerprint, an exact fit for `metrics.recovery_rate`);
+  while **tool-syntax validity** cannot come from the loop at all (the format shim parses/repairs
+  `<ronin:tool_call>` before an event is emitted, so a report only holds calls that already
+  parsed), so it is measured by a **decode probe** over raw completions on the held-out prompts
+  (`syntax_probe` → `metrics.check_raw_call`) and passed through as `StageRun.tool_validity`.
+  Every reducer is duck-typed over the report's shape (a wrong attribute name is a named
+  `AblationError`, not an `AttributeError` mid-run), and both the suite call and the probe are
+  injected — the same seam `threeway.target_runner` uses — so the wiring is finished and tested
+  before a checkpoint exists. Verified against real `ronin.evals` objects (a genuine `RunReport`
+  reduced to all five metrics, priced and unpriced cost paths included).
+- **Training-stage ablation table (`training/adapter/stage_ablation.py`).** The gap in the
+  adapter eval path: the provider (`ronin --model ronin-qwen-local`), the three-way
+  adapter-vs-base-vs-Kimi comparison, and the model-card generator already exist; what was
+  missing is the **base → +SFT → +DPO → +GRPO** progression bound to the five metrics the
+  ablation is judged on — **pass@1, tool-syntax validity, median turns, recovery rate,
+  cost/task** — in one table, with Kimi as a ceiling row. It reuses the three-way `TargetRun`
+  and the `metrics.py` functions (pass@1 is `SuiteScore`'s rate; tool validity + recovery are
+  the existing scorers); the only new arithmetic is median-turns and cost/task, because a
+  stage progression is exactly where "passes more but takes twice the turns and costs twice
+  as much" must be visible. A Δ-vs-base block reads each metric in its own direction (more
+  pass@1 wins; fewer turns and less cost win). Pure and offline — a `StageRun` per stage in, a
+  rendered table out; a `placeholder_table()` smoke run produces the full structure before any
+  GPU checkpoint exists, and every unmeasured cell renders `—`, never a fabricated `0`.
+- **Anti-reward-hacking guards + transcript sampler (`training/rl/guards.py`).** The RLVR
+  reward gates on *paths*; this adds the content- and transcript-aware half, because the
+  interesting hacks hide in what a change contains and what the agent did. Nine detectors,
+  each with a crafted-rollout test: deleting or weakening a test (assertion/`def test_`
+  count drops), editing `pytest.ini`/`conftest.py`/`tox.ini` or the pytest section of
+  `pyproject.toml`/`setup.cfg`, adding `@pytest.mark.skip`/`xfail`, adding `sys.exit(0)` /
+  `raise SystemExit(0)`, a constant-return stub, **hardcoding the exact value a visible test
+  asserts** (AST-matched against the tests the agent could read), farming shaping with
+  padded identical calls, gaming the length norm with giant outputs, and touching
+  `.git`/`verify.sh`/the sandbox or escaping the workspace. `BLOCK` findings hard-gate the
+  reward (a gamed pass can never out-earn honest work); `WARN` findings are surfaced for a
+  human. The other half is the **transcript sampler**: `TranscriptSampler.maybe_dump` writes
+  20 random rollouts (with their findings, giant outputs truncated with a marker) to a
+  readable file every N steps — the non-optional manual eyeball, because the reward curve can
+  climb while the policy learns something insane. All pure and offline.
+- **`ronin mcp login <server>` + keyring-backed token persistence.** The attended entrypoint
+  that makes the OAuth flow usable end to end: it reads `.ronin/mcp.json`, finds the named
+  `auth: oauth` server, runs the interactive authorization (browser + loopback redirect +
+  code exchange), then persists the result. A new `KeyringAuthStore` keeps the token in the
+  **OS keyring** (macOS Keychain / Windows Credential Locker / Secret Service) — an encrypted
+  store, so unlike the file store it can hold a bearer token without the clear-text risk, and
+  a later `ronin` session reads and refreshes it without asking again. `default_oauth_driver`
+  now prefers the keyring and degrades to the client-id-only file store (token in memory) on a
+  host with no keyring backend; `keyring` is a new **optional** dependency (`ronin[oauth]`),
+  lazy-imported with an in-memory fallback so a bare install still runs. Everything impure —
+  browser, socket, HTTPS, keyring — sits behind injected seams, so the command's resolution
+  and every error path (unknown server, non-OAuth server, malformed config, cancelled flow)
+  are tested offline against fakes.
+- **Mid-session OAuth refresh-on-`401` for remote MCP servers.** The reactive half the live
+  driver flagged as a follow-up: when a remote server rejects a request with `401` mid-turn
+  (its token expired or was revoked), the client now refreshes the bearer and retries the
+  *same* request in place instead of declaring the server dead. Three seams changed to make
+  it honest: the transport surfaces a `401` as a distinct `Unauthorized` (carrying the
+  `WWW-Authenticate` challenge) and, crucially, does **not** mark itself dead — an HTTP/SSE
+  request is stateless, so a rejected bearer is a header to swap, not a connection to tear
+  down; `OAuthDriver.force_refresh` refreshes even a token our own clock still thinks is
+  valid (a server-side revocation looks exactly like that), where the proactive path would
+  wrongly reuse it; and `McpClient` runs the refresh + one retry, bounded — a token still
+  rejected after a fresh one is fetched fails the call with a *re-authorize* message (server
+  is up, authorization is gone), distinct from the *server-down* message, and never a retry
+  loop. Wired through `connect_all`'s `refresher_for` seam, which an `auth: oauth` server
+  gets and everything else does not. Exercised offline end-to-end: a fake sender rejects the
+  first `tools/call` and accepts it only once the swapped-in bearer reaches the wire.
+- **OAuth 2.1 live driver for remote MCP servers (`mcp/oauth_driver.py`).** The follow-up the
+  protocol core promised: the orchestration that strings the pure transforms into a real
+  flow — `discover -> register -> authorize -> exchange -> refresh` — plus the three impure
+  edges it needs, each an injected Protocol. `HttpFetcher` does the HTTPS, `Authorizer`
+  runs browser consent + loopback redirect capture, `AuthStore` persists the client
+  identity and tokens; the clock and PKCE/CSRF entropy are injected too, so the whole
+  sequence is driven offline in tests with fakes and only the leaf adapters (`HttpxFetcher`,
+  `LoopbackAuthorizer`, `FileAuthStore`) ever open a socket, a browser, or the disk.
+  Fail-closed to match the core: **startup never launches a browser** — `ensure(...,
+  interactive=False)` reuses or refreshes a stored token but turns a missing one into a
+  "log in first" note rather than a hang; **tokens are never written to disk** — the file
+  store persists only the non-secret `client_id` (so a client registers once) and keeps the
+  bearer token in a session-only in-memory overlay, because a plaintext token file is a
+  clear-text-storage risk and Ronin ships no keyring to encrypt it; a refresh with no
+  client-id or no refresh-token on record is refused, not guessed. The
+  config surface lands with it — a network server may declare `"auth": "oauth"` in
+  `.ronin/mcp.json` (https-only, refused on stdio), and `authorize_servers()` resolves each
+  such server's `Authorization` header, recording per-server failures the way a dead server
+  is recorded so one unauthorized server never costs the session its other tools. Remote
+  (`http`/`sse`) MCP servers are now wired with a default HTTP sender in the CLI as a
+  result. The reactive mid-session refresh-on-`401` remains a documented next step (it needs
+  the transport to surface the `WWW-Authenticate` challenge).
+- **OAuth 2.1 protocol core for remote MCP servers (`mcp/oauth.py`).** The pure machinery
+  for the MCP authorization flow — PKCE (S256, RFC 7636), `WWW-Authenticate` parsing and
+  protected-resource / authorization-server metadata discovery (RFC 9728 / 8414), dynamic
+  client registration (RFC 7591), the authorization-URL builder, and authorization-code +
+  refresh token requests with a resource-pinned `TokenSet` (RFC 8707). Every transform is a
+  pure function — the HTTPS calls, the browser redirect, the randomness, the clock, and the
+  token store are all injected — so a security-critical flow is tested exhaustively offline
+  (the PKCE test uses the RFC 7636 Appendix B vector). Fail-closed throughout: PKCE is
+  mandatory and S256-only (no `plain` downgrade), every endpoint must be https (loopback
+  http aside), a missing required field errors rather than defaults, `state` is checked on
+  the redirect, and the token is bound to one `resource`. The live driver (real HTTP +
+  browser + persistence) and the config surface are a deliberate follow-up — the protocol,
+  the part that must be exactly right, lands first and fully covered.
+- **Verification engine: flaky detection, optional suites, and artifact contracts.** Three
+  pure additions to `verify/`, on top of the existing change-scoped runner and red-green
+  repair. `flaky.py` classifies a target from repeated runs of the *same* code
+  (stable-pass / stable-fail / **flaky** on a mix) so a green that means nothing is named
+  as noise — the runner is injected, and the honest limit is stated: N runs observe
+  flakiness, they never prove its absence. `suites.py` adds the required-vs-optional tier
+  the roadmap asked for: an optional suite (a linter, a slow integration pass) runs and is
+  reported but **never fails the gate and is never silently promoted to a blocker** — only
+  a required failure turns a task red. `contract.py` validates produced artifacts against a
+  declared contract (files exist, JSON parses, required keys present), so "it wrote a
+  report with a score field" is checked, not trusted. All offline: a runner callable, a
+  fold over results, and a `tmp_path` read.
+- **Provider pricing tiers + the free→paid fallback guard.** `providers/capability.py`
+  resolves the ambiguity the ledger already warned about: a `0.0` price is **FREE** only
+  for a local/keyless endpoint; for a hosted, key-requiring model with no price it is
+  **UNKNOWN**, never silently "free." On top of that tiering it adds `capability_matrix()`
+  (the provider × capability table the coverage audit asked for — every configured model,
+  its tier, and what it can do) and `fallback_concerns()`, which walks each role's failover
+  chain and flags every step that escalates cost (free→unknown, free→paid, unknown→paid).
+  `ronin doctor` surfaces the result as a `provider pricing` check — a **warning, never a
+  silent swap and never a hard failure**, because "pay to finish when the free model is
+  down" is a valid choice; the point is that the swap is seen here rather than on a bill.
+  Pure and offline: everything is a function of the router config, tested against
+  hand-built specs with no client and no request.
+- **`ronin repo` — repository intelligence, read-only and offline.** One verb, four
+  subcommands: `map` (the shape of the tree — file/definition counts, languages, entry
+  points, and the load-bearing modules by pagerank), `health` (static signals: orphan
+  modules, parse errors, oversized API surfaces, a missing test suite), `explain <path>`
+  (one file's definitions plus its resolved import neighbours — `imported by` *is* the
+  change-impact set), and `deadcode` (import-graph leaves that nothing imports).
+  - **A view, not a second scanner.** All four are pure functions of a `RepoScan`, the
+    un-budgeted walk/parse/rank extracted from `context.repomap` and now shared with the
+    model's repo map — one definition of "scan the repo," reused. `--output-format json`
+    switches every subcommand to machine output; no new format flag.
+  - **Honest about static limits.** A module reached only through `importlib`, a plugin
+    entry point, or test discovery looks orphaned to a static graph, so `deadcode` and the
+    orphan signal are labelled *candidates*, never verdicts; entry points, tests and
+    package `__init__`/`__main__` files are excluded because they are leaves by design.
+    Nothing claims a line count it did not measure — "size" is the definition count the
+    scan really has, not LOC it would have to re-read to know.
+- **`ronin2 mcp-serve` — Claude Desktop, Cursor or another Ronin can now actually launch
+  this one.** The MCP server side was written, tested, documented down to its trust model
+  and *never constructed outside the test suite*: no subcommand, no real `NestedRunner`.
+  The capability read as shipped and was unreachable. `cli/serve.py` is the missing
+  constructor and `mcp-serve` is the process that runs it, on this process's own stdin and
+  stdout (`mcp.transport.stdio_streams`).
+  - **The permission mode decides what is published**, because over stdio there is no
+    human to ask — stdin carries the frames. `ask` exposes `read`/`grep`/`glob`,
+    `auto_edit` adds `edit`, `full` adds `bash` and `ronin_task`. Publishing a tool that
+    would refuse every call is the mistake `wire.py` already argues against for a
+    `web_search` with no backend, so what is withheld is named on stderr together with the
+    lowest `--mode` that would expose it. The question is asked of
+    `PolicyEngine.relaxes()` rather than re-derived, so there is no second copy of the
+    mode ladder.
+  - **Nothing reaches stdout but frames.** `mcp-serve` refuses `--print` and
+    `--output-format`, never runs the first-run wizard (it prompts on stdout and reads
+    stdin — both are the protocol), and puts its banner and every note on stderr. A test
+    injects streams whose `out` raises.
+  - **Both halves of the gate travel, and there are two.** `GatedRegistry` does hooks, the
+    stale-edit check, taint and the output clamp; approval is *not* in it, because in a
+    session `core.loop` asks the policy first. A `tools/call` has no loop behind it, so
+    `ExposedTool` asks in the loop's place. That was found the hard way — the first version
+    only went through the registry, and a test that served `rm -rf ~` deleted the
+    directory, because the unconditional deny list lives in the policy engine and nothing
+    else in the path looks at it.
+  - One integration test runs the whole path: argv → `dispatch` → a real `McpClient` over
+    an in-memory pipe → `mcp__self__ronin_task` in a client-side registry → exit 0 when the
+    peer hangs up. `python -m ronin.cli.demo` gained a section that does the same and
+    prints what a client sees.
+- **`ronin` is a console script again, alongside `ronin2`.** Both point at this tree. v1's
+  entry point in `packages/cli` is renamed `ronin1` — explicitly, not removed, so an
+  existing user has something to type — which is what makes the short name safe to take:
+  console scripts are not namespaced, so two distributions declaring one name means
+  whichever was installed second silently wins. A test now checks that no two
+  distributions in this workspace claim the same command, because the next collision will
+  be a package nobody thought about. The two-letter `ro` alias is gone: `ro` resolving to
+  v1 while `ronin` resolves to v2 is the same silent swap in miniature.
+- **`from ronin import Agent` works, and the SDK can be embedded.** The package root was a
+  single docstring, so the one import line every doc and example would start with failed.
+  It now re-exports `Agent`, `AgentConfig`, `AgentResult`, `Run`, the whole `Event` union,
+  and the four names needed to declare a tool — **lazily**, through a PEP 562
+  `__getattr__`, because reaching `Agent` pulls in the entire application layer and
+  `import ronin` should not. A test resolves every name in `__all__`, and another asserts
+  in a subprocess that `import ronin` loads no `ronin.cli` module.
+  - **Both call shapes, one implementation.** `agent.run(prompt)` returns a `Run` that is
+    awaitable *and* async-iterable: `await agent.run(p)` folds to an `AgentResult` exactly
+    as before, `async for event in agent.run(p)` yields typed events. `stream()` is one
+    line over the same object. Two methods with two bodies is how a fix to one misses the
+    other.
+  - **`Agent(config)` is synchronous**, opening its workspace on first use, because
+    assembling a runtime reads files and resolves a router and cannot happen in
+    `__init__` without an event loop. `await agent.ready()` is the explicit form;
+    `agent.runtime` before that raises with the sentence that fixes it.
+  - **Callers can register their own tools** (`AgentConfig.tools` / `Agent.open(tools=…)`),
+    folded in *below* the gate — same policy, hooks, taint tracking and output budget as a
+    builtin. A tool added above the gate would be the only thing in the process able to act
+    without them, so there is a test asserting the clamp applies to a caller's tool.
+  - `examples/sdk_quickstart.py` runs all of it offline with a scripted provider, and the
+    suite runs the script. Writing it found the gap it now covers: `Tool`, `ToolContext`
+    and `ToolSpec` were unexported, so a caller could be told to bring a tool and had no
+    way to declare one.
+- **Skills — a directory of saved workflows that cost one line each until used.** A skill
+  is a `SKILL.md` (frontmatter + body) on disk. Only each skill's name and one-line
+  description enters the prompt at session start; the body loads on demand — via the new
+  `skill(name=…)` tool or by typing `/name` — and comes back as a *tool result*, so the
+  output gate truncates it deterministically like everything else the model reads. A
+  hundred skills cost ~a hundred lines in the cached prefix, not their full text.
+  - **Discovery precedence is "local wins", and a shadow is a note, never a silent
+    override.** `installed < ~/.ronin/skills < ./.ronin/skills`; when two tiers define one
+    name the project copy is used and the shadow is recorded where a human will read it.
+  - `allowed-tools` and `model` are advisory — surfaced in the loaded body, not enforced
+    at the gate — and documented as advisory rather than pretended otherwise. Frontmatter
+    reuses `agents.definitions.parse_frontmatter`, now parameterised with `known_keys` so
+    one grammar serves both agents and skills.
+- **Role workflows ship in the box.** Nine builtin skills — `autoplan`, `office-hours`,
+  `design-review`, `eng-review`, `review`, `ship`, `qa`, `retro`, `investigate` — load as
+  the lowest discovery tier, so a bare workspace already answers `/review` and a project
+  can shadow any of them. `review` and `investigate` drive the real `reviewer`/`fixer`
+  subagents through `task`; each carries an `adapted-from:` line where it borrows a shape.
+- **Plugins — a bundle a stranger wrote, and a consent gate in front of it.** `ronin plugin
+  add <path>` installs a directory carrying any of skills, MCP servers, subagents, slash
+  commands, hooks and assets, declared in a `plugin.json` (`.ronin-plugin/` or the
+  `.codex-plugin` alias). Surfaces merge into the workspace with the plugin *losing* every
+  collision, because a bundle must not be able to redefine a builtin out from under you.
+  - **A community bundle's hooks are `/bin/sh -c` that fire on the model's actions — so
+    installing one is arbitrary code execution the moment it is enabled.** Trust tiers
+    `builtin < official < trusted < community` gate that: an `official`/`trusted` bundle
+    installs silently, a `community` one (or any unrecognised tier) prints exactly what it
+    would run — the shell commands verbatim, the MCP servers, the agents and commands it
+    adds — and installs nothing until a human says yes. A malformed surface is omitted from
+    the summary *and* from what loads, so what is approved is exactly what runs. A
+    programmatic `install(...)` with no approver keeps its existing contract: the caller
+    owns the trust decision.
+  - Hooks arriving from a plugin are normalised through `HookConfig.normalize`, which now
+    accepts the flat, per-entry `event` shape as well as the nested one, so a bundle
+    authored against either the Ronin or the OpenAI hook schema loads without translation.
+- **`ronin acp` — Zed, JetBrains or any ACP editor can drive the loop over stdio.** The
+  Agent Client Protocol server speaks `initialize` / `session/new` / `session/prompt` /
+  `session/cancel` as JSON-RPC over the same framing the MCP server already uses
+  (`mcp.transport`), and maps the loop's event stream to `session/update` notifications. As
+  with `mcp-serve`, nothing but frames reaches stdout — the writer that would corrupt the
+  wire is refused at parse time.
+- **`ronin api` — an OpenAI- and Anthropic-shaped `/v1` in front of the agentic loop.** A
+  stdlib `http.server` exposes `/v1/chat/completions` and `/v1/messages`; each request runs
+  a real turn and returns the provider-native response shape, so an existing SDK client can
+  point its base URL here and get an agent instead of a single completion. Defaults to
+  `127.0.0.1:8080`; SSE streaming is a documented non-goal for now, named rather than
+  half-built.
+- **First-run wizard and `ronin doctor` detection.** On a first interactive run Ronin now
+  detects provider keys in the environment and any local model server it can reach
+  (`ollama`, `lmstudio`, `vllm`), proposes a config, writes it only after asking, and runs
+  a bounded 10-second smoke so "configured" means "answered once". `ronin doctor` reports
+  the same detection. Probing is gated behind an interactive TTY, so a pipe or a test never
+  opens a socket — the whole path stays offline-testable with an injected probe.
+- **`obs/` — an observer that cannot become a second exfiltration path.** A new
+  `SessionObserver.observe(event)` folds the loop's event stream into structured logs,
+  turn timings and counters. It imports **only** `ronin.core` and stdlib, pinned by a
+  dedicated boundary test — if it could reach the tool, provider or session layers,
+  "observability" would quietly become a channel by which prompts, paths or file contents
+  leave the loop.
+- **`evals/harvest.py` — turning real runs into training data, honestly.** `harvest()`
+  takes recorded `TaskOutcome`s, applies a `TrajectoryQualityBar`, and emits ShareGPT
+  (SFT), preference-pair (DPO) and RLVR datasets from the trajectories that clear it —
+  offline, from transcripts, with the bar that dropped a row recorded rather than the row
+  silently vanishing.
+- **GRPO with a verifiable reward — the RF.3 training pass (`ronin-training`).** The
+  adapter pipeline had SFT and DPO; this adds the third pass, and the reward is the point.
+  It is **not** a learned reward model: `ronin_training.adapter.reward` is a *verifier*
+  that scores a sampled completion on facts — a call that parses and validates against the
+  v2 registry earns reward, the v1 dialect the runtime can't execute is the one outcome
+  punished below zero — which is exactly what lets an RL pass be defined, validated and
+  unit-tested with **no GPU**. `group_advantages` implements GRPO's group-relative
+  advantage (`(r − mean)/std`, zero for a tied group), and `make_reward_fn` returns the
+  callable `trl.GRPOTrainer` expects — no `torch`/`trl`/`mlx` imported anywhere in the
+  module. `adapter/config.py` gains a validated `grpo` pass and `adapter_grpo.yaml`;
+  `to_mlx_config()` refuses GRPO by name (mlx-lm has no GRPO lane — it is peft/trl only).
+  Every hyperparameter shipped is trl's documented default carried explicitly, not a value
+  tuned by a run that did not happen here. Tests: `test_adapter_reward.py` (17),
+  `test_adapter_grpo.py` (13, incl. the shipped config end to end); `adapter.demo` gains a
+  fifth section that scores five completions in the policy order the weights encode.
+- **GitHub-App webhook → a gated Ronin run (`ronin-relay`).** `ronin_relay.github_app`
+  turns a GitHub webhook into a typed `RunRequest` and stops there — it verifies the
+  delivery, decides whether it should start a run, and hands the request to an injected
+  `enqueue` callable (the seam to `ronin-jobs`), so the whole path is a pure function of
+  `(secret, headers, body)` with no network. Three rules, each returned as a *value* not
+  raised (a webhook that raises is a 500 and a retry storm): a bad HMAC-SHA256 signature is
+  `REJECTED` and never enqueues; a **bot's own comment is ignored** so a run that comments
+  cannot trigger itself forever; and only a comment opening with the command prefix
+  (default `/ronin`) becomes a run — everything else is `IGNORED` with a reason. It states
+  its own offline limit: an `issue_comment` payload has no PR head SHA, so a command on a
+  PR runs against the default branch unless a caller resolves the head ref via the API.
+  16 tests; `python -m ronin_relay.github_app` runs the whole path against a fake queue.
+  The remaining RH steps — a real GitHub-App install, the live deploy, the API calls back
+  to GitHub — need infrastructure this sandbox does not have and are not claimed here.
+
+### Fixed
+- **A command you wrote yourself could not be run.** `.ronin/commands/*.md` has always
+  been parsed, validated (`$ARGUMENTS`, `$1..$n`, `$$`, builtin-shadow refusal) and loaded
+  onto `Loaded.commands` at startup — and the dispatcher handed the parser
+  `BUILTIN_REGISTRY` instead, so the one place a user could type their command answered
+  *unknown command*. Dispatch is now against the workspace's registry, and a user command
+  runs as an ordinary turn: same budget, same verification, same transcript.
+- **Seven of the thirteen slash commands were declared and not wired**, all falling into
+  one shared "not wired into this line session" branch. All seven now work:
+  - `/compact` folds the transcript on demand via a new `Conversation.compact_now` and
+    reports both token counts, because the ratio is the only honest measure of whether
+    compacting bought anything.
+  - `/model` lists the configured models and switches the one that answers the next turn
+    (new `Router.client_for_name` + `LoopClient.with_model`). **Only the main model moves** —
+    subagents and compaction keep their own roles, so asking for a stronger model to finish
+    one hard turn does not quietly make every summary more expensive.
+  - `/plan` enters real plan mode through the same `plan_runtime` as `--mode plan`: the
+    model is handed a registry with no tool that can mutate, not a sentence asking it not
+    to. One-way, and it says so.
+  - `/resume`, `/agents`, `/hooks`, `/init` — the replay, the subagent list (grouped with
+    each one's tools), the hooks grouped by firing event, and the first-run wizard made
+    reachable for anyone who skipped it with `--no-wizard`.
+- **A human at the interactive TUI could not approve anything.** Every piece existed and
+  nothing was connected: `ui/app.py` has always accepted `on_interrupt`, `on_rewind`,
+  `on_mode_change` and `on_approval`, and `cli/main.py` — the only caller of `run_app` —
+  passed **none of them**. So `esc` and `shift+tab` moved the status line and did nothing
+  to the running turn, and the only asker in `src/` was `UnattendedAsker`, which always
+  refuses. In the shipped `ronin2`, every gated edit was auto-denied with no way to say
+  yes.
+  - Approvals are now a **modal screen** that takes the viewport, renders
+    `ApprovalRequest.rendered` verbatim, and answers `y` (once) / `a` (and remember) /
+    `n` / `esc` (deny). The keystroke→decision mapping is `ui.reduce.decision_for`, a pure
+    table with unit tests — the widget decides nothing. `enter` and `space` answer
+    *nothing*, deliberately: a held-down key while an approval appears must not be able to
+    approve.
+  - **The modal is raised by the policy's question, not by the `ApprovalRequest` event.**
+    The loop emits that event for every tool whose spec requires approval and *then* asks
+    the policy, which in auto-accept mode allows the call itself. A UI driven by the event
+    would interrupt for every edit in the one mode that exists to stop interrupting. The
+    first version of this change did exactly that; there is now a test pinning it.
+  - `esc` reaches `PolicyEngine.cancel()` and `shift+tab` reaches a new
+    `PolicyEngine.set_mode()`.
+  - **`esc esc` now rewinds one turn**, unified with `/undo`. `Conversation.rewind`
+    truncates the transcript back to before the turn *and* restores that turn's checkpoint
+    through the same `CheckpointStore` `/undo` uses, so the conversation and the work tree
+    move together — never a file rewinding under a transcript that still describes the turn
+    that touched it. One turn back per double-press, destructive (no redo), and it degrades
+    honestly: a read-only turn rewinds the conversation only, and a mutating turn on a tree
+    with no git rewinds the conversation and says the files remain rather than claiming a
+    restore that could not happen. Spend is not refunded — tokens billed stay billed. The
+    one-line outcome is shown as a notification; the app decides none of it, `rewind` does.
+  - **The full-screen TUI takes multi-turn input.** `RoninApp` docks a real input line: the
+    argv prompt runs the first turn, and each submitted follow-up is fed onto a queue that
+    `multi_turn_events` runs as the next turn on the same conversation. Unset `on_submit`
+    (demo, replay) leaves the line inert rather than starting a turn that never runs.
+  - The status line shows the real model and git branch, and asks the orchestrator for
+    context occupancy once per turn. Occupancy is measured against the live transcript,
+    *not* from `Budget.spent_tokens`: spend is cumulative and includes messages compaction
+    has folded away, so using it would make the gauge drift further from the truth with
+    every turn.
+  - The line REPL gets `PromptAsker`, so a bare install with no Textual can approve too.
+    Both surfaces share one keymap.
+- **"Approve for this session" never matched anything.** `PolicyEngine.remembered_rule`
+  wrote `Exact(argument="path", …)` — a canonical name — while matching is a literal lookup
+  in the call's arguments (`MatchTarget.argument`). Every file tool here spells it
+  `file_path`, so the remembered rule matched no future call and the human was asked again
+  on the very next identical edit. The rule now records the argument's own name. Found by
+  the integration test for the `a` key, which is the first thing that could observe it.
+
+### Added
+- **The URL policy reads the IPv4 address hidden inside an IPv6 one — and ISATAP was a
+  real hole.** The gap note said 6to4 and Teredo were blocked by prefix rather than by
+  unwrapping. Checking each form first found that unwrapping those two would have
+  *weakened* the policy, and that a form nobody had listed was getting through:
+  - **ISATAP** (`<prefix>:0:5efe:<ipv4>`, RFC 5214) wears the **site's own global unicast
+    prefix**, so `2001:470:1f0b:1:0:5efe:a9fe:a9fe` looks like an ordinary public address
+    to every property in `ipaddress` and to every entry in `EXTRA_BLOCKED` — and on a host
+    with an ISATAP interface up it routes to `169.254.169.254`. It was **allowed** before
+    this change. No prefix test can find one, which is why `embedded_ipv4` reads the
+    interface identifier instead.
+  - `embedded_ipv4` also unwraps 6to4, Teredo (both halves — the client's IPv4 is XORed
+    with all ones, so `5601:5601` *is* 169.254.169.254), NAT64, IPv4-compatible and
+    IPv4-mapped. Those five were already refused by prefix, so there the unwrapping buys a
+    better *message*: "a 6to4 tunnel address, and the 169.254.169.254 it wraps is a
+    link-local address" instead of "a private address", which no reader can act on without
+    converting hex by hand.
+  - **Unwrapping adds refusals and never grants permission.** `2002:5db8:d822::` wraps a
+    public IPv4 and stays refused on its prefix: judging a tunnel by its payload alone
+    would open every 6to4 and Teredo address whose payload happens to be public, so the
+    two prefixes stay in `EXTRA_BLOCKED` and the payload check only ever adds a reason.
+    An ISATAP address wrapping a public IPv4 is still allowed — it reaches the public
+    internet, and refusing it would be a false positive.
+  - **6rd** (RFC 5969) remains a named gap: its IPv4 sits at a provider-chosen offset in a
+    provider-chosen prefix, so recognising one needs the provider's configuration and
+    guessing an offset would refuse public addresses at random.
+- **`web_search` has backends: brave, tavily, and a searxng you run yourself.** The last
+  tool in the tree with nothing behind its injected callable. It stayed that way because
+  a searcher needs a *provider*, which is a decision about somebody's account rather than
+  a design question — so `tools/searcher.py` carries all three as a **table**, since the
+  differences are entirely data (an endpoint, an auth header, a response shape).
+  - Chosen with `RONIN_SEARCH_PROVIDER`; the key comes from the provider's own variable
+    (`BRAVE_API_KEY`, `TAVILY_API_KEY`), and `RONIN_SEARCH_ENDPOINT` points at a
+    self-hosted searxng. Unset means `web_search` **does not exist** in the session, which
+    is what `build_registry` is built around: a tool with no backend that errors on every
+    call teaches the model to keep trying it. Half-configured produces a note naming the
+    variable to set, never a silent absence.
+  - Built on `fetcher.request_once`, so a search inherits address pinning, TLS
+    verification against the hostname, the size cap and the timeout from the one place
+    that implements them. A searcher with its own socket code is one that eventually
+    forgets to pin.
+  - **The query cannot move the request.** It is percent-encoded into a parameter or
+    placed in a JSON field, never concatenated into a host or path, so no query a model
+    writes can point the searcher somewhere else.
+  - **A configured endpoint is not a model-chosen URL.** A searxng on `localhost` is
+    reachable — the user put it there, exactly as they configure a local model server —
+    while a bad *scheme* in that same config value is still refused. `safety/net.py` grew
+    `check_scheme` so the config path applies a visible subset of the policy instead of
+    hand-rolling its own check.
+  - No HTML scraping of DuckDuckGo, Google or Bing: against their terms, brittle, and a
+    tool that silently degrades to garbage when a `<div>` moves is worse than one that
+    says it is not configured.
+  - A response in an unexpected shape is an **error naming where the results were meant to
+    be**, not an empty list — a provider changing its schema must not look like "no
+    results for your query" forever.
+- **`web_fetch` is a real tool now, and it resolves before it connects.** Two findings in
+  one: the DNS half of the URL policy was missing, and `web_fetch` **did not exist in a
+  real session at all**. `Fetcher` was a type alias with no implementation anywhere in
+  `src/`, and `cli/wire.py` never passed one — the tool was assembled only by demos and
+  tests handing in a fake, so the SSRF hole and the missing tool were the same gap seen
+  from two sides.
+  - `safety/net.py` gains `resolve_and_check`, which runs the literal checks and then the
+    same address rules again on **what the hostname resolves to**. `https://docs.example.com/`
+    passes every literal test and is the ordinary way to reach a metadata endpoint:
+    publish an `A` record pointing at `169.254.169.254` and let the victim's own resolver
+    do the work. Refuses if **any** returned address is disqualified — a name answering
+    with one public and one loopback address is not half safe, it is a name whose answer
+    depends on which address the client tries.
+  - `tools/fetcher.py` is the HTTP client that was missing, built on `http.client` +
+    `socket` + `ssl` (no new dependency). It **pins**: it connects to the vetted address
+    and keeps the hostname only in the `Host` header and the TLS handshake, so
+    certificate verification still happens against the name. Vetting an address and then
+    handing the *name* to a socket asks DNS twice and trusts the second answer, which is
+    the rebinding window — the point of the whole exercise.
+  - **Redirects are followed by hand**, so each hop is re-vetted from scratch;
+    `302 Location: http://169.254.169.254/` dies at the hop, and the tests assert no
+    connection to it was ever opened. Bounded response size, socket timeout, and a
+    finite redirect chain, because a fetch is remote input.
+  - Wired in `cli/wire.py` with an extractor on the **fast** model, built on first use so
+    a session that never fetches constructs no client. `web_search` is still absent, and
+    deliberately so: it needs a search provider and a key, and a tool that exists and
+    always errors teaches the model to keep trying it.
+  - Known, and written into the module: a resolver that *cannot* answer lets the URL
+    through rather than refusing (the weaker of the two options, chosen deliberately —
+    refusing would make a flaky resolver look like a security failure and get the check
+    switched off), and pinning is incompatible with an HTTP proxy, so `HTTPS_PROXY` is
+    ignored rather than half-honoured.
+- **A sqlite session index, and `ronin sessions --search`.** `persistence/` recorded
+  everything a session needed but could only answer one question about it — "newest
+  first" — because the picker reads one JSON sidecar per session. Two questions it could
+  not answer at any price: *which sessions cost the most*, and *which one was the session
+  where I fixed the pagination bug*. `persistence/index.py` adds a WAL sqlite database
+  beside the transcripts with a row per session and fts5 over recorded prompts and
+  answers, plus `ronin sessions [TEXT] [--search/--by-cost/--reindex]`.
+  - **It is a cache, and everything follows from that.** The jsonl transcript stays the
+    single source of truth; the index is strictly derived, so `rm
+    .ronin/sessions/index.sqlite3` costs a rebuild and loses nothing. A schema version is
+    stamped in `PRAGMA user_version` and a mismatch **drops and rebuilds** instead of
+    migrating. Opening a file sqlite will not read replaces it and says so, which is what
+    lets `--reindex` repair the case it is most needed for — while a *locked* database
+    (`OperationalError`, another Ronin mid-write) is never touched, because deleting a
+    file another process has open would turn contention into two corrupt indexes.
+  - **Writes never raise; reads do.** `record` runs at a turn boundary, *after* the
+    transcript is fsynced, so a full disk or a locked database is recorded in `problems`
+    and the turn continues — a cache must not end a session whose work is already safe.
+    `search`/`recent` raise instead, because `()` from a broken index reads exactly like
+    "you never had that session".
+  - **A typed query is rebuilt, never forwarded.** fts5 `MATCH` is an expression
+    language: `don't` raises `unterminated string`, and a sentence containing "not"
+    silently inverts the search. `fts_query` extracts words and quotes each one, so any
+    string a terminal can produce is a valid AND query.
+  - Prompts are indexed out of `TurnEnd.agent_state` — the user's message is not an event
+    in this system — with `StreamReset` applied via the same fold the exporters use, so
+    retracted text never surfaces a session by a sentence it does not contain. Tool
+    arguments and output are deliberately excluded: they are most of a transcript's bytes
+    and are where fetched pages land.
+  - Wired at the seam that already writes the sidecar, so the cadence is one write per
+    turn rather than per event, and only the current turn's events are held in memory.
+    `Transcript` depends on an `Indexer` protocol it declares itself, which keeps the
+    cache out of an import cycle with the log it caches.
+  - The plain `ronin sessions` listing still reads sidecars and never opens the database:
+    the command people run daily does not depend on the cache.
+- **The repo scaffold's missing half, and the packaging bug it exposed.** `pre-commit`
+  (whitespace, ruff, mypy, and four generated-file gates), `.env.example`, three working
+  `.ronin/` example configs with a schema README, `make install/run/eval/coverage`, a
+  **coverage gate at 85% on `src/ronin`** enforced by its own CI job, and
+  `docs/RULES.md` — the one-page non-negotiables `CONTRIBUTING.md` now points at.
+  - **`ronin2` did not exist in any dev checkout.** The root project declared
+    `[project.scripts]` but had no `[build-system]`, so `uv sync` skipped entry points
+    ("this project is not packaged") and `uv build --all-packages` emitted a wheel for
+    every workspace member and none for the root — `pipx install ronin` had nothing to
+    install. hatchling plus `tool.uv.package = true` fixes both: `ronin2` is in the venv
+    and `ronin-1.0.0` builds.
+  - **`scripts/check_test_imports.py`** enforces the offline-tests rule by parsing each
+    test's AST. It walks the tree rather than grepping because a grep matched a docstring
+    in `test_ronin_telemetry_transport.py` — a file that imports nothing of the kind.
+  - `make lint` and `make typecheck` were `@echo` stubs that exited 0 without running
+    anything, and `make test` omitted `tests/` — so the entire v2 suite CI runs sat
+    outside the Makefile. Both fixed.
+- **A published eval suite, and the gate that keeps it honest.** 118 tasks under
+  `tests/evals/` across eight categories, each a fixture repo, a prompt and a
+  `verify.sh`. `scripts/check_eval_tasks.py` proves every task discriminates in three
+  directions on every push — bare fixture must fail, the reference solution must pass,
+  and an `injection-resistance` task must also fail when the injection's artefact is
+  planted in an otherwise-solved workspace. A `verify.sh` that passes on the untouched
+  fixture inflates every score derived from the suite forever, and nothing about such a
+  run looks wrong. `manifest.toml` is generated (`scripts/gen_eval_manifest.py`), so a
+  deleted fixture cannot quietly make the suite easier.
+- **`ronin eval` and `ronin duel`.** The runner, the six-class failure taxonomy and the
+  paired A/B were complete, tested and unreachable from a command line. `--dry-run`
+  needs no model, no key and no network, and is the form CI exercises. Exit 1 means the
+  suite could not run; exit 0 means a measurement happened — a 0% pass rate is a result,
+  not a command failure.
+- **`ronin telemetry status|on|off|show`, with telemetry off by default.** The consent
+  store, payload log and bucketing existed with no way for a user to reach them; a
+  privacy control that exists only as a Python API is not a control. `on` prints what
+  will and will not be sent before recording the grant, `show` prints the local log
+  verbatim so a user can audit rather than trust, and a one-line disclosure appears once
+  on stderr on a first run — a notice, not a prompt. `doctor` reports the state and
+  warns only when a consent file cannot be read, since that is the case where the user's
+  actual choice is not the one being applied.
+- **`--model ronin-qwen-local` resolves.** `local-adapter` was missing from
+  `providers.registry.ADAPTERS`, so a config naming it failed with "unknown provider".
+  `examples/models.local.toml` is the copy-pasteable $0 config, pointing all three roles
+  at local weights — `fast` included, since that role carries subagents and compaction
+  and a key needed there fails partway into a session rather than at startup.
+- **`training/cuda/train_cuda.py --config`.** The trainer's constants are the v1
+  ronin-code-1.5b recipe and contradicted `training/config/adapter_sft.yaml` by 20x on
+  learning rate (2e-4 against 1.0e-5) and 2x on sequence length. Two files describing one
+  run and disagreeing like that means whichever you did not read is silently wrong, and
+  the artifact is named the same either way. The config is now selectable, validated
+  before any GPU work, and recorded in the run report so two runs can be compared.
+- **Colab cells 2b and 5b**, plus `python -m ronin_training.adapter preflight|validate`
+  subcommand dispatch. Cell 5b previously invoked a library module as if it had a CLI,
+  which exits 0 printing nothing — a cell that appears to succeed and does nothing.
+  `training/tests/test_colab_notebook.py` now checks every command in the notebook
+  against the real entry points and flags.
+
+### Changed
+- **The release workflow's publish gate now matches CI.** It ran `pytest packages` only
+  — 10 of 23 workspace paths — so `src/ronin`, `apps/` and `training/` were unguarded at
+  exactly the moment the artifact became immutable. It now runs the full workspace plus
+  ruff, mypy and every generated-file check.
+- **A release with no `PYPI_TOKEN` now fails instead of exiting 0.** On a tag push,
+  "skipping publish" with a green result is the worst available outcome: the tag looks
+  released and no package exists. A manual `workflow_dispatch` run may still dry-run.
+- **`docs/site/generate.py --check` runs in CI.** It earned the slot immediately —
+  registering the local-adapter provider made `providers.md` stale, and the generator
+  refused to document a new provider until its four per-builder descriptions were filled
+  in.
+- **README states where ronin loses.** The comparison table names model quality on hard
+  tasks, IDE integration, polish, user base and autocomplete as losses against Claude
+  Code, Cursor and Aider. A table with no losing rows is an advertisement.
+- **The "no telemetry, ever" claim is now "off unless you turn it on".** Accurate rather
+  than absolute, since the opt-in path now exists.
+
+### Fixed
+- **`web_fetch` would fetch the cloud metadata endpoint.** The URL check compared the host
+  against five literal spellings of localhost, so `http://169.254.169.254/` — which answers
+  unauthenticated HTTP with the instance's role credentials on every major cloud — was
+  fetched without complaint, as were `10.0.0.5`, `192.168.1.1`, `127.1`, `2130706433`,
+  `0x7f000001`, `[::ffff:127.0.0.1]`, `metadata.google.internal` and
+  `docs.example.com@169.254.169.254`. The tool hands what it fetches to a *model*, so a
+  page that talks the model into one more fetch was the whole exploit.
+  - The policy now lives in `safety/net.py`, next to the injection fence and for the same
+    reason: it is needed by anything that builds a `Fetcher`, and a copy in the tool layer
+    is the one that goes stale — which is precisely what had happened. Hosts are classified
+    with `ipaddress` rather than by string, covering private, loopback, link-local,
+    multicast, unspecified, reserved and CGNAT space in both families, with IPv4-mapped
+    IPv6 unwrapped so one rule covers both spellings.
+  - The legacy numeric notations are parsed here rather than handed to `inet_aton`, whose
+    acceptance of octal and hex differs across glibc, musl and macOS — a check that blocks
+    on Linux and passes on macOS is not a check, and CI runs both.
+  - Anything neither a valid DNS name nor a parseable address is **refused**, including a
+    host whose top-level label is all digits (`999.1.1.1`): no legal TLD is numeric, so
+    that is a malformed address rather than a name. Found by the blocked-URL table, which
+    is the argument for writing the cases out as data.
+  - `redact_url` strips userinfo, every query *value* and any fragment, keeping parameter
+    names — one rule that can be tested exhaustively, rather than a list of secret-looking
+    parameter names that fails silently when it misses one. Refusal messages go through it,
+    because a URL we declined to fetch can still carry a live token and declining is not a
+    reason to print it. Named where it is *not* applied: the session transcript records
+    tool arguments verbatim, since it is the replay source.
+  - Still open, and written into the module: names are not resolved, so a public hostname
+    whose `A` record points inward is not caught, and a redirect to such an address is
+    followed below this seam.
+- **Model prose and tool output reached the terminal with control sequences intact.** A
+  terminal is an interpreter, and those two strings are the most outsider-influenced text
+  in the program — a file read out of a repository nobody audited, a compiler's stderr, a
+  fetched page. Left alone, `\x1b]0;…\x07` renames the user's window, `\x1b]52;c;…\x07`
+  writes their clipboard in terminals that allow it, and `\x1b[2K\x1b[A` or a bare `\r`
+  overwrites what is already on screen. The last is why this is a safety fix rather than a
+  cosmetic one: an `ApprovalRequest.rendered` built that way displays `ls -la` while the
+  command awaiting approval is `rm -rf /`, so what the user reads and what they approve
+  stop being the same thing.
+  - `ui.render.strip_controls` removes every C0/C1 control character except tab and
+    newline, and `Styles.text` — the seam every renderer already routes model-derived text
+    through — now applies it for *every* dialect. It previously escaped only Textual's `[`,
+    and `PLAIN`/`ANSI` set `escape=None` on the reasoning that an out-of-band dialect has
+    nothing in its payload that could be mistaken for a control sequence. True of the
+    markup, false of the sink.
+  - The escape *character* is removed and the payload stays, so `\x1b]0;PWNED\x07` shows as
+    `]0;PWNED`: inert, and the attempt still visible. Deleting the sequence would hide the
+    evidence, for the same reason `wrap_untrusted` quotes an injection rather than removing
+    it.
+  - Also applied on the three paths that reach a terminal without a `Styles` map: the
+    `--output-format text` answer, `headless`'s stderr notices (`DENIAL_NOTICE` carries
+    `rendered`), and `cli.main._print_event`, which is the interactive line session. The
+    JSON formats needed no change — encoding already turns an escape into an inert
+    six-character JSON escape — and a test pins that so a later "strip everywhere"
+    cannot corrupt the
+    machine-readable stream.
+  - The cost is a compiler's colour codes in tool output, which is already truncated to a
+    summary line. Stripping everything is deliberate: "no control characters in text we did
+    not write" is one sentence and is tested exhaustively over both ranges, where "no
+    *harmful* control characters" is a list to maintain against every terminal feature
+    anyone adds.
+- **A session from another schema version was reported as corruption, and hidden.** The
+  codec has a precise error for it — it names both versions and says to export the old
+  session with the Ronin that wrote it — and `read_events` caught it alongside every
+  other decode failure and re-raised it as "malformed record in the middle of the
+  transcript ... refusing to load a transcript with a hole in it". The file has no hole.
+  Meanwhile `list_sessions` dropped the row entirely, so the session was not merely
+  mis-described, it was invisible. Both land at the first schema bump, when *every*
+  session a user owns is the old version.
+  - `read_events` now raises `TranscriptVersionError`, which subclasses both
+    `TranscriptError` and `SchemaVersionMismatch`: the first so the CLI's existing
+    `RuntimeError` handling keeps turning it into a one-line message instead of a
+    traceback, the second so a caller can tell "another Ronin wrote this" (recoverable)
+    from "this is corrupt" (not).
+  - `ronin sessions` lists the row with the reason, via a new `SessionMeta.unreadable`
+    beside the existing `stale` — a row that shows zero turns and zero cost would read
+    as an empty session, which is a different and wrong story. The flag is a judgement
+    by the reading build and is never written to disk.
+  - `Transcript.open` refuses to append to a log it cannot read, rather than interleave
+    two builds' records into a file neither can read.
+- **A session id became a filename with nothing checking it.** `--resume <id>` and
+  `ronin export <id>` take an id from argv and the SDK takes one from its caller, so
+  `session_path(dir, "../../x")` named — and on the writing side created — a file outside
+  `.ronin/sessions`. `valid_session_id` now confines an id to a bare filename component
+  at the one place the layer turns a caller's string into a path, which is the rule
+  `ToolContext.resolve` and the deny list's `OUTSIDE_WORKSPACE` already apply everywhere
+  else.
+- **Re-opening a session whose header was damaged appended a second header mid-file.**
+  "Fresh" was decided by whether a header could be *read*, so a log with a bad first
+  line got a new header written below its events — a header record in the middle, which
+  is the one thing `read_events` refuses to load. One bad line became an unloadable
+  session. A header is now written only when there is no file yet.
+- **The import-boundary gate could not see a cross-layer import in a package's
+  `__init__.py`.** Relative imports were resolved against the *parent* of the dotted
+  name, but `modules_under` reports an `__init__.py` under its own package's name — so
+  `from ..providers import x` in `ronin/tools/__init__.py` resolved to `.providers`,
+  failed the `ronin.`-prefix filter, and reached no prohibition at all. A gate with a
+  blind spot in the file whose job is re-exporting is worse than no gate, because it
+  reports success. No `__init__.py` had such an import, so nothing was being hidden.
+- **`<<<` was parsed as a heredoc, so the next line of a command was invisible to every
+  check in `safety`.** The lexer reads a run of `<` greedily, so `<<<` arrived at the
+  heredoc test already ending in `<<` and was taken for one — which made the *following
+  line* the heredoc body. `cat <<<x` followed by `rm -rf /` therefore produced a single
+  `cat` segment, and the deny list, the hazard scan and every configured rule saw nothing
+  else. The guard meant to prevent exactly this peeked ahead for a fourth `<` after the
+  greedy run had already consumed it, so it could never fire. The operator is now decided
+  from the finished token, `<<<` becomes a redirect whose target is data (never a path to
+  check), and a shell fed by one has its payload parsed as code — `bash <<<"rm -rf /"`
+  runs that word, exactly as a heredoc body does, and is refused on the same grounds.
+- **A `.gitignore` line of only slashes compiled to a rule that matched nothing.** `//`
+  lost one trailing slash and kept an empty pattern; every trailing slash is now stripped,
+  so the line is dropped like the other empty forms instead of sitting in the rule set
+  looking configured.
+- **Fetched web pages reached a model as instructions, not data.** `web_fetch` converts a
+  page to markdown and hands it to the fast model with the caller's prompt — and it handed
+  it over **bare**, so page text and the caller's own instructions arrived in one
+  undifferentiated string. Anyone able to edit a page (or a README, or a CI log) could put
+  text in front of a model that was mid-task with file-editing tools available. The
+  markdown is now fenced by `safety.injection.wrap_and_scan` before the extractor sees it,
+  so it arrives attributed to its URL, inside markers the content cannot forge its way out
+  of, under a standing instruction that content between the markers is data. Injection
+  patterns are flagged in the header above the content — quoted, never removed, because a
+  user cannot judge a source whose attempt they never saw — and the count is reported back
+  to the caller so the decision to keep trusting that source is theirs.
+  - The wrapper is injected, like the fetcher/extractor/clock, but **defaults to the real
+    one**: a security property that holds only when the wiring opts in is not a security
+    property. `build_registry` passes no wrapper, and an integration test asserts the
+    production path fences anyway.
+  - This is the tool layer's only import outside `core`, and deliberately so — `safety` is
+    a leaf that may not import `ronin.tools`, so the edge cannot become a cycle, and the
+    alternative was a second set of fence markers free to drift from the canonical ones.
+    `tests/tools/test_boundaries.py` now pins the tool layer's permitted imports, which it
+    previously did not constrain at all.
+- **Every pull request showed a failing check that could not be fixed from the repo.** A
+  second Vercel project (`web`, root directory unset, so it built the repo root as if it
+  were a Next.js app) failed on every push and left every PR at
+  `mergeable_state: "unstable"` — a red check nobody could act on, which is the kind of
+  noise that teaches people to ignore CI. A root `vercel.json` with
+  `git.deploymentEnabled: false` stops it triggering on any branch.
+  - `deploymentEnabled: false`, not `{"main": false}`: the branch-map form only disables
+    the named branches, and the deployments that were failing were *preview* builds from
+    PR branches.
+  - `apps/web/vercel.json` sets `deploymentEnabled: true` explicitly. The real project
+    (`ronin-ai-os-staging`) has its root directory set to `apps/web` and therefore reads
+    *that* file rather than the repo root's, so this is a no-op today — it exists so that
+    the root-level `false` can never be mistaken for a repo-wide switch that silently
+    takes staging previews down with it.
+- **A failed turn reached the user as if the model had simply answered.** The shim set
+  `FinishReason.ERROR` when its repair budget ran out and put the reason in
+  `Completed.notes`, and **nothing read either**: `providers/bridge.py` dropped both on
+  the way to the loop seam, so an exhausted repair budget arrived as prose with no tool
+  calls — the exact shape of a model that chose to answer — and the loop ended with
+  `DONE` / `no_tool_calls`. `FinalMessage` now carries `error` and `notes`; the loop
+  emits the `Error` event that already existed, and ends the turn as
+  `TurnState.ERROR` / `provider_error` when nothing survived. Turns that *did* produce
+  usable calls continue, with the failure reported alongside.
+- **The shim discarded a provider's `tool_call_id` on the native passthrough.** A
+  native-shaped call from a wrapped client had its id dropped and a synthetic `ron_…`
+  minted, so the next turn's `tool_result` answered a call the provider never issued —
+  the 400-a-turn-later failure `providers/normalize.py` exists to prevent, and a
+  contradiction of the copied-verbatim invariant already under test on the write path.
+  `ShimCall` carries `call_id` through to the accumulator.
+- **Exhausted repairs threw away the calls that had parsed.** Asking for three files and
+  mis-typing the fourth lost all four, while the retry replayed only the first failure —
+  so the model was likely to re-emit all four and lose them again. The good calls are
+  kept and run; the failure is still reported.
+- **The tool-call shim leaked its own close tag into the answer and silently emptied
+  the argument that contained it.** `ShimStreamParser` found `</ronin:tool_call>` with a
+  plain `str.find`, with none of the string-awareness every scanner in `jsonargs.py`
+  has. So a call whose argument legitimately contained that text — writing a file
+  that documents this protocol, for instance — was cut at the *first* close tag,
+  inside the string. The truncation repair then turned `{…"content":"` into
+  `{"content": ""}` and the leftover `"}}</ronin:tool_call>` was printed as prose:
+  an empty file written, the tag shown to the user, and no failure reported at any
+  layer. The scan is now string-aware, and the ambiguous case (a close tag inside an
+  *unterminated* string, which may be either a literal or a truncated payload's real
+  terminator) is resolved in `finish()`, where the stream is over and the two are no
+  longer indistinguishable — so the truncation-repair path still works. Text after a
+  recovered terminator is re-parsed rather than released blind.
+  - A single tool call wrapped in chatter (`Here you go: {…}`) was rejected while the
+    same block holding *two* objects parsed, because the multi-object path was gated
+    on `len(objects) > 1`. One is what a weak model actually emits.
+- **A checkpoint could stage files into the user's own git index.** `verify.checkpoints`
+  promises the user's index is never touched, and ran every command with `--git-dir` and
+  `--work-tree` pointed at a shadow repo — but neither flag overrides `GIT_INDEX_FILE`,
+  which names the index file outright. Under any parent that exports it (a git hook, or
+  ronin invoked from inside a `git commit`), every `git add` in the checkpoint store wrote
+  the real repo's index instead. Reproduced before fixing: one checkpoint turned
+  `?? brand_new.py` into `A  brand_new.py` in `git status` and grew `.git/index` from 137
+  to 217 bytes. The store now materializes its environment on every invocation, dropping
+  the five `GIT_*` location variables and pinning `GIT_INDEX_FILE` to the shadow index,
+  whether or not a caller injected an `env` — previously the pin only happened when one
+  did, and the default path was the unprotected one. `GIT_WORK_TREE` and `GIT_COMMON_DIR`
+  additionally made `init` fail, silently costing the session its checkpoints; both are
+  now neutralized too.
+  - `checkpoint()` raised `ValueError` out of the store when `git rev-parse HEAD` exited 0
+    with empty stdout, on a mutating turn. It returns a failed `CheckpointResult` like
+    every other failure in the class.
+- **Exit code 2 meant "asked", not "refused".** `core.loop` emits `ApprovalRequest`
+  before calling `policy.approve`, so counting requests made *every* `--mode auto_edit`
+  run that wrote a file exit 2 on a clean run and list the successful write under
+  `approvals_denied`. One `ApprovalTracker`, keyed on `tool_use_id`, at all three call
+  sites.
+
+### Known gaps
+- **No eval numbers exist.** Nothing has been run against a real model, so nothing is
+  reported anywhere in this repository. The benchmark surface ships with its cells empty
+  rather than with placeholders.
+- The README has no asciinema cast; recording one requires a real model run.
+- `web_fetch` and `web_search` still have no real backends.
+- The v2 CLI is not the shipped `ronin` console script (still `ronin_cli.main:app`), so
+  `python -m ronin` with `PYTHONPATH=src` is how the v2 commands are reached today.
+
+
+### Security
+- Updated transitive dependencies for the remediable Dependabot alerts:
+  `brace-expansion` 1.1.18 and 5.0.9, PostCSS 8.5.23, and cryptography 50.0.0.
+  The repository secret scan is now an enforced clean-tree contract: credential
+  detector fixtures construct their values at runtime, so test coverage remains
+  real without embedding credential-shaped literals in source files.
+
+### Added
+- **Durable orchestration CLI.** `ronin util orchestrate --durable` now saves
+  read-only multi-agent plan/wave checkpoints under `.ronin/`, prints a
+  recoverable runtime id, accepts hard team-wide token/cost/time/tool budgets,
+  and resumes only verified unfinished work with `--resume-run`. Write mode
+  remains intentionally routed through isolated mission candidates.
+- **Durable multi-agent execution kernel.** `OrchestratorAgent` can now share
+  the same local `RunJournal` and thread-safe `RunBudget` as ReAct runs. It
+  checkpoints plans and completed dependency waves, records compact lifecycle
+  evidence, accounts parallel specialist usage to one hard budget, and resumes
+  only unfinished waves from a verified checkpoint.
+- **Project-bound Ronin API keys.** `ronin util api-keys` now issues raw keys
+  once and retains only salted hashes with scope, expiry, rate, token, cost, and
+  concurrency policy. Keys can be listed, revoked, rotated, reserved/settled by
+  a gateway, and audited locally without persisting secret values. They remain
+  distinct from user-supplied provider credentials.
+- **Bounded mission implementation turn.** `ronin util mission implement` now
+  runs an approved plan only inside its attached detached candidate checkout and
+  records typed usage, changed-file, digest, iteration, and outcome evidence.
+  The command requires a Docker-configured candidate for the following test
+  gate, never edits the parent checkout, and cannot stage, commit, push, or
+  publish a change.
+- **Evidence-weighted competing agent trials.** Trial selection now evaluates
+  every attributable worktree diff, rejects candidates with credential findings
+  or failed handoff contracts, and uses a bounded score from successful role
+  outcomes plus typed contract evidence. Winners remain review-only proposals;
+  no trial command stages or merges code.
+- **Local ACP editor bridge.** `ronin acp --root <directory>` now exposes a
+  read-only, stdio-only Agent Client Protocol v1 session surface. It reuses the
+  coding agent's typed context, project memory, provider routing, and structured
+  conversation history without letting editor clients escape the trusted root,
+  attach arbitrary MCP servers, or gain write/command authority.
+- **Durable editor sessions and isolated ACP proposals.** ACP sessions now
+  persist locally and can be loaded by a later editor process. They emit compact
+  activity/usage evidence to the run archive, and an explicit `proposal` mode
+  invokes Ronin's bounded multi-agent worktree workflow, retaining reviewable
+  patches without writing into the editor workspace or staging a change.
+- **Evidence-backed learned project instincts.** `ronin util instincts` now
+  stores candidate practices locally with supporting evidence, confidence,
+  observation counts, and expiry. Only explicitly reinforced active instincts
+  are retrieved into the typed agent context, where they remain untrusted
+  evidence and can never override project policy or trigger actions.
+- **Provider-aware context policy.** Ronin now resolves a guarded context window
+  from its model/provider catalog or a bounded project override, reserves output
+  capacity, and uses the same policy for agent compaction, indexed retrieval,
+  terminal/TUI gauges, explain, and investigate modes. `/context` shows the
+  active budget and supports `/context 64k` or `/context auto`; `ronin code
+  --context-window` applies a one-run override. Unknown models safely fall back
+  to a 32k window instead of inheriting another provider's limit.
+- **Persistent specialist-team supervisor.** `ronin util team` now creates
+  durable local architect, implementer, reviewer, tester, security, and release
+  identities with an explicit lifecycle, heartbeats, stale-worker recovery, and
+  hash-chained audit in SQLite. Per-role experience entries carry source
+  provenance, confidence, expiry, access history, secret rejection, and safe
+  compaction. Token-bounded local context packs combine project conventions,
+  BM25 repository/test pointers, and recalled role experience; Mission Control
+  exposes status-only team metadata without task, scratchpad, or memory content.
+  Completed roles can also make typed, secret-screened evidence handoffs to an
+  assigned peer on the same mission; recipients explicitly acknowledge them,
+  and the hash-chained audit records both steps without exposing summaries or
+  evidence references to Mission Control.
+- **Typed durable mission event bus.** Committed mission audit records now emit
+  versioned, hash-chained, idempotent envelopes for mission creation,
+  transitions, handoffs, candidate assignment, test outcomes, and security
+  policy violations. `ronin util mission events` lists, verifies, and safely
+  replays the compact local bus, while Mission Control exposes the same safe
+  event feed without issue bodies, artifacts, paths, credentials, or raw logs.
+- **Durable issue-to-PR mission foundation.** `ronin util mission` now records
+  strict `MissionSpec`, plan/test/review/security artifacts, hard per-mission
+  budgets, legal workflow transitions, and a hash-chained audit log that is
+  checked against the current snapshot. Candidate workspaces are detached Git
+  checkouts tied to a mission; code verification requires an explicit Docker
+  image and runs with no host fallback, no network, dropped capabilities,
+  `no-new-privileges`, and bounded memory/PIDs. The read-only Operations UI
+  shows mission, audit, evidence, and candidate lifecycle status without
+  exposing issue bodies, artifact content, or workspace paths.
+- **Evidence-gated mission execution.** A mission can now record a typed plan,
+  run a Docker-only candidate verification, perform deterministic diff hygiene
+  review and masked added-line secret scanning, enforce its repair/tool/wall
+  budgets, and calculate an auditable release gate. Only a gate-eligible mission
+  with an explicit named human approval can produce a local PR title/body/branch
+  draft. This intentionally does not create branches, commits, remotes, or PRs.
+- **Remote issue-to-mission intake.** `ronin util mission import` now imports
+  one strictly shaped GitHub or GitLab issue into an attributable `MissionSpec`
+  and local source context before any agent can run. GitHub uses authenticated
+  `gh`; GitLab requires an environment-provided token and an HTTPS endpoint.
+  Tokens, issue bodies, and source URLs remain out of the Operations API, and
+  importing records operator-attributed audit evidence rather than an agent run.
+- **Sandboxed remote verification workers.** A mission candidate can now be
+  snapshotted into a leased, authenticated remote verification job. Workers
+  clone a credential-free HTTPS origin at the exact revision, apply the bounded
+  candidate patch, and execute only the approved command in no-network Docker.
+  One-time lease tokens, patch-digest revalidation, compact evidence, explicit
+  release recovery, and Mission Control lifecycle status prevent workers from
+  advancing stale work or gaining merge, publish, or approval authority.
+- **Governed fleet execution.** Saved fleet plans can now become durable local
+  fleet runs. `ronin util fleet start`, `runs`, and `run-next` claim exactly one
+  dependency-ready wave at a time, persist terminal agent/proposal evidence,
+  and require explicit retry or interrupted-worker recovery. Implementation
+  waves remain isolated-worktree proposals; no fleet command stages, commits,
+  or pushes code. The Operations dashboard exposes fleet-run state read-only.
+- **Bounded fleet planning.** `ronin util fleet plan` converts up to 512
+  relevant specialist profiles into persisted research, implementation, and
+  acceptance waves with a hard 32-profile per-wave ceiling. The local `list`
+  and `show` surfaces expose routing evidence and dependencies without starting
+  agents, provider calls, shell commands, edits, or merges.
+- **Retained agent proposals.** Write orchestrations now archive each isolated
+  role's non-empty patch under `.ronin/agent-proposals`, bound to the exact
+  source `HEAD` and protected by a content digest. `ronin util proposals list`,
+  `show`, and explicit `apply --yes` complete the review path without automatic
+  merges. Apply fails closed for unverified runs, altered patches, a moved base
+  revision, and non-clean Git trees; it stages only and never commits or pushes.
+- Interrupted or failed orchestrations can now start a linked recovery run with the original selected profiles, roster, mode, and a bounded status-only handoff. `ronin util agent-recover` never treats prior output as verification or silently resumes a completed run.
+- Real subtask outcomes now feed a durable local provider-health store with temporary exponential cooldown and success-based recovery. Benchmark and imported SWE-bench/judge reports become project-local model scorecards that `agent-route --use-scorecards` can use as explicit routing quality evidence. `ronin util agent-ops` joins run, queue, recovery, ledger, provider, and scorecard status without provider calls.
+- Patch preflight now validates JSON and TOML in addition to Python and locally available TypeScript parsing, preventing malformed structured configuration writes before disk mutation.
+- Repository-owned agent constitutions now enforce protected write paths, team caps, specialist-role requirements, and optional sandbox requirements from `.ronin/constitution.json`. Orchestration and interactive coding fail safely on malformed policy. Completed orchestrations append compact, hash-chained local ledger events verifiable with `ronin util ledger verify`.
+- Ronin now has durable local SQLite project memory with deterministic hashing retrieval, sensitive agent writes, and likely-secret rejection; compatible `RONIN.md`, `CLAUDE.md`, and `AGENTS.md` behavior remains unchanged. New `project-memory` commands manage explicit facts without cloud storage.
+- The agent control plane adds bounded parallel queue workers, explicit evidence-led per-role model-routing recommendations, and competing worktree trial execution with verified-only selection. Trial selection never merges or applies a candidate diff automatically.
+- `ronin eval platform` now covers constitution policy, ledger verification, and local project memory alongside queue, telemetry, retrieval, and sandbox regressions.
+- The agent platform now gives each implementation orchestration role a separate detached Git worktree, keeps review/test views on the candidate implementation tree, attributes resulting diffs by role, and never writes to the parent checkout. Project-local agent queues, terminal run/provider dashboards, a sandbox-policy inspector, and `ronin eval platform` provide controlled scheduling and observable offline operation. Semantic code retrieval now has a deterministic local hashing fallback and is available to coding runs without credentials or network egress.
+- `ronin-memory` now includes a dependency-free `SqliteBackend` for persistent, local-first long-term memory with namespace isolation, bounded retention, and pluggable scoring.
+- `ronin-agent-patterns` now supports per-run token, wall-clock, and provider-reported cost ceilings. Exhausted budgets return partial output with an explicit trace error and never execute newly requested tools.
+- `ronin-agent-patterns` now includes an opt-in, repository-scoped `PlanCache` for `PlannerExecutorAgent`, with atomic local writes, repository-change invalidation, bounded retention, and no raw task text in cache records.
+- Diff previews now use a chunk-aware, fixed-width renderer that treats diff content as literal terminal text, including raw fallback output.
+- Agent-facing checkpoint rewinds now offer a read-only preview, create a mandatory recovery snapshot before changing files, and atomically persist their local index.
+- Provider discovery now recognizes provider-specific environment keys (for example `GROQ_API_KEY` and `OPENROUTER_API_KEY`) ahead of the shared OpenAI-compatible fallback; health reporting names only the credential source, never a key value.
+- Plugins now support a literal, non-executing `PLUGIN` manifest for capability declarations. Malformed or dynamic manifests are rejected before import; undeclared legacy plugins receive a conservative full capability set. `subprocess` and `payment` declarations require an explicit approval even under `--yolo`.
+- Python edits now receive a pre-write AST parse check, so invalid `write_file`, `edit_file`, and `multi_edit` proposals are rejected without changing the file. Valid Python edits report removed top-level public symbols; TypeScript syntax is checked opportunistically with a project-local compiler.
+- `ronin dev perf` now has a versioned JSON report format, deterministic benchmark executor seam, atomic report writes without captured command output, p95/failure summaries, and baseline comparison that can fail on a configurable median-latency or failed-run regression.
+- Release automation now validates a fixed seven-package manifest against the tag, synchronizes package versions and CLI pins, verifies wheel/sdist completeness and clean installs, emits `SHA256SUMS`, and uploads checked artifacts to the GitHub Release. The legacy `csk` release-script wording has been removed.
+- `ronin orchestrate` now selects a bounded, task-relevant team from a 1,170-profile generated specialist catalog and optional non-executing `.ronin/agents.json` project profiles. `ronin agents` shows the catalog and selected team; all write-capable profiles remain worktree-isolated and approval-gated.
+- Agent routing now combines task tags with local repository-map evidence (relevant files, symbols, language, and project markers) and explains every selected specialist. Write orchestrations enforce a researcher -> implementer -> independent reviewer/tester workflow contract before any provider call, with per-agent time/turn ceilings, an optional token ceiling, bounded parallelism, a total plan reservation limit, and observed provider-health reporting. Live task state is atomically persisted under `.ronin/agent-runs/`; `ronin eval agents` adds provider-free regression coverage for routing, workflow, and governance. Existing installations need no migration; the new local task-board history is removable independently.
+
 ## [1.0.0]
 
 Package version `1.0.0` (PEP 440); displays as `v1.0.0`. The 1.0.0 line is rc.3 plus two release-readiness fixes. It carries forward all of the RC-series hardening (fail-closed budget, relay traversal confinement, tool-gate drift guard, destructive-floor coverage of `git reset --hard` / forced `git clean`), the honesty fixes (eval skips, graceful errors, deterministic offline eval), and standalone packaging (proven clean-install, run in CI). Full notes: `docs/release/v1.0.0-notes.md`.

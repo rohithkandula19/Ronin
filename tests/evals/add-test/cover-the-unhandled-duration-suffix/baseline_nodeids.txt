@@ -1,0 +1,6 @@
+tests/test_duration.py::test_formats_with_the_largest_exact_unit
+tests/test_duration.py::test_ignores_surrounding_whitespace_and_case
+tests/test_duration.py::test_parses_hours_and_days
+tests/test_duration.py::test_parses_minutes
+tests/test_duration.py::test_parses_seconds
+tests/test_duration.py::test_rejects_an_empty_duration

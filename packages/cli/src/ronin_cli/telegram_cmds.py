@@ -426,5 +426,3 @@ def telegram(
         bot.run_forever()
     except KeyboardInterrupt:
         console.print("\n[dim]stopped[/dim]")
-
-

@@ -473,7 +473,24 @@ def _slash_fix(ctx: SlashCtx) -> str:
 
 def _slash_context(ctx: SlashCtx) -> str:
     from . import code_mode
+    from .config import save_config
+    from .context_policy import parse_context_window, resolve_context_policy
+
     console, config, transcript = ctx.console, ctx.config, ctx.transcript
+    if len(ctx.parts) > 1:
+        requested = ctx.parts[1].lower()
+        if requested in {"auto", "default", "off"}:
+            config.context_window = None
+            save_config(config)
+            console.print("  [green]✓[/green] context window [bold]auto[/bold] — using the provider/model policy.")
+        else:
+            try:
+                config.context_window = parse_context_window(requested)
+            except ValueError as exc:
+                console.print(f"  [yellow]{exc}[/yellow]")
+                return "handled"
+            save_config(config)
+            console.print(f"  [green]✓[/green] context window [bold]{config.context_window:,}[/bold] tokens.")
     turns = sum(1 for e in transcript if e.startswith("USER: "))
     # Estimate from the STRUCTURED history the model actually receives — it
     # carries tool calls + tool results (file dumps, command output) that the
@@ -486,14 +503,24 @@ def _slash_context(ctx: SlashCtx) -> str:
         convo = "\n".join(transcript)
         entries = f"{len(transcript)} entries"
     toks = code_mode._estimate_tokens(convo)
-    window = 120_000 if config.provider == "anthropic" else 28_000
-    pct = min(100, round(toks / window * 100)) if window else 0
+    policy = resolve_context_policy(config)
+    pct = policy.used_percent(toks)
     console.print("[bold]context[/bold]")
-    console.print(f"  {code_mode.render_bar(toks, window)} [dim]~{toks:,} / {window:,} tokens "
-                  f"({pct}%)[/dim]", highlight=False)
+    console.print(
+        f"  {code_mode.render_bar(toks, policy.input_budget_tokens)} [dim]~{toks:,} / "
+        f"{policy.input_budget_tokens:,} input tokens ({pct}%)[/dim]",
+        highlight=False,
+    )
     console.print(f"  [#6b7089]{turns} turns · {entries} · "
                   f"~{len(convo):,} chars[/#6b7089]", highlight=False)
-    console.print("  [dim]shrink with [bold]/compact[/bold] · wipe with [bold]/clear[/bold][/dim]")
+    console.print(
+        f"  [#6b7089]window {policy.window_tokens:,} · reserve {policy.output_reserve_tokens:,} output · "
+        f"compact at {policy.compaction_threshold_tokens:,} · retrieval {policy.retrieval_budget_tokens:,} "
+        f"({policy.source})[/#6b7089]",
+        highlight=False,
+    )
+    console.print("  [dim]set with [bold]/context 64k[/bold] · reset with [bold]/context auto[/bold] · "
+                  "shrink with [bold]/compact[/bold][/dim]")
     return "handled"
 
 
@@ -817,6 +844,45 @@ def _slash_theme(ctx: SlashCtx) -> str:
     return "handled"
 
 
+def _slash_presence(ctx: SlashCtx) -> str:
+    """Show or set human-centered interactive delivery preferences.
+
+    The setting controls how Ronin communicates. It is not a claim that Ronin
+    is human or that it stores a user's inferred emotional state.
+    """
+    from .config import save_config
+    from .presence import INTERACTION_STYLES
+
+    parts, console, config = ctx.parts, ctx.console, ctx.config
+    if len(parts) == 1:
+        checkins = "on" if config.relational_checkins else "off"
+        console.print(
+            f"[bold]presence[/bold] [#6b7089]. active [bold]{config.interaction_style}[/bold] . "
+            f"check-ins [bold]{checkins}[/bold][/#6b7089]"
+        )
+        console.print("  [dim]set with /presence balanced|direct|supportive|quiet . "
+                      "/presence checkins on|off[/dim]")
+        return "handled"
+
+    requested = parts[1].lower()
+    if requested in {"checkin", "checkins"}:
+        if len(parts) != 3 or parts[2].lower() not in {"on", "off", "true", "false"}:
+            console.print("  [#e0af68]usage:[/#e0af68] /presence checkins on|off")
+            return "handled"
+        config.relational_checkins = parts[2].lower() in {"on", "true"}
+        save_config(config)
+        state = "on" if config.relational_checkins else "off"
+        console.print(f"  [green]ok[/green] task-relevant check-ins [bold]{state}[/bold] [dim](saved)[/dim]")
+        return "handled"
+    if requested not in INTERACTION_STYLES:
+        console.print("  [#e0af68]unknown presence style[/#e0af68] - use " + ", ".join(INTERACTION_STYLES))
+        return "handled"
+    config.interaction_style = requested
+    save_config(config)
+    console.print(f"  [green]ok[/green] presence -> [bold]{requested}[/bold] [dim](saved; next message)[/dim]")
+    return "handled"
+
+
 # command name (and aliases) → handler
 SLASH_DISPATCH: dict[str, Callable[[SlashCtx], str]] = {
     "q": _slash_quit, "quit": _slash_quit, "exit": _slash_quit,
@@ -828,6 +894,7 @@ SLASH_DISPATCH: dict[str, Callable[[SlashCtx], str]] = {
     "mode": _slash_mode,
     "plan": _slash_plan,
     "theme": _slash_theme,
+    "presence": _slash_presence,
     "clear": _slash_clear,
     "undo": _slash_undo,
     "diff": _slash_diff,

@@ -1,0 +1,13 @@
+id = "add-test/cover-the-unhandled-duration-suffix"
+category = "add-test"
+prompt = """timekit turns duration strings like "90s" or "15m" into seconds, and it is meant to be strict: if it does not recognise the unit on the end of the string (say "5x", or a bare "30" with no unit at all) it should refuse the value rather than quietly treating it as seconds — that behaviour is what stops a typo in a config file turning into a worker that sleeps for the wrong length of time.
+
+Nothing in tests/test_duration.py exercises that refusal; the existing tests only cover the units we do understand. Please add a test for it to tests/test_duration.py."""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = ["tests/test_duration.py"]
+max_turns = 10
+timeout_seconds = 180
+tags = ["python", "pytest", "error-branch"]
+regression_gate = false

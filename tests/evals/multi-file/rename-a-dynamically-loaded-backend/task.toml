@@ -1,0 +1,24 @@
+id = "multi-file/rename-a-dynamically-loaded-backend"
+category = "multi-file"
+prompt = """
+The `JsonFileStore` class is badly named now: it is the only file-backed store we
+have, and we are about to teach it to write CSV and plain text too. Rename the class
+to `FileStore`.
+
+Everything that selects a store has to keep working -- `resolve()` on the aliases and
+opening a profile from config/backends.json. Drop the old name completely.
+"""
+fixture = "fixture"
+git_sha = ""
+git_url = ""
+files_expected = [
+  "storekit/backends/jsonfile.py",
+  "storekit/backends/__init__.py",
+  "storekit/registry.py",
+  "config/backends.json",
+  "tests/test_registry.py",
+]
+max_turns = 14
+timeout_seconds = 180
+tags = ["python", "rename", "dynamic-import", "json-config"]
+regression_gate = false

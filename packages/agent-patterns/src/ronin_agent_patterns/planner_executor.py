@@ -1,18 +1,13 @@
 from __future__ import annotations
 
 import re
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from .plan_cache import Plan, PlanCache
 from .providers import AnthropicProvider, LLMProvider, Message
 from .react import ReActAgent
 from .types import AgentResult, Step, Tool
-
-
-class Plan(BaseModel):
-    goal: str
-    steps: list[str]
 
 
 class PlannerExecutorAgent(BaseModel):
@@ -25,6 +20,9 @@ class PlannerExecutorAgent(BaseModel):
     tools: list[Tool] = Field(default_factory=list)
     provider: LLMProvider | None = None
     max_replans: int = 1
+    # Opt-in persistence. ``PlanCache(repo_root)`` stores initial plans under
+    # <repo_root>/.ronin/plans and invalidates them when the repo changes.
+    plan_cache: PlanCache | None = None
 
     # Backward-compat:
     model: str | None = None
@@ -37,8 +35,13 @@ class PlannerExecutorAgent(BaseModel):
                 api_key=self.api_key,
             )
 
-    def _make_plan(self, task: str, prior_failure: str | None) -> Plan:
+    def _make_plan(self, task: str, prior_failure: str | None) -> tuple[Plan, str]:
         assert self.provider is not None
+        if prior_failure is None and self.plan_cache is not None:
+            cached = self.plan_cache.load(task)
+            if cached is not None:
+                return cached, "hit"
+
         prompt = f"Task: {task}\n\n"
         if prior_failure:
             prompt += (
@@ -60,9 +63,13 @@ class PlannerExecutorAgent(BaseModel):
         if not match:
             raise ValueError(f"Planner did not emit <plan></plan>: {response.text[:200]}")
         try:
-            return Plan.model_validate_json(match.group(1).strip())
+            plan = Plan.model_validate_json(match.group(1).strip())
         except ValidationError as exc:
             raise ValueError(f"Planner emitted invalid plan JSON: {exc}") from exc
+        if prior_failure is None and self.plan_cache is not None:
+            self.plan_cache.store(task, plan)
+            return plan, "miss"
+        return plan, "bypass" if prior_failure else "disabled"
 
     def run(self, task: str) -> AgentResult:
         trace: list[Step] = []
@@ -71,7 +78,7 @@ class PlannerExecutorAgent(BaseModel):
 
         for replan_idx in range(self.max_replans + 1):
             try:
-                plan = self._make_plan(task, prior_failure)
+                plan, cache_status = self._make_plan(task, prior_failure)
             except Exception as exc:  # noqa: BLE001
                 trace.append(Step(kind="error", content=f"plan failed: {exc}"))
                 return AgentResult(
@@ -79,7 +86,8 @@ class PlannerExecutorAgent(BaseModel):
                     iterations=replan_idx + 1,
                     trace=trace, error=str(exc),
                 )
-            trace.append(Step(kind="plan", content=plan.model_dump()))
+            trace.append(Step(kind="plan", content=plan.model_dump(),
+                              metadata={"cache": cache_status}))
 
             remaining = plan.steps[len(completed):]
             executor = ReActAgent(

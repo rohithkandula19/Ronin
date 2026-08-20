@@ -60,8 +60,29 @@ htmlcov/
 # SaaS / CLI runtime artifacts
 csk_saas.db
 csk_saas.db-journal
-# ronin local config — holds plaintext API keys; NEVER commit it
-.ronin/
+# ronin workspace config. Default-deny with an explicit allowlist, because the
+# directory holds both plaintext API keys (config.toml) and the four files a team
+# is *supposed* to share. The old blanket `.ronin/` ignored all of it — and since
+# git does not descend into an ignored directory, no negation inside could rescue
+# anything — so the committed project settings, subagents, slash commands and MCP
+# server list were silently untrackable.
+#
+# `.ronin/*` (not `.ronin/`) matches only direct children and lets git descend, so
+# the negations below work. Anything not named here stays ignored: a new file some
+# code drops in this directory is secret until someone decides otherwise.
+.ronin/*
+!.ronin/settings.json
+!.ronin/mcp.json
+!.ronin/hooks.json
+!.ronin/agents/
+!.ronin/commands/
+# The schema notes for the three files above. JSON has no comments, and an unknown key
+# in settings.json is an *error* rather than ignored, so the documentation cannot live
+# inside the files it documents.
+!.ronin/README.md
+# ...but never the local layer, even though its parent is now walkable.
+.ronin/settings.local.json
+.ronin/*.local.json
 # legacy (pre-rename) — still ignored for older checkouts.
 # NB: git does not support trailing comments on pattern lines.
 .csk/
@@ -69,3 +90,15 @@ csk_saas.db-journal
 ronin_image_*.png
 ronin_image_*.jpg
 ronin_video_*.mp4
+
+# Eval task fixtures are INPUTS, not build output. A repo-wide rule reaching inside one
+# deletes part of a test case: `*.log` silently ate a CI-log fixture and the three
+# `app.log` files a log-rotation task exists to rotate. Such a file passes for whoever
+# wrote it — it is on their disk — and fails forever in CI, with nothing in the run
+# pointing at why. `scripts/check_eval_tasks.py` now fails on it, and this stops it.
+!tests/evals/**/fixture/**
+!tests/evals/**/solution/**
+!tests/evals/**/broken/**
+# ...but bytecode is still build output, wherever it appears.
+tests/evals/**/__pycache__/
+tests/evals/**/*.pyc

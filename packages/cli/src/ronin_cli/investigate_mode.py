@@ -130,12 +130,15 @@ def run_investigate(
 
     tools = build_investigate_tools(config, root)
     services = ", ".join(config.configured_services()) or "none"
+    from .context_policy import resolve_context_policy
+
+    context_policy = resolve_context_policy(config)
     agent = ReActAgent(
         system=INVESTIGATE_SYSTEM + f"\n\nConfigured data services: {services}. Code root: {Path(root).resolve()}.",
         tools=tools,
         provider=build_provider(config),
         max_iterations=max_iterations,
-        compact_after_tokens=120_000,
+        compact_after_tokens=context_policy.compaction_threshold_tokens,
         compact_keep_recent=6,
     )
 

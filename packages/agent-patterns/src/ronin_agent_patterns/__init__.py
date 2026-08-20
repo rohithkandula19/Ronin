@@ -17,6 +17,8 @@ from .effort import (
     effort_to_params,
     normalize_effort,
 )
+from .contracts import AgentRequest, ContextAssembly, ContextFragment, ContextProvider, assemble_context
+from .durable import BudgetDecision, BudgetExceeded, BudgetLimits, DurableRunError, JournalEvent, RunBudget, RunJournal
 from .orchestrator import (
     OrchestrationPlan,
     OrchestrationResult,
@@ -25,7 +27,8 @@ from .orchestrator import (
     Subtask,
     SubtaskResult,
 )
-from .planner_executor import Plan, PlannerExecutorAgent
+from .plan_cache import Plan, PlanCache, repository_fingerprint
+from .planner_executor import PlannerExecutorAgent
 from .providers import (
     AnthropicProvider,
     FailoverProvider,
@@ -45,8 +48,16 @@ from .types import AgentResult, Step, Tool
 
 __all__ = [
     "AgentResult",
+    "AgentRequest",
+    "BudgetDecision",
+    "BudgetExceeded",
+    "BudgetLimits",
     "AnthropicProvider",
     "Critique",
+    "ContextAssembly",
+    "ContextFragment",
+    "ContextProvider",
+    "DurableRunError",
     "EFFORT_LEVELS",
     "describe_effort",
     "effort_to_params",
@@ -54,6 +65,7 @@ __all__ = [
     "FailoverProvider",
     "FakeProvider",
     "LLMProvider",
+    "JournalEvent",
     "LLMResponse",
     "Message",
     "OllamaProvider",
@@ -63,9 +75,13 @@ __all__ = [
     "OrchestratorAgent",
     "OrchestratorSubAgent",
     "Plan",
+    "PlanCache",
     "PlannerExecutorAgent",
     "ReActAgent",
+    "RunBudget",
+    "RunJournal",
     "ReflexionAgent",
+    "repository_fingerprint",
     "Step",
     "StreamEvent",
     "SubAgent",
@@ -74,4 +90,5 @@ __all__ = [
     "SupervisorAgent",
     "Tool",
     "ToolCall",
+    "assemble_context",
 ]
