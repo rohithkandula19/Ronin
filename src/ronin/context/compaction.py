@@ -38,7 +38,7 @@ per provider would be worse than being explicit about the approximation.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Container, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -72,6 +72,11 @@ COMPACTION_KEY = "compaction"
 
 #: Set on each re-emitted tool couple, naming the path whose result it preserves.
 RETAINED_PATH_KEY = "retained_path"
+
+#: Set on a retained result whose content ``max_retained_chars`` cut down. The path
+#: survives the fold; the content the model can see is only part of what it read, so
+#: anything reasoning about "does the model still have this file" has to exclude it.
+CLAMPED_KEY = "retained_clamped"
 
 #: The five sections, in order. Fixed shape: see the module docstring.
 SUMMARY_SECTIONS: tuple[str, ...] = (
@@ -352,6 +357,43 @@ def latest_tool_result_per_path(
                 continue
             latest[path] = (block, answer)
     return latest
+
+
+def paths_with_visible_read(
+    messages: Sequence[Message], *, read_tools: Container[str]
+) -> frozenset[str]:
+    """Paths whose *read* result the model can still see in ``messages``.
+
+    The question a file-state tracker cannot answer for itself, asked of the only
+    thing that knows: the transcript. One rule covers every way content leaves —
+    folded into the summary, given up by :func:`_fit_retention` to make room, or
+    displaced because retention keeps the most recent result *per path* and a later
+    ``grep`` scoped to that same file overwrote the read that had the contents.
+
+    Restricted to ``read_tools`` for exactly that last reason. A surviving result for
+    a path is not the same as surviving file content: a grep hit names the path and
+    carries three matching lines.
+
+    A retained result flagged :data:`CLAMPED_KEY` does not count. Its path survived
+    the fold with only part of what was read, and half a file is not the file.
+    """
+    answered = {
+        block.tool_use_id
+        for message in messages
+        for block in message.content_blocks
+        if isinstance(block, ToolResultBlock)
+    }
+    visible: set[str] = set()
+    for message in messages:
+        if message.metadata.get(CLAMPED_KEY):
+            continue
+        for block in message.content_blocks:
+            if not isinstance(block, ToolUse) or block.name not in read_tools:
+                continue
+            path = file_path_from_arguments(block.arguments)
+            if path is not None and block.id in answered:
+                visible.add(path)
+    return frozenset(visible)
 
 
 # --------------------------------------------------------------------------- #
@@ -782,6 +824,11 @@ def _retained_couples(
             content = clamp(
                 content, budget=OutputBudget(remaining_chars=policy.max_retained_chars)
             ).text
+        metadata: dict[str, Any] = {RETAINED_PATH_KEY: path}
+        if content != result.content:
+            # Recorded rather than inferred later: "was this clamped" is knowable
+            # exactly here and only guessable from the finished transcript.
+            metadata[CLAMPED_KEY] = True
         couples.append(
             (
                 path,
@@ -789,7 +836,7 @@ def _retained_couples(
                     Message(
                         role=Role.ASSISTANT,
                         content_blocks=(use,),
-                        metadata={RETAINED_PATH_KEY: path},
+                        metadata=dict(metadata),
                     ),
                     Message(
                         role=Role.TOOL,
@@ -800,7 +847,7 @@ def _retained_couples(
                                 is_error=result.is_error,
                             ),
                         ),
-                        metadata={RETAINED_PATH_KEY: path},
+                        metadata=dict(metadata),
                     ),
                 ),
             )
