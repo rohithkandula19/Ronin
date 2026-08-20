@@ -114,7 +114,14 @@ jobs:
         run: uv run python scripts/sync_typecheck_paths.py --check
 
       - name: Lint (ruff)
-        run: uv run ruff check src/ronin tests
+        run: uv run ruff check src/ronin tests scripts
+
+      # Formatting was enforced only by pre-commit, so it bound whoever had run
+      # `pre-commit install` and nobody else — and a file reached main unformatted
+      # while every check stayed green. CI is the only mandatory gate, so the rule
+      # lives here too, at the same scope as the lint above and as the hook.
+      - name: Format (ruff format --check)
+        run: uv run ruff format --check src/ronin tests scripts
 
       - name: Typecheck (mypy --strict)
         run: uv run mypy

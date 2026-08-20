@@ -383,6 +383,7 @@ target-version = "py311"
 src = ["src", "tests"]
 include = [
     "src/ronin/**/*.py",
+    "scripts/**/*.py",
     "tests/agents/**/*.py",
     "tests/cli/**/*.py",
     "tests/context/**/*.py",

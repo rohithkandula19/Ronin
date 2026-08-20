@@ -49,7 +49,11 @@ repos:
   #
   # `files` is not optional here, and this was found the hard way. pre-commit hands ruff
   # explicit paths, and explicit paths BYPASS the `include` list in pyproject.toml — so
-  # an unrestricted hook lints the whole monorepo. The first `pre-commit run --all-files`
+  # an unrestricted hook lints the whole monorepo. That bypass also hid a hole for a
+  # while: `scripts/` was outside `include`, so the hook linted it (explicit paths) and
+  # `ruff check src/ronin tests scripts` in CI did not (directory argument, filtered to
+  # nothing, "All checks passed!"). `scripts/**/*.py` is in `include` now, so the two
+  # agree by construction rather than by the tree happening to be clean. The first `pre-commit run --all-files`
   # reported **4406 errors and auto-fixed 1392 of them across 522 files** in `apps/`,
   # `training/`, `examples/` and the ~300-module v1 `packages/` tree, none of which is
   # lint-clean and none of which this change is touching. The regex below is the tree

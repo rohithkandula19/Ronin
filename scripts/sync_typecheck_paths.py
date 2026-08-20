@@ -142,7 +142,17 @@ def render() -> str:
     # the hook modules under test from there, and without it mypy cannot resolve them —
     # a test mypy cannot resolve is a test with no type checking at all.
     mypy_path = ":".join(["src", "scripts", *(f"tests/{name}" for name in dirs)])
-    include = ["src/ronin/**/*.py", *(f"tests/{name}/**/*.py" for name in dirs)]
+    # `scripts` IS in ruff's include, unlike mypy's `files`, and the asymmetry is the
+    # point: ruff filters a *directory* argument through `include` and reports "All
+    # checks passed!" on the empty result, so `ruff check src/ronin tests scripts` —
+    # which release.yml and the Makefile both run — was linting scripts/ vacuously.
+    # pre-commit hid it by passing explicit filenames, which bypass `include`, so the
+    # tree stayed clean and the gate stayed a no-op.
+    include = [
+        "src/ronin/**/*.py",
+        "scripts/**/*.py",
+        *(f"tests/{name}/**/*.py" for name in dirs),
+    ]
     modules = test_modules()
 
     def toml_list(values: list[str], indent: str = "    ") -> str:

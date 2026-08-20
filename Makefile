@@ -59,6 +59,7 @@ test-frontend:
 # without linting anything. They run the real tools now, over the same scope as CI.
 lint:
 	uv run ruff check src/ronin tests scripts
+	uv run ruff format --check src/ronin tests scripts
 	@echo "frontend: cd apps/web && npm run lint"
 
 typecheck:
