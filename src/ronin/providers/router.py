@@ -41,7 +41,7 @@ from typing import Any
 
 from .base import ModelClient, Transport
 from .resilience import FailoverClient, RetryingClient, RetryPolicy, Sleeper
-from .types import Capabilities, ProviderError
+from .types import CAPABILITY_OVERRIDE_KEYS, ProviderError
 
 
 def _default_retry() -> RetryPolicy:
@@ -76,7 +76,10 @@ class ModelSpec:
     model: str
     base_url: str = ""
     api_key_env: str = ""
-    capabilities: Capabilities | None = None
+    #: Only the capability keys the config actually named. Merged over whatever
+    #: the built adapter reports, so naming one capability cannot reset the rest;
+    #: empty means "the adapter's own defaults, untouched".
+    capability_overrides: Mapping[str, Any] = field(default_factory=dict)
     adapter_path: str = ""
     #: Per-million-token prices, for the ledger. Absent means "unpriced", which
     #: the ledger records as zero cost *and* flags — not as free.
@@ -236,7 +239,7 @@ def parse_config(data: Mapping[str, Any]) -> RouterConfig:
 
 
 def _parse_model(name: str, entry: Mapping[str, Any]) -> ModelSpec:
-    caps = _parse_capabilities(entry)
+    overrides = _parse_capability_overrides(entry)
     headers = entry.get("extra_headers")
     body = entry.get("extra_body")
     return ModelSpec(
@@ -245,7 +248,7 @@ def _parse_model(name: str, entry: Mapping[str, Any]) -> ModelSpec:
         model=str(entry.get("model", "")),
         base_url=str(entry.get("base_url", "")),
         api_key_env=str(entry.get("api_key_env", "")),
-        capabilities=caps,
+        capability_overrides=overrides,
         adapter_path=str(entry.get("adapter_path", "")),
         price_in=float(entry.get("price_in", 0.0)),
         price_out=float(entry.get("price_out", 0.0)),
@@ -255,35 +258,22 @@ def _parse_model(name: str, entry: Mapping[str, Any]) -> ModelSpec:
     )
 
 
-#: Capability keys a config may override. Anything else in the table is ignored
-#: rather than fatal, so a config written for a newer Ronin still loads.
-_CAP_KEYS = (
-    "native_tools",
-    "parallel_tools",
-    "prompt_cache",
-    "thinking",
-    "vision",
-)
+def _parse_capability_overrides(entry: Mapping[str, Any]) -> Mapping[str, Any]:
+    """The capability keys this entry names, and only those.
 
+    Values are carried through raw and checked at build time by
+    :func:`~ronin.providers.types.apply_capability_overrides`, which is where the
+    adapter's own defaults are known. Parsing them into a whole
+    :class:`~ronin.providers.types.Capabilities` here is what caused the bug this
+    replaces: a config naming ``max_context`` alone got a fully-populated value
+    with pessimistic fallbacks for everything else, silently turning caching,
+    thinking and vision off.
 
-def _parse_capabilities(entry: Mapping[str, Any]) -> Capabilities | None:
-    """Capability overrides from config, or None to use the adapter's defaults.
-
-    Partial overrides are supported and merged against the adapter default at
-    build time — a config saying only ``native_tools = false`` should not have to
-    restate ``max_context``.
+    A key in the table that is not a capability is left alone rather than being
+    fatal — the entry also carries ``provider``, ``model``, prices and headers, and
+    a config written for a newer Ronin should still load.
     """
-    present = [key for key in (*_CAP_KEYS, "max_context") if key in entry]
-    if not present:
-        return None
-    return Capabilities(
-        native_tools=bool(entry.get("native_tools", True)),
-        parallel_tools=bool(entry.get("parallel_tools", entry.get("native_tools", True))),
-        prompt_cache=bool(entry.get("prompt_cache", False)),
-        thinking=bool(entry.get("thinking", False)),
-        max_context=int(entry.get("max_context", 32_768)),
-        vision=bool(entry.get("vision", False)),
-    )
+    return {key: entry[key] for key in CAPABILITY_OVERRIDE_KEYS if key in entry}
 
 
 #: Builds a client from a spec. ``registry.build_client`` is the real one; tests

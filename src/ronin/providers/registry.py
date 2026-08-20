@@ -15,11 +15,17 @@ from dataclasses import replace
 from .anthropic import AnthropicClient
 from .base import HttpTransport, ModelClient, Transport
 from .local_adapter import build_local_adapter
-from .mlx_local import LOCAL_DEFAULTS, MLXClient
+from .mlx_local import MLXClient
 from .openai_compat import KNOWN_BASE_URLS, MoonshotClient, OpenAICompatClient
 from .router import ModelSpec
 from .shim import ShimClient
-from .types import Capabilities, ModelDelta, ModelRequest, ProviderError
+from .types import (
+    Capabilities,
+    ModelDelta,
+    ModelRequest,
+    ProviderError,
+    apply_capability_overrides,
+)
 
 #: Provider name → builder. The keys are what appears in a config file.
 Builder = Callable[[ModelSpec, Transport, Mapping[str, str] | None], ModelClient]
@@ -33,7 +39,6 @@ def _build_anthropic(
         transport=transport,
         api_key=spec.api_key(env),
         base_url=spec.base_url or "https://api.anthropic.com",
-        capabilities=spec.capabilities,
         extra_headers=spec.extra_headers,
     )
 
@@ -53,7 +58,6 @@ def _build_openai_compat(
         transport=transport,
         base_url=base_url,
         api_key=spec.api_key(env),
-        capabilities=spec.capabilities,
         extra_headers=spec.extra_headers,
         extra_body=spec.extra_body,
     )
@@ -71,8 +75,6 @@ def _build_moonshot(
     }
     if spec.base_url:
         kwargs["base_url"] = spec.base_url
-    if spec.capabilities is not None:
-        kwargs["capabilities"] = spec.capabilities
     return MoonshotClient(**kwargs)
 
 
@@ -81,7 +83,6 @@ def _build_mlx(spec: ModelSpec, transport: Transport, env: Mapping[str, str] | N
     return MLXClient(
         model=spec.model,
         adapter_path=spec.adapter_path or None,
-        capabilities=spec.capabilities or LOCAL_DEFAULTS,
     )
 
 
@@ -137,6 +138,14 @@ def build_client(
     The shim decision is made *here*, from capabilities, so no other code has to
     know that a model is weak. A caller gets a client that accepts tool specs and
     returns ``ToolUse`` blocks either way.
+
+    Config capability overrides are merged *here* too, and in this order for a
+    reason: the adapter is built first so its own defaults are the thing being
+    merged onto — no builder has to restate what a provider supports, and no copy
+    of those defaults can drift from the class that owns them. The merge lands
+    before the shim decision because ``native_tools = false`` in a config is a
+    request to shim, and a decision made from pre-override capabilities would
+    ignore it.
     """
     builder = ADAPTERS.get(spec.provider)
     if builder is None:
@@ -145,6 +154,15 @@ def build_client(
             f"known providers: {sorted(ADAPTERS)}"
         )
     client = builder(spec, transport or HttpTransport(), env)
+    if spec.capability_overrides:
+        merged = apply_capability_overrides(
+            client.capabilities(), spec.capability_overrides, model=spec.name
+        )
+        # A builder that already merged (the local adapter does, because it is also
+        # reachable without a registry) reports the merged value already; wrapping
+        # it again would only add a layer.
+        if merged != client.capabilities():
+            client = with_capabilities(client, merged)
     if not client.capabilities().native_tools:
         return ShimClient(client)
     return client

@@ -26,7 +26,7 @@ from ronin.providers import (
 )
 from ronin.providers.base import ModelClient
 from ronin.providers.registry import ADAPTERS, build_client, describe, with_capabilities
-from ronin.providers.types import ModelDelta, ModelRequest
+from ronin.providers.types import ModelDelta, ModelRequest, apply_capability_overrides
 
 CONFIG_TOML = """
 [roles]
@@ -62,13 +62,17 @@ class StubClient:
         self.spec = spec
 
     def capabilities(self) -> Capabilities:
-        return self.spec.capabilities or Capabilities(
-            native_tools=True,
-            parallel_tools=True,
-            prompt_cache=False,
-            thinking=False,
-            max_context=1000,
-            vision=False,
+        return apply_capability_overrides(
+            Capabilities(
+                native_tools=True,
+                parallel_tools=True,
+                prompt_cache=False,
+                thinking=False,
+                max_context=1000,
+                vision=False,
+            ),
+            self.spec.capability_overrides,
+            model=self.spec.name,
         )
 
     async def stream(self, req: ModelRequest) -> AsyncIterator[ModelDelta]:
@@ -250,21 +254,36 @@ def test_a_config_file_round_trips(tmp_path: Path) -> None:
 
 
 def test_capability_overrides_are_read_from_config() -> None:
-    caps = config().models["qwen-coder-7b"].capabilities
-    assert caps is not None
-    assert caps.native_tools is False
-    assert caps.max_context == 32768
+    assert config().models["qwen-coder-7b"].capability_overrides == {
+        "native_tools": False,
+        "max_context": 32768,
+    }
 
 
 def test_a_model_with_no_capability_keys_leaves_the_adapter_default() -> None:
-    assert config().models["kimi-k2"].capabilities is None
+    assert config().models["kimi-k2"].capability_overrides == {}
 
 
-def test_declaring_thinking_alone_does_not_reset_the_other_axes() -> None:
-    caps = config().models["deepseek-r1"].capabilities
-    assert caps is not None
-    assert caps.thinking is True
-    assert caps.native_tools is True
+def test_the_parser_carries_only_the_keys_the_config_named() -> None:
+    """The whole fix, at the parsing end.
+
+    A spec that carried a fully-populated ``Capabilities`` could not say "thinking,
+    and nothing else" — the other five fields had to hold *something*, and whatever
+    that something was got sent to the provider as though the user had asked for it.
+    """
+    assert config().models["deepseek-r1"].capability_overrides == {"thinking": True}
+
+
+def test_keys_that_are_not_capabilities_are_left_out_rather_than_rejected() -> None:
+    # The same table carries provider, model, prices and headers, and a config
+    # written for a newer Ronin should still load.
+    cfg = parse_config(
+        {
+            "roles": {"main": "m"},
+            "models": {"m": {"provider": "anthropic", "model": "x", "price_in": 3.0}},
+        }
+    )
+    assert cfg.models["m"].capability_overrides == {}
 
 
 def test_a_role_pointing_at_an_undefined_model_is_rejected_with_both_names() -> None:
@@ -397,14 +416,7 @@ def test_a_model_without_native_tools_is_wrapped_in_the_shim_automatically() -> 
         name="local",
         provider="mlx",
         model="q",
-        capabilities=Capabilities(
-            native_tools=False,
-            parallel_tools=False,
-            prompt_cache=False,
-            thinking=False,
-            max_context=8192,
-            vision=False,
-        ),
+        capability_overrides={"native_tools": False, "max_context": 8192},
     )
     assert isinstance(build_client(spec), ShimClient)
 
