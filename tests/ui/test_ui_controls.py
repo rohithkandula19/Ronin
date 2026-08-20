@@ -44,13 +44,20 @@ from ronin.core.types import (
     TurnState,
 )
 from ronin.ui.headless import OutputFormat, run_headless
-from ronin.ui.render import ANSI, MARKUP, PLAIN, Styles, strip_controls
+from ronin.ui.render import ANSI, MARKUP, NO_COLOUR_MARKUP, PLAIN, Styles, strip_controls
 
 #: The three attacks named in `strip_controls`, in one string.
 HOSTILE = "hello \x1b]0;PWNED\x07 \x1b[2J \x1b]52;c;cHduZWQ=\x07 world"
 
 #: Every dialect. The point of the change is that this property is not per-dialect.
-DIALECTS: tuple[tuple[str, Styles], ...] = (("PLAIN", PLAIN), ("ANSI", ANSI), ("MARKUP", MARKUP))
+#: A new dialect belongs here the day it is added, which is the whole reason the
+#: control-stripping tests are parametrized rather than written three times.
+DIALECTS: tuple[tuple[str, Styles], ...] = (
+    ("PLAIN", PLAIN),
+    ("ANSI", ANSI),
+    ("MARKUP", MARKUP),
+    ("NO_COLOUR_MARKUP", NO_COLOUR_MARKUP),
+)
 
 
 # --------------------------------------------------------------------------- #
