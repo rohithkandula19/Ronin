@@ -44,6 +44,9 @@ price_cache_read = 0.30
 
 # DeepSeek-R1 streams its reasoning on a separate field; the openai-compatible
 # adapter surfaces that as thinking rather than as the answer.
+#
+# Naming one capability changes only that one: everything unmentioned stays at the
+# adapter's own default, so this entry keeps the 128k window it would have had.
 [models.deepseek-r1]
 provider = "deepseek"
 model = "deepseek-reasoner"

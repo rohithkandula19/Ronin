@@ -30,9 +30,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from itertools import pairwise
+from typing import Any
 
 from .router import ModelSpec, Role, RouterConfig
-from .types import Capabilities
 
 #: Provider names that run on the user's own hardware — free by construction, whatever
 #: the price fields say. Kept beside the OpenAI-compatible local servers the wizard knows.
@@ -100,17 +100,21 @@ def pricing_tier(spec: ModelSpec) -> PricingTier:
 
 @dataclass(frozen=True, slots=True)
 class ModelCapabilityRow:
-    """One model's row in the matrix: who it is, what it costs, and what it can do.
+    """One model's row in the matrix: who it is, what it costs, and what config claims.
 
-    ``capabilities`` is ``None`` when the config declared none — reported as unknown
-    rather than guessed, the same rule the pricing tier follows.
+    ``capability_overrides`` is what the *config* declares, not what the model can
+    do: the full answer lives on the built client, which merges these over the
+    adapter's own defaults, and building every configured model to fill in a table
+    would load model weights to print a row. Empty means "the adapter decides" —
+    reported as undeclared rather than guessed, the same rule the pricing tier
+    follows.
     """
 
     name: str
     provider: str
     model: str
     tier: PricingTier
-    capabilities: Capabilities | None
+    capability_overrides: Mapping[str, Any]
 
 
 def capability_matrix(config: RouterConfig) -> tuple[ModelCapabilityRow, ...]:
@@ -121,7 +125,7 @@ def capability_matrix(config: RouterConfig) -> tuple[ModelCapabilityRow, ...]:
             provider=spec.provider,
             model=spec.model,
             tier=pricing_tier(spec),
-            capabilities=spec.capabilities,
+            capability_overrides=spec.capability_overrides,
         )
         for spec in sorted(config.models.values(), key=lambda s: s.name)
     )

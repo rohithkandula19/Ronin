@@ -59,6 +59,7 @@ from .resilience import (
 from .router import ModelSpec, Role, Router, RouterConfig, load_config, parse_config
 from .shim import ShimClient, ShimStreamParser, build_shim_system, render_tool_specs
 from .types import (
+    CAPABILITY_OVERRIDE_KEYS,
     CONSERVATIVE,
     Capabilities,
     Completed,
@@ -71,10 +72,12 @@ from .types import (
     ThinkingDelta,
     ToolCallDelta,
     Usage,
+    apply_capability_overrides,
 )
 
 __all__ = [
     "ADAPTERS",
+    "CAPABILITY_OVERRIDE_KEYS",
     "CONSERVATIVE",
     "KNOWN_BASE_URLS",
     "LOCAL_MODEL_NAME",
@@ -120,6 +123,7 @@ __all__ = [
     "Totals",
     "Transport",
     "Usage",
+    "apply_capability_overrides",
     "assemble",
     "build_client",
     "build_local_adapter",

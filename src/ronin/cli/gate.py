@@ -77,9 +77,10 @@ from typing import Any
 
 from ..agents.hooks import HookEvent, HookReport, HookRunner, cap
 from ..context.budget import ClampMode, OutputBudget, clamp
-from ..context.filestate import FileStateTracker, FileStatus
+from ..context.compaction import paths_with_visible_read
+from ..context.filestate import WHOLE_FILE, FileStateTracker, FileStatus, ReadWindow
 from ..core.protocols import StreamingToolRegistry, ToolRegistry
-from ..core.types import ToolResult, ToolSpec, ToolUse
+from ..core.types import Message, ToolResult, ToolSpec, ToolUse
 from ..mcp.tools import is_namespaced
 from ..safety.injection import CLOSE_MARKER, OPEN_MARKER, TaintTracker, wrap_and_scan
 from ..safety.policy import PolicyEngine
@@ -101,6 +102,17 @@ READ_TOOLS: frozenset[str] = frozenset({"read"})
 
 #: Argument names holding the single file a mutating tool targets, in priority order.
 PATH_ARGUMENT_KEYS: tuple[str, ...] = ("path", "file_path")
+
+#: The argument a model sets to demand the bytes even though it has been told it
+#: already has them. Named on every stub, because an escape hatch nobody is told
+#: about is not an escape hatch.
+FORCE_ARGUMENT = "force"
+
+#: Suffixes never answered with a stub. An image read returns base64 in
+#: ``artifacts`` rather than content, and artifacts are not what
+#: ``paths_with_visible_read`` measures — so "you already have it" is a claim this
+#: layer cannot back for an image, and the cheap answer is not to make it.
+NO_DEDUP_SUFFIXES: frozenset[str] = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"})
 
 #: Arguments that identify where untrusted content came from, in priority order. The
 #: source string ends up in the fence header and in every taint refusal, so it has to
@@ -157,6 +169,7 @@ class GateStage(StrEnum):
 
     PRE_HOOKS = "pre_hooks"
     FILE_STATE = "file_state"
+    DEDUP = "dedup"
     EXECUTE = "execute"
     RECORD_READ = "record_read"
     TAINT = "taint"
@@ -423,6 +436,31 @@ class GatedRegistry:
         """Every call this gate has seen, oldest first."""
         return tuple(self._log)
 
+    def sync_file_state(self, messages: Sequence[Message]) -> tuple[str, ...]:
+        """Drop read records whose content ``messages`` no longer carries. Returns what went.
+
+        Call after every compaction. The tracker keys on resolved absolute paths and
+        the transcript holds whatever the model typed, so the translation has to
+        happen somewhere that owns both ends — this gate owns the tracker *and* the
+        resolver, and is already the one place a read becomes a record. Doing it in
+        the session instead would mean a second copy of :func:`resolve_path`, and a
+        second copy is how the guard silently stops guarding.
+
+        A path that will not resolve is treated as still visible rather than dropped.
+        Forgetting on a resolution failure would quietly weaken the stale-edit check;
+        keeping is the conservative direction, and the worst it costs is a stub that
+        should not have been offered for a path the model cannot name consistently.
+        """
+        if self.files is None:
+            return ()
+        visible: set[str] = set()
+        for raw in paths_with_visible_read(messages, read_tools=self.read_tools):
+            try:
+                visible.add(str(self.resolve(raw)))
+            except Exception:
+                visible.add(raw)
+        return self.files.retain_only(visible)
+
     # -- the pipeline ------------------------------------------------------- #
 
     async def _run(
@@ -431,7 +469,11 @@ class GatedRegistry:
         try:
             pre = await self._fire_pre(use, draft)
             self._check_file_state(use, draft)
-            result = await self._invoke(use, draft, on_output=on_output)
+            stub = self._dedup_read(use, draft)
+            if stub is not None:
+                result = stub
+            else:
+                result = await self._invoke(use, draft, on_output=on_output)
             if result.ok:
                 self._record_read(use, draft)
                 result, fenced = self._register_untrusted(use, result, draft)
@@ -602,6 +644,49 @@ class GatedRegistry:
                 GateStage.FILE_STATE,
             )
 
+    # -- 2b: the read the model already has --------------------------------- #
+
+    def _dedup_read(self, use: ToolUse, draft: _Draft) -> ToolResult | None:
+        """A stub for a repeat read, or ``None`` to let the call run.
+
+        A model that re-reads an unchanged file pays for the whole thing twice, and
+        the only thing stopping it today is a line in the read tool's description
+        asking it not to. Advice is worth having and is not a mechanism.
+
+        The condition is deliberately narrow, because the failure mode of getting it
+        wrong is the worst kind: telling a model it has content it does not have.
+        :meth:`FileStateTracker.satisfies` is the whole of it — read before, *same
+        window*, unchanged on disk, and not since dropped by ``retain_only`` when
+        compaction folded the content away.
+
+        Even then the stub names ``force``. Every input to that condition is a fact
+        about the world that could be stale in a way this process cannot see, so the
+        model always keeps a way to say "give me the bytes anyway" — one wasted call
+        is a recoverable cost, and an edit written against a file the model never
+        saw is not.
+        """
+        if self.files is None or use.name not in self.read_tools:
+            return None
+        if use.arguments.get(FORCE_ARGUMENT):
+            return None
+        raw = _path_argument(use.arguments)
+        if raw is None:
+            return None
+        try:
+            path = self.resolve(raw)
+        except Exception:
+            # Not our error to raise: let the tool run and report it properly.
+            return None
+        if path.suffix.lower() in NO_DEDUP_SUFFIXES:
+            return None
+        window = _read_window(use.arguments)
+        if window is None or not self.files.satisfies(path, window):
+            return None
+        draft.stages.append(GateStage.DEDUP)
+        draft.path = str(path)
+        draft.file_status = FileStatus.UNCHANGED
+        return ToolResult(ok=True, content=_dedup_stub(raw, window))
+
     # -- 3: the tool itself ------------------------------------------------- #
 
     async def _invoke(
@@ -629,6 +714,12 @@ class GatedRegistry:
     def _record_read(self, use: ToolUse, draft: _Draft) -> None:
         if self.files is None or use.name not in self.read_tools:
             return
+        if GateStage.DEDUP in draft.stages:
+            # A stub is not a read. The record it was answered from is already
+            # current by definition — ``satisfies`` just checked it against disk —
+            # and re-writing it would claim the model saw something again when the
+            # whole point of the stage was that nothing was sent.
+            return
         raw = _path_argument(use.arguments)
         if raw is None:
             draft.notes.append(
@@ -636,8 +727,12 @@ class GatedRegistry:
                 "for the stale-edit check"
             )
             return
+        # A malformed window records as whole-file: the tool either refused the call
+        # (so nothing was shown and the record is moot) or ignored the bad argument
+        # and served the default, which is what whole-file means.
+        window = _read_window(use.arguments) or WHOLE_FILE
         try:
-            record = self.files.record_read(self.resolve(raw))
+            record = self.files.record_read(self.resolve(raw), window=window)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -730,6 +825,51 @@ def gated(
 # --------------------------------------------------------------------------- #
 # internals
 # --------------------------------------------------------------------------- #
+
+
+def _read_window(arguments: Mapping[str, Any]) -> ReadWindow | None:
+    """The window a read asked for, or ``None`` if the call does not describe one.
+
+    ``None`` means "do not dedup this call" — and a *malformed* window argument gets
+    that answer, not a defaulted one. ``read(path, offset="banana")`` does not mean
+    "the whole file"; treating it as such would answer a call the model got wrong
+    with a stub claiming it already had the answer, and swallow the error the read
+    tool exists to report. ``bool`` is excluded for the same reason: it is an ``int``
+    subclass, and ``offset=true`` is not a line number.
+    """
+    values: dict[str, int | None] = {}
+    for key in ("offset", "limit"):
+        raw = arguments.get(key)
+        if raw is None:
+            values[key] = None
+        elif isinstance(raw, bool) or not isinstance(raw, int):
+            return None
+        else:
+            values[key] = raw
+    return ReadWindow.of(values["offset"], values["limit"])
+
+
+def _dedup_stub(label: str, window: ReadWindow) -> str:
+    """What the model is handed instead of a file it already has.
+
+    Says three things, and the third is the one that matters: what was skipped, why
+    it was safe to skip, and how to override. A stub that only asserted "unchanged"
+    would leave a model that genuinely lost the content with no move except to give
+    up or guess.
+    """
+    where = (
+        "the whole file"
+        if window == WHOLE_FILE
+        else f"lines {window.offset}-{window.offset + window.limit - 1}"
+        if window.limit is not None
+        else f"from line {window.offset}"
+    )
+    return (
+        f"{label} is unchanged since you read it, and {where} is already in this "
+        f"conversation above — re-sending it would spend context on a copy. Scroll "
+        f"back for the contents. If you no longer have them, call read again with "
+        f"{FORCE_ARGUMENT}=true and the file will be re-sent."
+    )
 
 
 def _path_argument(arguments: Mapping[str, Any]) -> str | None:

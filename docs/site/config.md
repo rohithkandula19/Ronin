@@ -38,7 +38,10 @@ Every key a settings file may contain. Anything else is an error naming the key,
 
 | key | type |
 |---|---|
+| `compaction_escalate` | `bool` |
 | `default_decision` | `decision` |
+| `max_retained_chars` | `count_or_null` |
+| `max_retained_paths` | `count_or_null` |
 | `mode` | `mode` |
 | `protected_branches` | `strings` |
 | `sandbox` | `bool` |
@@ -48,6 +51,8 @@ Every key a settings file may contain. Anything else is an error naming the key,
 …plus `rules`, a list of permission rules (below).
 
 `mode` is one of `plan`, `ask`, `auto_edit`, `full`. `default_decision` is one of `allow`, `ask`, `deny`.
+
+A `count_or_null` key takes a positive integer, or `null` for no limit. `max_retained_paths` and `max_retained_chars` bound what compaction keeps in full when it folds the middle of a long session: the most recent tool result per file path. Both default to no limit, which is what makes a file edited early still readable hundreds of turns later — the cost is that a session touching more files than the window can hold stays above the compaction trigger and says so. Bounding either one trades that guarantee for fitting. `compaction_escalate` lets compaction make that trade by itself when the fold still would not fit the window, naming every path it gives up; it is off by default, because an over-budget transcript is a reported problem and a dropped file is a silent one.
 
 ## a rule
 

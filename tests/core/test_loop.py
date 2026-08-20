@@ -39,6 +39,7 @@ from fakes import (
 from ronin.core.loop import (
     INTERRUPTED_ERROR,
     STALL_ABORTED,
+    TRUNCATE_HEAD_SHARE,
     StalledError,
     StopReason,
     fingerprint,
@@ -779,7 +780,38 @@ def test_fingerprint_survives_unserializable_arguments() -> None:
 
 def test_truncate_for_model_reports_the_chars_and_lines_it_cut() -> None:
     content = "a" * 10 + "\n" + "b" * 10
-    assert truncate_for_model(content, 5) == "aaaaa\n…[truncated: 16 chars, 1 lines cut]"
+    assert truncate_for_model(content, 5) == (
+        "aaa\n…[truncated: 16 chars, 1 lines cut from the middle; head and tail kept]\nbb"
+    )
+
+
+def test_the_cut_keeps_both_ends_because_the_reason_is_at_the_end() -> None:
+    """The whole point: this is the last cut, so its shape is the shape the model sees.
+
+    A head-only cut here discards the traceback of every failing command, no matter
+    how carefully the tool below preserved it.
+    """
+    content = "setup line\n" + "noise\n" * 200 + "RuntimeError: the actual reason\n"
+    cut = truncate_for_model(content, 200)
+    assert cut.startswith("setup line\n")
+    assert cut.rstrip().endswith("RuntimeError: the actual reason")
+    assert "head and tail kept" in cut
+
+
+def test_the_split_is_head_biased_but_never_head_only() -> None:
+    # Most results are file reads, where the opening lines matter most — but a tail
+    # of zero is what threw the reasons away.
+    cut = truncate_for_model("A" * 500 + "B" * 500, 100)
+    head, _, tail = cut.partition("\n…[")
+    assert len(head) == int(100 * TRUNCATE_HEAD_SHARE)
+    assert 0 < len(tail.partition("]\n")[2]) < len(head)
+
+
+def test_the_marker_never_claims_a_negative_line_count() -> None:
+    # cut_lines subtracts two kept slices from the whole; an off-by-one there would
+    # print a negative number at exactly the boundary.
+    for limit in range(1, 40):
+        assert "-" not in truncate_for_model("x\ny\nz\n" * 5, limit).partition("chars, ")[2][:6]
 
 
 def test_content_exactly_at_the_limit_is_untouched() -> None:
@@ -805,7 +837,11 @@ async def test_a_long_tool_result_reaches_the_transcript_truncated() -> None:
     model = FakeModel([tool_turn(call("u1", "read_file", path="a.py")), text_turn("done")])
     events = await run_events(model, tools, FakePolicy(), max_tool_result_chars=50)
     block = tool_blocks(ended_state(events))[0]
-    assert block.content == "line\n" * 10 + "\n…[truncated: 150 chars, 30 lines cut]"
+    assert block.content == (
+        "line\n" * 6
+        + "\n…[truncated: 150 chars, 30 lines cut from the middle; head and tail kept]\n"
+        + "line\n" * 4
+    )
 
 
 async def test_the_tool_end_event_carries_the_untruncated_result() -> None:
@@ -823,7 +859,40 @@ async def test_a_long_error_is_truncated_too() -> None:
     events = await run_events(model, tools, FakePolicy(), max_tool_result_chars=40)
     block = tool_blocks(ended_state(events))[0]
     assert block.is_error is True
-    assert block.content.endswith(" lines cut]")
+    assert "head and tail kept" in block.content
+
+
+async def test_a_failing_command_hands_the_model_its_output_not_just_the_exit_code() -> None:
+    """The bug this closes: ``error`` alone said *that* it broke, never *why*.
+
+    A tool reports failure as ``ok=False`` with a one-line ``error`` and the real
+    output in ``content``. Sending only the error meant a failing test reached the
+    model as ``command exited 1`` — nothing to act on.
+    """
+    traceback = "Traceback (most recent call last):\n  File \"a.py\", line 1\nKeyError: 'user'\n"
+    failed = ToolResult(ok=False, content=traceback, error="command exited 1")
+    tools = FakeTools({"read_file": (READER, lambda _a: failed)})
+    model = FakeModel([tool_turn(call("u1", "read_file", path="a.py")), text_turn("done")])
+    events = await run_events(model, tools, FakePolicy())
+    block = tool_blocks(ended_state(events))[0]
+    assert block.is_error is True
+    assert "command exited 1" in block.content  # the reason still leads
+    assert "KeyError: 'user'" in block.content  # and the output now follows it
+
+
+def test_the_reason_leads_so_it_survives_a_cut_from_any_layer() -> None:
+    failed = ToolResult(ok=False, content="x" * 5_000, error="command exited 2")
+    assert failed.model_text().startswith("command exited 2\n")
+
+
+def test_a_failure_with_no_output_still_reads_as_one_line() -> None:
+    # Not every failure has output; joining an empty string would add a dangling
+    # newline for the model to interpret.
+    assert ToolResult(ok=False, error="timed out").model_text() == "timed out"
+
+
+def test_a_successful_result_is_passed_through_untouched() -> None:
+    assert ToolResult(ok=True, content="hello").model_text() == "hello"
 
 
 # --------------------------------------------------------------------------- #

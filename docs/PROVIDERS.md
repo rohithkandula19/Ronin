@@ -70,6 +70,26 @@ a new provider becomes a code change again. Two invariants are enforced in the t
 every axis, because a wrong "can't do that" costs a slower path and a wrong "can"
 costs a failed request the user has to debug.
 
+### Overriding capabilities from config
+
+A model table may name any of the six keys. Only the keys it names are carried on
+the `ModelSpec` (as `capability_overrides`); `registry.build_client` merges them
+over the capabilities the *built adapter* reports, so declaring one axis leaves the
+other five where the adapter put them. This matters more than it sounds:
+`thinking = true` on a two-line DeepSeek entry used to cut the window from 128k to
+32,768, and `max_context = 200000` on an Anthropic model used to turn prompt
+caching, thinking and vision off.
+
+The merge happens after the adapter is built — so nothing has to restate a
+provider's defaults, and no copy of them can drift — and before the shim decision,
+because `native_tools = false` is a request to shim.
+
+Values are type-checked, not coerced: `prompt_cache = "no"` is an error rather than
+a quiet *yes* (`bool("no")` is `True`). An unrecognized capability key is an error
+too, and names the settable keys so a typo is visible. `native_tools = false` on
+its own also switches `parallel_tools` off, because the type forbids that pair and
+the config author was not talking about parallelism.
+
 ---
 
 ## 2. The tool-call normalizer

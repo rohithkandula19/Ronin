@@ -38,7 +38,7 @@ per provider would be worse than being explicit about the approximation.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Container, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -72,6 +72,11 @@ COMPACTION_KEY = "compaction"
 
 #: Set on each re-emitted tool couple, naming the path whose result it preserves.
 RETAINED_PATH_KEY = "retained_path"
+
+#: Set on a retained result whose content ``max_retained_chars`` cut down. The path
+#: survives the fold; the content the model can see is only part of what it read, so
+#: anything reasoning about "does the model still have this file" has to exclude it.
+CLAMPED_KEY = "retained_clamped"
 
 #: The five sections, in order. Fixed shape: see the module docstring.
 SUMMARY_SECTIONS: tuple[str, ...] = (
@@ -148,6 +153,13 @@ class CompactionPolicy:
     #: the case where compaction alone cannot get under the trigger, and the
     #: caller has to choose which property to keep.
     max_retained_paths: int | None = None
+    #: Whether compaction may surrender older retained paths on its own when the
+    #: folded transcript still would not fit the window. Off by default, and that
+    #: default is the same decision as the unbounded ceilings above: an over-budget
+    #: transcript is a *reported* problem the caller can act on, while a dropped file
+    #: is a silent, permanent loss. Turn it on for long unattended runs, where fitting
+    #: matters more than remembering and nobody is reading the notes.
+    escalate_to_fit: bool = False
 
     def __post_init__(self) -> None:
         if self.context_window <= 0:
@@ -212,6 +224,12 @@ class CompactionResult:
     missing_sections: tuple[str, ...] = ()
     #: Orphan tool blocks :func:`repair_pairing` had to remove. Should be zero.
     dropped_blocks: int = 0
+    #: Paths whose retained results were given up so the fold could get under the
+    #: trigger, oldest first. Non-empty means the "answerable in turn 200" guarantee
+    #: was surrendered for these files specifically — reported by name, because a
+    #: caller told only that *something* was dropped cannot tell the model what it
+    #: no longer knows.
+    surrendered_paths: tuple[str, ...] = ()
     #: The policy's trigger, carried so a caller can see the one case compaction
     #: cannot fix on its own: retained tool results alone exceeding the trigger.
     trigger_tokens: int = 0
@@ -339,6 +357,43 @@ def latest_tool_result_per_path(
                 continue
             latest[path] = (block, answer)
     return latest
+
+
+def paths_with_visible_read(
+    messages: Sequence[Message], *, read_tools: Container[str]
+) -> frozenset[str]:
+    """Paths whose *read* result the model can still see in ``messages``.
+
+    The question a file-state tracker cannot answer for itself, asked of the only
+    thing that knows: the transcript. One rule covers every way content leaves —
+    folded into the summary, given up by :func:`_fit_retention` to make room, or
+    displaced because retention keeps the most recent result *per path* and a later
+    ``grep`` scoped to that same file overwrote the read that had the contents.
+
+    Restricted to ``read_tools`` for exactly that last reason. A surviving result for
+    a path is not the same as surviving file content: a grep hit names the path and
+    carries three matching lines.
+
+    A retained result flagged :data:`CLAMPED_KEY` does not count. Its path survived
+    the fold with only part of what was read, and half a file is not the file.
+    """
+    answered = {
+        block.tool_use_id
+        for message in messages
+        for block in message.content_blocks
+        if isinstance(block, ToolResultBlock)
+    }
+    visible: set[str] = set()
+    for message in messages:
+        if message.metadata.get(CLAMPED_KEY):
+            continue
+        for block in message.content_blocks:
+            if not isinstance(block, ToolUse) or block.name not in read_tools:
+                continue
+            path = file_path_from_arguments(block.arguments)
+            if path is not None and block.id in answered:
+                visible.add(path)
+    return frozenset(visible)
 
 
 # --------------------------------------------------------------------------- #
@@ -499,6 +554,25 @@ async def compact(
 
     summary, error = await _summarize(foldable, summarizer)
     retained = _retained_couples(foldable, policy) if policy.retain_tool_results_per_path else []
+    retained, surrendered = _fit_retention(
+        retained,
+        policy=policy,
+        head=head,
+        hoisted=hoisted,
+        summary=summary,
+        tail=tail,
+        # The marker is part of the transcript it measures, so the floor has to
+        # include it. Built with the pre-escalation counts, which can only make the
+        # floor larger than the final one — erring toward surrendering one path too
+        # many rather than landing over the window.
+        marker=_marker(
+            folded=len(foldable),
+            retained=len(retained),
+            tokens=0,
+            summarizer_error=error,
+            dropped=0,
+        ),
+    )
     retained_paths = tuple(path for path, _ in retained)
 
     marker = ""
@@ -542,8 +616,64 @@ async def compact(
         summarizer_error=error,
         missing_sections=missing_sections(summary),
         dropped_blocks=repaired,
+        surrendered_paths=surrendered,
         trigger_tokens=policy.trigger_tokens,
     )
+
+
+def _fit_retention(
+    retained: list[tuple[str, tuple[Message, Message]]],
+    *,
+    policy: CompactionPolicy,
+    head: Sequence[Message],
+    hoisted: Sequence[Message],
+    summary: str,
+    tail: Sequence[Message],
+    marker: str,
+) -> tuple[list[tuple[str, tuple[Message, Message]]], tuple[str, ...]]:
+    """Drop the oldest retained paths, but only to keep the transcript *sendable*.
+
+    The floor is the **context window, not the trigger**, and the difference is the
+    whole design. Landing above the trigger is not a failure: the trigger is a
+    fraction of the window, so an over-trigger transcript still fits and is still
+    answerable — compaction simply cannot reclaim any more, which is what
+    ``still_over_trigger`` reports. Surrendering file context there would trade a
+    recoverable warning for a permanent loss, and it is exactly the case the
+    unbounded default exists to serve: a file edited in turn 3 stays answerable in
+    turn 200 *because* retention is allowed to push past the trigger.
+
+    Exceeding the window is different in kind. That transcript cannot be sent at all,
+    so keeping every retained path would mean keeping none of them — the request
+    fails. Only then is dropping the oldest paths the better of two losses, and every
+    path given up is named so the caller can say what the model no longer knows.
+
+    Everything outside retention — head, hoisted messages, summary, pinned tail — is
+    a floor this cannot lower. When that alone exceeds the window, nothing is
+    surrendered: dropping file context would not fix a pinned tail that does not fit.
+
+    Chosen in one pass rather than one re-assembly per path: assembling is
+    ``O(transcript)``, so peeling paths off one at a time is quadratic in the number
+    of files a session touched — exactly the sessions this runs on.
+    """
+    if not retained or not policy.escalate_to_fit:
+        return retained, ()
+    floor = _provisional_tokens(head, hoisted, summary, marker, (), tail)
+    room = policy.context_window - floor
+    if room <= 0:
+        return retained, ()
+    costs = [transcript_tokens(couple) for _, couple in retained]
+    if sum(costs) <= room:
+        return retained, ()
+    # Newest paths are the most likely to matter next, and they are last in
+    # first-call order, so fill from the end.
+    keep_from = len(retained)
+    spent = 0
+    for index in range(len(retained) - 1, -1, -1):
+        if spent + costs[index] > room:
+            break
+        spent += costs[index]
+        keep_from = index
+    return retained[keep_from:], tuple(path for path, _ in retained[:keep_from])
 
 
 def build_summary_prompt(messages: Sequence[Message]) -> str:
@@ -694,6 +824,11 @@ def _retained_couples(
             content = clamp(
                 content, budget=OutputBudget(remaining_chars=policy.max_retained_chars)
             ).text
+        metadata: dict[str, Any] = {RETAINED_PATH_KEY: path}
+        if content != result.content:
+            # Recorded rather than inferred later: "was this clamped" is knowable
+            # exactly here and only guessable from the finished transcript.
+            metadata[CLAMPED_KEY] = True
         couples.append(
             (
                 path,
@@ -701,7 +836,7 @@ def _retained_couples(
                     Message(
                         role=Role.ASSISTANT,
                         content_blocks=(use,),
-                        metadata={RETAINED_PATH_KEY: path},
+                        metadata=dict(metadata),
                     ),
                     Message(
                         role=Role.TOOL,
@@ -712,7 +847,7 @@ def _retained_couples(
                                 is_error=result.is_error,
                             ),
                         ),
-                        metadata={RETAINED_PATH_KEY: path},
+                        metadata=dict(metadata),
                     ),
                 ),
             )

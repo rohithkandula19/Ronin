@@ -84,6 +84,7 @@ INPUT_ID = "prompt-input"
 ACTIVITY_ID = "activity"
 NOTICES_ID = "notices"
 QUEUED_ID = "queued"
+BANNER_ID = "banner"
 
 #: Placeholder shown in the empty input line.
 INPUT_PLACEHOLDER = "type a message, Enter to send — esc interrupt, shift+tab mode, ctrl+c quit"
@@ -97,6 +98,7 @@ Screen { layout: vertical; }
 #errors { height: auto; padding: 0 1; }
 #notices { height: auto; max-height: 40%; overflow-y: auto; padding: 0 1; }
 #queued { height: auto; padding: 0 1; }
+#banner { height: auto; padding: 1 1 0 1; }
 #prompt-input { dock: bottom; height: 3; margin: 0 1; }
 #status { height: 1; dock: bottom; padding: 0 1; }
 """
@@ -193,6 +195,17 @@ class Session:
     #: reason every other seam here is: a test asserts what the screen says after four
     #: seconds of nothing without waiting four seconds.
     clock: Callable[[], float] = time.monotonic
+    #: The startup identity, already rendered. A string rather than a flag because the
+    #: app is a skin: ``render_banner`` is a pure function the orchestrator calls, so
+    #: what is on screen stays something a test can produce without a terminal. Empty
+    #: means no banner, which is what the demo and a replay want.
+    banner: str = ""
+    #: The dialect every region is rendered through. Chosen by the caller because
+    #: whether the terminal wants colour is something only the caller can know —
+    #: ``render.py`` is pure and may not read the environment. ``NO_COLOUR_MARKUP``
+    #: is the ``NO_COLOR`` answer: it keeps markup escaping, which is not optional
+    #: for an in-band surface, and drops every colour pair.
+    styles: Styles = MARKUP
 
 
 def initial_state(session: Session) -> ViewState:
@@ -322,7 +335,7 @@ def _build_app(session: Session) -> Any:
             self.request = request
 
         def compose(self) -> Any:
-            yield static(render_approval(self.request, styles=MARKUP), id=MODAL_ID)
+            yield static(render_approval(self.request, styles=session.styles), id=MODAL_ID)
 
         def on_key(self, event: Any) -> None:
             decision = decision_for(event.key)
@@ -354,6 +367,11 @@ def _build_app(session: Session) -> Any:
             self._last_event_at = session.clock()
 
         def compose(self) -> Any:
+            # Painted once and never repainted: it is identity, not state. Without it
+            # the app opened on an entirely blank screen, which reads as "nothing
+            # loaded" rather than "ready".
+            if session.banner:
+                yield static(session.banner, id=BANNER_ID)
             yield vertical_scroll(static("", id=TRANSCRIPT_ID), id="transcript-scroll")
             yield static("", id=TOOLS_ID)
             yield static("", id=TODOS_ID)
@@ -468,7 +486,11 @@ def _build_app(session: Session) -> Any:
                 self._paint()
 
         def _paint(self) -> None:
-            panels = panels_for(self.state, show_thinking=self.session.show_thinking)
+            panels = panels_for(
+                self.state,
+                styles=self.session.styles,
+                show_thinking=self.session.show_thinking,
+            )
             for region, text in (
                 (TRANSCRIPT_ID, panels.transcript),
                 (TOOLS_ID, panels.tools),

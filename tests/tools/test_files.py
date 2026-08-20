@@ -59,7 +59,8 @@ async def test_read_honours_offset_and_limit(tmp_path: Path) -> None:
     assert "line 50" in result.content
     assert "line 52" in result.content
     assert "line 53" not in result.content
-    assert "   50\tline 50" in result.content, "numbering continues from the offset"
+    # Window 50-52, so two digits is the whole gutter.
+    assert "50\tline 50" in result.content, "numbering continues from the offset"
 
 
 async def test_read_truncates_at_the_line_cap_with_an_actionable_marker(tmp_path: Path) -> None:
@@ -169,7 +170,39 @@ async def test_read_an_image_with_vision_returns_it_as_an_artifact(tmp_path: Pat
 
 def test_number_lines_pads_consistently() -> None:
     rendered = number_lines("a\nb")
-    assert rendered == "    1\ta\n    2\tb"
+    # Exactly as wide as the largest number, and no wider: the old floor of five cost
+    # a flat six characters on every line of every read and aligned nothing that is
+    # ever compared. Two lines need one digit.
+    assert rendered == "1\ta\n2\tb"
+
+
+def test_the_gutter_is_as_wide_as_the_largest_number_and_no_wider() -> None:
+    for count, width in ((9, 1), (10, 2), (99, 2), (100, 3), (1000, 4)):
+        rendered = number_lines("\n".join("x" for _ in range(count)))
+        first = rendered.split("\n")[0]
+        assert first == f"{1:>{width}}\tx", f"{count} lines wanted a {width}-wide gutter"
+
+
+def test_every_line_in_one_read_stays_aligned() -> None:
+    # Width comes from the read's own last line, so the numbers still form a column.
+    # That is the only alignment that matters; nothing compares two reads to each other.
+    rendered = number_lines("\n".join("x" for _ in range(120)))
+    gutters = {line.split("\t")[0] for line in rendered.split("\n")}
+    assert len({len(gutter) for gutter in gutters}) == 1
+
+
+def test_a_windowed_read_sizes_its_gutter_from_the_window_not_from_one() -> None:
+    rendered = number_lines("a\nb", start=4000)
+    assert rendered == "4000\ta\n4001\tb"
+
+
+def test_dropping_the_floor_actually_costs_less() -> None:
+    """The point of the change, as a number rather than a claim."""
+    body = "\n".join(f"line {i}" for i in range(1, 201))
+    overhead = len(number_lines(body)) - len(body)
+    # 200 lines: 3 digits + a tab = 4 per line. The old floor of five charged 6.
+    assert overhead == 200 * 4
+    assert overhead < 200 * 6
 
 
 # --------------------------------------------------------------------------- #

@@ -42,7 +42,13 @@ from .base import ModelClient, Transport
 from .mlx_local import LOCAL_DEFAULTS, Generator, MLXClient
 from .router import ModelSpec, Role, RouterConfig
 from .shim import ShimClient
-from .types import Capabilities, ModelDelta, ModelRequest, ProviderError
+from .types import (
+    Capabilities,
+    ModelDelta,
+    ModelRequest,
+    ProviderError,
+    apply_capability_overrides,
+)
 
 #: The model name a user types. One name, so the flag is memorable and so the
 #: offline default does not depend on anyone having written a config file.
@@ -378,7 +384,6 @@ def local_adapter_spec(
         provider=LOCAL_PROVIDER,
         model=BASE_MODEL_MLX if lane is Backend.MLX else BASE_MODEL_HF,
         adapter_path=path,
-        capabilities=LOCAL_ADAPTER_DEFAULTS,
         extra_body={"backend": lane.value},
     )
 
@@ -393,6 +398,12 @@ def build_local_adapter(
     Deliberately does **not** apply the format shim — ``registry.build_client``
     applies it from capabilities, and a builder that shimmed itself would be shimmed
     twice.
+
+    It *does* merge the spec's capability overrides, unlike its HTTP neighbours,
+    because :func:`build_local_client` reaches this function without going through
+    ``registry.build_client`` — a config override that only the registry honoured
+    would be silently dropped on the offline lane. The registry's own merge is
+    idempotent, so doing it here costs nothing on the normal path.
     """
     del transport  # local generation has no transport
     raw = spec.extra_body.get("backend")
@@ -401,7 +412,9 @@ def build_local_adapter(
         model=spec.model,
         adapter_path=spec.adapter_path or (env or {}).get(ADAPTER_PATH_ENV, ""),
         backend=backend,
-        capabilities=spec.capabilities or LOCAL_ADAPTER_DEFAULTS,
+        capabilities=apply_capability_overrides(
+            LOCAL_ADAPTER_DEFAULTS, spec.capability_overrides, model=spec.name
+        ),
     )
 
 

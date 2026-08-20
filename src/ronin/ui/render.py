@@ -208,6 +208,76 @@ MARKUP = Styles(
     },
 )
 
+#: Console markup with every style removed but the escaping kept. What ``NO_COLOR``
+#: selects inside the Textual app.
+#:
+#: Not ``PLAIN``: the app renders *in band*, so a diff line reading ``[dim]`` has to
+#: be escaped whether or not we colour anything, or the host's markup parser eats it.
+#: Dropping the pairs without dropping ``escape`` is the difference between "no
+#: colour" and "no colour and also corrupted text".
+NO_COLOUR_MARKUP = Styles(escape=escape_markup)
+
+
+# --------------------------------------------------------------------------- #
+# Identity
+# --------------------------------------------------------------------------- #
+
+#: The wordmark, in block glyphs. Thin strokes and a lot of empty space on purpose:
+#: ``packages/design-system`` states the house aesthetic as sumi-e ink on warm paper,
+#: "the deliberate antithesis of the neon-gradient AI aesthetic", and a heavy filled
+#: banner is the thing it is the antithesis of. Every glyph here is a block or
+#: box-drawing character that ruff's ambiguous-unicode rules accept, which rules out
+#: the quadrant blocks and the kaomoji the v1 CLI uses.
+WORDMARK: tuple[str, ...] = (
+    "█▀▄ █▀█ █▄ █ █ █▄ █",
+    "█▀▄ █ █ █ ▀█ █ █ ▀█",
+    "▀ ▀ ▀▀▀ ▀  ▀ ▀ ▀  ▀",
+)
+
+#: Widest line of :data:`WORDMARK`, so a caller can decide before rendering.
+WORDMARK_WIDTH = max(len(line) for line in WORDMARK)
+
+#: What Ronin is, in the register the rest of the interface uses: lowercase, terse.
+TAGLINE = "masterless · terminal-native"
+
+#: The compact form, for a terminal too narrow for the wordmark.
+COMPACT_WORDMARK = "ronin"
+
+#: Indent the wordmark sits at, matching the two-space gutter every other region uses.
+BANNER_INDENT = "  "
+
+
+def render_banner(
+    *,
+    version: str = "",
+    hint: str = "",
+    width: int = 0,
+    styles: Styles = PLAIN,
+) -> str:
+    """The startup identity: wordmark, what this is, and how to get help.
+
+    Pure like every other renderer — the version and the hint arrive as arguments
+    rather than being read from ``importlib.metadata`` or a command registry here,
+    for the reason stated at the top of this module: a renderer that discovers things
+    cannot be called from a test or from a redraw.
+
+    ``width`` of 0 means "no constraint". A terminal narrower than the wordmark gets
+    the compact form rather than a wrapped one, because a wordmark that wraps is
+    worse than no wordmark.
+    """
+    subtitle = TAGLINE if not version else f"{TAGLINE} · {version}"
+    lines: list[str] = []
+    if width and width < len(BANNER_INDENT) + WORDMARK_WIDTH:
+        lines.append(f"{BANNER_INDENT}{COMPACT_WORDMARK} {styles.wrap('meta', subtitle)}")
+    else:
+        lines.extend(f"{BANNER_INDENT}{line}" for line in WORDMARK)
+        lines.append("")
+        lines.append(f"{BANNER_INDENT}{styles.wrap('meta', subtitle)}")
+    if hint:
+        lines.append(f"{BANNER_INDENT}{styles.wrap('meta', hint)}")
+    return "\n".join(lines)
+
+
 # --------------------------------------------------------------------------- #
 # Truncation
 # --------------------------------------------------------------------------- #
