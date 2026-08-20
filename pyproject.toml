@@ -214,6 +214,7 @@ module = [
     "test_context_repomap",
     "test_context_repomap_edges",
     "test_context_repomap_paths",
+    "test_context_retention_reach",
     "test_context_scan_repo",
     "test_core_demo",
     "test_definitions",

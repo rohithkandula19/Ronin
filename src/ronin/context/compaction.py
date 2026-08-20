@@ -148,6 +148,13 @@ class CompactionPolicy:
     #: the case where compaction alone cannot get under the trigger, and the
     #: caller has to choose which property to keep.
     max_retained_paths: int | None = None
+    #: Whether compaction may surrender older retained paths on its own when the
+    #: folded transcript still would not fit the window. Off by default, and that
+    #: default is the same decision as the unbounded ceilings above: an over-budget
+    #: transcript is a *reported* problem the caller can act on, while a dropped file
+    #: is a silent, permanent loss. Turn it on for long unattended runs, where fitting
+    #: matters more than remembering and nobody is reading the notes.
+    escalate_to_fit: bool = False
 
     def __post_init__(self) -> None:
         if self.context_window <= 0:
@@ -212,6 +219,12 @@ class CompactionResult:
     missing_sections: tuple[str, ...] = ()
     #: Orphan tool blocks :func:`repair_pairing` had to remove. Should be zero.
     dropped_blocks: int = 0
+    #: Paths whose retained results were given up so the fold could get under the
+    #: trigger, oldest first. Non-empty means the "answerable in turn 200" guarantee
+    #: was surrendered for these files specifically — reported by name, because a
+    #: caller told only that *something* was dropped cannot tell the model what it
+    #: no longer knows.
+    surrendered_paths: tuple[str, ...] = ()
     #: The policy's trigger, carried so a caller can see the one case compaction
     #: cannot fix on its own: retained tool results alone exceeding the trigger.
     trigger_tokens: int = 0
@@ -499,6 +512,25 @@ async def compact(
 
     summary, error = await _summarize(foldable, summarizer)
     retained = _retained_couples(foldable, policy) if policy.retain_tool_results_per_path else []
+    retained, surrendered = _fit_retention(
+        retained,
+        policy=policy,
+        head=head,
+        hoisted=hoisted,
+        summary=summary,
+        tail=tail,
+        # The marker is part of the transcript it measures, so the floor has to
+        # include it. Built with the pre-escalation counts, which can only make the
+        # floor larger than the final one — erring toward surrendering one path too
+        # many rather than landing over the window.
+        marker=_marker(
+            folded=len(foldable),
+            retained=len(retained),
+            tokens=0,
+            summarizer_error=error,
+            dropped=0,
+        ),
+    )
     retained_paths = tuple(path for path, _ in retained)
 
     marker = ""
@@ -542,8 +574,64 @@ async def compact(
         summarizer_error=error,
         missing_sections=missing_sections(summary),
         dropped_blocks=repaired,
+        surrendered_paths=surrendered,
         trigger_tokens=policy.trigger_tokens,
     )
+
+
+def _fit_retention(
+    retained: list[tuple[str, tuple[Message, Message]]],
+    *,
+    policy: CompactionPolicy,
+    head: Sequence[Message],
+    hoisted: Sequence[Message],
+    summary: str,
+    tail: Sequence[Message],
+    marker: str,
+) -> tuple[list[tuple[str, tuple[Message, Message]]], tuple[str, ...]]:
+    """Drop the oldest retained paths, but only to keep the transcript *sendable*.
+
+    The floor is the **context window, not the trigger**, and the difference is the
+    whole design. Landing above the trigger is not a failure: the trigger is a
+    fraction of the window, so an over-trigger transcript still fits and is still
+    answerable — compaction simply cannot reclaim any more, which is what
+    ``still_over_trigger`` reports. Surrendering file context there would trade a
+    recoverable warning for a permanent loss, and it is exactly the case the
+    unbounded default exists to serve: a file edited in turn 3 stays answerable in
+    turn 200 *because* retention is allowed to push past the trigger.
+
+    Exceeding the window is different in kind. That transcript cannot be sent at all,
+    so keeping every retained path would mean keeping none of them — the request
+    fails. Only then is dropping the oldest paths the better of two losses, and every
+    path given up is named so the caller can say what the model no longer knows.
+
+    Everything outside retention — head, hoisted messages, summary, pinned tail — is
+    a floor this cannot lower. When that alone exceeds the window, nothing is
+    surrendered: dropping file context would not fix a pinned tail that does not fit.
+
+    Chosen in one pass rather than one re-assembly per path: assembling is
+    ``O(transcript)``, so peeling paths off one at a time is quadratic in the number
+    of files a session touched — exactly the sessions this runs on.
+    """
+    if not retained or not policy.escalate_to_fit:
+        return retained, ()
+    floor = _provisional_tokens(head, hoisted, summary, marker, (), tail)
+    room = policy.context_window - floor
+    if room <= 0:
+        return retained, ()
+    costs = [transcript_tokens(couple) for _, couple in retained]
+    if sum(costs) <= room:
+        return retained, ()
+    # Newest paths are the most likely to matter next, and they are last in
+    # first-call order, so fill from the end.
+    keep_from = len(retained)
+    spent = 0
+    for index in range(len(retained) - 1, -1, -1):
+        if spent + costs[index] > room:
+            break
+        spent += costs[index]
+        keep_from = index
+    return retained[keep_from:], tuple(path for path, _ in retained[:keep_from])
 
 
 def build_summary_prompt(messages: Sequence[Message]) -> str:

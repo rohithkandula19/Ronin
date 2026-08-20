@@ -572,13 +572,22 @@ class Conversation:
                 "locally-computed digest was used instead — it states less but "
                 "cannot state anything false"
             )
+        if result.surrendered_paths:
+            given_up = ", ".join(result.surrendered_paths)
+            self.notes.append(
+                f"retained file context did not fit under the compaction trigger, so "
+                f"{len(result.surrendered_paths)} older path(s) were given up to make "
+                f"room: {given_up}. Those files are no longer in context — re-read one "
+                "if you need it again."
+            )
         if result.still_over_trigger:
             self.notes.append(
                 "the transcript is still at or above the compaction trigger after "
                 f"folding (~{result.token_estimate_after:,} tokens vs a trigger of "
-                f"{result.trigger_tokens:,}): the retained per-path tool results are "
-                "themselves bigger than the budget. Compacting again would change "
-                "nothing — bound max_retained_paths or start a fresh session."
+                f"{result.trigger_tokens:,}), and dropping file context cannot fix it: "
+                "the pinned tail and the summary alone are over budget. Compacting "
+                "again would change nothing — start a fresh session, or raise the "
+                "model's context window."
             )
 
     async def compact_now(

@@ -274,8 +274,20 @@ class Loaded:
         return estimate_tokens(self.memory.render()) + self.repo_map.token_estimate
 
     def compaction_policy(self, *, context_window: int) -> CompactionPolicy:
-        """A policy for this window. One constructor, so the trigger cannot drift."""
-        return CompactionPolicy(context_window=context_window)
+        """A policy for this window. One constructor, so the trigger cannot drift.
+
+        The retention ceilings come from settings so the remedy compaction prints
+        when retained results exceed the trigger is one the user can actually apply.
+        Both default to ``None`` (no ceiling), which is what keeps a file edited in
+        turn 3 answerable in turn 200; compaction escalates on its own when even
+        that cannot fit.
+        """
+        return CompactionPolicy(
+            context_window=context_window,
+            max_retained_paths=self.settings.max_retained_paths,
+            max_retained_chars=self.settings.max_retained_chars,
+            escalate_to_fit=self.settings.compaction_escalate,
+        )
 
     def system_suffix(self) -> str:
         """RONIN.md and the repo map, in the order they belong in the stable prefix.

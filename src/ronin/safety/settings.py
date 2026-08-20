@@ -83,6 +83,9 @@ SCALAR_KEYS: Mapping[str, str] = {
     "protected_branches": "strings",
     "default_decision": "decision",
     "taint_min_span": "int",
+    "max_retained_paths": "count_or_null",
+    "max_retained_chars": "count_or_null",
+    "compaction_escalate": "bool",
 }
 
 RULES_KEY = "rules"
@@ -136,6 +139,15 @@ class Settings:
     protected_branches: frozenset[str] = frozenset({"main", "master", "trunk"})
     default_decision: Decision = Decision.ASK
     taint_min_span: int = MIN_TAINT_SPAN
+    #: Compaction retention ceilings. ``None`` means no ceiling, which is the default
+    #: and is load-bearing — see ``CompactionPolicy.max_retained_paths``. Settable
+    #: because compaction *reports* bounding them as the remedy when retained results
+    #: alone exceed the trigger, and advice the user cannot act on is not advice.
+    max_retained_paths: int | None = None
+    max_retained_chars: int | None = None
+    #: Let compaction surrender older retained file context by itself rather than
+    #: reporting that it cannot fit. Off by default: see ``CompactionPolicy``.
+    compaction_escalate: bool = False
     rules: tuple[Rule, ...] = ()
     layers: tuple[Layer, ...] = ()
     errors: tuple[LayerError, ...] = ()
@@ -211,6 +223,9 @@ def load_settings(
         protected_branches=scalars.get("protected_branches", defaults.protected_branches),
         default_decision=scalars.get("default_decision", defaults.default_decision),
         taint_min_span=scalars.get("taint_min_span", defaults.taint_min_span),
+        max_retained_paths=scalars.get("max_retained_paths", defaults.max_retained_paths),
+        max_retained_chars=scalars.get("max_retained_chars", defaults.max_retained_chars),
+        compaction_escalate=scalars.get("compaction_escalate", defaults.compaction_escalate),
         rules=tuple(rules),
         layers=tuple(layers),
         errors=tuple(errors),
@@ -343,6 +358,14 @@ def _coerce(key: str, value: object) -> object:
     if kind == "int":
         if not isinstance(value, int) or isinstance(value, bool) or value < 4:
             raise ValueError(f"{key!r} must be an integer >= 4, found {value!r}")
+        return value
+    if kind == "count_or_null":
+        if value is None:
+            return None
+        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+            raise ValueError(
+                f"{key!r} must be a positive integer, or null for no limit, found {value!r}"
+            )
         return value
     if kind == "mode":
         legal = ", ".join(mode.value for mode in Mode)
