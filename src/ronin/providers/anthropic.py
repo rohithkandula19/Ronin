@@ -17,6 +17,7 @@ The three things this adapter knows that no other one does:
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Mapping, Sequence
+from enum import StrEnum
 from typing import Any
 
 from ..core.types import ContentBlock, Message, Role, Text, Thinking, ToolResultBlock, ToolSpec
@@ -45,6 +46,19 @@ _FINISH = {
     "max_tokens": FinishReason.MAX_TOKENS,
     "refusal": FinishReason.CONTENT_FILTER,
 }
+
+
+class _CacheTarget(StrEnum):
+    """Which stable block carries the request's single ``cache_control`` marker.
+
+    Anthropic renders the prefix as tools, then system, then messages, and a marker
+    caches everything up to and including its own block — so the target is always
+    the *last* stable block that exists.
+    """
+
+    NONE = "none"
+    TOOLS = "tools"
+    SYSTEM = "system"
 
 
 class AnthropicClient:
@@ -104,26 +118,42 @@ class AnthropicClient:
             "stream": True,
             "messages": [_render_message(m) for m in req.messages],
         }
-        system_blocks = _render_system(req, cacheable=self._capabilities.prompt_cache)
+        target = self._cache_target(req)
+        system_blocks = _render_system(req, cache_last=target is _CacheTarget.SYSTEM)
         if system_blocks:
             body["system"] = system_blocks
         if req.tools:
-            body["tools"] = _render_tools(req.tools, cache_last=self._should_cache_tools(req))
+            body["tools"] = _render_tools(req.tools, cache_last=target is _CacheTarget.TOOLS)
         if req.temperature is not None:
             body["temperature"] = req.temperature
         if req.thinking_budget and self._capabilities.thinking:
             body["thinking"] = {"type": "enabled", "budget_tokens": req.thinking_budget}
         return body
 
-    def _should_cache_tools(self, req: ModelRequest) -> bool:
-        """Whether the cache marker belongs on the last tool rather than the system.
+    def _cache_target(self, req: ModelRequest) -> _CacheTarget:
+        """Which block carries the one cache breakpoint. Decided in one place.
 
-        Tool definitions sit *after* the system prompt in Anthropic's prefix, so
-        when both are present the marker goes on the last tool — marking the
-        system prompt instead would leave the tool schemas outside the cached span
-        and re-bill them every turn.
+        Anthropic's prefix renders in a fixed order — **tools, then system, then
+        messages** — and ``cache_control`` caches everything up to *and including*
+        the block it sits on. So the marker belongs on the last *stable* block, and
+        when both are present that is the system block, not the last tool.
+
+        Putting it on the last tool ends the cached span before the system prompt
+        and the repo map, which are the two most stable segments in the request:
+        both were then re-sent at full input rate on every turn that had tools,
+        i.e. every real agent turn. On the system block instead, one marker covers
+        tools *and* system *and* the repo map.
+
+        One breakpoint, never two — a second marker buys a second cache write for
+        the same prefix.
         """
-        return bool(req.tools) and self._capabilities.prompt_cache and req.cache_marker >= 0
+        if not self._capabilities.prompt_cache or req.cache_marker < 0:
+            return _CacheTarget.NONE
+        if req.system or req.prefix:
+            return _CacheTarget.SYSTEM
+        if req.tools:
+            return _CacheTarget.TOOLS
+        return _CacheTarget.NONE
 
     # ------------------------------------------------------------------ #
     # Streaming
@@ -219,18 +249,21 @@ class AnthropicClient:
 # --------------------------------------------------------------------------- #
 
 
-def _render_system(req: ModelRequest, *, cacheable: bool) -> list[dict[str, Any]]:
+def _render_system(req: ModelRequest, *, cache_last: bool) -> list[dict[str, Any]]:
     """The system prompt as blocks, with the cache marker on the last one.
 
     Blocks rather than a bare string because ``cache_control`` is per-block: a
     string cannot be marked, so a string cannot be cached.
+
+    Whether to mark is not decided here — see ``_cache_target``, which owns the
+    placement so the two renderers cannot disagree about who holds the marker.
     """
     blocks: list[dict[str, Any]] = []
     if req.system:
         blocks.append({"type": "text", "text": req.system})
     if req.prefix:
         blocks.append({"type": "text", "text": req.prefix})
-    if blocks and cacheable and req.cache_marker >= 0 and not req.tools:
+    if blocks and cache_last:
         blocks[-1]["cache_control"] = {"type": "ephemeral"}
     return blocks
 
