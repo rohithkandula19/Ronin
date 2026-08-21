@@ -4,22 +4,13 @@
   "private": true,
   "description": "Opinionated reference implementation for shipping production Claude agents in a weekend.",
   "license": "MIT",
+  "packageManager": "pnpm@11.22.0",
   "engines": {
     "node": ">=20",
-    "pnpm": ">=9"
+    "pnpm": ">=11"
   },
   "scripts": {
     "lint": "echo 'No JS linter is wired. This is a Python codebase; CI gates are pytest + uv build.' && exit 0",
     "test": "echo 'No Node test suite. Run the real tests with: uv run pytest' && exit 0"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "unrs-resolver"
-    ],
-    "overrides": {
-      "postcss@<8.5.12": ">=8.5.12",
-      "sharp@<0.35.0": ">=0.35.0",
-      "nanoid@<3.3.17": "^3.3.17"
-    }
   }
 }

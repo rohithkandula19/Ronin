@@ -78,9 +78,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # No `version:` input on purpose. The action reads `packageManager` from
+      # package.json, so the pnpm version has exactly one declaration. It used to
+      # be pinned to 9 here while contributors ran 10 locally — a split that let a
+      # lockfile be written by one major and verified by another.
       - uses: pnpm/action-setup@v6
-        with:
-          version: 9
 
       - name: Setup Node
         uses: actions/setup-node@v7
