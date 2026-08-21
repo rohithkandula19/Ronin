@@ -78,14 +78,20 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # No `version:` input on purpose. The action reads `packageManager` from
+      # package.json, so the pnpm version has exactly one declaration. It used to
+      # be pinned to 9 here while contributors ran 10 locally — a split that let a
+      # lockfile be written by one major and verified by another.
       - uses: pnpm/action-setup@v6
-        with:
-          version: 9
 
+      # Node 22, not 20, because pnpm 11 requires >=22.13 — it uses `node:sqlite`,
+      # which Node 20 does not have, and fails with ERR_UNKNOWN_BUILTIN_MODULE
+      # before it reaches the install. Raising pnpm without raising this is not an
+      # option, so the two move together.
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: "22"
           cache: pnpm
 
       - name: Install Node deps

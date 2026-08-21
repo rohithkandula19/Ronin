@@ -2,5 +2,19 @@ packages:
   - "packages/agent-patterns"
   - "packages/design-system"
   - "apps/*"
+
+# Moved here from package.json's `pnpm` field, which pnpm 11 no longer reads at
+# all — it warns and ignores. These are security floors, not preferences: left
+# in the old place the lockfile silently loses its `overrides:` block and
+# nothing stops a later resolution dropping below them. See https://pnpm.io/settings
+overrides:
+  postcss@<8.5.12: ">=8.5.12"
+  sharp@<0.35.0: ">=0.35.0"
+  nanoid@<3.3.17: "^3.3.17"
+
+# unrs-resolver compiles a native binding. Without an explicit answer here pnpm
+# refuses to run its install script and fails with ERR_PNPM_IGNORED_BUILDS. The
+# unresolved `set this to true or false` placeholder that used to sit here was
+# written by pnpm itself when nobody answered the prompt.
 allowBuilds:
-  unrs-resolver: set this to true or false
+  unrs-resolver: true
