@@ -84,6 +84,8 @@ from ..core.types import Message, ToolResult, ToolSpec, ToolUse
 from ..mcp.tools import is_namespaced
 from ..safety.injection import CLOSE_MARKER, OPEN_MARKER, TaintTracker, wrap_and_scan
 from ..safety.policy import PolicyEngine
+from ..tools.base import ToolError, optional_int
+from ..tools.files import IMAGE_SUFFIXES
 
 # --------------------------------------------------------------------------- #
 # Which tools mean what
@@ -112,7 +114,12 @@ FORCE_ARGUMENT = "force"
 #: ``artifacts`` rather than content, and artifacts are not what
 #: ``paths_with_visible_read`` measures — so "you already have it" is a claim this
 #: layer cannot back for an image, and the cheap answer is not to make it.
-NO_DEDUP_SUFFIXES: frozenset[str] = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"})
+#:
+#: Imported rather than restated. A hand-copied duplicate would let someone add
+#: ``.svg`` to the tool's own list — the natural place to add it — and silently make
+#: image reads stubbable, with the stub claiming content that only ever lived in
+#: ``artifacts``.
+NO_DEDUP_SUFFIXES: frozenset[str] = IMAGE_SUFFIXES
 
 #: Arguments that identify where untrusted content came from, in priority order. The
 #: source string ends up in the fence header and in every taint refusal, so it has to
@@ -162,6 +169,21 @@ def untrusted_source(use: ToolUse) -> str:
 # --------------------------------------------------------------------------- #
 # The record
 # --------------------------------------------------------------------------- #
+
+
+class _KeyMismatch(RuntimeError):
+    """Raised when not one path named in the transcript could be resolved.
+
+    Not a user-facing error: the session catches it, keeps every record, and says so.
+    A named exception rather than a boolean return so the reason travels with it.
+    """
+
+    def __init__(self, seen: list[str], known: list[str]) -> None:
+        super().__init__(
+            "not one path named in the transcript could be resolved, so the resolver "
+            f"is broken rather than the transcript empty (transcript: {seen}; "
+            f"recorded: {known}). Keeping every record rather than forgetting them all."
+        )
 
 
 class GateStage(StrEnum):
@@ -446,19 +468,39 @@ class GatedRegistry:
         the session instead would mean a second copy of :func:`resolve_path`, and a
         second copy is how the guard silently stops guarding.
 
-        A path that will not resolve is treated as still visible rather than dropped.
-        Forgetting on a resolution failure would quietly weaken the stale-edit check;
-        keeping is the conservative direction, and the worst it costs is a stub that
-        should not have been offered for a path the model cannot name consistently.
+        A path that will not resolve is kept under both spellings rather than dropped.
+        Forgetting on a resolution failure would quietly weaken the stale-edit check,
+        and the worst that keeping costs is a stub offered for a path the model cannot
+        name consistently.
+
+        There is one tripwire, and it is deliberately narrow: if the transcript names
+        paths and **not one of them resolves**, the resolver is broken rather than the
+        transcript empty, and forgetting on that basis would delete the whole
+        stale-edit guard while reporting a routine compaction. Nothing is forgotten in
+        that case and the caller is told why.
+
+        A wider check is tempting and wrong. "Some paths resolved but none matched a
+        record" looks like a keying bug and is in fact the ordinary case: the one file
+        being tracked was folded away while other files stayed visible. Tripping there
+        would refuse to forget exactly when forgetting is correct, which is the bug
+        this method exists to fix.
         """
         if self.files is None:
             return ()
+        if not self.files.known_paths():
+            return ()
+        named = paths_with_visible_read(messages, read_tools=self.read_tools)
         visible: set[str] = set()
-        for raw in paths_with_visible_read(messages, read_tools=self.read_tools):
+        resolved_any = False
+        for raw in named:
+            visible.add(raw)
             try:
                 visible.add(str(self.resolve(raw)))
+                resolved_any = True
             except Exception:
-                visible.add(raw)
+                continue
+        if named and not resolved_any:
+            raise _KeyMismatch(sorted(named)[:3], list(self.files.known_paths())[:3])
         return self.files.retain_only(visible)
 
     # -- the pipeline ------------------------------------------------------- #
@@ -476,8 +518,10 @@ class GatedRegistry:
                 result = await self._invoke(use, draft, on_output=on_output)
             if result.ok:
                 self._record_read(use, draft)
+                self._record_mutation(use, draft)
                 result, fenced = self._register_untrusted(use, result, draft)
                 result = self._clamp(use, result, draft, fenced=fenced)
+                self._note_clamped_read(use, draft)
             post = await self._fire_post(use, result, draft)
             result = self._attach_hook_context(result, (pre, post), draft)
         except _Refused as refusal:
@@ -727,12 +771,20 @@ class GatedRegistry:
                 "for the stale-edit check"
             )
             return
-        # A malformed window records as whole-file: the tool either refused the call
-        # (so nothing was shown and the record is moot) or ignored the bad argument
-        # and served the default, which is what whole-file means.
-        window = _read_window(use.arguments) or WHOLE_FILE
+        window = _read_window(use.arguments)
+        if window is None:
+            # Never fabricate WHOLE_FILE here. A record claiming the model holds the
+            # whole file, written because we could not read the arguments, is how a
+            # windowed read gets answered later with "the whole file is above".
+            draft.notes.append(
+                f"the read of {raw!r} named a window this layer could not parse, so "
+                "nothing was recorded for it; a later edit will ask for a fresh read"
+            )
+            return
         try:
-            record = self.files.record_read(self.resolve(raw), window=window)
+            path = self.resolve(raw)
+            shown, complete = self._shown_bytes(path)
+            record = self.files.record_read(path, shown, window=window, complete=complete)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -745,6 +797,81 @@ class GatedRegistry:
             return
         draft.stages.append(GateStage.RECORD_READ)
         draft.path = record.path
+
+    def _record_mutation(self, use: ToolUse, draft: _Draft) -> None:
+        """Re-baseline the digest after the model itself changes a file.
+
+        Without this the guard accuses the user of the model's own edit. ``read a.py``
+        records digest D1; ``edit a.py`` is allowed and writes D2, but only
+        ``ToolContext.read_files`` is updated — the tracker still holds D1. The second
+        ``edit`` therefore sees CHANGED and is refused with *"a.py changed on disk
+        since you read it (the user or another process edited it)"*, when nobody but
+        the model touched it. ``tools/files.py`` states the intended contract in a
+        comment — "A write is also a read" — and nothing implemented it.
+
+        Recorded as **incomplete** on purpose. The new digest is a sound
+        change-detection baseline, which is what was missing. It is not grounds for
+        answering a later ``read`` with "you already have it": after an ``edit`` the
+        model holds the file it read plus an intention, not the bytes on disk.
+        """
+        if self.files is None or use.name not in self.mutating_tools:
+            return
+        raw = _path_argument(use.arguments)
+        if raw is None:
+            return
+        try:
+            self.files.record_read(self.resolve(raw), complete=False)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            draft.notes.append(
+                f"{use.name} succeeded but its result was not re-recorded "
+                f"({type(exc).__name__}: {exc}), so the next edit of {raw!r} may ask "
+                "for a fresh read first"
+            )
+
+    def _note_clamped_read(self, use: ToolUse, draft: _Draft) -> None:
+        """A clamped read showed a prefix, so its record must not stand in for content.
+
+        Separate from :meth:`_record_read` because the two answer different questions
+        at different times. The digest is of the file and is taken before the clamp
+        deliberately — clamping the *output* must not change what the file hashed to.
+        Whether the *model* received all of that output is only known afterwards.
+        """
+        if self.files is None or use.name not in self.read_tools:
+            return
+        if draft.clamp_mode is ClampMode.NONE or GateStage.RECORD_READ not in draft.stages:
+            return
+        if draft.path:
+            self.files.mark_incomplete(Path(draft.path))
+
+    def _shown_bytes(self, path: Path) -> tuple[bytes | None, bool]:
+        """The bytes the tool actually showed for ``path``, or ``None`` to re-read.
+
+        Closes a race that produced the one verdict this whole subsystem exists to
+        prevent. The tool reads the file and renders a window; the gate then hashed it
+        by reading the file *again*. A save landing between the two is recorded as the
+        version the model never saw — and because the recorded stat matches that same
+        version, ``check`` takes its fast path and answers UNCHANGED, "safe to edit
+        against the content you have", without even re-hashing. A write against that
+        reverts the user's save.
+
+        ``None`` is always a safe answer: it means the caller re-reads, which is the
+        previous behaviour. That is what makes the key comparison below safe rather
+        than load-bearing — the tool layer resolves paths through ``ToolContext``
+        while the gate resolves through :func:`resolve_path`, and if those two ever
+        disagree the bytes are simply not used. A wrong digest is a silent bad edit; a
+        missed handoff is one extra read.
+        """
+        ctx = getattr(self.inner, "ctx", None)
+        take = getattr(ctx, "take_read_bytes", None)
+        if take is None:
+            return None, True
+        try:
+            handoff: tuple[bytes, bool] | None = take(path)
+        except Exception:  # pragma: no cover - a context that cannot answer is not fatal
+            return None, True
+        return handoff if handoff is not None else (None, True)
 
     def _register_untrusted(
         self, use: ToolUse, result: ToolResult, draft: _Draft
@@ -808,8 +935,20 @@ def gated(
     budget: OutputBudget | None = None,
     untrusted_tools: frozenset[str] = UNTRUSTED_TOOLS,
     mcp_is_untrusted: bool = True,
+    resolve: Callable[[str], Path] | None = None,
 ) -> GatedRegistry:
-    """Wrap ``inner`` so every call goes through the gate. The one constructor."""
+    """Wrap ``inner`` so every call goes through the gate. The one constructor.
+
+    ``resolve`` defaults to the inner registry's own ``ToolContext.resolve`` when it
+    has one, which is what :func:`resolve_path` has always told callers to do. The
+    two must agree: the tool serves the file *its* resolver names and the gate tracks
+    the file *its* resolver names, so a divergence means the guard is watching a
+    different file than the model is reading — silently, and for the whole session.
+    """
+    if resolve is None:
+        ctx = getattr(inner, "ctx", None)
+        from_ctx = getattr(ctx, "resolve", None)
+        resolve = from_ctx if callable(from_ctx) else resolve_path
     return GatedRegistry(
         inner=inner,
         policy=policy,
@@ -819,6 +958,7 @@ def gated(
         budget=budget,
         untrusted_tools=untrusted_tools,
         mcp_is_untrusted=mcp_is_untrusted,
+        resolve=resolve,
     )
 
 
@@ -830,23 +970,26 @@ def gated(
 def _read_window(arguments: Mapping[str, Any]) -> ReadWindow | None:
     """The window a read asked for, or ``None`` if the call does not describe one.
 
-    ``None`` means "do not dedup this call" — and a *malformed* window argument gets
-    that answer, not a defaulted one. ``read(path, offset="banana")`` does not mean
-    "the whole file"; treating it as such would answer a call the model got wrong
-    with a stub claiming it already had the answer, and swallow the error the read
-    tool exists to report. ``bool`` is excluded for the same reason: it is an ``int``
-    subclass, and ``offset=true`` is not a line number.
+    Parsed with :func:`~ronin.tools.base.optional_int`, and that is the whole point:
+    it must agree with the tool about what a window *is*. It did not, and the
+    disagreement was the worst kind. ``optional_int`` deliberately tolerates the
+    string form models often send, so ``read(path, offset="300", limit="40")`` serves
+    forty lines — while this function, which rejected strings, reported "no window"
+    and left the caller to record a **whole-file** read. A later bare ``read`` then
+    matched that record and was answered with "the whole file is already in this
+    conversation above", when the model had forty lines of five thousand.
+
+    ``None`` now means only what it says: the call does not describe a window this
+    layer can vouch for, so nothing about it may be recorded as if it did.
     """
-    values: dict[str, int | None] = {}
-    for key in ("offset", "limit"):
-        raw = arguments.get(key)
-        if raw is None:
-            values[key] = None
-        elif isinstance(raw, bool) or not isinstance(raw, int):
-            return None
-        else:
-            values[key] = raw
-    return ReadWindow.of(values["offset"], values["limit"])
+    try:
+        offset = optional_int(arguments, "offset")
+        limit = optional_int(arguments, "limit")
+    except ToolError:
+        # The tool raises on the same input, so the call fails and never reaches the
+        # record. Answering None keeps that true if the tool ever grows more tolerant.
+        return None
+    return ReadWindow.of(offset, limit)
 
 
 def _dedup_stub(label: str, window: ReadWindow) -> str:

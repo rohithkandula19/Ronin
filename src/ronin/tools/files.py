@@ -64,6 +64,17 @@ KNOWN_BINARY_SUFFIXES: Mapping[str, str] = {
 
 def _read_text(path: Path) -> str:
     """Read a file as text, or raise a :class:`ToolError` explaining why not."""
+    return _read_bytes_and_text(path)[1]
+
+
+def _read_bytes_and_text(path: Path) -> tuple[bytes, str]:
+    """The same read, handing back the raw bytes alongside the decoded text.
+
+    ``read`` needs both: the text to show, and the bytes to hand the gate so the
+    stale-edit digest is of what the model actually saw rather than of a second read
+    that may already have raced. Re-encoding the text is not a substitute — see
+    :meth:`~ronin.tools.base.ToolContext.mark_read`.
+    """
     if not path.exists():
         raise ToolError(
             f"{path} does not exist. Check the path, or use glob/ls to find the file you meant."
@@ -86,11 +97,11 @@ def _read_text(path: Path) -> str:
             "rather than text. Reading it would fill your context with noise."
         )
     try:
-        return raw.decode("utf-8")
+        return raw, raw.decode("utf-8")
     except UnicodeDecodeError:
         # Latin-1 always decodes. Better a mojibake read the model can reason about
         # than a refusal on a file that is 99% ASCII with one stray byte.
-        return raw.decode("latin-1")
+        return raw, raw.decode("latin-1")
 
 
 def number_lines(text: str, *, start: int = 1) -> str:
@@ -195,8 +206,10 @@ class ReadTool(Tool):
         if path.suffix.lower() in IMAGE_SUFFIXES:
             return self._read_image(path, ctx)
 
-        text = _read_text(path)
-        ctx.mark_read(path)
+        raw, text = _read_bytes_and_text(path)
+        # Completeness is settled below, once the cap is known; record the bytes now
+        # so the digest is of what was read even if the render raises.
+        ctx.mark_read(path, raw)
 
         if text == "":
             return ToolResult(
@@ -217,6 +230,9 @@ class ReadTool(Tool):
 
         body = number_lines("\n".join(shown), start=start)
         if remaining > 0:
+            # The model is getting a prefix, not the file. Re-stamp the handoff so the
+            # stale-edit record cannot later stand in for content it never carried.
+            ctx.mark_read(path, raw, complete=False)
             next_offset = start + capped
             body += (
                 f"\n…[truncated: {remaining} of {len(lines)} lines not shown. "

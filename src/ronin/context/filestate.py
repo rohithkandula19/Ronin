@@ -47,7 +47,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 
@@ -126,7 +126,16 @@ class ReadWindow:
 
     @classmethod
     def of(cls, offset: int | None = None, limit: int | None = None) -> ReadWindow:
-        return cls(offset=max(offset, 1) if offset else 1, limit=limit)
+        """Normalize a requested window.
+
+        ``limit`` is dropped unless it is positive. ``limit=0`` is not "zero lines" to
+        the read tool — it slices nothing off and serves the default — and carrying it
+        through would have the stub render ``lines 1-0``.
+        """
+        return cls(
+            offset=max(offset, 1) if offset else 1,
+            limit=limit if limit is not None and limit > 0 else None,
+        )
 
 
 #: What a bare ``read(path)`` asks for.
@@ -144,6 +153,11 @@ class ReadRecord:
     #: The slice that was asked for. Two reads of one file are interchangeable only
     #: if they asked for the same lines.
     window: ReadWindow = WHOLE_FILE
+    #: Whether the model actually received everything that read returned. False when
+    #: the tool hit its line cap or the gate clamped the output — the record is still
+    #: a valid change-detection baseline, but it can no longer stand in for the
+    #: content, so a repeat read must be served rather than answered with a stub.
+    complete: bool = True
 
 
 def digest_bytes(data: bytes) -> str:
@@ -165,7 +179,12 @@ class FileStateTracker:
     _records: dict[str, ReadRecord] = field(default_factory=dict)
 
     def record_read(
-        self, path: Path, data: bytes | None = None, *, window: ReadWindow = WHOLE_FILE
+        self,
+        path: Path,
+        data: bytes | None = None,
+        *,
+        window: ReadWindow = WHOLE_FILE,
+        complete: bool = True,
     ) -> ReadRecord:
         """Remember that ``path`` was read, what it contained, and which lines were asked for.
 
@@ -187,9 +206,21 @@ class FileStateTracker:
             size=len(payload),
             mtime_ns=stat.st_mtime_ns,
             window=window,
+            complete=complete,
         )
         self._records[record.path] = record
         return record
+
+    def mark_incomplete(self, path: Path) -> None:
+        """Record that the model saw only part of what the last read returned.
+
+        Called after the fact because truncation is decided downstream of recording:
+        the digest is taken from the file and must not wait on the clamp, but whether
+        the *model* got all of it is only known once the clamp has run.
+        """
+        record = self._records.get(str(path))
+        if record is not None and record.complete:
+            self._records[str(path)] = replace(record, complete=False)
 
     def satisfies(self, path: Path, window: ReadWindow = WHOLE_FILE) -> bool:
         """Whether re-reading ``window`` of ``path`` would return what the model has.
@@ -203,7 +234,7 @@ class FileStateTracker:
         model gets the bytes.
         """
         record = self._records.get(str(path))
-        if record is None or record.window != window:
+        if record is None or record.window != window or not record.complete:
             return False
         return self.check(path).status is FileStatus.UNCHANGED
 

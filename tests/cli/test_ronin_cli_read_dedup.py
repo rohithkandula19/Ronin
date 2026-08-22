@@ -56,6 +56,9 @@ from ronin.context.filestate import (
 from ronin.core.types import Message, Role, Text, ToolResult, ToolResultBlock, ToolUse
 from ronin.safety.injection import TaintTracker
 from ronin.safety.policy import PolicyEngine, builtin_ruleset
+from ronin.tools.base import ToolContext
+from ronin.tools.files import ReadTool
+from ronin.tools.registry import ToolRegistry
 
 BODY = b"def load_config():\n    return {'retries': 3}\n"
 
@@ -369,17 +372,26 @@ async def test_a_folded_away_file_is_read_again_rather_than_stubbed(tmp_path: Pa
 async def test_sync_resolves_transcript_paths_the_way_records_are_keyed(tmp_path: Path) -> None:
     """The two ends key differently, and a mismatch would forget everything.
 
-    Records are keyed on the resolved absolute path; the transcript holds whatever
-    the model typed. If the sync compared them raw, every path would look invisible
-    and every session would lose its stale-edit guard at the first compaction.
+    Records are keyed on the resolved absolute path; the transcript holds whatever the
+    model typed, which for a real session is usually **relative**. If the sync compared
+    them raw, every path would look invisible and every session would lose its
+    stale-edit guard at the first compaction — silently, reported as a routine fold.
+
+    Written with a genuinely relative path on purpose. An earlier version of this test
+    used an absolute path containing a ``.`` segment, which ``_normalize_path`` already
+    collapses before ``sync_file_state`` ever sees it — so it passed with the
+    resolution step deleted, which is the one thing it was supposed to prove.
     """
     target = tmp_path / "a.py"
     target.write_bytes(BODY)
     files = FileStateTracker()
-    gate = build(reader(), files)
+    inner = ToolRegistry((ReadTool(),), ToolContext(root=tmp_path))
+    taint = TaintTracker()
+    gate = gated(inner, PolicyEngine(builtin_ruleset(), taint=taint), files=files, taint=taint)
     await gate.execute(use("read", path=str(target)))
+    assert files.recorded(target) is not None
 
-    call = ToolUse(id="t1", name="read", arguments={"path": f"{tmp_path}/./a.py"})
+    call = ToolUse(id="t1", name="read", arguments={"path": "a.py"})  # as the model typed it
     visible = [
         Message(role=Role.ASSISTANT, content_blocks=(call,)),
         Message(
@@ -390,6 +402,38 @@ async def test_sync_resolves_transcript_paths_the_way_records_are_keyed(tmp_path
 
     assert gate.sync_file_state(visible) == ()
     assert files.recorded(target) is not None
+
+
+async def test_sync_keeps_everything_when_no_path_resolves(tmp_path: Path) -> None:
+    """A broken resolver must not read as "the fold dropped everything"."""
+    target = tmp_path / "a.py"
+    target.write_bytes(BODY)
+    files = FileStateTracker()
+    files.record_read(target)
+
+    def refuse(_: str) -> Path:
+        raise RuntimeError("resolver is broken")
+
+    taint = TaintTracker()
+    gate = gated(
+        reader(),
+        PolicyEngine(builtin_ruleset(), taint=taint),
+        files=files,
+        taint=taint,
+        resolve=refuse,
+    )
+    call = ToolUse(id="t1", name="read", arguments={"path": "a.py"})
+    messages = [
+        Message(role=Role.ASSISTANT, content_blocks=(call,)),
+        Message(
+            role=Role.TOOL,
+            content_blocks=(ToolResultBlock(tool_use_id="t1", content=BODY.decode()),),
+        ),
+    ]
+
+    with pytest.raises(RuntimeError, match="not one path"):
+        gate.sync_file_state(messages)
+    assert files.recorded(target) is not None  # nothing forgotten
 
 
 # --------------------------------------------------------------------------- #

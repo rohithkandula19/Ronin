@@ -48,6 +48,21 @@ class ToolContext:
     root: Path
     #: Absolute paths the model has read this session. ``write`` consults this.
     read_files: set[str] = field(default_factory=set)
+    #: The raw bytes of the **most recent** read, keyed by resolved path — a one-slot
+    #: handoff to the gate, deliberately not a cache.
+    #:
+    #: The gate records a digest for every read so a later edit can tell whether the
+    #: file moved under the model. Without this it re-reads the file to hash it, and a
+    #: file changed in the interval between the tool's read and the gate's is then
+    #: recorded as the version the model *never saw* — a record that is internally
+    #: consistent and externally wrong, which ``check`` reports as UNCHANGED, "safe to
+    #: edit against the content you have".
+    #:
+    #: A ``dict`` rather than a plain field because the streaming path hands tools a
+    #: shallow ``replace()`` copy of this context: a container is shared by reference
+    #: and a scalar assignment would be silently dropped. Cleared on every read so it
+    #: never grows and never serves one file's bytes for another's record.
+    last_read_bytes: dict[str, tuple[bytes, bool]] = field(default_factory=dict)
     #: Whether the model can accept image blocks. ``read`` returns a description
     #: instead of an image when it cannot, rather than silently returning nothing.
     vision: bool = False
@@ -86,8 +101,30 @@ class ToolContext:
             )
         return resolved
 
-    def mark_read(self, path: Path) -> None:
+    def mark_read(self, path: Path, data: bytes | None = None, *, complete: bool = True) -> None:
+        """Record that ``path`` was read, and optionally the exact bytes shown.
+
+        ``data`` is what closes the re-read race described on :attr:`last_read_bytes`.
+        It must be the **raw bytes**, not a re-encode of the decoded text: ``read``
+        falls back to latin-1 for files that are not valid UTF-8, and
+        ``raw.decode("latin-1").encode("utf-8")`` differs from ``raw`` for every byte
+        above 0x7f — which would swap a rare wrong-in-the-unsafe-direction record for a
+        guaranteed wrong-in-the-safe-direction one on every such file.
+        """
         self.read_files.add(str(path))
+        # One slot: the gate consumes this immediately after the call it belongs to.
+        self.last_read_bytes.clear()
+        if data is not None:
+            self.last_read_bytes[str(path)] = (data, complete)
+
+    def take_read_bytes(self, path: Path) -> tuple[bytes, bool] | None:
+        """Consume what the last :meth:`mark_read` stashed, if it is this file's.
+
+        Returns the raw bytes and whether the model was shown all of them — a read
+        that hit the tool's line cap showed a prefix, and a record that forgets this
+        lets a later repeat read be answered with "you already have it".
+        """
+        return self.last_read_bytes.pop(str(path), None)
 
     def has_been_read(self, path: Path) -> bool:
         return str(path) in self.read_files

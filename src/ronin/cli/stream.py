@@ -612,7 +612,7 @@ class Conversation:
             return ()
         try:
             forgotten: tuple[str, ...] = sync(self.messages)
-        except Exception as exc:  # pragma: no cover - defensive; see the docstring
+        except Exception as exc:
             self.notes.append(
                 f"file-state bookkeeping after the fold failed ({type(exc).__name__}: "
                 f"{exc}); the stale-edit guard may report a folded-away file as safe "

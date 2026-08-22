@@ -376,12 +376,17 @@ def paths_with_visible_read(
 
     A retained result flagged :data:`CLAMPED_KEY` does not count. Its path survived
     the fold with only part of what was read, and half a file is not the file.
+
+    Neither does a failed read. Retention keeps the most recent result *per path*, so
+    a read that succeeded and was later re-read into an error — offset past EOF, a
+    transient permission failure — leaves the error as the surviving couple. It names
+    the path and carries none of the file.
     """
     answered = {
         block.tool_use_id
         for message in messages
         for block in message.content_blocks
-        if isinstance(block, ToolResultBlock)
+        if isinstance(block, ToolResultBlock) and not block.is_error
     }
     visible: set[str] = set()
     for message in messages:
