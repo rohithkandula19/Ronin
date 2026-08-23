@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 import stream_harness as h
 
+from ronin.cli.spine import Runtime
 from ronin.cli.stream import (
     CHECKPOINT_STEP,
     COMPACT_STEP,
@@ -679,6 +680,146 @@ async def test_a_turn_after_a_rewind_continues_from_the_truncated_transcript(
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="uses a real local git")
+# --------------------------------------------------------------------------- #
+# a rewind moves the transcript AND the work tree; file state must follow both
+# --------------------------------------------------------------------------- #
+
+
+def _gated_runtime(runtime: Runtime) -> Runtime:
+    """The harness wires scripted tools straight in; a rewind test needs the gate.
+
+    ``runtime.files`` is otherwise a tracker nothing is attached to, so a test against
+    it would prove only that an unused object stayed unused.
+    """
+    from dataclasses import replace as _replace
+
+    from ronin.cli.gate import gated
+
+    # No `taint=`: the gate refuses a tracker the PolicyEngine does not share, and the
+    # harness's engine has none. It adopts the engine's, which is the invariant.
+    return _replace(runtime, registry=gated(runtime.registry, runtime.policy, files=runtime.files))
+
+
+async def test_a_rewind_forgets_reads_it_dropped_from_the_transcript(tmp_path: Path) -> None:
+    """The same divergence compaction gets repaired for, on the other shrinking path.
+
+    Without this the record outlives the read: the guard calls the file safe to edit
+    against content no longer in front of the model, and a repeat read is answered
+    with "scroll back for the contents".
+    """
+    root = h.git_repo(tmp_path)
+    target = root / "a.py"
+    target.write_text("x = 1\n", encoding="utf-8")
+    runtime = _gated_runtime(
+        h.build_runtime(h.build_loaded(root), tools=h.ScriptedTools([h.reader()]), git=h.FakeGit())
+    )
+    runtime.files.record_read(target)
+    conversation = Conversation(model=h.ScriptedModel([h.say("read it")]))
+
+    await h.collect(conversation.run_prompt(runtime, "look at a.py", verify=False))
+    assert runtime.files.recorded(target) is not None
+
+    outcome = await conversation.rewind(runtime)
+
+    assert outcome.ok is True
+    assert conversation.messages == ()
+    # No read survives in the transcript, so no record may survive either.
+    assert runtime.files.recorded(target) is None
+
+
+async def test_a_restore_forgets_every_record_because_the_tree_moved(tmp_path: Path) -> None:
+    """Truncating the transcript is only half of a rewind.
+
+    The read of ``kept.py`` happens in the first turn, so it survives the truncation
+    and the transcript sync has every reason to keep its record. The restore is what
+    invalidates it: a checkpoint moves files under *every* record at once, including
+    files the rewound turn never touched. Digests are re-established by reading, so
+    the honest state after a restore is none of them.
+
+    Written this way deliberately — an earlier version read nothing in a surviving
+    turn, so the sync cleared the record first and the test passed with this fix
+    disabled.
+    """
+    root = tmp_path
+    await run_command(["git", "init", "--quiet"], cwd=root)
+    edited = root / "poem.txt"
+    untouched = root / "kept.py"
+    edited.write_text("before\n", encoding="utf-8")
+    untouched.write_text("z = 3\n", encoding="utf-8")
+    runtime = _gated_runtime(
+        h.build_runtime(
+            h.build_loaded(root),
+            tools=h.ScriptedTools([h.reader(), h.writer(root)]),
+        )
+    )
+    conversation = Conversation(
+        model=h.ScriptedModel(
+            [
+                h.call("read", {"path": str(untouched)}),
+                h.say("seen"),
+                h.call("edit", {"file_path": "poem.txt", "content": "after\n"}),
+                h.say("done"),
+            ]
+        )
+    )
+
+    await h.collect(conversation.run_prompt(runtime, "read kept.py", verify=False))
+    assert runtime.files.recorded(untouched) is not None
+    await h.collect(conversation.run_prompt(runtime, "rewrite the poem", verify=False))
+
+    outcome = await conversation.rewind(runtime)
+
+    assert outcome.ok is True and outcome.files_restored is True
+    assert edited.read_text(encoding="utf-8") == "before\n"
+    # kept.py's read is still in the transcript, so the sync alone would keep it.
+    assert runtime.files.known_paths() == ()
+    assert "read again" in outcome.detail
+
+
+async def test_a_rewind_that_restores_nothing_keeps_a_read_that_survived(
+    tmp_path: Path,
+) -> None:
+    """The control. Forgetting on every rewind would be the too-generous direction.
+
+    The read happens in the *first* turn, so it is still in the transcript after the
+    second is rewound, and a read-only turn takes no checkpoint so nothing on disk
+    moved. Both halves of the justification still hold, so the record must survive.
+    """
+    root = h.git_repo(tmp_path)
+    survivor = root / "kept.py"
+    survivor.write_text("z = 3\n", encoding="utf-8")
+    runtime = _gated_runtime(
+        h.build_runtime(h.build_loaded(root), tools=h.ScriptedTools([h.reader()]), git=h.FakeGit())
+    )
+    conversation = Conversation(
+        model=h.ScriptedModel([h.call("read", {"path": str(survivor)}), h.say("one"), h.say("two")])
+    )
+
+    await h.collect(conversation.run_prompt(runtime, "read kept.py", verify=False))
+    assert runtime.files.recorded(survivor) is not None, "the gate recorded the read"
+    await h.collect(conversation.run_prompt(runtime, "second turn", verify=False))
+
+    outcome = await conversation.rewind(runtime)
+
+    assert outcome.ok is True and outcome.files_restored is False
+    assert runtime.files.recorded(survivor) is not None
+
+
+async def test_a_rewind_survives_a_registry_that_cannot_answer(tmp_path: Path) -> None:
+    # The harness's own scripted registry has neither method. A rewind is a recovery
+    # action; it must not be the thing that raises.
+    root = h.git_repo(tmp_path)
+    runtime = h.build_runtime(
+        h.build_loaded(root), tools=h.ScriptedTools([h.reader()]), git=h.FakeGit()
+    )
+    conversation = Conversation(model=h.ScriptedModel([h.say("hi")]))
+    await h.collect(conversation.run_prompt(runtime, "say hi", verify=False))
+
+    outcome = await conversation.rewind(runtime)
+
+    assert outcome.ok is True
+
+
 async def test_rewind_really_reverts_a_file_on_disk(tmp_path: Path) -> None:
     # The integration proof: a real shadow git repo, a real file, a real restore. The
     # unit tests above use FakeGit for the branching; this one shows the bytes move.
