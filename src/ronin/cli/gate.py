@@ -458,6 +458,30 @@ class GatedRegistry:
         """Every call this gate has seen, oldest first."""
         return tuple(self._log)
 
+    def _unmark(self, dropped: tuple[str, ...]) -> tuple[str, ...]:
+        """Take ``dropped`` out of ``ToolContext.read_files`` too. Returns it unchanged.
+
+        There are two registries of "the model has seen this file", and they answer
+        the same question: :class:`FileStateTracker`, which the gate prunes when a
+        read leaves the transcript, and ``ToolContext.read_files``, a bare set of
+        paths that ``write`` consults before it will overwrite. Only the first was
+        being pruned, so the guard survived exactly the case it exists for — the fold
+        removes the read, the tracker forgets it, and ``write`` still sees the path
+        and replaces the whole file with something chosen without looking at it.
+
+        Pruned by *exactly* what the tracker dropped, not cleared wholesale. A
+        subagent's reads never reach this gate, so they are in ``read_files`` and were
+        never in the tracker; clearing everything would refuse writes to files this
+        layer has no opinion about.
+        """
+        if not dropped:
+            return dropped
+        ctx = getattr(self.inner, "ctx", None)
+        seen = getattr(ctx, "read_files", None)
+        if isinstance(seen, set):
+            seen.difference_update(dropped)
+        return dropped
+
     def forget_file_state(self) -> tuple[str, ...]:
         """Drop every read record. Returns what went, sorted.
 
@@ -469,7 +493,7 @@ class GatedRegistry:
         """
         if self.files is None:
             return ()
-        return self.files.retain_only(())
+        return self._unmark(self.files.retain_only(()))
 
     def sync_file_state(self, messages: Sequence[Message]) -> tuple[str, ...]:
         """Drop read records whose content ``messages`` no longer carries. Returns what went.
@@ -514,7 +538,7 @@ class GatedRegistry:
                 continue
         if named and not resolved_any:
             raise _KeyMismatch(sorted(named)[:3], list(self.files.known_paths())[:3])
-        return self.files.retain_only(visible)
+        return self._unmark(self.files.retain_only(visible))
 
     # -- the pipeline ------------------------------------------------------- #
 

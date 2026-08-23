@@ -349,6 +349,102 @@ def test_a_failed_read_does_not_count_as_the_file_being_visible() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# the two registries of "the model has seen this file" must agree
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_fold_that_forgets_a_read_also_stops_write_overwriting_it(
+    tmp_path: Path,
+) -> None:
+    """The destructive case, and the whole reason `write` has a read-before rule.
+
+    Two registries answer "has the model seen this file": the tracker, which the gate
+    prunes when a read leaves the transcript, and ``ToolContext.read_files``, a bare
+    set of paths that ``write`` consults. Only the first was pruned — so the fold
+    removed the read, the tracker forgot it, and ``write`` still saw the path and
+    replaced the whole file with content chosen without looking at it.
+    """
+    target = tmp_path / "a.py"
+    target.write_text("original = 1\n")
+    files, gate = real_gate(tmp_path, ReadTool(), WriteTool())
+
+    await read(gate, target)
+    assert files.recorded(target) is not None
+
+    dropped = gate.sync_file_state([])  # the read is no longer anywhere in the transcript
+    assert str(target) in dropped
+
+    result = await gate.execute(
+        use("write", call_id="w1", path=str(target), content="clobbered = 2\n")
+    )
+
+    assert not result.ok
+    assert target.read_text() == "original = 1\n", "the user's file survived"
+
+
+async def test_a_restore_also_clears_the_write_guard(tmp_path: Path) -> None:
+    target = tmp_path / "a.py"
+    target.write_text("original = 1\n")
+    files, gate = real_gate(tmp_path, ReadTool(), WriteTool())
+
+    await read(gate, target)
+    gate.forget_file_state()
+    assert files.known_paths() == ()
+
+    result = await gate.execute(
+        use("write", call_id="w1", path=str(target), content="clobbered = 2\n")
+    )
+
+    assert not result.ok
+    assert target.read_text() == "original = 1\n"
+
+
+async def test_pruning_takes_only_what_the_tracker_dropped(tmp_path: Path) -> None:
+    """Not a wholesale clear. Subagents run ungated, so their reads are in
+    ``read_files`` and never in the tracker; clearing everything would refuse writes
+    to files this layer has no opinion about."""
+    tracked = tmp_path / "tracked.py"
+    tracked.write_text("a = 1\n")
+    untracked = tmp_path / "untracked.py"
+    untracked.write_text("b = 2\n")
+    _files, gate = real_gate(tmp_path, ReadTool(), WriteTool())
+    ctx = gate.inner.ctx  # type: ignore[attr-defined]
+
+    await read(gate, tracked)
+    ctx.mark_read(untracked)  # as an ungated subagent read would leave it
+
+    gate.forget_file_state()
+
+    assert not ctx.has_been_read(tracked)
+    assert ctx.has_been_read(untracked), "a path the gate never recorded is left alone"
+
+
+async def test_a_read_that_survives_the_fold_can_still_be_written(tmp_path: Path) -> None:
+    # The control: pruning must not switch the write path off wholesale.
+    target = tmp_path / "a.py"
+    target.write_text("original = 1\n")
+    _files, gate = real_gate(tmp_path, ReadTool(), WriteTool())
+
+    await read(gate, target)
+    call = ToolUse(id="t1", name="read", arguments={"path": str(target)})
+    still_visible = [
+        Message(role=Role.ASSISTANT, content_blocks=(call,)),
+        Message(
+            role=Role.TOOL,
+            content_blocks=(ToolResultBlock(tool_use_id="t1", content="original = 1"),),
+        ),
+    ]
+    assert gate.sync_file_state(still_visible) == ()
+
+    result = await gate.execute(
+        use("write", call_id="w1", path=str(target), content="deliberate = 2\n")
+    )
+
+    assert result.ok, result.error
+    assert target.read_text() == "deliberate = 2\n"
+
+
+# --------------------------------------------------------------------------- #
 # wiring that must not drift
 # --------------------------------------------------------------------------- #
 
