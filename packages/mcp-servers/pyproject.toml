@@ -24,7 +24,7 @@ dependencies = [
 
 [project.optional-dependencies]
 postgres = ["psycopg2-binary>=2.9"]
-mcp = ["mcp>=1.28.1"]
+mcp = ["mcp>=2.0.0"]
 
 [project.urls]
 Homepage = "https://github.com/rohithkandula19/Ronin"
