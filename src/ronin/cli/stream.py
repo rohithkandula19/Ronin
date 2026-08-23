@@ -598,6 +598,22 @@ class Conversation:
                 "model's context window."
             )
 
+    def _forget_file_state(self, runtime: Runtime) -> tuple[str, ...]:
+        """Drop every read record. Never fatal, for the same reason as the sync below."""
+        forget = getattr(runtime.registry, "forget_file_state", None)
+        if forget is None:
+            return ()
+        try:
+            forgotten: tuple[str, ...] = forget()
+        except Exception as exc:
+            self.notes.append(
+                f"file-state could not be cleared after the restore "
+                f"({type(exc).__name__}: {exc}); re-read any file before editing it, "
+                "because the guard may still describe the tree as it was before the rewind"
+            )
+            return ()
+        return forgotten
+
     def _sync_file_state(self, runtime: Runtime) -> tuple[str, ...]:
         """Tell the gate which reads survived the fold. Never fatal.
 
@@ -672,6 +688,12 @@ class Conversation:
         dropped = len(self.messages) - mark.messages_before
         self.messages = self.messages[: mark.messages_before]
         del self.checkpoints[mark.checkpoints_before :]
+        # A rewind shrinks the transcript, so reads from the dropped turn are no longer
+        # in front of the model — the same divergence compaction gets repaired for, on
+        # the other code path that removes messages. Without this the stale-edit guard
+        # calls those files safe to edit against content that is gone, and a repeat
+        # read is answered with "scroll back for the contents".
+        self._sync_file_state(runtime)
         # A following turn must start from a clean per-turn slate; these are otherwise
         # only reset at the top of run_prompt, which a rewind does not pass through.
         self._mutated = False
@@ -698,6 +720,12 @@ class Conversation:
             )
         restore = await runtime.checkpoints.restore(mark.checkpoint_id)
         if restore.ok:
+            # Truncating the transcript is only half of it. A restore moves files under
+            # every record at once — including files the rewound turn never touched, and
+            # including a record this session wrote for the model's own edit, which now
+            # describes a version that no longer exists. Digests are re-established by
+            # reading, so the honest state is none of them.
+            self._forget_file_state(runtime)
             return RewindOutcome(
                 ok=True,
                 messages_dropped=dropped,
@@ -705,7 +733,9 @@ class Conversation:
                 restored_to=restore.restored_to,
                 detail=(
                     f"rewound one turn: dropped {dropped} message(s) and restored the "
-                    f"work tree to {restore.restored_to[:10]}."
+                    f"work tree to {restore.restored_to[:10]}. Files must be read again "
+                    "before they are edited — what was read before describes the tree "
+                    "as it was, not as it is now."
                 ),
             )
         return RewindOutcome(

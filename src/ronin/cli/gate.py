@@ -458,6 +458,19 @@ class GatedRegistry:
         """Every call this gate has seen, oldest first."""
         return tuple(self._log)
 
+    def forget_file_state(self) -> tuple[str, ...]:
+        """Drop every read record. Returns what went, sorted.
+
+        For when the *work tree* moves rather than the transcript — a checkpoint
+        restore puts files back to a commit the records know nothing about, so every
+        digest now describes content that no longer exists. Forgetting is the honest
+        answer: the next edit is told to read first, which is exactly right, and
+        ``NEVER_READ`` advises rather than refuses.
+        """
+        if self.files is None:
+            return ()
+        return self.files.retain_only(())
+
     def sync_file_state(self, messages: Sequence[Message]) -> tuple[str, ...]:
         """Drop read records whose content ``messages`` no longer carries. Returns what went.
 
