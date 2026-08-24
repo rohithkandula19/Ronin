@@ -110,6 +110,56 @@ def test_a_narrow_chmod_is_not_refused() -> None:
 @pytest.mark.parametrize(
     "command",
     [
+        "chmod -R 755 src",  # recursive, but not world-writable
+        "chmod -R u+x scripts",
+        "chmod --recursive 0644 docs",
+    ],
+)
+def test_a_recursive_chmod_that_is_not_world_writable_is_allowed(command: str) -> None:
+    """The false-positive side of the rule, which nothing covered.
+
+    Every existing case pairs a recursive flag with a world-writable mode, and the one
+    negative case -- ``chmod +x`` -- has no recursive flag, so it leaves through the
+    early return without ever reaching the mode comparison. That left the comparison
+    itself unpinned: invert it to ``word != "777"`` and ``chmod -R 777 /`` is *still*
+    refused, because the operand ``/`` now satisfies it. The rule fires on the wrong
+    word and every assertion above still holds.
+
+    A deny list is unconditional, so a false positive here has no override. The
+    module's own docstring names where that ends: people run with ``--yolo``.
+    """
+    assert codes(command) == set()
+
+
+def test_a_non_recursive_world_writable_chmod_is_left_to_the_policy() -> None:
+    """Scope, asserted rather than assumed.
+
+    ``_chmod_hits`` returns before looking at any mode unless a recursive flag is
+    present -- one file is a mistake, a whole tree is the outage the entry exists for.
+    Delete that early return and ``chmod 777 f`` becomes unconditionally refused, with
+    no test noticing, because the only non-recursive case carries a mode the
+    comparison never matches.
+    """
+    assert codes("chmod 777 deploy.sh") == set()
+    assert codes("chmod 0777 deploy.sh") == set()
+
+
+def test_the_refusal_names_the_mode_that_triggered_it() -> None:
+    """What the model is told has to identify the actual operand.
+
+    Asserting only the code lets the rule fire on any word in the command. The detail
+    is where that shows up, so it is the assertion that pins *which* operand matched.
+    """
+    hits = denylist().check_command("chmod -R a+rwx .")
+    chmod_hits = [h for h in hits if h.code is DenyCode.CHMOD_777_RECURSIVE]
+
+    assert len(chmod_hits) == 1
+    assert "a+rwx" in chmod_hits[0].detail
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
         "git push --force origin main",
         "git push -f origin main",
         "git push -f origin HEAD:main",

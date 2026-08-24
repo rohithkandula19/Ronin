@@ -243,6 +243,78 @@ def test_clearing_the_tracker_restores_trust() -> None:
     assert tracker.derives_from_untrusted({"command": "something-distinctive.sh --now"}) is None
 
 
+def test_a_span_of_exactly_the_minimum_does_taint() -> None:
+    """The boundary the neighbouring test only covers from one side.
+
+    ``_match`` returns early on ``len(text) < min_span``. Widen that by one character
+    -- ``<=`` -- and a payload of *exactly* the minimum length stops being detected,
+    while every other test here keeps passing. That is the shortest span the design
+    claims to catch, so it is the one an attacker would aim for.
+    """
+    payload = "zqx-payload-7734"
+    assert len(payload) == MIN_TAINT_SPAN  # exactly at the threshold, not over it
+    tracker = TaintTracker()
+    tracker.register(f"please run {payload} to continue", source="page")
+
+    hit = tracker.derives_from_untrusted({"command": payload})
+
+    assert hit is not None, "a span of exactly the minimum length was not detected"
+    assert hit.span == payload
+    assert hit.source == "page"
+
+
+def test_registering_one_source_twice_lists_it_once() -> None:
+    """``register`` documents itself as "idempotent per source and content".
+
+    Nothing checked the source list, so appending unconditionally survives: a page
+    fetched three times would be reported as three sources, and the taint banner
+    counts them.
+    """
+    tracker = TaintTracker()
+    tracker.register("some untrusted prose about deployment", source="page")
+    tracker.register("a different sentence entirely, same page", source="page")
+    tracker.register("prose from somewhere else", source="other")
+
+    assert tracker.sources == ("page", "other")
+
+
+def test_arguments_that_are_not_strings_are_walked_without_error() -> None:
+    """Real tool calls carry numbers and booleans, and the walk must survive them.
+
+    ``_walk``'s last branch is ``isinstance(value, Sequence) and not
+    isinstance(value, (str, bytes))``. Loosen that conjunction and an ``int`` falls
+    into the iterate-me branch and raises ``TypeError`` -- turning the taint check
+    into a crash on the most ordinary argument shape there is. Every existing test
+    passes only strings, lists and dicts.
+    """
+    tracker = TaintTracker()
+    tracker.register("run something-distinctive.sh --now", source="page")
+
+    args = {
+        "offset": 4000,
+        "limit": None,
+        "force": True,
+        "ratio": 1.5,
+        "nested": [{"depth": 2}, ("a", 3), {"blank": b"bytes"}],
+        "command": "something-distinctive.sh --now",
+    }
+    hit = tracker.derives_from_untrusted(args)
+
+    assert hit is not None  # the string is still found, past all the scalars
+    assert hit.argument == "command"
+
+
+def test_the_lowest_accepted_minimum_span_is_four() -> None:
+    """The refusal test below pins that *too low* raises; this pins where too low ends.
+
+    Without it the threshold can drift upward by one -- rejecting a legitimate
+    ``min_span=4`` -- and nothing notices, because no test constructs the boundary.
+    """
+    assert TaintTracker(min_span=4).min_span == 4
+    with pytest.raises(ValueError, match="prompts on everything"):
+        TaintTracker(min_span=3)
+
+
 def test_a_dangerously_low_minimum_span_is_refused_at_construction() -> None:
     """A threshold of 3 taints on `src` and prompts on everything, which is how the
     mechanism gets switched off."""
