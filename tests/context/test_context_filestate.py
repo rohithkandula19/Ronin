@@ -144,13 +144,21 @@ def test_re_reading_after_a_change_makes_the_file_editable_again(tmp_path: Path)
     assert tracker.check(path).status is FileStatus.UNCHANGED
 
 
-def test_forget_drops_the_record(tmp_path: Path) -> None:
+def test_dropping_a_record_puts_the_file_back_to_never_read(tmp_path: Path) -> None:
+    """``retain_only`` is the only way a record leaves, and it must leave completely.
+
+    Half-forgetting is the dangerous outcome: a path still in ``known_paths`` reports
+    a verdict, and any verdict but ``NEVER_READ`` is an invitation to edit blind.
+    """
     path = write(tmp_path / "a.py", b"x\n")
     tracker = FileStateTracker()
     tracker.record_read(path)
-    tracker.forget(path)
+
+    assert tracker.retain_only(()) == (str(path),)
+
     assert tracker.check(path).status is FileStatus.NEVER_READ
     assert tracker.known_paths() == ()
+    assert tracker.recorded(path) is None
 
 
 def test_known_paths_and_check_all_are_sorted_for_reproducible_output(
@@ -163,7 +171,12 @@ def test_known_paths_and_check_all_are_sorted_for_reproducible_output(
     assert [check.path for check in tracker.check_all()] == sorted(tracker.known_paths())
 
 
-def test_changed_since_read_lists_only_what_moved(tmp_path: Path) -> None:
+def test_check_all_gives_each_file_its_own_verdict(tmp_path: Path) -> None:
+    """One sweep, three different answers — the point of the plural.
+
+    A sweep that collapsed to a single verdict, or that let one file's status leak
+    into the next, would be worse than useless: the caller would act on it.
+    """
     tracker = FileStateTracker()
     stable = write(tmp_path / "stable.py", b"x\n")
     moved = write(tmp_path / "moved.py", b"x\n")
@@ -172,7 +185,14 @@ def test_changed_since_read_lists_only_what_moved(tmp_path: Path) -> None:
         tracker.record_read(path)
     write(moved, b"y\n")
     gone.unlink()
-    assert tracker.changed_since_read() == (str(gone), str(moved))
+
+    verdicts = {check.path: check.status for check in tracker.check_all()}
+
+    assert verdicts == {
+        str(stable): FileStatus.UNCHANGED,
+        str(moved): FileStatus.CHANGED,
+        str(gone): FileStatus.DELETED,
+    }
 
 
 def test_an_injected_reader_is_used_instead_of_the_filesystem(tmp_path: Path) -> None:
