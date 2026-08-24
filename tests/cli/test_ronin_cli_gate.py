@@ -605,6 +605,22 @@ def test_an_empty_record_still_renders() -> None:
     assert GateRecord(tool="read", tool_use_id="call_1").line() == "read[call_1]  refused"
 
 
+def test_blocked_reports_whether_a_stage_refused() -> None:
+    """A derived accessor on a public record, whose answer nothing checked.
+
+    ``GateRecord`` is the gate's contract with everything downstream — ``/doctor``,
+    the served registry, the log. ``blocked`` is the one-line reading of
+    ``blocked_by`` those consumers reach for, and inverting it flips every one of
+    their answers at once while the whole suite stays green.
+    """
+    allowed = GateRecord(tool="read", tool_use_id="c1", ok=True)
+    refused = GateRecord(tool="bash", tool_use_id="c2", blocked_by=GateStage.FILE_STATE)
+
+    assert not allowed.blocked
+    assert refused.blocked
+    assert refused.blocked_by is GateStage.FILE_STATE
+
+
 # --------------------------------------------------------------------------- #
 # Errors are values
 # --------------------------------------------------------------------------- #
@@ -637,6 +653,11 @@ async def test_cancellation_propagates_and_is_still_recorded() -> None:
 
     assert gate.log[-1].error == "cancelled"
     assert gate.log[-1].ok is False
+    # "cancelled" alone does not say *when*. A record that cannot distinguish a call
+    # cancelled before it ran from one cancelled in flight cannot answer the only
+    # question that matters afterwards: whether the tool may have already had an
+    # effect. The note is the half that carries that, so it is part of "recorded".
+    assert any("in flight" in note for note in gate.log[-1].notes)
 
 
 async def test_a_result_the_gate_itself_chokes_on_is_still_a_value() -> None:
