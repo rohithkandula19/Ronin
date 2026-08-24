@@ -2,6 +2,13 @@
 
 The CRLF test is the one worth reading: a tracker that hashes decoded text calls a
 whole-file line-ending rewrite "unchanged", and the model then clobbers it.
+
+The second half covers what the module grew later — the window, the completeness
+flag, and ``retain_only`` — which had no tests in its own test file at all. That
+gap mattered more than it looks: those three exist to keep a record from claiming
+more than the model was shown, so an untested one is a guard that can be wrong in
+the direction nobody notices. They were exercised only through the gate, which
+tests the wiring rather than the rules.
 """
 
 from __future__ import annotations
@@ -12,8 +19,10 @@ from pathlib import Path
 import pytest
 
 from ronin.context.filestate import (
+    WHOLE_FILE,
     FileStateTracker,
     FileStatus,
+    ReadWindow,
     digest_bytes,
 )
 
@@ -196,3 +205,188 @@ def test_a_reader_that_raises_oserror_reports_deleted(tmp_path: Path) -> None:
 def test_reading_a_missing_file_raises_rather_than_recording_a_lie(tmp_path: Path) -> None:
     with pytest.raises(OSError):
         FileStateTracker().record_read(tmp_path / "nope.py")
+
+
+# --------------------------------------------------------------------------- #
+# the window: two reads of one file are interchangeable only if they asked alike
+# --------------------------------------------------------------------------- #
+
+
+def test_a_bare_read_and_an_explicit_first_line_are_the_same_window() -> None:
+    # Otherwise the two spellings of "from the top" are two records that never agree.
+    assert ReadWindow.of() == ReadWindow.of(1) == WHOLE_FILE
+
+
+def test_a_non_positive_limit_is_dropped_rather_than_carried() -> None:
+    # `limit=0` is not "zero lines" to the read tool — it slices nothing and serves
+    # the default. Carried through, it renders as "lines 1-0".
+    assert ReadWindow.of(None, 0) == WHOLE_FILE
+    assert ReadWindow.of(None, -5) == WHOLE_FILE
+    assert ReadWindow.of(5, 0) == ReadWindow(offset=5, limit=None)
+
+
+def test_offset_zero_is_not_a_line_number() -> None:
+    assert ReadWindow.of(0) == WHOLE_FILE
+
+
+def test_a_window_is_recorded_as_asked_for(tmp_path: Path) -> None:
+    path = write(tmp_path / "a.py", b"\n".join(b"line %d" % i for i in range(1, 200)))
+    tracker = FileStateTracker()
+
+    record = tracker.record_read(path, window=ReadWindow.of(100, 20))
+
+    assert record.window == ReadWindow(offset=100, limit=20)
+
+
+def test_the_digest_stays_whole_file_even_for_a_windowed_read(tmp_path: Path) -> None:
+    """Deliberate, and the reason the window is a separate field.
+
+    A digest of twenty lines would call the file unchanged after an edit five hundred
+    lines away. The digest answers "did the file move"; the window answers "what did
+    the model see". Conflating them loses one answer or the other.
+    """
+    body = b"\n".join(b"line %d" % i for i in range(1, 200))
+    path = write(tmp_path / "a.py", body)
+    tracker = FileStateTracker()
+
+    record = tracker.record_read(path, body, window=ReadWindow.of(100, 20))
+
+    assert record.digest == digest_bytes(body)
+
+
+# --------------------------------------------------------------------------- #
+# satisfies: the whole condition for answering a read without re-sending it
+# --------------------------------------------------------------------------- #
+
+
+def test_a_matching_window_on_an_unchanged_file_is_satisfied(tmp_path: Path) -> None:
+    path = write(tmp_path / "a.py", b"x = 1\n")
+    tracker = FileStateTracker()
+    tracker.record_read(path)
+
+    assert tracker.satisfies(path, WHOLE_FILE)
+
+
+def test_a_different_window_is_not_satisfied(tmp_path: Path) -> None:
+    path = write(tmp_path / "a.py", b"\n".join(b"line %d" % i for i in range(1, 200)))
+    tracker = FileStateTracker()
+    tracker.record_read(path, window=ReadWindow.of(100, 20))
+
+    assert tracker.satisfies(path, ReadWindow.of(100, 20))
+    assert not tracker.satisfies(path, WHOLE_FILE)
+    assert not tracker.satisfies(path, ReadWindow.of(1, 20))
+
+
+def test_a_changed_file_is_not_satisfied(tmp_path: Path) -> None:
+    path = write(tmp_path / "a.py", b"x = 1\n")
+    tracker = FileStateTracker()
+    tracker.record_read(path)
+
+    write(path, b"x = 2\n")
+
+    assert not tracker.satisfies(path, WHOLE_FILE)
+
+
+def test_a_file_never_read_is_not_satisfied(tmp_path: Path) -> None:
+    assert not FileStateTracker().satisfies(tmp_path / "never.py", WHOLE_FILE)
+
+
+# --------------------------------------------------------------------------- #
+# complete: a sound baseline is not the same as a stand-in for content
+# --------------------------------------------------------------------------- #
+
+
+def test_a_record_is_complete_unless_told_otherwise(tmp_path: Path) -> None:
+    path = write(tmp_path / "a.py", b"x = 1\n")
+    assert FileStateTracker().record_read(path).complete
+
+
+def test_an_incomplete_record_still_detects_change_but_never_satisfies(
+    tmp_path: Path,
+) -> None:
+    """The distinction the flag exists to draw.
+
+    A capped or clamped read showed the model a prefix. That is still a perfectly
+    good answer to "did the file move" — and no answer at all to "does the model
+    hold this file".
+    """
+    path = write(tmp_path / "a.py", b"x = 1\n")
+    tracker = FileStateTracker()
+    tracker.record_read(path, complete=False)
+
+    assert tracker.check(path).status is FileStatus.UNCHANGED
+    assert not tracker.satisfies(path, WHOLE_FILE)
+
+    write(path, b"x = 2\n")
+    assert tracker.check(path).status is FileStatus.CHANGED
+
+
+def test_mark_incomplete_downgrades_a_record_in_place(tmp_path: Path) -> None:
+    path = write(tmp_path / "a.py", b"x = 1\n")
+    tracker = FileStateTracker()
+    tracker.record_read(path)
+    assert tracker.satisfies(path, WHOLE_FILE)
+
+    tracker.mark_incomplete(path)
+
+    assert not tracker.satisfies(path, WHOLE_FILE)
+    assert tracker.check(path).status is FileStatus.UNCHANGED  # baseline survives
+
+
+def test_mark_incomplete_on_an_unknown_path_is_a_no_op(tmp_path: Path) -> None:
+    tracker = FileStateTracker()
+    tracker.mark_incomplete(tmp_path / "never.py")  # must not raise or invent a record
+    assert tracker.known_paths() == ()
+
+
+# --------------------------------------------------------------------------- #
+# retain_only: forgetting is how the guard stops describing a vanished transcript
+# --------------------------------------------------------------------------- #
+
+
+def test_retain_only_drops_what_is_not_named_and_reports_it(tmp_path: Path) -> None:
+    kept = write(tmp_path / "kept.py", b"a = 1\n")
+    gone = write(tmp_path / "gone.py", b"b = 2\n")
+    tracker = FileStateTracker()
+    tracker.record_read(kept)
+    tracker.record_read(gone)
+
+    dropped = tracker.retain_only([str(kept)])
+
+    assert dropped == (str(gone),)
+    assert tracker.known_paths() == (str(kept),)
+
+
+def test_retain_only_reports_in_a_stable_order(tmp_path: Path) -> None:
+    # The caller prints these; unsorted output would churn between runs.
+    tracker = FileStateTracker()
+    for name in ("c.py", "a.py", "b.py"):
+        tracker.record_read(write(tmp_path / name, b"x\n"))
+
+    assert tracker.retain_only(()) == tuple(
+        sorted(str(tmp_path / name) for name in ("a.py", "b.py", "c.py"))
+    )
+
+
+def test_a_forgotten_file_reads_as_never_read_not_as_unchanged(tmp_path: Path) -> None:
+    """The point of forgetting. NEVER_READ advises; UNCHANGED would assert something
+    false about content the model no longer holds."""
+    path = write(tmp_path / "a.py", b"x = 1\n")
+    tracker = FileStateTracker()
+    tracker.record_read(path)
+
+    tracker.retain_only(())
+
+    check = tracker.check(path)
+    assert check.status is FileStatus.NEVER_READ
+    assert not check.safe_to_edit
+    assert "Read it first" in check.message
+
+
+def test_retaining_everything_drops_nothing(tmp_path: Path) -> None:
+    path = write(tmp_path / "a.py", b"x = 1\n")
+    tracker = FileStateTracker()
+    tracker.record_read(path)
+
+    assert tracker.retain_only([str(path)]) == ()
+    assert tracker.recorded(path) is not None
