@@ -134,7 +134,7 @@ async def test_a_file_that_changed_on_disk_is_read_again(tmp_path: Path) -> None
     assert inner.called == ("read", "read")
 
 
-async def test_a_deleted_file_is_read_again_so_the_tool_reports_the_error(tmp_path: Path) -> None:
+async def test_a_deleted_file_is_read_again_rather_than_stubbed(tmp_path: Path) -> None:
     target = tmp_path / "config.py"
     target.write_bytes(BODY)
     inner = reader()
@@ -146,6 +146,7 @@ async def test_a_deleted_file_is_read_again_so_the_tool_reports_the_error(tmp_pa
 
     # Answering "unchanged" for a file that is gone would be the worst stub of all.
     assert inner.called == ("read", "read")
+    assert GateStage.DEDUP not in gate.log[-1].stages
 
 
 async def test_only_read_tools_are_deduplicated(tmp_path: Path) -> None:
@@ -261,7 +262,7 @@ async def test_the_gate_reads_the_window_off_the_call(tmp_path: Path) -> None:
     assert len(inner.called) == 2  # whole file: not what was seen
 
 
-async def test_a_malformed_offset_is_left_for_the_tool_to_report(tmp_path: Path) -> None:
+async def test_a_malformed_offset_is_not_treated_as_no_offset(tmp_path: Path) -> None:
     target = tmp_path / "long.py"
     target.write_text("\n".join(f"line {i}" for i in range(1, 400)))
     inner = reader()
@@ -271,8 +272,10 @@ async def test_a_malformed_offset_is_left_for_the_tool_to_report(tmp_path: Path)
     await gate.execute(use("read", call_id="call_2", path=str(target), offset="banana"))
 
     # Treating a bad offset as "absent" would silently stub a call that asked for
-    # something else. The tool owns that error message.
+    # something else. The tool owns that error message — see the fidelity suite,
+    # which drives the real tool and checks it actually produces one.
     assert inner.called == ("read", "read")
+    assert GateStage.DEDUP not in gate.log[-1].stages
 
 
 # --------------------------------------------------------------------------- #
