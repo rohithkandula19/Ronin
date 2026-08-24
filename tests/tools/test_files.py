@@ -87,6 +87,36 @@ async def test_read_reports_an_empty_file_as_empty(tmp_path: Path) -> None:
     assert "empty" in result.content
 
 
+async def test_reading_an_empty_file_hands_over_no_content_to_stand_in_for_it(
+    tmp_path: Path,
+) -> None:
+    """The answer describes the file; it is not a copy of it.
+
+    Handed over as complete, it becomes grounds for the gate to answer the next read
+    with "the contents are above, scroll back" — pointing at a message that has no
+    contents to find. The file is still *recorded*, so the write guard is unaffected.
+    """
+    target = write_file(tmp_path, "empty.txt", "")
+    ctx = context(tmp_path)
+
+    await call(READ, ctx, path="empty.txt")
+
+    assert str(target) in ctx.read_files  # recorded: an edit of it is still checked
+    _raw, complete = ctx.last_read_bytes[str(target)]
+    assert complete is False
+
+
+async def test_reading_a_file_with_content_does_hand_it_over(tmp_path: Path) -> None:
+    """The control. Only emptiness withholds the handoff, not every short read."""
+    target = write_file(tmp_path, "one.txt", "x\n")
+    ctx = context(tmp_path)
+
+    await call(READ, ctx, path="one.txt")
+
+    _raw, complete = ctx.last_read_bytes[str(target)]
+    assert complete is True
+
+
 async def test_read_refuses_a_binary_file_with_a_useful_message(tmp_path: Path) -> None:
     (tmp_path / "data.bin").write_bytes(b"\x00\x01\x02" * 100)
     result = await call(READ, context(tmp_path), path="data.bin")

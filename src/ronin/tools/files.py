@@ -221,6 +221,15 @@ class ReadTool(Tool):
         ctx.mark_read(path, raw)
 
         if text == "":
+            # A description of the file, not a copy of it — so it must not be
+            # allowed to stand in for one. Recorded complete, the dedup answers the
+            # next read with "the whole file is already in this conversation above,
+            # scroll back for the contents" — 282 characters spent to avoid
+            # re-sending 40, pointing at a message that has no contents to find.
+            # Marking it incomplete costs one cheap re-read and keeps the answer
+            # true. The digest is still recorded, so the write guard is unaffected:
+            # ``complete`` gates only the dedup.
+            ctx.mark_read(path, raw, complete=False)
             return ToolResult(
                 ok=True,
                 content=f"{path.name} exists but is empty (0 bytes).",

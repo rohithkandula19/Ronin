@@ -277,6 +277,79 @@ async def test_a_complete_small_read_is_still_deduplicated(tmp_path: Path) -> No
 
 
 # --------------------------------------------------------------------------- #
+# an empty file has nothing to scroll back to
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_second_read_of_an_empty_file_is_answered_with_the_file(
+    tmp_path: Path,
+) -> None:
+    """The dedup spent more context than it saved, and lied while doing it.
+
+    ``read`` of an empty file returns a *description* — "notes.txt exists but is
+    empty (0 bytes)" — and used to record it as though it were the contents. So the
+    second read was answered with the stub: 282 characters telling the model to
+    scroll back for contents that are 40 characters of "there are none". Seven times
+    the cost, in the mechanism whose only justification is cost, pointing the model
+    at something it cannot find.
+    """
+    target = tmp_path / "notes.txt"
+    target.write_text("")
+    _files, gate = real_gate(tmp_path)
+
+    first = await read(gate, target)
+    second = await gate.execute(use("read", call_id="r2", path=str(target)))
+
+    assert first.content == second.content
+    assert "0 bytes" in second.content
+    assert "scroll back" not in second.content.lower()
+    assert len(second.content) <= len(first.content)
+
+
+async def test_an_empty_read_still_records_enough_to_check_a_later_write(
+    tmp_path: Path,
+) -> None:
+    """Withholding the handoff must not cost the guard.
+
+    ``complete`` gates the dedup and nothing else — the digest is still recorded, so
+    a write after reading an empty file is still a write the model has looked at.
+    Getting this wrong would trade a cosmetic waste for a refused legitimate write.
+    """
+    target = tmp_path / "notes.txt"
+    target.write_text("")
+    files, gate = real_gate(tmp_path, ReadTool(), WriteTool())
+
+    await read(gate, target)
+    written = await gate.execute(
+        use("write", call_id="w1", path=str(target), content="first line\n")
+    )
+
+    assert written.ok, written.error
+    assert target.read_text() == "first line\n"
+    assert files.recorded(target) is not None
+
+
+async def test_a_file_that_becomes_empty_is_read_again_not_stubbed(tmp_path: Path) -> None:
+    """The path that gets there by truncation, not by starting out that way.
+
+    The first read is a real, complete copy of the contents. Emptying the file makes
+    the stub actively wrong — and the record must not survive the change in a form
+    that still satisfies the dedup.
+    """
+    target = tmp_path / "notes.txt"
+    target.write_text("x = 1\n")
+    files, gate = real_gate(tmp_path)
+
+    await read(gate, target)
+    assert files.satisfies(target, WHOLE_FILE)  # the ordinary case still holds
+    target.write_text("")
+    second = await gate.execute(use("read", call_id="r2", path=str(target)))
+
+    assert "0 bytes" in second.content
+    assert not files.satisfies(target, WHOLE_FILE)
+
+
+# --------------------------------------------------------------------------- #
 # the model's own edits are not the user's
 # --------------------------------------------------------------------------- #
 
