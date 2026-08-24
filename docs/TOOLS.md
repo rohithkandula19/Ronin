@@ -43,13 +43,14 @@ contents — the gate returns it without running the tool at all. The contents a
 above in the conversation, and sending a second copy spends the window on a duplicate.
 
 The condition is narrow, because the failure mode of getting it wrong is telling a model
-it has something it does not. `FileStateTracker.satisfies` is the whole of it, and all
-four parts have to hold:
+it has something it does not. `FileStateTracker.satisfies` is the core of it, and all
+five parts have to hold:
 
 * the path was read this session,
 * the read asked for the **same window** — a whole-file note after a twenty-line read
   would claim lines the model never saw,
 * the file has not changed on disk since,
+* the record is **complete** — see below,
 * and the record has not been dropped because compaction folded the contents away.
 
 That last one is what makes the rest safe. `FileStateTracker` compares digests against
@@ -80,6 +81,32 @@ will be re-sent.
 
 One wasted call is recoverable. An edit written against a file the model never saw is
 not, which is why the escape hatch exists and why the note always mentions it.
+
+### What is never stubbed
+
+The gate declines before `satisfies` is consulted at all when:
+
+* the call passed `force=true`,
+* the path names an **image** — the contents only ever lived in `artifacts`, which the
+  transcript layer cannot scroll back to, so there is nothing above to point at
+  (`NO_DEDUP_SUFFIXES` is `IMAGE_SUFFIXES` itself, imported rather than restated, so
+  adding `.svg` to the tool's list cannot silently make image reads stubbable),
+* or the window argument will not parse, which is never read as "no window": a stub
+  for the whole file would answer a call that asked for part of it.
+
+And a record is marked **incomplete** — recorded for change-detection, but never
+grounds for a stub — in four cases, because in each the model holds less than the file:
+
+| Case | Why the record cannot stand in for the contents |
+|---|---|
+| the tool hit its 2000-line cap | the model got a prefix |
+| the gate clamped the result to the output budget | same, decided a layer later |
+| the file is **empty** | the answer is a description — "0 bytes" — not a copy |
+| the model's own `edit` re-baselined the digest | after an edit it holds the file it read plus an intention, not the bytes on disk |
+
+A read that **failed** is not recorded at all. Recording one would let a refusal — a
+PDF, a directory, a missing file — be answered on the next call with "the whole file is
+already in this conversation above", about content the tool declined to send.
 
 ---
 
