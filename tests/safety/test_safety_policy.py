@@ -42,7 +42,7 @@ from ronin.safety.policy import (
     glob_to_regex,
     most_restrictive,
 )
-from ronin.safety.sandbox import BubblewrapSandbox, NoSandbox
+from ronin.safety.sandbox import SANDBOX_AUTO_APPROVES, BubblewrapSandbox, NoSandbox
 
 # --------------------------------------------------------------------------- #
 # Protocol conformance
@@ -530,6 +530,14 @@ async def test_a_non_isolating_sandbox_changes_nothing() -> None:
         (Budget(max_tokens=100, spent_tokens=100), "token_budget"),
         (Budget(max_usd=1.0, spent_usd=1.5), "cost_budget"),
         (Budget(max_wall_seconds=30, elapsed_seconds=31), "wall_budget"),
+        # All three ceilings are `>=`, and only the token one was pinned at the
+        # boundary. Landing exactly on a limit has to stop the run, or "max" means
+        # "max plus one call" — and the two that were tested only from above could
+        # drift to `>` with nothing failing.
+        (Budget(max_usd=1.0, spent_usd=0.99), None),
+        (Budget(max_usd=1.0, spent_usd=1.0), "cost_budget"),
+        (Budget(max_wall_seconds=30, elapsed_seconds=29), None),
+        (Budget(max_wall_seconds=30, elapsed_seconds=30), "wall_budget"),
     ],
 )
 def test_check_budget_names_the_ceiling_that_was_hit(budget: Budget, expected: str | None) -> None:
@@ -562,6 +570,42 @@ async def test_an_approval_request_is_never_blank() -> None:
         spec, ToolUse(id="c", name="deploy", arguments={"env": "prod"}), rendered=""
     )
     assert asker_of(policy).requests[0].rendered == "deploy(env='prod')"
+
+
+async def test_an_auto_approval_under_an_isolating_sandbox_is_still_audited() -> None:
+    """The one approval no human sees is the one the log most has to carry.
+
+    ``sandbox.py`` states the trade outright: the engine "hands this to the model *and
+    the log* verbatim, so the trade -- no prompts *because* no reach -- is on the
+    record rather than implicit." Tests asserted the wording of
+    ``SANDBOX_AUTO_APPROVES`` and never that it reaches the record, so deleting the
+    ``_record`` call on that branch leaves the whole suite green: the call is approved,
+    the asker is never consulted, and the audit trail simply has nothing in it.
+
+    That is the worst entry to lose. Every other approval either prompted a person or
+    was allowed by a rule someone can read; this one happened because the sandbox
+    claimed isolation, and the audit log is the only place that claim is written down.
+    """
+
+    class Isolating:
+        name = "docker"
+        isolates = True
+
+        def describe(self) -> str:
+            return "docker"
+
+    policy = engine(sandbox=Isolating())
+    # `./deploy.sh` is the ASK case -- see the audit test below. Under isolation it
+    # is approved with no asker involved at all.
+    decision = await policy.approve(BASH, use("./deploy.sh"), rendered="./deploy.sh")
+
+    assert decision.approved is True
+    assert asker_of(policy).requests == []  # nobody was asked
+    assert len(policy.audit) == 1, "an auto-approval left no trace in the audit log"
+    entry = policy.audit[0]
+    assert entry.approved is True
+    assert entry.decision is Decision.ASK  # what it *would* have been without the box
+    assert entry.reason == SANDBOX_AUTO_APPROVES
 
 
 async def test_the_audit_log_records_every_decision_with_its_trace() -> None:
