@@ -223,6 +223,7 @@ module = [
     "test_fetcher",
     "test_files",
     "test_files_edges",
+    "test_files_line_endings",
     "test_golden_streams",
     "test_integration",
     "test_jsonargs",

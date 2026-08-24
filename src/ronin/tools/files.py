@@ -67,6 +67,15 @@ def _read_text(path: Path) -> str:
     return _read_bytes_and_text(path)[1]
 
 
+#: Passed to every write. ``newline=None`` — the default — translates ``"\n"`` to
+#: ``os.linesep`` on the way out, so on Windows a file that legitimately contains
+#: ``"\r\n"`` (which ``_read_text`` decodes faithfully, byte for byte) is written back
+#: as ``"\r\r\n"``. One ``edit`` doubles every carriage return in the file. ``""``
+#: means "write the string exactly as it is", which is the only correct answer when
+#: the string came from reading that same file.
+KEEP_LINE_ENDINGS = ""
+
+
 def _read_bytes_and_text(path: Path) -> tuple[bytes, str]:
     """The same read, handing back the raw bytes alongside the decoded text.
 
@@ -315,7 +324,7 @@ class WriteTool(Tool):
 
         path.parent.mkdir(parents=True, exist_ok=True)
         existed = path.exists()
-        path.write_text(content, encoding="utf-8")
+        path.write_text(content, encoding="utf-8", newline=KEEP_LINE_ENDINGS)
         # A write is also a read: the model now knows exactly what is in the file,
         # so a follow-up edit or write should not be blocked by the guard.
         ctx.mark_read(path)
@@ -428,7 +437,7 @@ class EditTool(Tool):
         updated, replacements = apply_edit(
             text, old, new, replace_all=replace_all, path_label=str(path)
         )
-        path.write_text(updated, encoding="utf-8")
+        path.write_text(updated, encoding="utf-8", newline=KEEP_LINE_ENDINGS)
         ctx.mark_read(path)
         return ToolResult(
             ok=True,
@@ -521,7 +530,7 @@ class MultiEditTool(Tool):
                 ) from exc
             total += replacements
 
-        path.write_text(buffer, encoding="utf-8")
+        path.write_text(buffer, encoding="utf-8", newline=KEEP_LINE_ENDINGS)
         ctx.mark_read(path)
         return ToolResult(
             ok=True,
