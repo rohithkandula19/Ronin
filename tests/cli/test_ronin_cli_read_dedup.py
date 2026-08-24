@@ -439,6 +439,62 @@ async def test_sync_keeps_everything_when_no_path_resolves(tmp_path: Path) -> No
     assert files.recorded(target) is not None  # nothing forgotten
 
 
+async def test_sync_keeps_a_path_that_will_not_resolve_while_others_do(tmp_path: Path) -> None:
+    """The invariant the docstring states and nothing checked.
+
+    ``sync_file_state`` says: *"A path that will not resolve is kept under both
+    spellings rather than dropped. Forgetting on a resolution failure would quietly
+    weaken the stale-edit check."* The line that implements it is one ``visible.add``
+    of the raw spelling, before the resolve that may throw.
+
+    The neighbouring test covers the *tripwire* — when not one path resolves, the
+    resolver is broken and nothing is forgotten. This is the other branch, and the
+    dangerous one: when some paths resolve, the tripwire stays silent, so a dropped
+    raw spelling means that one file is quietly forgotten while the compaction is
+    reported as routine. The next edit of it is then checked against nothing.
+    """
+    good = tmp_path / "good.py"
+    bad = tmp_path / "bad.py"
+    for path in (good, bad):
+        path.write_bytes(BODY)
+    files = FileStateTracker()
+    files.record_read(good)
+    files.record_read(bad)
+
+    def resolve_except_bad(raw: str) -> Path:
+        if raw == str(bad):
+            raise RuntimeError("this spelling cannot be resolved")
+        return Path(raw)
+
+    taint = TaintTracker()
+    gate = gated(
+        reader(),
+        PolicyEngine(builtin_ruleset(), taint=taint),
+        files=files,
+        taint=taint,
+        resolve=resolve_except_bad,
+    )
+    messages: list[Message] = []
+    for i, path in enumerate((good, bad)):
+        call = ToolUse(id=f"t{i}", name="read", arguments={"path": str(path)})
+        messages.append(Message(role=Role.ASSISTANT, content_blocks=(call,)))
+        messages.append(
+            Message(
+                role=Role.TOOL,
+                content_blocks=(ToolResultBlock(tool_use_id=f"t{i}", content=BODY.decode()),),
+            )
+        )
+
+    dropped = gate.sync_file_state(messages)
+
+    assert dropped == ()  # neither file left the transcript, so neither may be forgotten
+    assert files.recorded(good) is not None
+    assert files.recorded(bad) is not None, (
+        "the unresolvable path was forgotten, so the stale-edit guard no longer "
+        "covers it — and the compaction reported nothing unusual"
+    )
+
+
 # --------------------------------------------------------------------------- #
 # what counts as "visible"
 # --------------------------------------------------------------------------- #
