@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import TextIO
 
 from ..agents.hooks import MATCH_ALL
+from ..context.compaction import context_breakdown
 from ..core.types import (
     ApprovalRequest,
     Budget,
@@ -2380,7 +2381,39 @@ def cost_report(agent: Agent) -> str:
     if len(roles) > 1:
         for role, per_role in sorted(roles.items(), key=lambda item: item[0].value):
             lines.append(f"  {role.value:<6} {per_role.summary()}")
+    lines.extend(context_lines(agent))
     return "\n".join(lines) + "\n"
+
+
+def context_lines(agent: Agent) -> list[str]:
+    """Where the window's tokens are now, heaviest first. Empty if there is nothing yet.
+
+    The lines above this answer "what did it cost and which model spent it". This
+    answers "what is in the window", which is a different question with a different
+    remedy: a ledger row tells you to switch model, a breakdown row tells you to shrink
+    the repo map or let compaction run. Both belong under ``/cost`` because a user
+    asking about spend is asking about whichever of the two is currently hurting.
+
+    Sized against the same policy the status line uses, so the percentage here and the
+    ``ctx`` figure in the status bar cannot disagree.
+    """
+    breakdown = context_breakdown(
+        agent.conversation.messages,
+        memory_chars=len(agent.loaded.memory.render()),
+        repo_map_tokens=agent.loaded.repo_map.token_estimate,
+        context_window=agent.runtime.compaction.context_window,
+    )
+    rows = breakdown.ranked()
+    if not rows:
+        return []
+    window = agent.runtime.compaction.context_window
+    head = f"  context ~{breakdown.total_tokens:,} tokens"
+    if window > 0:
+        head += f" of {window:,} ({breakdown.total_tokens / window:.0%})"
+    out = [head]
+    for name, tokens in rows:
+        out.append(f"    {name:<13} {tokens:>8,}  {breakdown.share(name):>4.0%}")
+    return out
 
 
 def provider_failure_message(exc: ProviderError) -> str:
