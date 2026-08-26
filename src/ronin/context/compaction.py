@@ -38,6 +38,7 @@ per provider would be worse than being explicit about the approximation.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Awaitable, Callable, Container, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -274,6 +275,141 @@ def render_message(message: Message) -> str:
 
 def _render_arguments(arguments: Mapping[str, Any]) -> str:
     return ", ".join(f"{key}={arguments[key]!r}" for key in sorted(arguments))
+
+
+#: The categories a context window divides into, in the order ``/cost`` prints them.
+#: Ordered by what a user acts on first: the two pinned costs they can configure away,
+#: then the transcript's own weight, heaviest contributor first.
+BREAKDOWN_CATEGORIES: tuple[str, ...] = (
+    "memory",
+    "repo map",
+    "tool results",
+    "tool calls",
+    "assistant",
+    "user",
+    "system",
+    "framing",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ContextBreakdown:
+    """Where the tokens in the window actually are, by category.
+
+    Answers a different question from the cost ledger, and the difference is the point.
+    The ledger says *which model* spent money and whether the cache hit — cumulative,
+    historical, denominated in dollars. This says *what is in the window right now*,
+    denominated in tokens. On a 32k local model "the repo map is 8k of your 32k" is the
+    number that tells you what to change; "main spent 80%" is not.
+
+    Characters are accumulated per category and converted once at the end, because
+    :func:`estimate_tokens` rounds up per call: summing rounded parts drifts above the
+    whole. Accumulating characters and dividing once means the parts sum to the total by
+    construction rather than by luck, which is what makes the percentages trustworthy.
+
+    ``framing`` is the role tags and newline joins :func:`render_message` adds. It is
+    named rather than hidden because a transcript of many tiny messages really does
+    spend tokens on it, and an unexplained residual invites the reader to assume the
+    breakdown is lossy.
+    """
+
+    chars: Mapping[str, int]
+    context_window: int = 0
+
+    @property
+    def total_chars(self) -> int:
+        return sum(self.chars.values())
+
+    @property
+    def total_tokens(self) -> int:
+        return estimate_tokens_from_chars(self.total_chars)
+
+    def tokens(self, category: str) -> int:
+        return estimate_tokens_from_chars(self.chars.get(category, 0))
+
+    def share(self, category: str) -> float:
+        """This category as a fraction of the window, or of the total if no window."""
+        denominator = self.context_window if self.context_window > 0 else self.total_chars
+        if denominator <= 0:
+            return 0.0
+        if self.context_window > 0:
+            return min(self.tokens(category) / self.context_window, 1.0)
+        return self.chars.get(category, 0) / denominator
+
+    def ranked(self) -> tuple[tuple[str, int], ...]:
+        """Non-empty categories as ``(name, tokens)``, heaviest first.
+
+        Ties break on :data:`BREAKDOWN_CATEGORIES` order rather than on the name, so a
+        session where two categories happen to match prints the same way twice.
+        """
+        order = {name: index for index, name in enumerate(BREAKDOWN_CATEGORIES)}
+        rows = [(name, self.tokens(name)) for name in self.chars if self.chars.get(name, 0) > 0]
+        rows.sort(key=lambda row: (-row[1], order.get(row[0], len(order))))
+        return tuple(rows)
+
+
+def estimate_tokens_from_chars(chars: int) -> int:
+    """``estimate_tokens`` for a length already counted. One rounding rule, one place."""
+    return math.ceil(chars / CHARS_PER_TOKEN) if chars > 0 else 0
+
+
+def context_breakdown(
+    messages: Sequence[Message],
+    *,
+    memory_chars: int = 0,
+    repo_map_tokens: int = 0,
+    context_window: int = 0,
+) -> ContextBreakdown:
+    """Attribute the window's tokens to categories, mirroring :func:`render_message`.
+
+    Every character :func:`render_message` produces lands in exactly one bucket, which
+    is the invariant the tests pin: add a block type there and forget it here and the
+    sum stops matching, rather than a category silently under-reporting. That is why
+    this lives next to ``render_message`` instead of in a module of its own.
+
+    The two pinned figures come in as arguments because they are not in ``messages`` at
+    all — the repo map and RONIN.md live in the provider's stable prefix, and a
+    breakdown that omitted them would report a small window as mostly empty while
+    compaction was already firing. ``repo_map_tokens`` arrives as tokens because the
+    map was *budgeted* in tokens; it is converted back to characters here so one
+    rounding rule applies to every row.
+    """
+    chars: dict[str, int] = {name: 0 for name in BREAKDOWN_CATEGORIES}
+    chars["memory"] = memory_chars
+    chars["repo map"] = repo_map_tokens * CHARS_PER_TOKEN
+    for message in messages:
+        rendered = _render_parts(message)
+        # The role tag and the newlines between parts, exactly as `render_message` joins.
+        chars["framing"] += len(f"[{message.role.value}]") + len(rendered)
+        for category, text in rendered:
+            chars[category] += len(text)
+    return ContextBreakdown(chars=chars, context_window=context_window)
+
+
+def _render_parts(message: Message) -> list[tuple[str, str]]:
+    """Each rendered block of ``message`` as ``(category, text)``.
+
+    Kept in lockstep with :func:`render_message` — the strings here are that function's
+    strings, so the two cannot disagree about what a block costs.
+    """
+    speaker = {
+        Role.USER: "user",
+        Role.ASSISTANT: "assistant",
+        Role.SYSTEM: "system",
+        Role.TOOL: "tool results",
+    }.get(message.role, "system")
+    parts: list[tuple[str, str]] = []
+    for block in message.content_blocks:
+        if isinstance(block, Text):
+            parts.append((speaker, block.text))
+        elif isinstance(block, ToolUse):
+            parts.append(("tool calls", f"call {block.name}({_render_arguments(block.arguments)})"))
+        elif isinstance(block, ToolResultBlock):
+            prefix = "error" if block.is_error else "result"
+            parts.append(("tool results", f"{prefix} {block.tool_use_id}: {block.content}"))
+        else:
+            parts.append((speaker, block.text))
+    return parts
 
 
 def message_tokens(message: Message) -> int:

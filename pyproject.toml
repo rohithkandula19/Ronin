@@ -206,6 +206,7 @@ module = [
     "test_capability_overrides",
     "test_check_test_imports",
     "test_cli_cost_visibility",
+    "test_context_breakdown",
     "test_context_budget",
     "test_context_compaction",
     "test_context_edges",
