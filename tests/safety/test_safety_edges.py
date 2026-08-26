@@ -38,6 +38,7 @@ from ronin.safety.policy import (
     Exact,
     MatchTarget,
     Outcome,
+    PathGlob,
     PolicyEngine,
     Rule,
     RuleSet,
@@ -421,6 +422,86 @@ def test_a_non_command_argument_is_read_straight_from_the_arguments() -> None:
     assert target.argument("path") == "notes.md"
     assert target.argument("lines") is None, "a non-string must not be stringified"
     assert target.argument("missing") is None
+
+
+def test_the_command_argument_is_read_through_the_segment_not_the_raw_arguments() -> None:
+    """The routing every matcher depends on, and none of them pinned.
+
+    ``MatchTarget.argument`` special-cases the command field: once a compound command
+    has been split, a rule judging "the command" must see *this segment's* line, not
+    the whole original string sitting in ``arguments``. Five separate one-token changes
+    to that condition survived the suite -- dropping the branch, loosening its ``and``,
+    inverting either comparison -- because nothing ever asked for the command field on
+    a segment target and compared the answer to both candidates.
+
+    Getting it wrong is not a cosmetic error: a ``CommandRegex`` rule would then be
+    matched against text from a different segment, so a deny rule silently stops
+    firing on the segment it was written for.
+    """
+    segment = parse_command("cat src/a.py; rm -rf /etc")[1]
+    target = MatchTarget(
+        tool="bash", arguments={"command": "cat src/a.py; rm -rf /etc"}, segment=segment
+    )
+
+    assert target.argument("command") == "rm -rf /etc"  # this segment
+    assert target.argument("command") != target.arguments["command"]  # not the whole line
+
+
+def test_a_non_command_argument_is_unaffected_by_the_presence_of_a_segment() -> None:
+    """The other half of the same condition.
+
+    Loosening the ``and`` to ``or`` makes *every* argument return the command text as
+    soon as a segment exists -- so a rule matching on ``path`` would be handed a shell
+    command. The control that catches it has to ask for a non-command argument on a
+    target that does have a segment, which no existing test did.
+    """
+    segment = parse_command("rm -rf /etc")[0]
+    target = MatchTarget(
+        tool="bash", arguments={"command": "rm -rf /etc", "cwd": "/srv"}, segment=segment
+    )
+
+    assert target.argument("cwd") == "/srv"
+    assert target.argument("missing") is None
+
+
+def test_the_command_field_falls_back_to_the_arguments_with_no_segment() -> None:
+    """No segment and no command text means there is nothing to route, so the ordinary
+    lookup has to still work -- that is what the second half of the ``or`` is for."""
+    plain = MatchTarget(tool="bash", arguments={"command": "git status"})
+    empty = MatchTarget(tool="write", arguments={"path": "a.py"})
+
+    assert plain.argument("command") == "git status"
+    assert empty.argument("command") is None
+
+
+def test_a_path_glob_bound_to_one_argument_matches_only_that_argument() -> None:
+    """`PathGlob` has two branches and only the ``*`` one was ever matched against.
+
+    ``PathGlob(pattern, argument)`` is a shape the settings parser already produces, so
+    a user can write it in config today. Its branch was untested end to end, which let
+    two separate inversions survive: swapping which branch runs, and dropping the
+    ``is not None`` filter so the candidate tuple comes out empty and the rule never
+    matches anything at all.
+    """
+    matching = MatchTarget(tool="write", arguments={"path": "secrets/key.pem"})
+    other_argument = MatchTarget(tool="write", arguments={"backup": "secrets/key.pem"})
+    non_matching = MatchTarget(tool="write", arguments={"path": "src/main.py"})
+
+    rule = PathGlob("secrets/*", "path")
+
+    assert rule.matches(matching) is True
+    assert rule.matches(non_matching) is False
+    assert rule.matches(other_argument) is False, (
+        "a rule bound to `path` must not match a value that arrived under another name"
+    )
+
+
+def test_a_star_path_glob_still_reads_every_path_argument() -> None:
+    """The control for the test above: binding one argument must not break ``*``."""
+    target = MatchTarget(tool="write", arguments={"paths": ["src/a.py", "secrets/k.pem"]})
+
+    assert PathGlob("secrets/*").matches(target) is True
+    assert PathGlob("nope/*").matches(target) is False
 
 
 def test_a_segment_target_takes_its_paths_from_the_segment() -> None:
