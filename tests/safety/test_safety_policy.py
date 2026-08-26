@@ -217,6 +217,57 @@ def test_the_winning_rule_is_reported_for_provenance() -> None:
     assert "outranked 1 other rule" in resolution.explain()
 
 
+def test_explain_names_the_rules_that_lost_not_the_one_that_won() -> None:
+    """The count was asserted; the identity was not, and only one of them holds it up.
+
+    ``losers`` is ``[r for r in self.matched if r is not self.rule]``. Flip that to
+    ``is`` and it becomes the winner instead of the others -- but the list is still one
+    element long, so "outranked 1 other rule" still reads true and the existing test
+    still passes. The explanation would then name the rule that *won* as the one that
+    was outranked, which is exactly backwards for the only reader it has: someone
+    working out why a call was refused.
+    """
+    resolution = RuleSet(rules=(TOOL_DENY, REGEX_ALLOW)).resolve(target("git status"))
+
+    text = resolution.explain()
+
+    assert resolution.rule is REGEX_ALLOW
+    assert TOOL_DENY.describe() in text, "the rule that lost is the one to name"
+    assert text.count(REGEX_ALLOW.describe()) == 1, (
+        "the winner is named once, as the decision -- never again in the outranked list"
+    )
+
+
+def test_explain_says_nothing_about_outranking_when_one_rule_matched() -> None:
+    """`if losers:` forced on prints "outranked 0 other rule(s):" and a dangling colon.
+
+    Every existing case has a contest, so the no-contest branch was never rendered.
+    """
+    resolution = RuleSet(rules=(REGEX_ALLOW,)).resolve(target("git status"))
+
+    text = resolution.explain()
+
+    assert resolution.rule is REGEX_ALLOW
+    assert "outranked" not in text
+
+
+def test_the_subject_is_the_command_that_ran_not_the_tool_that_ran_it() -> None:
+    """What the refusal and the audit entry actually name.
+
+    ``subject = target.command_text or target.tool`` -- the fallback exists for tools
+    with no command at all. Narrow that ``or`` to ``and`` and every bash subject
+    collapses to the string "bash", so the audit log records `deny bash` where it
+    should record `deny rm -rf /`. Nothing read ``subject`` for a command target, so
+    the whole distinction was unpinned.
+    """
+    command = RuleSet(rules=(TOOL_DENY,)).resolve(target("rm -rf /"))
+    bare = RuleSet(rules=(TOOL_DENY,)).resolve(target(tool="bash"))
+
+    assert command.subject == "rm -rf /"
+    assert "rm -rf /" in command.explain()
+    assert bare.subject == "bash"  # the fallback, for a call carrying no command text
+
+
 def test_the_later_of_two_identical_rules_is_the_one_reported() -> None:
     """Provenance should point at the file the user edited most recently."""
     first = Rule(tool="bash", matcher=CommandRegex("^ls"), decision=Decision.ALLOW, source="user")
@@ -458,6 +509,47 @@ def test_relaxes_answers_only_the_modes_half_not_the_deny_lists() -> None:
     policy = engine(mode=Mode.FULL)
     assert policy.relaxes(BASH) is True
     assert policy.evaluate(BASH, use("rm -rf /")).decision is Decision.DENY
+
+
+def test_plan_mode_denies_a_tool_at_exactly_the_mutating_level() -> None:
+    """The boundary plan mode is named after, and the one case that never ran.
+
+    The condition is ``spec.danger_level >= DangerLevel.MUTATING``. The test below
+    exercises it with ``BASH``, which is ``DESTRUCTIVE`` -- and ``DESTRUCTIVE >
+    MUTATING`` holds either way, so narrowing that ``>=`` to ``>`` leaves the whole
+    suite green while plan mode quietly stops denying the level it is defined by.
+
+    ``write`` is ``MUTATING`` exactly. If plan mode lets it through, "plan mode is
+    read-only" is false for the most ordinary mutation there is.
+    """
+    policy = engine(mode=Mode.PLAN)
+    write = ToolUse(id="c", name="write", arguments={"path": "src/app.py", "content": "x"})
+
+    verdict = policy.evaluate(WRITE, write)
+
+    assert WRITE.danger_level is DangerLevel.MUTATING  # the boundary, not above it
+    assert verdict.decision is Decision.DENY
+    assert "plan mode is read-only" in verdict.reason
+
+
+def test_a_mutating_tool_has_its_paths_checked_as_writes() -> None:
+    """The same threshold again, deciding read-vs-write against the deny list.
+
+    ``writes = spec.danger_level >= DangerLevel.MUTATING`` is what tells
+    ``check_path`` whether this call is a write. Narrow it to ``>`` and a ``MUTATING``
+    tool's paths are vetted as *reads*, so every write-only rule stops firing for it --
+    `.env`, and anything resolving outside the workspace. The tool that most obviously
+    writes would be the one checked as if it did not.
+    """
+    policy = engine()
+    dotenv = ToolUse(id="c", name="write", arguments={"path": ".env", "content": "K=v"})
+
+    verdict = policy.evaluate(WRITE, dotenv)
+
+    assert verdict.decision is Decision.DENY
+    assert any("secret" in line.lower() or "denylist" in line.lower() for line in verdict.trace), (
+        f"the write was not vetted as a write; trace was {verdict.trace}"
+    )
 
 
 def test_plan_mode_denies_anything_that_mutates_and_says_why() -> None:
