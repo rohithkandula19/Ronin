@@ -28,6 +28,7 @@ from ronin.core.types import (
 from ronin.ui.app import (
     APPROVAL_ID,
     INPUT_ID,
+    MENTIONS_ID,
     MODAL_ID,
     QUEUED_ID,
     REASON_ID,
@@ -837,3 +838,176 @@ async def test_the_steering_line_clears_when_the_loop_takes_the_message() -> Non
 
         assert _text(app, QUEUED_ID) == "", "the line must follow the queue down, not wait"
         assert "and now continuing" in _text(app, TRANSCRIPT_ID)
+
+
+# --------------------------------------------------------------------------- #
+# @file mentions: the picker, through the real input widget
+# --------------------------------------------------------------------------- #
+
+#: A corpus with two files sharing a basename, so selection actually has to be moved.
+MENTION_PATHS = (
+    "README.md",
+    "apps/api/main.py",
+    "src/ronin/cli/main.py",
+    "src/ronin/ui/app.py",
+)
+
+
+async def _typed_into(app: object, pilot: Any, text: str) -> Any:
+    """Put ``text`` on the focused prompt line one key at a time, as a human would.
+
+    Character by character rather than by assigning ``value``, because the picker is
+    driven by ``Input.Changed`` and the cursor position — and a test that sets the value
+    wholesale proves nothing about either.
+    """
+    line = _input(app)
+    line.focus()
+    await pilot.pause()
+    for char in text:
+        await pilot.press("at" if char == "@" else char)
+    await pilot.pause()
+    return line
+
+
+async def test_typing_a_mention_offers_matching_paths() -> None:
+    app = _build_app(Session(events=stream(happy_turn()), on_files=lambda: MENTION_PATHS))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _typed_into(app, pilot, "look at @app")
+
+        shown = _text(app, MENTIONS_ID)
+        assert "src/ronin/ui/app.py" in shown
+        assert "tab inserts" in shown, "a list with no stated way to take one gets retyped"
+
+
+async def test_tab_inserts_the_selected_path_and_closes_the_picker() -> None:
+    app = _build_app(Session(events=stream(happy_turn()), on_files=lambda: MENTION_PATHS))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        line = await _typed_into(app, pilot, "look at @app")
+        await pilot.press("tab")
+        await pilot.pause()
+
+        assert line.value == "look at src/ronin/ui/app.py "
+        assert line.cursor_position == len(line.value)
+        assert _text(app, MENTIONS_ID) == "", "the picker closes once it has been used"
+
+
+async def test_the_arrows_choose_a_path_while_the_picker_is_open() -> None:
+    app = _build_app(Session(events=stream(happy_turn()), on_files=lambda: MENTION_PATHS))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        line = await _typed_into(app, pilot, "@main.py")
+        assert "apps/api/main.py" in _text(app, MENTIONS_ID)
+
+        await pilot.press("down")
+        await pilot.press("tab")
+        await pilot.pause()
+
+        assert line.value == "src/ronin/cli/main.py "
+
+
+async def test_the_arrows_go_back_to_the_history_once_the_picker_is_closed() -> None:
+    """The one real key conflict in the feature. The picker wins while it is open; the
+    history has to be intact the moment it is not, or ``@`` would cost you the arrows
+    for the rest of the session."""
+    submitted: list[str] = []
+    app = _build_app(
+        Session(
+            events=stream(happy_turn()),
+            on_submit=submitted.append,
+            on_files=lambda: MENTION_PATHS,
+        )
+    )
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        line = await _typed_into(app, pilot, "first message")
+        await pilot.press("enter")
+        await pilot.pause()
+
+        # A mention, taken — which closes the picker.
+        await _typed_into(app, pilot, "@app")
+        await pilot.press("tab")
+        await pilot.pause()
+        assert _text(app, MENTIONS_ID) == ""
+
+        line.value = ""
+        await pilot.press("up")
+        await pilot.pause()
+
+        assert line.value == "first message", "up must be the history again"
+
+
+async def test_an_email_address_does_not_open_a_file_picker() -> None:
+    app = _build_app(Session(events=stream(happy_turn()), on_files=lambda: MENTION_PATHS))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _typed_into(app, pilot, "mail ask@main.py")
+
+        assert _text(app, MENTIONS_ID) == ""
+
+
+async def test_the_picker_closes_when_the_token_stops_being_a_mention() -> None:
+    # `escape` is deliberately not a dismissal — it interrupts the turn. So the picker
+    # has to close on its own when the mention is finished or deleted.
+    app = _build_app(Session(events=stream(happy_turn()), on_files=lambda: MENTION_PATHS))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _typed_into(app, pilot, "@app")
+        assert _text(app, MENTIONS_ID) != ""
+
+        await pilot.press("space")
+        await pilot.pause()
+
+        assert _text(app, MENTIONS_ID) == ""
+
+
+async def test_enter_still_submits_a_message_containing_a_mention() -> None:
+    # If enter took the selection instead, an `@` word could never be sent in one
+    # keystroke.
+    submitted: list[str] = []
+    app = _build_app(
+        Session(
+            events=stream(happy_turn()),
+            on_submit=submitted.append,
+            on_files=lambda: MENTION_PATHS,
+        )
+    )
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _typed_into(app, pilot, "@app")
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert submitted == ["@app"]
+        assert _text(app, MENTIONS_ID) == "", "the line it was completing has been sent"
+
+
+async def test_with_no_file_seam_an_at_is_ordinary_text() -> None:
+    # The demo and a replayed recording have no repo behind them.
+    app = _build_app(Session(events=stream(happy_turn())))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        line = await _typed_into(app, pilot, "@app")
+
+        assert _text(app, MENTIONS_ID) == ""
+        await pilot.press("tab")
+        await pilot.pause()
+        assert line.value == "@app", "tab must not eat the line when nothing is offered"
+
+
+async def test_ordinary_typing_never_asks_the_orchestrator_for_the_file_list() -> None:
+    """The seam is a cached tree walk. Asking it per keystroke of ordinary prose would
+    make every session pay for a feature it is not using."""
+    asked: list[int] = []
+
+    def files() -> tuple[str, ...]:
+        asked.append(1)
+        return MENTION_PATHS
+
+    app = _build_app(Session(events=stream(happy_turn()), on_files=files))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _typed_into(app, pilot, "no mentions here at all")
+
+        assert asked == []
