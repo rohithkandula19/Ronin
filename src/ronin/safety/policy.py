@@ -879,6 +879,23 @@ class PolicyEngine:
         """Ask the loop to stop. Idempotent, and never un-set from inside a turn."""
         self._cancelled = True
 
+    def resume(self) -> None:
+        """Release an interrupt so the *next* turn can run. Idempotent.
+
+        ``cancel`` latches on purpose: it is polled at every await point inside one
+        turn, and a flag that flickered would let a turn the user stopped stagger on.
+        But nothing released the latch, so a single ``esc`` ended the *session* rather
+        than the turn — every later prompt hit :meth:`cancelled` at the top of
+        iteration 0 and came straight back as ``interrupted``, with no way out short
+        of restarting.
+
+        The turn boundary is the only place that can tell "stop this" from "stop
+        everything", so that is where this is called from and the only place it may be
+        called from: see :meth:`ronin.cli.stream.Conversation._turn`. Calling it from
+        inside a turn would defeat the latch.
+        """
+        self._cancelled = False
+
     def set_mode(self, mode: Mode) -> None:
         """Change the permission mode mid-session — what the TUI's mode key calls.
 
