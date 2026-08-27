@@ -42,14 +42,17 @@ def test_a_queued_message_is_shown_with_when_it_will_run() -> None:
     shown = render_queued(state, styles=PLAIN)
     assert "actually use a dataclass" in shown
     # The timing is the point: without it the user cannot decide whether to press esc.
-    assert "esc" in shown and "ends" in shown
+    # It says "next step" and not "when this turn ends" because that is what now
+    # happens — the message joins the running conversation at the loop's next
+    # iteration rather than waiting for the whole turn.
+    assert "esc" in shown and "next step" in shown
 
 
 def test_several_queued_messages_are_counted_and_kept_in_order() -> None:
     state = ViewState().with_queued("first").with_queued("second")
     assert state.queued == ("first", "second")
     shown = render_queued(state, styles=PLAIN)
-    assert "2 queued" in shown
+    assert "2 steering" in shown
     assert shown.index("first") < shown.index("second")
 
 

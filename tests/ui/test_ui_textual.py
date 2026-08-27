@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 from ui_harness import APPROVAL, approval_turn, happy_turn, stream
 
+from ronin.core.steering import Steering
 from ronin.core.types import (
     ApprovalDecision,
     Event,
@@ -28,6 +29,7 @@ from ronin.ui.app import (
     APPROVAL_ID,
     INPUT_ID,
     MODAL_ID,
+    QUEUED_ID,
     REASON_ID,
     STATUS_ID,
     TODOS_ID,
@@ -672,3 +674,166 @@ async def test_the_input_line_is_present_even_with_no_on_submit() -> None:
         await pilot.press("enter")
         await pilot.pause()
         assert line.value == "", "still cleared, even with nothing consuming it"
+
+
+# --------------------------------------------------------------------------- #
+# Steering: a message typed mid-turn joins the running conversation
+# --------------------------------------------------------------------------- #
+
+
+def _running_turn() -> tuple[Event, ...]:
+    """A turn that has started and not ended, so the app is genuinely ``busy``."""
+    return happy_turn()[:8]
+
+
+def _turn_in_flight() -> tuple[AsyncIterator[Event], asyncio.Event]:
+    """A turn that stays in flight until released, then ends. Release before teardown.
+
+    Truncating the stream to leave the app ``busy`` is not enough on its own, and the
+    difference is a race a slow runner loses: ``_tick`` repaints ten times a second
+    while ``state.busy``, so a timer callback can land after ``run_test()`` has taken
+    the widget tree apart, and ``_paint`` then raises ``NoMatches``. Ending the turn
+    before leaving the block closes that window — ``_tick`` returns early once the
+    state is finished.
+
+    Reproduced by shrinking ``SPINNER_INTERVAL_SECONDS`` to 0.5ms, which turns the
+    race into a certainty; with the release in place it passes at that interval too.
+    """
+    release = asyncio.Event()
+
+    async def events() -> AsyncIterator[Event]:
+        for event in _running_turn():
+            yield event
+        await release.wait()
+        yield TurnEnd(
+            turn_index=0,
+            state=TurnState.DONE,
+            stop_reason="no_tool_calls",
+            agent_state=None,
+        )
+
+    return events(), release
+
+
+async def test_a_message_typed_mid_turn_steers_instead_of_queueing_a_new_turn() -> None:
+    """The whole feature, through the real widget: while the agent is working, Enter must
+    reach the steering seam and not the next-turn queue. Driven here rather than only in
+    the pure tests because the branch is in the submit handler, and the thing that decides
+    it — ``state.busy`` — is only true once real events have been folded in."""
+    steering = Steering()
+    submitted: list[str] = []
+    events, release = _turn_in_flight()
+    app = _build_app(
+        Session(
+            events=events,
+            on_submit=submitted.append,
+            on_steer=steering.push,
+            on_steering=steering.pending,
+        )
+    )
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.state.busy, "the fixture must leave a turn in flight for this to mean anything"
+        line = _input(app)
+        line.focus()
+        await pilot.pause()
+        line.value = "actually use pathlib"
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert steering.pending() == ("actually use pathlib",)
+        assert submitted == [], "a mid-turn message must not also start a new turn"
+        assert line.value == ""
+        shown = _text(app, QUEUED_ID)
+        assert "actually use pathlib" in shown
+        assert "next step" in shown, "the line has to say when it lands, or esc is a guess"
+
+        release.set()
+        await pilot.pause()
+
+
+async def test_a_message_typed_between_turns_starts_a_turn_rather_than_steering() -> None:
+    steering = Steering()
+    submitted: list[str] = []
+    app = _build_app(
+        Session(
+            events=stream(happy_turn()),  # ends with TurnEnd, so the app is idle
+            on_submit=submitted.append,
+            on_steer=steering.push,
+            on_steering=steering.pending,
+        )
+    )
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert not app.state.busy
+        line = _input(app)
+        line.focus()
+        await pilot.pause()
+        line.value = "now do the other thing"
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert submitted == ["now do the other thing"]
+        assert steering.pending() == (), "there is no turn to steer between turns"
+
+
+async def test_with_no_steering_seam_a_mid_turn_message_queues_exactly_as_before() -> None:
+    # The demo and a replayed recording have no live loop. Nothing may crash, and the
+    # keystroke must still be acknowledged on screen.
+    submitted: list[str] = []
+    events, release = _turn_in_flight()
+    app = _build_app(Session(events=events, on_submit=submitted.append))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        line = _input(app)
+        line.focus()
+        await pilot.pause()
+        line.value = "held for later"
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert submitted == ["held for later"]
+        assert "held for later" in _text(app, QUEUED_ID)
+
+        release.set()
+        await pilot.pause()
+
+
+async def test_the_steering_line_clears_when_the_loop_takes_the_message() -> None:
+    """The reason the pending list is *pulled*: the loop takes a correction at a moment
+    the app cannot see, and a line that only cleared at ``TurnEnd`` would show a message
+    delivered two minutes ago as though it were still waiting."""
+    steering = Steering()
+    gate: asyncio.Event = asyncio.Event()
+
+    async def events() -> AsyncIterator[Event]:
+        for event in _running_turn():
+            yield event
+        await gate.wait()
+        # Whatever the loop did with the queue happened before this event arrived.
+        yield TextDelta(text=" and now continuing")
+        # Ends the turn so the app is not busy at teardown — see `_turn_in_flight`.
+        yield TurnEnd(
+            turn_index=0,
+            state=TurnState.DONE,
+            stop_reason="no_tool_calls",
+            agent_state=None,
+        )
+
+    app = _build_app(Session(events=events(), on_steer=steering.push, on_steering=steering.pending))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        line = _input(app)
+        line.focus()
+        await pilot.pause()
+        line.value = "use pathlib"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "use pathlib" in _text(app, QUEUED_ID)
+
+        steering.drain()  # the loop injected it
+        gate.set()
+        await pilot.pause()
+
+        assert _text(app, QUEUED_ID) == "", "the line must follow the queue down, not wait"
+        assert "and now continuing" in _text(app, TRANSCRIPT_ID)

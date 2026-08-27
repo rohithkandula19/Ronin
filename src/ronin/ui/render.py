@@ -304,10 +304,12 @@ CONTEXT_WARN_FRACTION = 0.75
 #: Appended to the context percentage once past the warning line.
 CONTEXT_WARN_MARK = " ⚠"
 
-#: What the queued-message line says. Names the timing, because "queued" alone does not
-#: tell the user whether to wait or to interrupt.
-QUEUED_ONE = "queued — runs when this turn ends (esc to interrupt now)"
-QUEUED_MANY = "{n} queued — they run in order when this turn ends (esc to interrupt now)"
+#: What the pending-message line says. Names the timing, because "queued" alone does not
+#: tell the user whether to wait or to interrupt — and the timing changed: a mid-turn
+#: message now joins the running conversation at the loop's next step rather than waiting
+#: for the whole turn to finish, so the line has to stop promising the old behaviour.
+QUEUED_ONE = "steering — goes in at the agent's next step (esc to stop now and send it)"
+QUEUED_MANY = "{n} steering — they go in, in order, at the agent's next step (esc to stop now)"
 QUEUED_INDENT = "  | "
 
 #: How long in-flight work must go quiet before the activity line shows a clock. Below
@@ -694,7 +696,10 @@ def render_queued(state: ViewState, *, styles: Styles = PLAIN) -> str:
     if not state.queued:
         return ""
     head = QUEUED_ONE if len(state.queued) == 1 else QUEUED_MANY.format(n=len(state.queued))
-    lines = [styles.wrap("meta", head)]
+    # Escaped like every other in-band string here. Nothing in the copy needs it today,
+    # but the approval prompt taught this the expensive way: `[y]es` in an unescaped
+    # constant renders as `es`, and the bug is invisible to anyone reading the source.
+    lines = [styles.wrap("meta", styles.text(head))]
     lines += [styles.wrap("meta", styles.text(f"{QUEUED_INDENT}{item}")) for item in state.queued]
     return "\n".join(lines)
 

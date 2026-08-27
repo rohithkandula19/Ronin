@@ -790,6 +790,9 @@ class Conversation:
                 runtime.policy,
                 system=runtime.system,
                 max_iterations=max_iterations,
+                # Session-scoped, so a correction typed during turn n-1 that arrived
+                # too late for it is delivered by turn n rather than dropped.
+                steering=runtime.steering.drain,
             )
             async for event in stream:
                 if isinstance(event, ToolStart) and self._mutating(runtime, event.name):
