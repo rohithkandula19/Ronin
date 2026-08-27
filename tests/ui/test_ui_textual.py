@@ -686,6 +686,35 @@ def _running_turn() -> tuple[Event, ...]:
     return happy_turn()[:8]
 
 
+def _turn_in_flight() -> tuple[AsyncIterator[Event], asyncio.Event]:
+    """A turn that stays in flight until released, then ends. Release before teardown.
+
+    Truncating the stream to leave the app ``busy`` is not enough on its own, and the
+    difference is a race a slow runner loses: ``_tick`` repaints ten times a second
+    while ``state.busy``, so a timer callback can land after ``run_test()`` has taken
+    the widget tree apart, and ``_paint`` then raises ``NoMatches``. Ending the turn
+    before leaving the block closes that window — ``_tick`` returns early once the
+    state is finished.
+
+    Reproduced by shrinking ``SPINNER_INTERVAL_SECONDS`` to 0.5ms, which turns the
+    race into a certainty; with the release in place it passes at that interval too.
+    """
+    release = asyncio.Event()
+
+    async def events() -> AsyncIterator[Event]:
+        for event in _running_turn():
+            yield event
+        await release.wait()
+        yield TurnEnd(
+            turn_index=0,
+            state=TurnState.DONE,
+            stop_reason="no_tool_calls",
+            agent_state=None,
+        )
+
+    return events(), release
+
+
 async def test_a_message_typed_mid_turn_steers_instead_of_queueing_a_new_turn() -> None:
     """The whole feature, through the real widget: while the agent is working, Enter must
     reach the steering seam and not the next-turn queue. Driven here rather than only in
@@ -693,9 +722,10 @@ async def test_a_message_typed_mid_turn_steers_instead_of_queueing_a_new_turn() 
     it — ``state.busy`` — is only true once real events have been folded in."""
     steering = Steering()
     submitted: list[str] = []
+    events, release = _turn_in_flight()
     app = _build_app(
         Session(
-            events=stream(_running_turn()),
+            events=events,
             on_submit=submitted.append,
             on_steer=steering.push,
             on_steering=steering.pending,
@@ -717,6 +747,9 @@ async def test_a_message_typed_mid_turn_steers_instead_of_queueing_a_new_turn() 
         shown = _text(app, QUEUED_ID)
         assert "actually use pathlib" in shown
         assert "next step" in shown, "the line has to say when it lands, or esc is a guess"
+
+        release.set()
+        await pilot.pause()
 
 
 async def test_a_message_typed_between_turns_starts_a_turn_rather_than_steering() -> None:
@@ -748,7 +781,8 @@ async def test_with_no_steering_seam_a_mid_turn_message_queues_exactly_as_before
     # The demo and a replayed recording have no live loop. Nothing may crash, and the
     # keystroke must still be acknowledged on screen.
     submitted: list[str] = []
-    app = _build_app(Session(events=stream(_running_turn()), on_submit=submitted.append))
+    events, release = _turn_in_flight()
+    app = _build_app(Session(events=events, on_submit=submitted.append))
     async with app.run_test() as pilot:
         await pilot.pause()
         line = _input(app)
@@ -760,6 +794,9 @@ async def test_with_no_steering_seam_a_mid_turn_message_queues_exactly_as_before
 
         assert submitted == ["held for later"]
         assert "held for later" in _text(app, QUEUED_ID)
+
+        release.set()
+        await pilot.pause()
 
 
 async def test_the_steering_line_clears_when_the_loop_takes_the_message() -> None:
@@ -775,6 +812,13 @@ async def test_the_steering_line_clears_when_the_loop_takes_the_message() -> Non
         await gate.wait()
         # Whatever the loop did with the queue happened before this event arrived.
         yield TextDelta(text=" and now continuing")
+        # Ends the turn so the app is not busy at teardown — see `_turn_in_flight`.
+        yield TurnEnd(
+            turn_index=0,
+            state=TurnState.DONE,
+            stop_reason="no_tool_calls",
+            agent_state=None,
+        )
 
     app = _build_app(Session(events=events(), on_steer=steering.push, on_steering=steering.pending))
     async with app.run_test() as pilot:
