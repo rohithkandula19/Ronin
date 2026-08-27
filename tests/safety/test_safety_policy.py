@@ -646,6 +646,27 @@ async def test_a_cancelled_session_refuses_without_asking() -> None:
     assert asker_of(policy).asked is False
 
 
+async def test_resume_releases_the_cancel_latch_including_the_blanket_refusal() -> None:
+    # `cancel` gates two things: `cancelled()`, which the loop polls, and the blanket
+    # refusal in `approve`. Both have to come back, or the turn after an interrupt runs
+    # but cannot approve anything.
+    policy = engine(Answer(outcome=Outcome.YES_ONCE))
+    policy.cancel()
+    policy.resume()
+
+    assert policy.cancelled() is False
+    decision = await policy.approve(BASH, use("./deploy.sh"), rendered="./deploy.sh")
+    assert decision.approved is True
+    assert asker_of(policy).asked is True
+
+
+def test_resume_is_idempotent_and_safe_with_no_cancel_outstanding() -> None:
+    policy = engine(Answer(outcome=Outcome.YES_ONCE))
+    policy.resume()
+    policy.resume()
+    assert policy.cancelled() is False
+
+
 async def test_the_default_asker_refuses_when_no_human_is_attached() -> None:
     policy = PolicyEngine(rules=builtin_ruleset(), denylist=denylist())
     assert isinstance(policy.asker, UnattendedAsker)

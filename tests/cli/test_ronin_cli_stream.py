@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import shutil
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 import pytest
 import stream_harness as h
@@ -35,6 +37,7 @@ from ronin.core.types import (
     Role,
     Text,
     ToolEnd,
+    ToolResult,
     ToolStart,
     TurnEnd,
     unpaired_tool_uses,
@@ -473,6 +476,55 @@ async def test_cancelled_error_propagates_out_of_run_prompt(tmp_path: Path) -> N
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
+
+
+def cancelling_tool(holder: list[Runtime], *, name: str = "peek") -> h.FakeTool:
+    """A tool that presses ``esc`` from inside itself. The mid-turn interrupt, offline."""
+
+    def handle(arguments: Mapping[str, Any]) -> ToolResult:
+        del arguments
+        holder[0].policy.cancel()
+        return ToolResult(ok=True, content="looked, then the user pressed esc")
+
+    return h.FakeTool(name=name, handler=handle)
+
+
+async def test_an_interrupt_ends_the_turn_and_not_the_session(tmp_path: Path) -> None:
+    # `PolicyEngine.cancel` is a latch, and nothing released it: one `esc` used to end
+    # every later turn too — each came straight back `interrupted` without reaching the
+    # model, with no way out short of restarting.
+    holder: list[Runtime] = []
+    tools = h.ScriptedTools([cancelling_tool(holder)])
+    runtime = h.build_runtime(h.build_loaded(tmp_path), tools=tools)
+    holder.append(runtime)
+    model = h.ScriptedModel([h.call("peek", {}), h.say("after the interrupt")])
+    conversation = Conversation(model=model)
+
+    interrupted = await h.collect(conversation.run_prompt(runtime, "go"))
+    assert [e.stop_reason for e in interrupted if isinstance(e, TurnEnd)] == ["interrupted"]
+    assert runtime.policy.cancelled() is True
+
+    after = await h.collect(conversation.run_prompt(runtime, "carry on"))
+
+    assert [e.stop_reason for e in after if isinstance(e, TurnEnd)] == ["no_tool_calls"]
+    assert runtime.policy.cancelled() is False
+
+
+async def test_the_release_is_the_boundary_and_not_every_iteration(tmp_path: Path) -> None:
+    # The boundary release must not drift into the loop. A cancel that lands *during*
+    # a turn has to stop it after the running tool, not be cleared on the next lap.
+    holder: list[Runtime] = []
+    tools = h.ScriptedTools([cancelling_tool(holder)])
+    runtime = h.build_runtime(h.build_loaded(tmp_path), tools=tools)
+    holder.append(runtime)
+    model = h.ScriptedModel([h.call("peek", {}), h.say("would keep going")])
+
+    events = await h.collect(Conversation(model=model).run_prompt(runtime, "go"))
+
+    # One model call: the cancel stopped the turn after the tool rather than starting
+    # a second iteration, and the tool result still reached the transcript.
+    assert model.turns == 1
+    assert [e.stop_reason for e in events if isinstance(e, TurnEnd)] == ["interrupted"]
 
 
 async def test_wall_clock_is_folded_into_the_budget_at_the_turn_boundary(

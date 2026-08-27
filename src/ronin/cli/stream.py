@@ -767,6 +767,12 @@ class Conversation:
 
     async def _turn(self, runtime: Runtime, *, max_iterations: int) -> AsyncIterator[Event]:
         """One ``run_turn``, with the checkpoint slipped in before the first edit."""
+        # A previous turn's interrupt must not end the session. `PolicyEngine.cancel`
+        # latches deliberately (see `PolicyEngine.resume`), and this is the boundary
+        # that clears it: by the time a new turn is starting, the turn the interrupt
+        # belonged to is over. Without this, one `esc` made every later prompt come
+        # back `interrupted` at iteration 0 without reaching the model.
+        runtime.policy.resume()
         self._checkpointed = False
         state = AgentState(
             messages=self.messages,
