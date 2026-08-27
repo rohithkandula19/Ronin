@@ -850,10 +850,6 @@ REASON_KEY = "s"
 #: is how the two drift, so this module owns the meaning and that one owns the words.
 REMEMBER_KEY = "a"
 
-#: Why a denial happened, in the words the model is shown. A refusal the model cannot
-#: read as deliberate reads as a malfunction, and it retries.
-DENIED_BY_HUMAN = "the user declined this action"
-
 #: What a remembered approval asks for, in the model's words.
 APPROVED_AND_REMEMBERED = "approved, and remembered for the rest of this session"
 
@@ -866,12 +862,11 @@ def deny_with(reason: str) -> ApprovalDecision:
     model. Nothing below this function needed building — the only thing missing was a
     way for a person to type the sentence.
 
-    A blank reason is passed on as blank, *not* as :data:`DENIED_BY_HUMAN`. The engine
-    already branches on an empty feedback and says something better than this layer
-    could — "declined this action and gave no reason. Do not retry it. Propose an
-    alternative" — whereas substituting a placeholder here produces "the user declined
-    and said: the user declined this action", which reads as a malfunction. Saying
-    nothing is what lets the layer that owns the wording own it.
+    A blank reason is passed on as blank, never as a placeholder. The engine already
+    branches on an empty feedback and says something better than this layer could —
+    "declined this action and gave no reason. Do not retry it. Propose an alternative" —
+    whereas a placeholder here comes back doubled. Saying nothing is what lets the layer
+    that owns the wording own it.
     """
     return ApprovalDecision(approved=False, reason=reason.strip())
 
@@ -888,7 +883,15 @@ def decision_for(key: str) -> ApprovalDecision | None:
     if approved is None:
         return None
     if not approved:
-        return ApprovalDecision(approved=False, reason=DENIED_BY_HUMAN)
+        # Blank, deliberately, and for the same reason `deny_with` leaves an empty
+        # reason empty: `reason` travels to the engine as `Answer.feedback`, which the
+        # engine reproduces as *the human's own words*. A placeholder here was quoted
+        # back as if it were something they said — "the user declined and said: the user
+        # declined this action" — and, worse, took the branch that appends "Take that as
+        # a correction, not a dead end: adjust the plan and continue", inviting the
+        # retry a bare `n` exists to stop. Blank takes the engine's other branch, which
+        # says "Do not retry it".
+        return ApprovalDecision(approved=False, reason="")
     remember = key == REMEMBER_KEY
     return ApprovalDecision(
         approved=True,
@@ -901,7 +904,6 @@ __all__ = [
     "APPROVAL_KEYS",
     "APPROVED_AND_REMEMBERED",
     "ARGUMENT_SUMMARY_LIMIT",
-    "DENIED_BY_HUMAN",
     "DOUBLE_ESCAPE_WINDOW_SECONDS",
     "ELLIPSIS",
     "ERROR_PREFIX",
