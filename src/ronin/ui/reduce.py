@@ -282,9 +282,11 @@ class ViewState:
     #: the number that answers "is it stuck?", and it is supplied rather than derived:
     #: the reducer has no clock, and giving it one would make every fold untestable.
     waiting_seconds: float = 0.0
-    #: Messages the user typed while a turn was running. They run as the next turn — the
-    #: queue is how you redirect without killing what is in flight — but until this field
-    #: existed nothing on screen said they had been received, so a correction looked lost.
+    #: Messages the user typed while a turn was running and that have not been delivered
+    #: yet. They join the *running* conversation at the loop's next iteration boundary
+    #: (see :mod:`ronin.core.steering`) — redirecting without killing what is in flight —
+    #: but until this field existed nothing on screen said they had been received, so a
+    #: correction looked lost.
     queued: tuple[str, ...] = ()
     #: Output from things that are not the model: a slash command's answer, a rewind's
     #: outcome. Kept out of the transcript on purpose — the transcript is what the model
@@ -347,6 +349,18 @@ class ViewState:
     def with_queued(self, text: str) -> ViewState:
         """Record a message typed mid-turn, so the user can see it landed."""
         return self if not text.strip() else replace(self, queued=(*self.queued, text))
+
+    def with_queue(self, items: Sequence[str]) -> ViewState:
+        """Replace the pending list wholesale, from whoever actually owns it.
+
+        The append-one door above is for a view that keeps its own book. Once the
+        orchestrator holds the real queue — it is the side that knows when the loop took
+        a message — the screen has to be able to *follow* that list down as well as up,
+        which one-at-a-time appends cannot do. Identity is preserved when nothing moved,
+        because this is pulled on every event of a long turn.
+        """
+        pending = tuple(items)
+        return self if pending == self.queued else replace(self, queued=pending)
 
     def cleared_queued(self) -> ViewState:
         """Drop the queue. Called when a turn starts: whatever was waiting is now running,

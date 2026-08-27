@@ -9,8 +9,8 @@ produces a new :class:`AgentState`; nothing else in this module rebinds it, and
 there are no module-level mutables. The final state rides out on ``TurnEnd`` so a
 consumer can resume from it without reaching into the loop.
 
-Three decisions were made here rather than guessed silently — they are recorded in
-``docs/ARCHITECTURE.md`` §8 with their alternatives:
+Four decisions were made here rather than guessed silently — they are recorded in
+``docs/ARCHITECTURE.md`` §8 and §9 with their alternatives:
 
 1. **Approval is answered by the injected policy**, not by the consumer through
    the stream, because the work order injects ``policy`` and types the return as
@@ -26,6 +26,10 @@ Three decisions were made here rather than guessed silently — they are recorde
    transcript before the ``CancelledError`` propagates. Both are required by the
    spec ("cancellable at any await point" *and* "conversation stays well-formed"),
    so this is one design meeting two constraints, not two competing designs.
+4. **Steering lands at the top of an iteration**, never mid-tool-chain. A user
+   message between a ``tool_use`` and its ``tool_result`` is a transcript providers
+   reject, and "it takes effect at the model's next decision" is a promise that can
+   be kept, where "within a second or two" is not. See :mod:`ronin.core.steering`.
 """
 
 from __future__ import annotations
@@ -69,6 +73,11 @@ from .types import (
     TurnStart,
     TurnState,
 )
+
+#: What a steered message is marked with in the transcript. A user message either way —
+#: this only says *how* it arrived, so a reader (and a future rewind) can tell a
+#: correction typed mid-turn from the prompt that opened the turn.
+STEER_KIND = "steer"
 
 DEFAULT_MAX_ITERATIONS = 100
 DEFAULT_MAX_TOOL_RESULT_CHARS = 16_000
@@ -244,6 +253,7 @@ async def run_turn(
     system: str = "",
     max_iterations: int = DEFAULT_MAX_ITERATIONS,
     max_tool_result_chars: int = DEFAULT_MAX_TOOL_RESULT_CHARS,
+    steering: Callable[[], Sequence[str]] | None = None,
 ) -> AsyncIterator[Event]:
     """Run one turn to completion, yielding every observable step.
 
@@ -251,6 +261,13 @@ async def run_turn(
     Raises only :class:`StalledError` (a repeat after a nudge) and
     ``asyncio.CancelledError`` (a hard cancel) — everything else, including a tool
     that raises, becomes a value.
+
+    ``steering`` is the mid-turn correction channel: a callable the loop *pulls*, at
+    the top of each iteration, for messages the user typed while this turn was
+    running (see :mod:`ronin.core.steering`). It is pulled rather than pushed for the
+    same reason ``policy.cancelled()`` is — the loop stays a generator over injected
+    values, with nothing to receive and no second task to coordinate with. Unset, the
+    loop behaves exactly as it did before there was such a thing as steering.
     """
     specs = list(tools.specs())
     messages: list[Message] = list(state.messages)
@@ -281,6 +298,32 @@ async def run_turn(
                 agent_state=state,
             )
             return
+
+        # ------------------------------------------------------------ steering
+        # The one safe seam for a mid-turn correction, and the reason it is here
+        # rather than wherever the keystroke landed: every `tool_use` from the
+        # previous assistant message has already been answered by the
+        # `_results_message` at the bottom of the last iteration, and the next model
+        # call has not been made yet. Anywhere inside the tool run would put a user
+        # message between a `tool_use` and its `tool_result`, which every provider
+        # rejects — and would also make "when does my correction take effect?"
+        # depend on which tool happened to be running.
+        #
+        # After the cancellation check on purpose. An interrupted turn must not
+        # swallow the message: leaving it in the holder is what lets the orchestrator
+        # deliver it as the next turn instead of losing it to a turn that is ending.
+        if steering is not None:
+            for correction in steering():
+                # USER, not SYSTEM: this is the human talking, and calling it
+                # anything else would misreport who said it to compaction, to a
+                # rewind, and to anyone reading the transcript back.
+                messages.append(
+                    Message(
+                        role=Role.USER,
+                        content_blocks=(Text(correction),),
+                        metadata={"kind": STEER_KIND},
+                    )
+                )
 
         # ------------------------------------------------------ model streaming
         final: FinalMessage | None = None
@@ -574,6 +617,7 @@ __all__ = [
     "STALL_ABORTED",
     "STALL_REPEATS",
     "STALL_WINDOW",
+    "STEER_KIND",
     "TRUNCATE_HEAD_SHARE",
     "StalledError",
     "StopReason",

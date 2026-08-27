@@ -1867,6 +1867,9 @@ def _app_session(options: Options, agent: Agent, handoff: Handoff | None) -> App
     advisory: v1 always steps one turn back rather than seeking to an arbitrary one.
     """
     policy = agent.runtime.policy
+    # The same object `Conversation._turn` hands to the loop, so what the screen shows
+    # as waiting and what the loop will take cannot diverge.
+    steering = agent.runtime.steering
     submissions: asyncio.Queue[str | None] = asyncio.Queue()
 
     def run_turn(prompt: str) -> AsyncIterator[Event]:
@@ -1919,7 +1922,7 @@ def _app_session(options: Options, agent: Agent, handoff: Handoff | None) -> App
         return "".join(captured).rstrip("\n")
 
     return AppSession(
-        events=multi_turn_events(options.prompt, submissions, run_turn),
+        events=multi_turn_events(options.prompt, submissions, run_turn, leftover=steering.drain),
         model=agent.runtime.session.router.spec_for(ModelRole.MAIN).model,
         cwd=str(agent.loaded.paths.cwd),
         branch=current_branch(agent.loaded.paths.workspace_root),
@@ -1931,6 +1934,8 @@ def _app_session(options: Options, agent: Agent, handoff: Handoff | None) -> App
         on_status=lambda: context_share(agent.conversation.messages, agent.runtime.compaction),
         on_todos=lambda: live_todos(agent.runtime.registry),
         on_submit=submissions.put_nowait,
+        on_steer=steering.push,
+        on_steering=steering.pending,
         on_command=on_command,
         banner=render_banner(
             version=_version(),

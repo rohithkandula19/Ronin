@@ -527,6 +527,53 @@ async def test_the_release_is_the_boundary_and_not_every_iteration(tmp_path: Pat
     assert [e.stop_reason for e in events if isinstance(e, TurnEnd)] == ["interrupted"]
 
 
+async def test_a_correction_pushed_mid_turn_reaches_the_model_in_the_same_turn(
+    tmp_path: Path,
+) -> None:
+    """End to end through the middleware: the holder on ``Runtime`` is the one the loop
+    drains, so a message pushed while a tool runs is in the *next* model call of the
+    *same* turn — not queued behind it as a second turn."""
+    holder: list[Runtime] = []
+
+    def steer_mid_tool(arguments: Mapping[str, Any]) -> ToolResult:
+        del arguments
+        holder[0].steering.push("actually use pathlib")
+        return ToolResult(ok=True, content="read it")
+
+    tools = h.ScriptedTools([h.FakeTool(name="peek", handler=steer_mid_tool)])
+    runtime = h.build_runtime(h.build_loaded(tmp_path), tools=tools)
+    holder.append(runtime)
+    model = h.ScriptedModel([h.call("peek", {}), h.say("using pathlib then")])
+
+    await h.collect(Conversation(model=model).run_prompt(runtime, "go"))
+
+    assert model.turns == 2, "one turn, two model calls — not two turns"
+    last = model.calls[1].messages[-1]
+    assert last.role is Role.USER
+    assert last.metadata == {"kind": "steer"}
+    assert [b.text for b in last.content_blocks if isinstance(b, Text)] == ["actually use pathlib"]
+    assert unpaired_tool_uses(model.calls[1].messages) == ()
+    assert runtime.steering.pending() == ()
+
+
+async def test_a_correction_that_missed_its_turn_is_delivered_by_the_next_one(
+    tmp_path: Path,
+) -> None:
+    # The holder is session-scoped for exactly this: a message typed as a turn ended has
+    # nothing left to steer, and must not be stranded.
+    runtime = h.build_runtime(h.build_loaded(tmp_path))
+    model = h.ScriptedModel([h.say("first"), h.say("second")])
+    conversation = Conversation(model=model)
+
+    await h.collect(conversation.run_prompt(runtime, "one"))
+    runtime.steering.push("wait, the other file")
+    await h.collect(conversation.run_prompt(runtime, "two"))
+
+    kinds = [m.metadata.get("kind") for m in model.calls[1].messages]
+    assert "steer" in kinds
+    assert runtime.steering.pending() == ()
+
+
 async def test_wall_clock_is_folded_into_the_budget_at_the_turn_boundary(
     tmp_path: Path,
 ) -> None:

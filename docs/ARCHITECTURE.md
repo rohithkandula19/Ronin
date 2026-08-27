@@ -477,7 +477,8 @@ for later?
 
 ```python
 async def run_turn(state, model, tools, policy, *, system="",
-                   max_iterations=100, max_tool_result_chars=16_000) -> AsyncIterator[Event]
+                   max_iterations=100, max_tool_result_chars=16_000,
+                   steering=None) -> AsyncIterator[Event]
 ```
 
 Zero provider knowledge, zero UI knowledge: `model`, `tools`, and `policy` are
@@ -517,6 +518,34 @@ either way.
 `CancelledError` is caught around tool execution. A cancelled call gets
 `ToolResult(ok=False, error="interrupted by user")`, so the transcript stays
 well-formed and `TurnEnd.agent_state` is resumable.
+
+**Steering.** `steering` is a callable the loop *pulls* — like `policy.cancelled()`,
+and for the same reason: the loop stays a generator over injected values, with
+nothing to receive and no second task to coordinate with. It returns the messages
+the user typed while this turn was running (`src/ronin/core/steering.py`), and they
+are appended as ordinary `USER` messages tagged `metadata={"kind": "steer"}`.
+
+Three decisions, recorded rather than guessed:
+
+1. **The seam is the top of an iteration** — after every `tool_use` from the
+   previous assistant message has been answered by the `_results_message` at the
+   bottom of the last iteration, and before the next model call. The two
+   neighbouring positions are both wrong: anywhere inside the tool run puts a user
+   message between a `tool_use` and its `tool_result`, which every provider
+   rejects; one turn later is the queueing behaviour this replaces. It also makes
+   the timing predictable — a correction lands at the model's next decision,
+   always, rather than depending on which tool happened to be running.
+2. **A steer does not cancel in-flight work.** The running tool finishes and its
+   result is kept. Stopping work is what `esc` is for, and conflating the two makes
+   every correction a gamble about how much progress it costs. Intent-based
+   cancellation is a later feature, deliberately not this one.
+3. **The drain happens after the cancellation check**, so an interrupted turn does
+   not swallow the message. Leaving it in the holder is what lets the orchestrator
+   (`ui/app.py:multi_turn_events`) deliver it as the next turn instead of losing it
+   to a turn that was already ending.
+
+The holder is session-scoped — it hangs off `Runtime` next to `policy`, so a
+message typed as one turn ends is delivered by the next.
 
 **Demo:** `uv run python -m ronin.demo` — offline, no key, two scenarios showing
 parallel execution, a denied approval, the truncation marker, the stall nudge, and

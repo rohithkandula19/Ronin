@@ -212,6 +212,23 @@ class Session:
     #: Unset (demo, a replayed recording) leaves the input inert: nothing consumes a
     #: prompt, so there is no path from a keystroke to a turn that never runs.
     on_submit: Callable[[str], None] | None = None
+    #: The steering seam: where a message typed *while a turn is running* goes. Set, a
+    #: mid-turn message joins the conversation in flight at the loop's next step instead
+    #: of waiting for the whole turn to end — which is the difference between correcting
+    #: the agent and correcting the transcript of what it already did wrong. Unset (demo,
+    #: replay, and any consumer that has no live loop), a mid-turn message falls back to
+    #: ``on_submit`` and runs as the next turn, exactly as before.
+    #:
+    #: Separate from ``on_submit`` rather than a flag on it, because the two land in
+    #: genuinely different places — one continues the running turn, the other starts a
+    #: new one — and the app must not have to know which by inspecting a return value.
+    on_steer: Callable[[str], None] | None = None
+    #: What is still waiting to be delivered, pulled on every event. The orchestrator
+    #: owns the real queue (the loop takes from it, and the app cannot see when), so the
+    #: screen has to *follow* that list rather than keep its own — the same reason
+    #: ``on_status`` and ``on_todos`` are pulls. Unset leaves the display driven by the
+    #: app's own bookkeeping, which is right when ``on_steer`` is unset too.
+    on_steering: Callable[[], Sequence[str]] | None = None
     #: Runs a slash command and returns what to show for it. Set, the input line routes
     #: anything :func:`~ronin.ui.commands.is_command` recognises here instead of to the
     #: model — which is what makes ``/help`` in the TUI run the command rather than
@@ -268,6 +285,8 @@ async def multi_turn_events(
     first: str | None,
     submissions: asyncio.Queue[str | None],
     run_turn: TurnRunner,
+    *,
+    leftover: Callable[[], Sequence[str]] | None = None,
 ) -> AsyncIterator[Event]:
     """The app's event source for a multi-turn session: run a turn, then wait for the next.
 
@@ -275,6 +294,11 @@ async def multi_turn_events(
     the next prompt (the input line puts one there via ``Session.on_submit``) and runs it,
     repeating until ``None`` is queued. One ``Agent`` is one conversation and ``run_turn``
     continues it, so turn *n* sees the history of turns before it.
+
+    ``leftover`` is the steering channel's safety net, drained after every turn. A
+    correction typed as a turn ended — or one held back because the turn was interrupted
+    — has nothing left to steer, so it becomes the next turn instead of sitting in the
+    holder forever.
 
     This is the whole multi-turn orchestration, and it is pure over an injected
     ``run_turn``: tested with scripted turns and a hand-fed queue — no model, no Textual.
@@ -288,6 +312,17 @@ async def multi_turn_events(
     while prompt is not None:
         async for event in run_turn(prompt):
             yield event
+        # A steer can miss its turn two ways, and both end here rather than in a
+        # message that is never delivered: the turn ended between the keystroke and the
+        # loop's next iteration, or the turn was interrupted (the loop deliberately
+        # leaves the holder untouched when it stops). Whatever is still waiting becomes
+        # the next turn — which is also what "esc to stop now and send it" promises.
+        if leftover is not None and (waiting := tuple(leftover())):
+            # One turn, not one each: they were typed as one thought about the same
+            # work, and delivering them as separate turns would let the model answer
+            # the first before it could see the second.
+            prompt = "\n\n".join(waiting)
+            continue
         prompt = await submissions.get()
 
 
@@ -530,11 +565,21 @@ def _build_app(session: Session) -> Any:
                 # pump here would freeze the very screen that shows the answer.
                 self.run_worker(self._run_command(text))
                 return
+            if self.state.busy and self.session.on_steer is not None:
+                # Mid-turn: steer the running conversation rather than queueing a new
+                # turn behind it. `busy` is the right test and not `pending_approval`:
+                # a session parked on an approval modal is waiting on the human, and
+                # there is no running turn to steer.
+                self.session.on_steer(text)
+                self._refresh_steering()
+                self._paint()
+                return
             if self.session.on_submit is not None:
                 self.session.on_submit(text)
                 if self.state.busy:
-                    # Mid-turn: it will run as the next turn. Say so, rather than letting
-                    # the keystroke look swallowed.
+                    # Mid-turn with no steering seam wired (demo, replay): it will run as
+                    # the next turn. Say so, rather than letting the keystroke look
+                    # swallowed.
                     self.state = self.state.with_queued(text)
                     self._paint()
 
@@ -550,6 +595,18 @@ def _build_app(session: Session) -> Any:
             todos = tuple(self.session.on_todos())
             if todos != self.state.todos:
                 self.state = self.state.with_todos(todos)
+
+        def _refresh_steering(self) -> None:
+            """Follow the orchestrator's pending list, if it offered one.
+
+            Pulled on every event for the same reason the checklist is: the loop takes
+            corrections at its own moments, and a screen that only cleared them at
+            ``TurnEnd`` would keep showing a message that was delivered two minutes ago
+            as though it were still waiting.
+            """
+            if self.session.on_steering is None:
+                return
+            self.state = self.state.with_queue(self.session.on_steering())
 
         async def _run_command(self, text: str) -> None:
             """Run one slash command and show what it said."""
@@ -620,6 +677,7 @@ def _build_app(session: Session) -> Any:
                 elif isinstance(event, TurnEnd) and self.session.on_status is not None:
                     self.state = self.state.with_status(context_used=self.session.on_status())
                 self._refresh_todos()
+                self._refresh_steering()
                 self._paint()
 
         def _paint(self) -> None:
