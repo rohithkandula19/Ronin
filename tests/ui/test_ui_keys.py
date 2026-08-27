@@ -10,10 +10,12 @@ from ronin.ui.reduce import (
     DENIED_BY_HUMAN,
     DOUBLE_ESCAPE_WINDOW_SECONDS,
     MODE_CYCLE,
+    REASON_KEY,
     REMEMBER_KEY,
     EscapeAction,
     EscapeState,
     decision_for,
+    deny_with,
     mode_label,
     next_mode,
     press_escape,
@@ -146,6 +148,48 @@ def test_only_two_keys_can_approve_and_they_are_named() -> None:
     assert approving == ["a", "y"]
     assert REMEMBER_KEY in approving
     assert APPROVAL_KEYS["escape"] is False, "escape must never be an approval"
+
+
+def test_the_reason_key_is_not_an_answer_on_its_own() -> None:
+    """It opens a line to type in; it decides nothing.
+
+    Kept out of :data:`APPROVAL_KEYS` deliberately, so ``decision_for`` keeps returning
+    ``None`` for it and the request stays standing. If it resolved here it would be a
+    second denial key wearing a confusing name, and the human would lose the chance to
+    back out of a keystroke they took back.
+    """
+    assert REASON_KEY not in APPROVAL_KEYS
+    assert decision_for(REASON_KEY) is None
+
+
+def test_the_reason_key_does_not_collide_with_an_answering_key() -> None:
+    """A letter that both denies instantly and opens a prompt cannot do either well."""
+    assert REASON_KEY not in set(APPROVAL_KEYS)
+    assert REASON_KEY != REMEMBER_KEY
+
+
+@pytest.mark.parametrize(
+    ("typed", "expected"),
+    [
+        ("use staging", "use staging"),
+        ("  use staging  ", "use staging"),
+        ("", ""),
+        ("   ", ""),
+        ("\n\t", ""),
+    ],
+)
+def test_deny_with_carries_the_words_and_leaves_blank_blank(typed: str, expected: str) -> None:
+    """Whitespace is trimmed; emptiness is preserved rather than papered over.
+
+    A blank reason must stay blank so the engine's own no-reason wording fires.
+    Substituting :data:`DENIED_BY_HUMAN` here would render, through
+    ``PolicyEngine._denial``, as "the user declined and said: the user declined this
+    action" — the placeholder doubled back on itself.
+    """
+    decision = deny_with(typed)
+    assert decision.approved is False
+    assert decision.reason == expected
+    assert not decision.remember, "a denial has nothing to remember"
 
 
 def test_a_denial_says_why_so_the_model_can_act_on_it() -> None:

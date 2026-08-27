@@ -49,12 +49,14 @@ from ronin.core.types import ApprovalDecision, ApprovalRequest, Event, Mode, Tur
 
 from .commands import is_command
 from .reduce import (
+    REASON_KEY,
     SPINNER_INTERVAL_SECONDS,
     EscapeAction,
     EscapeState,
     ViewState,
     advance_activity,
     decision_for,
+    deny_with,
     next_mode,
     press_escape,
     reduce_event,
@@ -74,6 +76,11 @@ DISMISSED = "the approval was dismissed without an answer, so the action was ref
 
 #: Region ids, so the tests and the CSS agree on one spelling.
 MODAL_ID = "approval-modal"
+#: The reason line inside the approval modal. Hidden in phase one.
+REASON_ID = "approval-reason"
+#: What the reason line says before anything is typed. Phrased as the correction
+#: itself, because the useful sentence is "use staging", not "I refuse".
+REASON_PLACEHOLDER = "what should it do instead?"
 TRANSCRIPT_ID = "transcript"
 TOOLS_ID = "tools"
 TODOS_ID = "todos"
@@ -109,6 +116,10 @@ Screen { layout: vertical; }
 #: own tail in another agent's UI. Taking the screen means what is shown is all there is.
 MODAL_CSS = """
 ApprovalModal { align: center middle; background: $background 85%; }
+/* Hidden *and* disabled until the reason key is pressed. Disabled is the load-bearing
+   half: Textual focuses the first focusable widget when a screen mounts, so a merely
+   hidden Input would still take the focus and swallow the `y` that approves. */
+#approval-reason { display: none; margin: 1 2 0 2; }
 #approval-modal { width: 90%; height: auto; max-height: 90%; overflow-y: auto;
                   border: round $warning; padding: 1 2; }
 """
@@ -326,6 +337,14 @@ def _build_app(session: Session) -> Any:
         :func:`~ronin.ui.reduce.decision_for`, so the set of keys that can approve an
         edit is a table in a pure module and not a list of widget handlers. A key that
         means nothing is swallowed rather than treated as either answer.
+
+        Two phases, and the second one is why this screen has state at all.
+        :data:`~ronin.ui.reduce.REASON_KEY` denies *and* asks why, which cannot be
+        answered by one keystroke — so that key opens a line to type in and the screen
+        waits again. The invariant across both phases: ``dismiss`` is called only with a
+        complete :class:`ApprovalDecision`. There is no path that leaves the request
+        answered-but-empty, because a half-resolved approval would either hang the turn
+        or send the model a correction nobody wrote.
         """
 
         CSS = MODAL_CSS
@@ -333,11 +352,60 @@ def _build_app(session: Session) -> Any:
         def __init__(self, request: ApprovalRequest) -> None:
             super().__init__()
             self.request = request
+            #: Phase two. Guards every key handler, because in phase two `escape` must
+            #: back out to phase one rather than deny, and `y`/`n`/`a` are just letters
+            #: someone is typing into a sentence.
+            self._collecting = False
 
         def compose(self) -> Any:
             yield static(render_approval(self.request, styles=session.styles), id=MODAL_ID)
+            # `disabled` keeps it out of the focus order, which is what makes phase one
+            # behave exactly as it did before this line existed: a focused Input would
+            # consume the very keystrokes that answer the request.
+            yield input_widget(placeholder=REASON_PLACEHOLDER, id=REASON_ID, disabled=True)
+
+        def _repaint(self) -> None:
+            body = render_approval(self.request, styles=session.styles, collecting=self._collecting)
+            self.query_one(f"#{MODAL_ID}", static).update(body)
+
+        def _begin_collecting(self) -> None:
+            self._collecting = True
+            line = self.query_one(f"#{REASON_ID}")
+            line.disabled = False
+            line.display = True
+            line.value = ""
+            self._repaint()
+            line.focus()
+
+        def _cancel_collecting(self) -> None:
+            """Back to phase one with the request still standing, not denied.
+
+            The one thing this must not do is resolve. Someone who pressed the reason
+            key and thought better of it has not decided anything yet, and turning that
+            into a refusal would punish a keystroke they took back.
+            """
+            self._collecting = False
+            line = self.query_one(f"#{REASON_ID}")
+            line.value = ""
+            line.display = False
+            line.disabled = True
+            self._repaint()
+            self.set_focus(None)
 
         def on_key(self, event: Any) -> None:
+            if self._collecting:
+                # Only `escape` is ours in phase two; every printable key belongs to the
+                # input line, and `enter` arrives as `Input.Submitted` below.
+                if event.key == "escape":
+                    event.stop()
+                    event.prevent_default()
+                    self._cancel_collecting()
+                return
+            if event.key == REASON_KEY:
+                event.stop()
+                event.prevent_default()
+                self._begin_collecting()
+                return
             decision = decision_for(event.key)
             if decision is None:
                 return
@@ -346,6 +414,18 @@ def _build_app(session: Session) -> Any:
             event.stop()
             event.prevent_default()
             self.dismiss(decision)
+
+        def on_input_submitted(self, event: Any) -> None:
+            """Enter in the reason line: send the denial, with whatever was typed.
+
+            ``deny_with`` owns the empty case — a blank reason becomes the ordinary
+            denial rather than an empty correction, so pressing the reason key and then
+            Enter is never worse than pressing `n`.
+            """
+            if not self._collecting:
+                return
+            event.stop()
+            self.dismiss(deny_with(event.value))
 
     class RoninApp(app_base):  # type: ignore[misc]  # base is Any: lazy import, no stubs
         CSS = APP_CSS

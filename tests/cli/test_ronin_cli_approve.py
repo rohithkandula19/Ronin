@@ -9,6 +9,8 @@ still refuse.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from ronin.cli.approve import (
@@ -19,8 +21,10 @@ from ronin.cli.approve import (
     PromptAsker,
     answer_for,
 )
-from ronin.core.types import ApprovalDecision, ApprovalRequest, DangerLevel
-from ronin.safety.policy import Asker, Outcome
+from ronin.core.types import ApprovalDecision, ApprovalRequest, DangerLevel, ToolSpec, ToolUse
+from ronin.safety.denylist import Denylist
+from ronin.safety.policy import Answer, Asker, Outcome, PolicyEngine, RuleSet, builtin_rules
+from ronin.ui.reduce import deny_with
 
 REQUEST = ApprovalRequest(
     tool_use_id="t1",
@@ -71,6 +75,83 @@ def test_remembering_is_session_scoped_not_written_to_disk() -> None:
 def test_the_reason_survives_so_a_denial_is_actionable() -> None:
     answer = answer_for(ApprovalDecision(approved=False, reason="not that directory"))
     assert answer.feedback == "not that directory"
+
+
+async def test_a_typed_reason_reaches_the_model_verbatim_and_first() -> None:
+    """The whole chain, end to end: keystrokes in, model-readable correction out.
+
+    ``deny_with`` is what the modal's reason line produces. This drives it through
+    ``answer_for`` into a real ``PolicyEngine`` and asserts the sentence survives into
+    the text the *model* is handed — not paraphrased, not prefixed away, and ahead of
+    the engine's own framing so the model reads the correction before the boilerplate.
+
+    Asserted here rather than only in the UI because the UI can only prove it built the
+    decision; whether the words reach the model is a property of three layers agreeing.
+    """
+    correction = "use the staging database, not production"
+
+    class Reasoning:
+        async def ask(self, request: ApprovalRequest) -> Answer:
+            del request
+            return answer_for(deny_with(correction))
+
+    policy = PolicyEngine(
+        rules=RuleSet(rules=builtin_rules()),
+        asker=Reasoning(),
+        denylist=Denylist(workspace_root=Path("/work"), home=Path("/home/dev")),
+    )
+    spec = ToolSpec(
+        name="bash",
+        description="Run a command.",
+        danger_level=DangerLevel.DESTRUCTIVE,
+        requires_approval=True,
+    )
+    use = ToolUse(id="c1", name="bash", arguments={"command": "./deploy.sh"})
+
+    decision = await policy.approve(spec, use, rendered="./deploy.sh")
+
+    assert decision.approved is False
+    assert correction in decision.reason, "the human's words did not reach the model"
+    # First: the model reads the correction before the engine's framing around it.
+    assert decision.reason.index(correction) < decision.reason.index("correction, not a")
+    assert "declined" in decision.reason
+
+
+async def test_an_empty_typed_reason_does_not_send_the_model_a_blank_correction() -> None:
+    """`deny_with("")` must degrade to the engine's no-reason wording.
+
+    Otherwise the model receives "the user declined and said:" with nothing after the
+    colon, which reads as a malfunction — and a model that reads a refusal as a bug
+    retries the same call.
+    """
+
+    class Blank:
+        async def ask(self, request: ApprovalRequest) -> Answer:
+            del request
+            return answer_for(deny_with("   "))
+
+    policy = PolicyEngine(
+        rules=RuleSet(rules=builtin_rules()),
+        asker=Blank(),
+        denylist=Denylist(workspace_root=Path("/work"), home=Path("/home/dev")),
+    )
+    spec = ToolSpec(
+        name="bash",
+        description="Run a command.",
+        danger_level=DangerLevel.DESTRUCTIVE,
+        requires_approval=True,
+    )
+
+    decision = await policy.approve(
+        spec, ToolUse(id="c1", name="bash", arguments={"command": "./deploy.sh"}), rendered="x"
+    )
+
+    assert decision.approved is False
+    assert "said:" not in decision.reason, "no dangling colon with nothing after it"
+    assert "gave no reason" in decision.reason
+    # And not the placeholder doubled back on itself: substituting a stand-in here
+    # would render "the user declined and said: the user declined this action".
+    assert "declined and said" not in decision.reason
 
 
 # --------------------------------------------------------------------------- #

@@ -28,6 +28,7 @@ from ronin.ui.app import (
     APPROVAL_ID,
     INPUT_ID,
     MODAL_ID,
+    REASON_ID,
     STATUS_ID,
     TODOS_ID,
     TOOLS_ID,
@@ -36,6 +37,8 @@ from ronin.ui.app import (
     Session,
     _build_app,
 )
+from ronin.ui.reduce import REASON_KEY
+from ronin.ui.render import APPROVAL_PROMPT, REASON_PROMPT
 
 pytest.importorskip("textual", reason="the interactive TUI needs the 'tui' extra")
 
@@ -126,6 +129,136 @@ async def test_a_keypress_on_the_modal_answers_the_policy_s_question(
     modal takes focus and receives the key."""
     answers = await _answer_with(key)
     assert [(a.approved, a.remember) for a in answers] == [(approved, remember)]
+
+
+async def _deny_with_reason(*keys: str) -> tuple[list[ApprovalDecision], list[str]]:
+    """Press ``keys`` on the modal; return the answers and the prompt text at the end.
+
+    Returns the prompt too, because half of what this feature has to get right is what
+    the screen says while it waits — a prompt with no stated way out is how someone
+    force-quits instead of backing out of one keystroke.
+    """
+    asked: list[Asking] = []
+    app = _build_app(Session(events=stream(approval_turn()[:4]), on_attach=asked.append))
+    answers: list[ApprovalDecision] = []
+    seen: list[str] = []
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        async def ask() -> None:
+            answers.append(await asked[0](APPROVAL))
+
+        worker = app.run_worker(ask(), exclusive=False)
+        await pilot.pause()
+        for key in keys:
+            await pilot.press(key)
+            await pilot.pause()
+        seen.append(_modal_text(app) if not answers else "")
+        if answers:
+            await worker.wait()
+        else:
+            worker.cancel()
+    return answers, seen
+
+
+async def test_the_reason_line_is_out_of_the_focus_order_until_it_is_needed() -> None:
+    """Phase one must behave exactly as it did before the line existed.
+
+    Textual focuses the first focusable widget when a screen mounts, so an enabled
+    ``Input`` on this modal captures the very keystroke that approves — the request then
+    never resolves and the turn waits forever. That regression shows up as a *hung*
+    suite rather than a failing one, which is a bad signal to leave for CI, so this
+    asserts the disabled state directly and fails in milliseconds instead.
+    """
+    from textual.widgets import Input
+
+    asked: list[Asking] = []
+    app = _build_app(Session(events=stream(approval_turn()[:4]), on_attach=asked.append))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        async def ask() -> None:
+            await asked[0](APPROVAL)
+
+        worker = app.run_worker(ask(), exclusive=False)
+        await pilot.pause()
+        screen = app.screen
+        line = screen.query_one(f"#{REASON_ID}", Input)
+
+        assert line.disabled is True, "an enabled reason line swallows the approving key"
+        assert line.display is False
+        assert screen.focused is not line
+        worker.cancel()
+
+
+async def test_the_reason_key_denies_with_the_words_the_human_typed() -> None:
+    """The outcome ``policy.py`` calls the one that makes the gate usable.
+
+    Its transport was already complete — ``ApprovalDecision.reason`` becomes
+    ``Answer.feedback`` in ``cli.approve.answer_for`` and the engine reproduces it
+    verbatim. The only missing piece was a way for a person to type the sentence, and
+    one keystroke cannot carry a sentence, which is why the modal grew a second phase.
+    """
+    answers, _ = await _deny_with_reason(REASON_KEY, *"use staging", "enter")
+
+    assert len(answers) == 1
+    assert answers[0].approved is False
+    assert answers[0].reason == "use staging"
+    assert answers[0].remember is False, "a denial has nothing to remember"
+
+
+async def test_escape_while_typing_a_reason_keeps_the_request_open() -> None:
+    """The requirement that makes the second phase safe rather than a trap.
+
+    ``escape`` denies in phase one. In phase two it has to mean "I take back the
+    keystroke", not "deny with whatever I have typed" and not "deny with nothing" —
+    someone who opened the reason line and thought better of it has decided nothing.
+    So the request must still be standing afterwards, answerable either way.
+    """
+    answers, seen = await _deny_with_reason(REASON_KEY, *"never", "escape")
+
+    assert answers == [], "escape during collection must not resolve the approval"
+    assert APPROVAL.rendered in seen[0], "the command is still on screen to decide on"
+    assert APPROVAL_PROMPT in seen[0], "and the ordinary key list is back"
+
+
+async def test_the_request_stays_answerable_after_backing_out_of_a_reason() -> None:
+    """Not merely unresolved — still *answerable*. An approval that survives the cancel
+    but no longer takes a keypress is a hung turn, which is worse than either answer."""
+    answers, _ = await _deny_with_reason(REASON_KEY, "escape", "y")
+
+    assert [(a.approved, a.remember) for a in answers] == [(True, False)]
+
+
+async def test_the_reason_line_names_the_way_out_while_it_waits() -> None:
+    """Phase two swaps the key list for a prompt that says what enter and esc do."""
+    _answers, seen = await _deny_with_reason(REASON_KEY)
+
+    assert REASON_PROMPT in seen[0]
+    assert APPROVAL.rendered in seen[0], "the command stays visible while you explain"
+
+
+async def test_an_empty_reason_is_the_ordinary_denial_not_an_empty_correction() -> None:
+    """Pressing the reason key then enter must never be worse than pressing ``n``.
+
+    The reason is left *blank* rather than filled with a stand-in: the engine already
+    branches on empty feedback and says something better than this layer could, while a
+    placeholder would render as "the user declined and said: the user declined this
+    action". ``tests/cli/test_ronin_cli_approve.py`` pins the text the model then sees.
+    """
+    answers, _ = await _deny_with_reason(REASON_KEY, "enter")
+
+    assert len(answers) == 1
+    assert answers[0].approved is False
+    assert answers[0].reason == ""
+
+
+async def test_the_reason_key_alone_does_not_answer_the_question() -> None:
+    """It opens a line; it decides nothing. If it resolved on its own it would be a
+    second denial key with a confusing name."""
+    answers, _ = await _deny_with_reason(REASON_KEY)
+
+    assert answers == []
 
 
 async def test_a_key_that_answers_nothing_leaves_the_question_open() -> None:

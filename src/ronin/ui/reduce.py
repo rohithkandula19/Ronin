@@ -714,6 +714,15 @@ APPROVAL_KEYS: Mapping[str, bool] = {
     "escape": False,
 }
 
+#: The key that denies *and* opens a line to say why. Absent from
+#: :data:`APPROVAL_KEYS` on purpose: on its own it answers nothing, so
+#: :func:`decision_for` must keep returning ``None`` for it and leave the request
+#: standing until the human either supplies a reason or backs out. The widget reads
+#: this name rather than the letter, for the same reason the renderer reads
+#: :data:`ronin.ui.render.APPROVAL_PROMPT`: two spellings of one keymap is how they
+#: drift.
+REASON_KEY = "s"
+
 #: The key that approves *and* asks for the decision to be remembered. The prompt the
 #: human reads is :data:`ronin.ui.render.APPROVAL_PROMPT`, which already names these
 #: three keys — one spelling of the keymap for the renderer and another for the widget
@@ -726,6 +735,24 @@ DENIED_BY_HUMAN = "the user declined this action"
 
 #: What a remembered approval asks for, in the model's words.
 APPROVED_AND_REMEMBERED = "approved, and remembered for the rest of this session"
+
+
+def deny_with(reason: str) -> ApprovalDecision:
+    """A denial carrying the human's own words, or the bare one if they gave none.
+
+    The words travel as ``ApprovalDecision.reason``, which ``cli.approve.answer_for``
+    already turns into ``Answer.feedback`` and the engine reproduces verbatim to the
+    model. Nothing below this function needed building — the only thing missing was a
+    way for a person to type the sentence.
+
+    A blank reason is passed on as blank, *not* as :data:`DENIED_BY_HUMAN`. The engine
+    already branches on an empty feedback and says something better than this layer
+    could — "declined this action and gave no reason. Do not retry it. Propose an
+    alternative" — whereas substituting a placeholder here produces "the user declined
+    and said: the user declined this action", which reads as a malfunction. Saying
+    nothing is what lets the layer that owns the wording own it.
+    """
+    return ApprovalDecision(approved=False, reason=reason.strip())
 
 
 def decision_for(key: str) -> ApprovalDecision | None:
@@ -763,6 +790,7 @@ __all__ = [
     "NOTICE_HISTORY",
     "OK_SUMMARY",
     "PRIMARY_ARGUMENT_KEYS",
+    "REASON_KEY",
     "REMEMBER_KEY",
     "REPEAT_GLYPH",
     "RESULT_ARROW",
@@ -783,6 +811,7 @@ __all__ = [
     "activity_label",
     "advance_activity",
     "decision_for",
+    "deny_with",
     "mode_label",
     "next_mode",
     "press_escape",
