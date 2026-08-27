@@ -24,7 +24,7 @@ from ronin.cli.approve import (
 from ronin.core.types import ApprovalDecision, ApprovalRequest, DangerLevel, ToolSpec, ToolUse
 from ronin.safety.denylist import Denylist
 from ronin.safety.policy import Answer, Asker, Outcome, PolicyEngine, RuleSet, builtin_rules
-from ronin.ui.reduce import deny_with
+from ronin.ui.reduce import decision_for, deny_with
 
 REQUEST = ApprovalRequest(
     tool_use_id="t1",
@@ -152,6 +152,54 @@ async def test_an_empty_typed_reason_does_not_send_the_model_a_blank_correction(
     # And not the placeholder doubled back on itself: substituting a stand-in here
     # would render "the user declined and said: the user declined this action".
     assert "declined and said" not in decision.reason
+
+
+@pytest.mark.parametrize("key", ["n", "escape"])
+async def test_a_bare_no_tells_the_model_not_to_retry(key: str) -> None:
+    """The end-to-end assertion that was missing, and the reason the bug survived.
+
+    Both `n` and `escape` deny without words. The UI-layer tests only ever checked the
+    *field* ``decision_for`` produced, so a placeholder in it looked fine there while the
+    model was being handed something else entirely:
+
+        the user declined and said: the user declined this action
+        Take that as a correction, not a dead end: adjust the plan and continue.
+
+    Two things wrong with that. The placeholder is quoted back as though the human had
+    typed it, which no human did. And it takes the branch that invites the model to
+    adjust and carry on — the opposite of what a bare "no" means, and the exact opposite
+    of the branch the engine has for this case.
+    """
+
+    class Bare:
+        async def ask(self, request: ApprovalRequest) -> Answer:
+            del request
+            decision = decision_for(key)
+            assert decision is not None
+            return answer_for(decision)
+
+    policy = PolicyEngine(
+        rules=RuleSet(rules=builtin_rules()),
+        asker=Bare(),
+        denylist=Denylist(workspace_root=Path("/work"), home=Path("/home/dev")),
+    )
+    spec = ToolSpec(
+        name="bash",
+        description="Run a command.",
+        danger_level=DangerLevel.DESTRUCTIVE,
+        requires_approval=True,
+    )
+
+    decision = await policy.approve(
+        spec, ToolUse(id="c1", name="bash", arguments={"command": "./deploy.sh"}), rendered="x"
+    )
+
+    assert decision.approved is False
+    assert "gave no reason" in decision.reason
+    assert "Do not retry it" in decision.reason
+    # Not quoted back as the human's words, and not the retry-friendly framing.
+    assert "declined and said" not in decision.reason
+    assert "correction, not a dead end" not in decision.reason
 
 
 # --------------------------------------------------------------------------- #
