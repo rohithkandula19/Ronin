@@ -11,6 +11,7 @@ from ronin.core.types import ApprovalRequest, DangerLevel, Todo, TodoStatus
 from ronin.ui.reduce import ViewState, reduce_all
 from ronin.ui.render import (
     ANSI,
+    APPROVAL_PROMPT,
     APPROVAL_TRUNCATION,
     CONTEXT_WARN_MARK,
     CR_GLYPH,
@@ -18,6 +19,7 @@ from ronin.ui.render import (
     NO_CHANGES_NOTE,
     OVER_CAPACITY,
     PLAIN,
+    REASON_PROMPT,
     TRAILING_NEWLINE_NOTE,
     Styles,
     escape_markup,
@@ -293,11 +295,63 @@ def test_a_renderer_cannot_substitute_its_own_text_for_the_rendered_field() -> N
 
 
 def test_the_approval_renderer_takes_no_arguments_it_could_re_derive_from() -> None:
+    """The signature is the guarantee: what is shown is what will run.
+
+    ``collecting`` is a bool that only chooses between two fixed prompt strings, so it
+    cannot carry or reconstruct a command — which is the property this test defends.
+    The second assertion is the one that matters and it is deliberately a denylist of
+    the argument names that *would* let the body be re-derived; keep it that way rather
+    than loosening the exact set above without an argument for the addition.
+    """
     import inspect
 
     parameters = set(inspect.signature(render_approval).parameters)
-    assert parameters == {"request", "styles", "max_lines"}
+    assert parameters == {"request", "styles", "max_lines", "collecting"}
     assert not parameters & {"arguments", "tool", "spec", "diff", "old", "new"}
+    assert inspect.signature(render_approval).parameters["collecting"].annotation == "bool"
+
+
+def test_the_key_hints_survive_a_host_that_parses_markup() -> None:
+    """The line a human reads to know which key approves was being eaten.
+
+    ``APPROVAL_PROMPT`` spells the keys as ``[y]es / [n]o / [a]lways``, and a host that
+    parses console markup reads ``[y]`` as a tag and drops it — so the prompt rendered
+    as "approve? es / o / lways". Every other string in this renderer goes through
+    ``styles.text``; this one did not, which is the whole bug.
+
+    Asserted against the *resolved* markup rather than the raw string, because the raw
+    string always looked correct — that is why it went unnoticed.
+    """
+    from rich.markup import render as resolve_markup
+
+    request = ApprovalRequest(
+        tool_use_id="t1",
+        name="bash",
+        danger_level=DangerLevel.DESTRUCTIVE,
+        rendered="rm -rf ./build",
+    )
+
+    visible = str(resolve_markup(render_approval(request, styles=MARKUP)))
+
+    for hint in ("[y]es", "[n]o", "[a]lways", "[s]ay why"):
+        assert hint in visible, f"{hint} was consumed as markup"
+
+
+def test_the_reason_prompt_replaces_the_key_list_while_collecting() -> None:
+    """Phase two says what enter and esc do; a prompt with no stated way out is how
+    someone force-quits rather than backing out of one keystroke."""
+    request = ApprovalRequest(
+        tool_use_id="t1",
+        name="bash",
+        danger_level=DangerLevel.DESTRUCTIVE,
+        rendered="rm -rf ./build",
+    )
+
+    waiting = render_approval(request, collecting=True)
+
+    assert REASON_PROMPT in waiting
+    assert APPROVAL_PROMPT not in waiting
+    assert "rm -rf ./build" in waiting, "the command stays visible while you explain"
 
 
 def test_a_gigantic_approval_body_is_truncated_and_says_so_twice() -> None:

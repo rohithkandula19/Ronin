@@ -542,11 +542,15 @@ def render_status_for(state: ViewState, *, styles: Styles = PLAIN) -> str:
 # --------------------------------------------------------------------------- #
 
 DANGER_MARKER = "⚠"
-APPROVAL_PROMPT = "approve? [y]es / [n]o / [a]lways"
+APPROVAL_PROMPT = "approve? [y]es / [n]o / [a]lways / [s]ay why"
 #: Says the human is looking at less than the whole thing. Kept loud because the
 #: alternative — a quietly clipped command — is how someone approves a `rm` they
 #: never saw.
 APPROVAL_TRUNCATION = "the text above is incomplete; do not approve unless you accept all of it"
+#: Shown in place of :data:`APPROVAL_PROMPT` while the human types a reason. Names the
+#: way out, because a prompt with no stated escape is how someone force-quits the
+#: session rather than backing out of one keystroke.
+REASON_PROMPT = "why not? enter sends it back to the model — esc keeps the request open"
 
 
 def render_approval(
@@ -554,6 +558,7 @@ def render_approval(
     *,
     styles: Styles = PLAIN,
     max_lines: int = APPROVAL_MAX_LINES,
+    collecting: bool = False,
 ) -> str:
     """Render exactly what the human is deciding on.
 
@@ -562,6 +567,11 @@ def render_approval(
     accident — that is the whole point of the field: what is shown is what will
     run. The only transformation permitted is truncation, and it announces itself
     twice (a line-count marker plus :data:`APPROVAL_TRUNCATION`).
+
+    ``collecting`` swaps the key list for :data:`REASON_PROMPT` while a reason is
+    being typed. The request itself stays on screen throughout: someone explaining
+    why they are refusing a command needs to still be able to read the command, and
+    re-rendering without it would be the one moment the body is missing.
     """
     head = styles.wrap(
         "danger",
@@ -576,7 +586,12 @@ def render_approval(
         body = truncate_lines(body, max_lines, what="approval text", styles=styles)
         body = f"{body}\n{styles.wrap('danger', APPROVAL_TRUNCATION)}"
     parts.append(body)
-    parts.append(styles.wrap("meta", APPROVAL_PROMPT))
+    # Escaped, not just wrapped. The key hints are spelled `[y]es / [n]o`, and a host
+    # that parses console markup reads `[y]` as a tag and eats it — so the line a human
+    # relies on to know which key approves rendered as "approve? es / o / lways". Every
+    # other string here goes through `styles.text`; this one did not.
+    prompt = REASON_PROMPT if collecting else APPROVAL_PROMPT
+    parts.append(styles.wrap("meta", styles.text(prompt)))
     return "\n".join(parts)
 
 
@@ -776,6 +791,7 @@ __all__ = [
     "QUEUED_INDENT",
     "QUEUED_MANY",
     "QUEUED_ONE",
+    "REASON_PROMPT",
     "STATUS_SEPARATOR",
     "TODO_GLYPHS",
     "TOKENS",
