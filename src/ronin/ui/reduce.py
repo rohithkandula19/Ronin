@@ -504,7 +504,13 @@ def reduce_event(state: ViewState, event: Event) -> ViewState:
             turn_state=event.state,
             stop_reason=event.stop_reason,
             pending_approval=None,
-            todos=agent.todos if agent is not None else state.todos,
+            # `or state.todos`, not a bare read: `AgentState.todos` is empty on every
+            # live turn (nothing populates it outside a resumed session), so taking it
+            # unconditionally would wipe a plan pushed in mid-turn the instant the turn
+            # ended. An empty list is never a deliberate clear — `parse_todos` refuses
+            # one and tells the model to mark items done instead — so falling back to
+            # what is already on screen cannot swallow a real "clear the list".
+            todos=(agent.todos or state.todos) if agent is not None else state.todos,
             # Spend and mode come from the state the turn actually ended with, so
             # the status line reports what ran rather than what the UI hoped ran.
             cost_usd=agent.budget.spent_usd if agent is not None else state.cost_usd,
