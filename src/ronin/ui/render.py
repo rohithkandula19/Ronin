@@ -312,6 +312,12 @@ QUEUED_ONE = "steering — goes in at the agent's next step (esc to stop now and
 QUEUED_MANY = "{n} steering — they go in, in order, at the agent's next step (esc to stop now)"
 QUEUED_INDENT = "  | "
 
+#: The ``@file`` picker. The header names both keys, because a list of paths with no
+#: stated way to take one is a list you retype by hand.
+MENTION_HEADER = "tab inserts the path · up/down chooses"
+MENTION_SELECTED = "  > "
+MENTION_UNSELECTED = "    "
+
 #: How long in-flight work must go quiet before the activity line shows a clock. Below
 #: this every ordinary tool would flash a number; above it, the number appearing is the
 #: warning that something is slow.
@@ -631,6 +637,29 @@ def render_tool_line(line: ToolLine, *, styles: Styles = PLAIN) -> str:
     return styles.wrap("tool_ok" if line.ok else "tool_error", safe)
 
 
+def render_completion(state: ViewState, *, styles: Styles = PLAIN) -> str:
+    """The ``@file`` paths on offer, selected one marked. ``""`` when none are.
+
+    Shown above the input rather than as a floating overlay: an overlay has to know how
+    wide the terminal is and where the cursor sits, and getting either wrong puts the
+    list on top of what the user is reading. A docked region cannot cover anything.
+
+    Paths are escaped like every other in-band string here — a repo is allowed to
+    contain a file with a bracket in its name, and that must render as its name rather
+    than as markup.
+    """
+    if not state.completion.open:
+        return ""
+    lines = [styles.wrap("meta", styles.text(MENTION_HEADER))]
+    for position, path in enumerate(state.completion.candidates):
+        chosen = position == state.completion.selected
+        marker = MENTION_SELECTED if chosen else MENTION_UNSELECTED
+        lines.append(
+            styles.wrap("tool_running" if chosen else "meta", styles.text(f"{marker}{path}"))
+        )
+    return "\n".join(lines)
+
+
 def render_tool_output(line: ToolLine, *, styles: Styles = PLAIN) -> str:
     """The expansion under a running tool: the tail of what it has printed so far.
 
@@ -749,6 +778,8 @@ class Panels:
     notices: str = ""
     #: Messages typed mid-turn and waiting their turn. Empty when nothing is queued.
     queued: str = ""
+    #: The ``@file`` picker. Empty unless a mention is being typed.
+    completion: str = ""
 
 
 def render_panels(
@@ -773,6 +804,7 @@ def render_panels(
         activity=render_activity(state, styles=styles),
         notices=render_notices(state, styles=styles),
         queued=render_queued(state, styles=styles),
+        completion=render_completion(state, styles=styles),
     )
 
 
@@ -807,6 +839,7 @@ __all__ = [
     "escape_markup",
     "render_activity",
     "render_approval",
+    "render_completion",
     "render_diff",
     "render_errors",
     "render_notices",

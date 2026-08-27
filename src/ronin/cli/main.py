@@ -45,6 +45,7 @@ from typing import TextIO
 
 from ..agents.hooks import MATCH_ALL
 from ..context.compaction import context_breakdown
+from ..context.fileindex import FileIndex
 from ..core.types import (
     ApprovalRequest,
     Budget,
@@ -1870,6 +1871,11 @@ def _app_session(options: Options, agent: Agent, handoff: Handoff | None) -> App
     # The same object `Conversation._turn` hands to the loop, so what the screen shows
     # as waiting and what the loop will take cannot diverge.
     steering = agent.runtime.steering
+    # Rooted at the workspace, not the cwd: `ToolContext.resolve` resolves a relative
+    # path against exactly this root, so a path offered here is one the model can hand
+    # straight to a tool. Cached, because a tree walk per keystroke is a broken input
+    # line — see `FileIndex`.
+    files = FileIndex(root=agent.loaded.paths.workspace_root)
     submissions: asyncio.Queue[str | None] = asyncio.Queue()
 
     def run_turn(prompt: str) -> AsyncIterator[Event]:
@@ -1936,6 +1942,7 @@ def _app_session(options: Options, agent: Agent, handoff: Handoff | None) -> App
         on_submit=submissions.put_nowait,
         on_steer=steering.push,
         on_steering=steering.pending,
+        on_files=files.paths,
         on_command=on_command,
         banner=render_banner(
             version=_version(),

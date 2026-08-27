@@ -19,8 +19,16 @@ Keys, and where their logic lives:
 ``esc esc``   rewind to an earlier turn, within
               :data:`ronin.ui.reduce.DOUBLE_ESCAPE_WINDOW_SECONDS`
 ``shift+tab`` cycle normal → auto-accept → plan — :func:`ronin.ui.reduce.next_mode`
+``up``/``down`` choose an offered ``@file`` path, else walk the prompt history —
+              :mod:`ronin.ui.mentions` and :func:`ronin.ui.reduce.walk_back`
+``tab``       insert the chosen ``@file`` path — :func:`ronin.ui.mentions.accept`
 ``ctrl+c``    quit
 ============= ===============================================================
+
+``@`` is the only key with a shared meaning, and the sharing is deliberate: the picker
+takes the arrows only while it is open, which is a transient state directly under the
+cursor, and the history has them back the moment it closes. ``esc`` is *not* a
+dismissal — it interrupts the turn, which is the most important key on the screen.
 
 The app never approves anything by itself. An :class:`~ronin.core.types.ApprovalRequest`
 takes the whole screen as a modal that renders ``request.rendered`` verbatim, and the
@@ -56,6 +64,7 @@ from ronin.core.types import (
 )
 
 from .commands import is_command
+from .mentions import NO_COMPLETION, Completion, accept, active_mention, rank
 from .reduce import (
     REASON_KEY,
     SPINNER_INTERVAL_SECONDS,
@@ -103,6 +112,8 @@ INPUT_ID = "prompt-input"
 ACTIVITY_ID = "activity"
 NOTICES_ID = "notices"
 QUEUED_ID = "queued"
+#: The ``@file`` picker, docked directly above the input it completes.
+MENTIONS_ID = "mentions"
 BANNER_ID = "banner"
 
 #: Placeholder shown in the empty input line.
@@ -117,6 +128,7 @@ Screen { layout: vertical; }
 #errors { height: auto; padding: 0 1; }
 #notices { height: auto; max-height: 40%; overflow-y: auto; padding: 0 1; }
 #queued { height: auto; padding: 0 1; }
+#mentions { height: auto; padding: 0 1; }
 #banner { height: auto; padding: 1 1 0 1; }
 #prompt-input { dock: bottom; height: 3; margin: 0 1; }
 #status { height: 1; dock: bottom; padding: 0 1; }
@@ -229,6 +241,12 @@ class Session:
     #: ``on_status`` and ``on_todos`` are pulls. Unset leaves the display driven by the
     #: app's own bookkeeping, which is right when ``on_steer`` is unset too.
     on_steering: Callable[[], Sequence[str]] | None = None
+    #: The repo's files, as repo-relative posix paths, for ``@file`` completion. Pulled
+    #: only while a mention is actually being typed, never on ordinary keystrokes — the
+    #: orchestrator's implementation is a cached tree walk and this is a keystroke
+    #: handler. Unset leaves ``@`` as ordinary text, which is right for the demo and for
+    #: a replayed recording: there is no repo behind either.
+    on_files: Callable[[], Sequence[str]] | None = None
     #: Runs a slash command and returns what to show for it. Set, the input line routes
     #: anything :func:`~ronin.ui.commands.is_command` recognises here instead of to the
     #: model — which is what makes ``/help`` in the TUI run the command rather than
@@ -338,6 +356,9 @@ class KeyController:
     mode: Mode = Mode.ASK
     escape: EscapeState = field(default_factory=EscapeState)
     history: History = field(default_factory=History)
+    #: The ``@file`` paths on offer. Here beside the history because both are what the
+    #: arrow keys mean, and which one they mean depends on whether this is open.
+    completion: Completion = NO_COMPLETION
     clock: Callable[[], float] = time.monotonic
 
     def press_escape(self) -> EscapeAction:
@@ -351,6 +372,41 @@ class KeyController:
     def submitted(self, text: str) -> None:
         """Record a prompt that was sent, and stop browsing."""
         self.history = remember(self.history, text)
+        self.completion = NO_COMPLETION
+
+    def offer(self, text: str, cursor: int, paths: Callable[[], Sequence[str]]) -> Completion:
+        """Recompute what ``@`` is offering for the token under the cursor.
+
+        ``paths`` is a callable and is invoked *only* once the token is known to be a
+        mention. That laziness is the whole reason it is not a ``Sequence``: the
+        orchestrator's implementation is a cached tree walk, and calling it on every
+        keystroke of ordinary prose would make every session pay for a feature it is
+        not using. Passing the list in eagerly reads identically at the call site and
+        quietly loses this.
+
+        Selection resets to the top on every recomputation, deliberately: another
+        character narrows the list to a *different* list, and carrying an index across
+        that would leave ``tab`` inserting whatever happened to land in that slot.
+        """
+        mention = active_mention(text, cursor)
+        if mention is None:
+            self.completion = NO_COMPLETION
+            return self.completion
+        self.completion = Completion(candidates=rank(mention.query, paths()))
+        return self.completion
+
+    def move_completion(self, delta: int) -> Completion:
+        self.completion = self.completion.moved(delta)
+        return self.completion
+
+    def take_completion(self, text: str, cursor: int) -> tuple[str, int]:
+        """What ``tab`` does: the line with the mention replaced, and where to put the
+        cursor. Returns the line unchanged when nothing is on offer."""
+        if not self.completion.open:
+            return text, cursor
+        replaced = accept(text, cursor, self.completion.choice)
+        self.completion = NO_COMPLETION
+        return replaced
 
     def recall_older(self, current: str) -> str | None:
         """The previous prompt, or ``None`` if there is nothing older to show.
@@ -537,11 +593,34 @@ def _build_app(session: Session) -> Any:
             # Directly above the input, so "what is it doing" sits where the eye already
             # is between turns rather than at the far edge of the screen.
             yield static("", id=ACTIVITY_ID)
+            # Directly above the input, so the paths on offer and the text being
+            # completed are adjacent rather than at opposite ends of the screen.
+            yield static("", id=MENTIONS_ID)
             # The multi-turn affordance. Docked above the status line so streaming text
             # fills the space between. Present even when `on_submit` is unset (demo /
             # replay); the submit handler simply has nothing to hand a prompt to then.
             yield input_widget(placeholder=INPUT_PLACEHOLDER, id=INPUT_ID)
             yield static("", id=STATUS_ID)
+
+        def on_input_changed(self, event: Any) -> None:
+            """Every edit of the prompt line: recompute what ``@`` is offering.
+
+            Guarded on the widget id because the approval modal's reason line is an
+            ``Input`` too, and its ``Changed`` messages bubble through here on their way
+            up. Completing file paths into a denial reason would be nonsense.
+
+            ``on_files`` is consulted only once the token under the cursor is actually a
+            mention, so ordinary typing never reaches the orchestrator's tree walk.
+            """
+            if self.session.on_files is None or event.input.id != INPUT_ID:
+                return
+            before = self.keys.completion
+            offered = self.keys.offer(
+                event.value, event.input.cursor_position, self.session.on_files
+            )
+            if offered != before:
+                self.state = self.state.with_completion(offered)
+                self._paint()
 
         def on_input_submitted(self, event: Any) -> None:
             """Enter in the prompt line: hand a non-empty message to ``on_submit``, clear.
@@ -557,8 +636,16 @@ def _build_app(session: Session) -> Any:
             if not text.strip():
                 return
             # Recorded before dispatch, so a slash command is recalled too: `/model
-            # sonnet` is exactly the sort of line someone retypes.
+            # sonnet` is exactly the sort of line someone retypes. Also drops any open
+            # `@` picker: the line it was completing has been sent.
             self.keys.submitted(text)
+            # Painted here rather than in the branches below, because only some of them
+            # repaint and the picker has to come down on all of them: the line it was
+            # completing has been sent. Clearing the state without painting left the
+            # stale list on screen — the `Input.Changed` from emptying the line does not
+            # cover it, since the state it would compare against is already clear.
+            self.state = self.state.with_completion(self.keys.completion)
+            self._paint()
             if is_command(text) and self.session.on_command is not None:
                 # A slash command is answered locally, not sent to the model. Run it on a
                 # worker: `/diff` and `/undo` shell out to git, and blocking the message
@@ -695,12 +782,13 @@ def _build_app(session: Session) -> Any:
                 (ACTIVITY_ID, panels.activity),
                 (NOTICES_ID, panels.notices),
                 (QUEUED_ID, panels.queued),
+                (MENTIONS_ID, panels.completion),
                 (STATUS_ID, panels.status),
             ):
                 self.query_one(f"#{region}", static).update(text)
 
         def on_key(self, event: Any) -> None:
-            """``up``/``down`` walk the prompt history. Everything else is untouched.
+            """``tab`` takes an offered path; ``up``/``down`` choose one, else walk history.
 
             Handled here rather than as an app ``BINDING`` because a priority binding
             fires ahead of the focused widget and would take these keys away from the
@@ -711,11 +799,33 @@ def _build_app(session: Session) -> Any:
             Guarded on the prompt line actually having focus, so arrows keep meaning
             whatever they mean everywhere else — scrolling the transcript, moving inside
             some future multi-line editor — instead of being globally hijacked.
+
+            The arrows are shared, and the ``@`` picker wins while it is open: it is
+            transient and directly under the cursor, where the history is not, and it
+            closes the moment the token stops being a mention. ``escape`` is
+            deliberately *not* a dismissal — it interrupts the turn, which is the most
+            important key on the screen, and a picker is not worth overloading it.
+            ``enter`` still submits: if it took the selection instead, a message
+            containing an ``@`` word could never be sent in one keystroke.
             """
-            if event.key not in ("up", "down"):
+            if event.key not in ("up", "down", "tab"):
                 return
             line = self.query_one(f"#{INPUT_ID}", input_widget)
             if self.focused is not line:
+                return
+            if self.keys.completion.open:
+                event.stop()
+                event.prevent_default()
+                if event.key == "tab":
+                    line.value, cursor = self.keys.take_completion(line.value, line.cursor_position)
+                    line.cursor_position = cursor
+                else:
+                    self.keys.move_completion(-1 if event.key == "up" else 1)
+                self.state = self.state.with_completion(self.keys.completion)
+                self._paint()
+                return
+            if event.key == "tab":
+                # Nothing on offer: leave tab to whatever it means elsewhere (focus).
                 return
             recalled = (
                 self.keys.recall_older(line.value)

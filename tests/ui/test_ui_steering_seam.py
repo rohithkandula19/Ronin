@@ -242,3 +242,40 @@ def test_the_screen_and_the_loop_are_wired_to_the_same_holder() -> None:
         "on_steering": "steering.pending",
         "leftover": "steering.drain",
     }
+
+
+def test_the_file_picker_is_wired_to_a_cached_index_rooted_at_the_workspace() -> None:
+    """Two things this pins, both of which fail quietly rather than loudly.
+
+    Rooted at ``workspace_root`` and not ``cwd``: ``ToolContext.resolve`` resolves a
+    relative path against exactly that root, so a path offered anywhere else is one the
+    model would hand to a tool that then refuses it — and only for users who run
+    ``ronin`` from a subdirectory, which is exactly the case nobody tests by hand.
+
+    And wired to the ``FileIndex``, not to ``walk_repo`` directly: the walk is ~180ms on
+    this repo, so an uncached seam is a visibly broken input line rather than an error.
+    """
+    import ast
+    import inspect
+
+    from ronin.cli import main as cli_main
+
+    tree = ast.parse(inspect.getsource(cli_main._app_session))
+
+    built = {
+        ast.unparse(node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name) and target.id == "files"
+    }
+    assert built == {"FileIndex(root=agent.loaded.paths.workspace_root)"}
+
+    seams = {
+        keyword.arg: ast.unparse(keyword.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        for keyword in node.keywords
+        if keyword.arg == "on_files"
+    }
+    assert seams == {"on_files": "files.paths"}

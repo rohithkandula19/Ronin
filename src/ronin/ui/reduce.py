@@ -50,6 +50,8 @@ from ronin.core.types import (
     VerifyResult,
 )
 
+from .mentions import NO_COMPLETION, Completion
+
 # --------------------------------------------------------------------------- #
 # Rendering constants (glyphs only — colour is the renderer's business)
 # --------------------------------------------------------------------------- #
@@ -288,6 +290,10 @@ class ViewState:
     #: but until this field existed nothing on screen said they had been received, so a
     #: correction looked lost.
     queued: tuple[str, ...] = ()
+    #: The ``@file`` paths currently on offer, and which one ``tab`` would take. Lives
+    #: here rather than only on the keyboard controller because it has to be rendered,
+    #: and everything on screen comes from one folded state.
+    completion: Completion = NO_COMPLETION
     #: Output from things that are not the model: a slash command's answer, a rewind's
     #: outcome. Kept out of the transcript on purpose — the transcript is what the model
     #: said, and folding `/help` into it would make the conversation a record of two
@@ -366,6 +372,11 @@ class ViewState:
         """Drop the queue. Called when a turn starts: whatever was waiting is now running,
         and showing it as still-pending would be a lie about which turn is in flight."""
         return self if not self.queued else replace(self, queued=())
+
+    def with_completion(self, completion: Completion) -> ViewState:
+        """Offer these paths, or none. Identity-preserving when nothing changed, because
+        this is recomputed on every keystroke of a mention."""
+        return self if completion == self.completion else replace(self, completion=completion)
 
     def cleared_notices(self) -> ViewState:
         """Drop the notices. Called when a new turn starts: a command's answer belongs
