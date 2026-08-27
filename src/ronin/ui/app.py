@@ -41,11 +41,19 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
-from ronin.core.types import ApprovalDecision, ApprovalRequest, Event, Mode, TurnEnd, TurnStart
+from ronin.core.types import (
+    ApprovalDecision,
+    ApprovalRequest,
+    Event,
+    Mode,
+    Todo,
+    TurnEnd,
+    TurnStart,
+)
 
 from .commands import is_command
 from .reduce import (
@@ -168,6 +176,12 @@ class Session:
     not the same number as how full the window is, and printing one under the other's
     label would be a lie the status line tells every second — so the orchestrator, the
     only layer that can see the live transcript, is asked instead.
+
+    ``on_todos`` is the same shape for the plan, and asked on *every* event rather than
+    once per turn: a checklist that only moves when the turn ends is a checklist during
+    exactly the stretch where nobody needs one. The stream cannot carry it — the model's
+    plan lives in ``ToolContext.todos``, written by ``todo_write`` — so again the
+    orchestrator is asked.
     """
 
     events: AsyncIterator[Event]
@@ -189,6 +203,9 @@ class Session:
     on_approval: Callable[[ApprovalRequest], None] | None = None
     on_attach: Callable[[Asking], None] | None = None
     on_status: Callable[[], float] | None = None
+    #: The model's current plan, asked for once per event so the checklist moves while
+    #: the turn runs. Unset (demo, replay) leaves the panel driven by the stream alone.
+    on_todos: Callable[[], Sequence[Todo]] | None = None
     #: The multi-turn seam. When set, the input line is live: a submitted, non-empty
     #: message is handed here, and the orchestrator turns it into the next turn (whose
     #: events arrive on the same ``events`` iterator — see :func:`multi_turn_events`).
@@ -521,6 +538,19 @@ def _build_app(session: Session) -> Any:
                     self.state = self.state.with_queued(text)
                     self._paint()
 
+        def _refresh_todos(self) -> None:
+            """Pull the model's plan, if the orchestrator offered a way to.
+
+            Compared before assigning: the checklist is asked for on every event and a
+            long turn is mostly events that change nothing about it, so this keeps the
+            state object identical rather than rebuilding it hundreds of times per turn.
+            """
+            if self.session.on_todos is None:
+                return
+            todos = tuple(self.session.on_todos())
+            if todos != self.state.todos:
+                self.state = self.state.with_todos(todos)
+
         async def _run_command(self, text: str) -> None:
             """Run one slash command and show what it said."""
             assert self.session.on_command is not None
@@ -589,6 +619,7 @@ def _build_app(session: Session) -> Any:
                     self.session.on_approval(event)
                 elif isinstance(event, TurnEnd) and self.session.on_status is not None:
                     self.state = self.state.with_status(context_used=self.session.on_status())
+                self._refresh_todos()
                 self._paint()
 
         def _paint(self) -> None:

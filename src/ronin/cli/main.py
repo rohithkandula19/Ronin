@@ -52,6 +52,7 @@ from ..core.types import (
     Event,
     Mode,
     TextDelta,
+    Todo,
     ToolEnd,
     ToolStart,
 )
@@ -1698,6 +1699,25 @@ def _wants_modal(options: Options, streams: Streams) -> bool:
     return bool(options.tui and options.prompt and streams.isatty and textual_available())
 
 
+def live_todos(registry: object) -> tuple[Todo, ...]:
+    """The model's current plan, read off the live tool context. Empty if unreachable.
+
+    ``todo_write`` writes into ``ToolContext.todos``, which the gated registry wraps —
+    so the plan is two hops away and both are optional by design: a registry assembled
+    without a context, or a future one that does not expose it, must degrade to "no
+    plan" rather than break the status pane. ``getattr`` twice rather than an assertion,
+    for the same reason ``GatedRegistry`` reaches for its inner context that way.
+
+    Filtered to real ``Todo`` values because the context types the slot as
+    ``list[Any]``: it belongs to whatever tool owns the plan, and the UI should render
+    only what it can actually render.
+    """
+    inner = getattr(registry, "inner", registry)
+    ctx = getattr(inner, "ctx", None)
+    todos = getattr(ctx, "todos", ())
+    return tuple(todo for todo in todos if isinstance(todo, Todo))
+
+
 def _asker(handoff: Handoff | None, streams: Streams) -> Asker | None:
     """Who answers gated calls: the modal, the line prompt, or nobody.
 
@@ -1909,6 +1929,7 @@ def _app_session(options: Options, agent: Agent, handoff: Handoff | None) -> App
         on_mode_change=policy.set_mode,
         on_attach=handoff.attach if handoff is not None else None,
         on_status=lambda: context_share(agent.conversation.messages, agent.runtime.compaction),
+        on_todos=lambda: live_todos(agent.runtime.registry),
         on_submit=submissions.put_nowait,
         on_command=on_command,
         banner=render_banner(
@@ -2503,6 +2524,7 @@ __all__ = [
     "Usage",
     "build_parser",
     "dispatch",
+    "live_todos",
     "main",
     "parse",
     "repl_banner",
