@@ -53,6 +53,7 @@ from .reduce import (
     SPINNER_INTERVAL_SECONDS,
     EscapeAction,
     EscapeState,
+    History,
     ViewState,
     advance_activity,
     decision_for,
@@ -60,6 +61,9 @@ from .reduce import (
     next_mode,
     press_escape,
     reduce_event,
+    remember,
+    walk_back,
+    walk_forward,
 )
 from .render import MARKUP, Panels, Styles, render_approval, render_panels
 
@@ -281,6 +285,7 @@ class KeyController:
 
     mode: Mode = Mode.ASK
     escape: EscapeState = field(default_factory=EscapeState)
+    history: History = field(default_factory=History)
     clock: Callable[[], float] = time.monotonic
 
     def press_escape(self) -> EscapeAction:
@@ -290,6 +295,24 @@ class KeyController:
     def cycle_mode(self) -> Mode:
         self.mode = next_mode(self.mode)
         return self.mode
+
+    def submitted(self, text: str) -> None:
+        """Record a prompt that was sent, and stop browsing."""
+        self.history = remember(self.history, text)
+
+    def recall_older(self, current: str) -> str | None:
+        """The previous prompt, or ``None`` if there is nothing older to show.
+
+        ``current`` is handed in rather than read from a widget so this stays testable
+        without a terminal: the caller owns the box, this owns where in history it is.
+        """
+        self.history, text = walk_back(self.history, current)
+        return text
+
+    def recall_newer(self) -> str | None:
+        """The next prompt, ending on the user's own draft. ``None`` if not browsing."""
+        self.history, text = walk_forward(self.history)
+        return text
 
 
 async def run_app(session: Session) -> int:
@@ -481,6 +504,9 @@ def _build_app(session: Session) -> Any:
             event.input.value = ""
             if not text.strip():
                 return
+            # Recorded before dispatch, so a slash command is recalled too: `/model
+            # sonnet` is exactly the sort of line someone retypes.
+            self.keys.submitted(text)
             if is_command(text) and self.session.on_command is not None:
                 # A slash command is answered locally, not sent to the model. Run it on a
                 # worker: `/diff` and `/undo` shell out to git, and blocking the message
@@ -583,6 +609,39 @@ def _build_app(session: Session) -> Any:
                 (STATUS_ID, panels.status),
             ):
                 self.query_one(f"#{region}", static).update(text)
+
+        def on_key(self, event: Any) -> None:
+            """``up``/``down`` walk the prompt history. Everything else is untouched.
+
+            Handled here rather than as an app ``BINDING`` because a priority binding
+            fires ahead of the focused widget and would take these keys away from the
+            approval modal's reason line. Non-priority ``on_key`` on the app sees only
+            what the focused widget did not consume, and Textual's single-line ``Input``
+            consumes neither arrow.
+
+            Guarded on the prompt line actually having focus, so arrows keep meaning
+            whatever they mean everywhere else — scrolling the transcript, moving inside
+            some future multi-line editor — instead of being globally hijacked.
+            """
+            if event.key not in ("up", "down"):
+                return
+            line = self.query_one(f"#{INPUT_ID}", input_widget)
+            if self.focused is not line:
+                return
+            recalled = (
+                self.keys.recall_older(line.value)
+                if event.key == "up"
+                else self.keys.recall_newer()
+            )
+            event.stop()
+            event.prevent_default()
+            if recalled is None:
+                # Nothing older, or not browsing: hold the line as it is rather than
+                # clearing it. A history key that empties the box loses work.
+                return
+            line.value = recalled
+            # End of line, so editing a recalled prompt starts where you would type.
+            line.action_end()
 
         def action_escape(self) -> None:
             action = self.keys.press_escape()

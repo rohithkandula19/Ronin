@@ -695,6 +695,96 @@ def press_escape(
 
 
 # --------------------------------------------------------------------------- #
+# Prompt history — pure, so walking it needs no terminal
+# --------------------------------------------------------------------------- #
+
+#: How many prompts back the input line remembers. Generous enough that a session's
+#: worth of retyping is covered, bounded because this is held in memory for the life
+#: of the process and an unbounded list of every prompt is a slow leak.
+HISTORY_LIMIT = 200
+
+
+@dataclass(frozen=True, slots=True)
+class History:
+    """Submitted prompts, plus where in them the input line currently is.
+
+    ``cursor is None`` means "not browsing": the box holds live text the user is
+    typing, and that text is theirs, not ours. ``draft`` is where it goes the moment
+    they first press up, so that walking back and then forward returns what they had
+    rather than an empty line. Losing a half-written prompt to a stray keypress is the
+    thing that makes history feel unsafe to use at all, and it is the whole reason this
+    type carries state instead of being a bare list plus an index.
+
+    Frozen, and every operation hands back a new one, so browsing can never mutate
+    what was submitted: recalling a prompt, editing it, and pressing up again walks
+    the original entries, not the edit.
+    """
+
+    entries: tuple[str, ...] = ()
+    cursor: int | None = None
+    draft: str = ""
+
+    @property
+    def browsing(self) -> bool:
+        return self.cursor is not None
+
+
+def remember(history: History, text: str) -> History:
+    """Record a submitted prompt and leave browsing.
+
+    Blank submissions are not prompts and are dropped. A prompt identical to the most
+    recent one is dropped too — holding a command down or re-sending the same thing
+    twice should not make ``up`` walk through duplicates — but the same prompt *does*
+    record again once something else has intervened, because then it is a real step in
+    what the user did.
+
+    Submitting always ends browsing and clears the draft: the text is on its way, so
+    there is nothing left to restore.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return History(entries=history.entries)
+    if history.entries and history.entries[-1] == stripped:
+        return History(entries=history.entries)
+    entries = (*history.entries, stripped)[-HISTORY_LIMIT:]
+    return History(entries=entries)
+
+
+def walk_back(history: History, current: str) -> tuple[History, str | None]:
+    """One step toward older prompts. ``None`` means nothing moved.
+
+    ``current`` is what the box holds right now, and on the *first* step it is stashed
+    as the draft. Later steps must not overwrite it: after up-up-down-down the user
+    expects their own half-written line back, not the recalled prompt they passed
+    through on the way.
+    """
+    if not history.entries:
+        return history, None
+    if history.cursor is None:
+        index = len(history.entries) - 1
+        return replace(history, cursor=index, draft=current), history.entries[index]
+    if history.cursor == 0:
+        return history, None  # already at the oldest; hold rather than wrap
+    index = history.cursor - 1
+    return replace(history, cursor=index), history.entries[index]
+
+
+def walk_forward(history: History) -> tuple[History, str | None]:
+    """One step toward newer prompts, ending on the draft. ``None`` means nothing moved.
+
+    Stepping past the newest entry restores the draft rather than clearing the line or
+    wrapping to the oldest. Wrapping would be actively hostile: the user pressed down
+    to get back to what they were writing.
+    """
+    if history.cursor is None:
+        return history, None
+    if history.cursor >= len(history.entries) - 1:
+        return replace(history, cursor=None, draft=""), history.draft
+    index = history.cursor + 1
+    return replace(history, cursor=index), history.entries[index]
+
+
+# --------------------------------------------------------------------------- #
 # Answering an approval — pure, so the modal has no decision of its own to make
 # --------------------------------------------------------------------------- #
 
@@ -785,6 +875,7 @@ __all__ = [
     "ELLIPSIS",
     "ERROR_PREFIX",
     "FINISHED_STATES",
+    "HISTORY_LIMIT",
     "MODE_CYCLE",
     "MODE_LABELS",
     "NOTICE_HISTORY",
@@ -806,6 +897,7 @@ __all__ = [
     "WAITING_LABEL",
     "EscapeAction",
     "EscapeState",
+    "History",
     "ToolLine",
     "ViewState",
     "activity_label",
@@ -818,7 +910,10 @@ __all__ = [
     "reduce_all",
     "reduce_event",
     "reduce_stream",
+    "remember",
     "spinner_frame",
     "summarize_arguments",
     "summarize_result",
+    "walk_back",
+    "walk_forward",
 ]

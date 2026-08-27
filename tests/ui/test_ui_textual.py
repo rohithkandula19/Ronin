@@ -501,6 +501,150 @@ async def test_a_submitted_message_reaches_on_submit_and_clears_the_line() -> No
     assert line.value == "", "the line clears after a submit"
 
 
+async def _typed(app: object, pilot: Any, text: str) -> None:
+    """Put ``text`` on the focused prompt line and send it."""
+    line = _input(app)
+    line.value = text
+    await pilot.press("enter")
+    await pilot.pause()
+
+
+async def test_up_and_down_walk_the_prompts_that_were_sent() -> None:
+    """The pure walk is covered in ``test_ui_history.py``; this is the wiring.
+
+    Driven through the real widget because that is the half a unit test cannot reach:
+    that the arrows are not swallowed by Textual's ``Input``, that the app sees them,
+    and that the recalled text lands in the box.
+    """
+    submitted: list[str] = []
+    app = _build_app(Session(events=stream(happy_turn()), on_submit=submitted.append))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        line = _input(app)
+        line.focus()
+        await pilot.pause()
+        await _typed(app, pilot, "first prompt")
+        await _typed(app, pilot, "second prompt")
+
+        await pilot.press("up")
+        await pilot.pause()
+        assert line.value == "second prompt"
+        await pilot.press("up")
+        await pilot.pause()
+        assert line.value == "first prompt"
+        await pilot.press("down")
+        await pilot.pause()
+        assert line.value == "second prompt"
+
+
+async def test_a_half_written_prompt_survives_a_trip_through_history() -> None:
+    """The behaviour that makes the keystroke safe to press at all.
+
+    Someone mid-sentence who checks what they asked earlier must get their own words
+    back. Losing them is how a history key becomes something users learn to avoid.
+    """
+    app = _build_app(Session(events=stream(happy_turn()), on_submit=lambda _text: None))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        line = _input(app)
+        line.focus()
+        await pilot.pause()
+        await _typed(app, pilot, "an earlier prompt")
+
+        line.value = "half written"
+        await pilot.press("up")
+        await pilot.pause()
+        assert line.value == "an earlier prompt"
+        await pilot.press("down")
+        await pilot.pause()
+
+        assert line.value == "half written", "the draft did not come back"
+
+
+async def test_up_with_nothing_in_history_leaves_the_line_alone() -> None:
+    """A history key that clears the box on an empty history destroys work for no gain."""
+    app = _build_app(Session(events=stream(happy_turn()), on_submit=lambda _text: None))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        line = _input(app)
+        line.focus()
+        await pilot.pause()
+        line.value = "nothing sent yet"
+
+        await pilot.press("up")
+        await pilot.pause()
+
+        assert line.value == "nothing sent yet"
+
+
+async def test_the_cursor_lands_at_the_end_of_a_recalled_prompt() -> None:
+    """You recall a prompt to edit it, and editing starts where you would type."""
+    app = _build_app(Session(events=stream(happy_turn()), on_submit=lambda _text: None))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        line = _input(app)
+        line.focus()
+        await pilot.pause()
+        await _typed(app, pilot, "a long-ish earlier prompt")
+
+        await pilot.press("up")
+        await pilot.pause()
+
+        assert line.cursor_position == len("a long-ish earlier prompt")
+
+
+async def test_a_slash_command_is_recalled_too() -> None:
+    """`/model sonnet` is exactly the sort of line someone retypes, so it is recorded
+    before the command/prompt fork rather than after it."""
+    ran: list[str] = []
+
+    async def on_command(line: str) -> str:
+        ran.append(line)
+        return "ok"
+
+    app = _build_app(
+        Session(
+            events=stream(happy_turn()),
+            on_submit=lambda _text: None,
+            on_command=on_command,
+        )
+    )
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        line = _input(app)
+        line.focus()
+        await pilot.pause()
+        await _typed(app, pilot, "/cost")
+        await pilot.pause()
+
+        await pilot.press("up")
+        await pilot.pause()
+
+        assert ran == ["/cost"], "the command still ran"
+        assert line.value == "/cost", "and it is recallable"
+
+
+async def test_the_arrows_are_left_alone_when_the_prompt_line_is_not_focused() -> None:
+    """Not a global hijack. With focus elsewhere the arrows keep whatever meaning they
+    have there, which is what leaves room for a scrollable transcript or a future
+    multi-line editor."""
+    app = _build_app(Session(events=stream(happy_turn()), on_submit=lambda _text: None))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        line = _input(app)
+        line.focus()
+        await pilot.pause()
+        await _typed(app, pilot, "recorded")
+        line.value = "still here"
+        app.set_focus(None)
+        await pilot.pause()
+
+        await pilot.press("up")
+        await pilot.pause()
+
+        assert line.value == "still here", "history moved with the line unfocused"
+
+
 async def test_a_blank_submit_is_not_a_turn() -> None:
     submitted: list[str] = []
     app = _build_app(Session(events=stream(happy_turn()), on_submit=submitted.append))
