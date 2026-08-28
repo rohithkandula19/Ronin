@@ -91,10 +91,6 @@ TEXTUAL_MISSING = (
     "a scripted run, `python -m ronin.ui.demo` for an offline walkthrough."
 )
 
-#: What a modal popped from outside — never in normal use — is reported as. Refusing is
-#: the only safe reading of a dialog that vanished without an answer.
-DISMISSED = "the approval was dismissed without an answer, so the action was refused"
-
 #: Region ids, so the tests and the CSS agree on one spelling.
 MODAL_ID = "approval-modal"
 #: The reason line inside the approval modal. Hidden in phase one.
@@ -741,8 +737,13 @@ def _build_app(session: Session) -> Any:
             if isinstance(decision, ApprovalDecision):
                 return decision
             # Dismissed without an answer — only reachable if the screen is popped from
-            # outside. Refusing is the only safe reading of "no answer".
-            return ApprovalDecision(approved=False, reason=DISMISSED)
+            # outside. Refusing is the only safe reading of "no answer", and the refusal
+            # carries no words: `reason` reaches the policy engine as the *human's own
+            # words*, and nobody said anything here. A sentence invented at this layer
+            # was quoted back to the model as though a person had typed it, and took the
+            # branch that says "adjust the plan and continue" — the same mistake a bare
+            # `n` used to make. Blank takes the engine's "do not retry it" branch.
+            return ApprovalDecision(approved=False, reason="")
 
         async def _consume(self) -> None:
             # Painting inside the loop, per event, is the no-buffering guarantee:
@@ -882,7 +883,6 @@ __all__ = [
     "ACTIVITY_ID",
     "APPROVAL_ID",
     "APP_CSS",
-    "DISMISSED",
     "ERRORS_ID",
     "INPUT_ID",
     "INPUT_PLACEHOLDER",

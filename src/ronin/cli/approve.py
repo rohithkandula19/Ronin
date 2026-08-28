@@ -28,19 +28,20 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from ..core.types import ApprovalDecision, ApprovalRequest
-from ..safety.policy import Answer, Outcome
+from ..safety.policy import NO_HUMAN_ATTACHED, Answer, Outcome
 from ..ui.app import Asking
 from ..ui.reduce import decision_for
 from ..ui.render import APPROVAL_PROMPT, render_approval
 
-#: What the model is told when no UI was attached to ask. Deliberately identical in
-#: substance to ``UnattendedAsker``'s: from the model's side there is no difference
-#: between "nobody was asked" and "nobody answered", and inventing a second wording
-#: would only make the two look like different problems.
-NO_ANSWER = (
-    "no human was attached to answer this, so it was refused. Either do this a different "
-    "way, or tell the user what to run themselves."
-)
+#: What the model is told when no UI was attached to ask. Now literally the same string
+#: as ``UnattendedAsker``'s rather than merely "identical in substance": from the model's
+#: side there is no difference between "nobody was asked" and "nobody answered", and two
+#: wordings only make one situation look like two problems.
+#:
+#: It travels as ``Answer.detail``, not ``Answer.feedback`` — nobody said it, so it must
+#: not be quoted back as something the user said. It also carries no advice: the engine
+#: owns what the model should do next.
+NO_ANSWER = NO_HUMAN_ATTACHED
 
 
 def answer_for(decision: ApprovalDecision) -> Answer:
@@ -89,7 +90,7 @@ class Handoff:
         The turn is already stopped — nothing is running behind this.
         """
         if self._ui is None:
-            return Answer(outcome=Outcome.NO, feedback=NO_ANSWER)
+            return Answer(outcome=Outcome.NO, detail=NO_ANSWER)
         return answer_for(await self._ui(request))
 
 
@@ -101,8 +102,10 @@ MAX_ATTEMPTS = 3
 #: What an unreadable answer is told. Names the keys again rather than only complaining.
 REASK = "please answer y (once), a (and remember), or n"
 
-#: Why a refusal happened after :data:`MAX_ATTEMPTS` unreadable answers.
-UNREADABLE = "the answer could not be read as yes or no, so the action was refused"
+#: Why a refusal happened after :data:`MAX_ATTEMPTS` unreadable answers. A statement of
+#: fact carried by ``Answer.detail``: the human was present and typed *something*, but
+#: none of it was an answer, so there is no decision to quote and nothing to work from.
+UNREADABLE = "the answer typed at the prompt could not be read as yes or no"
 
 
 @dataclass(slots=True)
@@ -131,7 +134,7 @@ class PromptAsker:
             if decision is not None:
                 return answer_for(decision)
             self.write(REASK + "\n")
-        return Answer(outcome=Outcome.NO, feedback=UNREADABLE)
+        return Answer(outcome=Outcome.NO, detail=UNREADABLE)
 
 
 __all__ = [

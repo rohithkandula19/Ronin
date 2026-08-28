@@ -428,10 +428,29 @@ class Outcome(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class Answer:
-    """A human's reply: an outcome, plus the words that make a ``no`` useful."""
+    """A reply to an approval: an outcome, plus why — from whichever source there was.
+
+    Two fields because there are two genuinely different kinds of ``no`` and the engine
+    has to be able to tell them apart:
+
+    ``feedback`` is **the human's own words**, and nothing else. The engine reproduces it
+    verbatim and tells the model to treat it as a correction to work from, which is only
+    defensible if a person actually said it.
+
+    ``detail`` is the other kind: a refusal that is a *fact about the session* rather
+    than a decision — nobody was attached to ask, the typed answer could not be read.
+    Nobody said anything, so there is nothing to quote and nothing to work from.
+
+    Keeping both in one field is how the engine came to tell the model "the user declined
+    and said: no human is attached to approve this" — a sentence that contradicts itself,
+    on the default asker's path — and then invited it to adjust the plan and continue.
+    Setting both is allowed and ``feedback`` wins: a person who spoke outranks a
+    description of the session.
+    """
 
     outcome: Outcome
     feedback: str = ""
+    detail: str = ""
 
     def __post_init__(self) -> None:
         if not isinstance(self.outcome, Outcome):
@@ -451,22 +470,28 @@ class Asker(Protocol):
         ...
 
 
+#: Why a refusal happened when there was nobody to decide. A statement of fact with no
+#: advice attached: :meth:`PolicyEngine._denial` owns what the model should do about it,
+#: exactly as it does for a human's own words. Shared so that "nobody was asked" and
+#: "nobody answered" read as one situation rather than two different problems.
+NO_HUMAN_ATTACHED = "no human is attached to this session, so there was nobody to ask"
+
+
 @dataclass(frozen=True, slots=True)
 class UnattendedAsker:
     """The safe default when nobody is watching: always ``no``, and says why.
 
     Mirrors ``core.types.DENY_UNATTENDED``. A headless run that auto-approved would be
     the single worst default in the system, so the default asker refuses.
+
+    The wording travels as ``detail`` and not ``feedback``, because no human said it.
+    Through ``feedback`` the engine rendered it as "the user declined and said: no human
+    is attached to approve this" — which is self-contradicting, and on *this* path, the
+    one every unattended run takes.
     """
 
     async def ask(self, request: ApprovalRequest) -> Answer:
-        return Answer(
-            outcome=Outcome.NO,
-            feedback=(
-                "no human is attached to approve this, so it was refused. Either do "
-                "this a different way, or tell the user what to run themselves."
-            ),
-        )
+        return Answer(outcome=Outcome.NO, detail=NO_HUMAN_ATTACHED)
 
 
 # --------------------------------------------------------------------------- #
@@ -1205,7 +1230,7 @@ class PolicyEngine:
         self, spec: ToolSpec, use: ToolUse, verdict: Verdict, answer: Answer
     ) -> ApprovalDecision:
         if not answer.approves:
-            reason = self._denial(answer.feedback)
+            reason = self._denial(answer.feedback, answer.detail)
             self._record(spec, use, verdict, approved=False, outcome=answer.outcome, reason=reason)
             return ApprovalDecision(approved=False, reason=reason)
 
@@ -1267,18 +1292,38 @@ class PolicyEngine:
             reason="approved by the user",
         )
 
-    def _denial(self, feedback: str) -> str:
-        """Turn a human's "no" into something the model can act on.
+    def _denial(self, feedback: str, detail: str = "") -> str:
+        """Turn a "no" into something the model can act on, without inventing a speaker.
 
-        The feedback is reproduced verbatim and first. This is the whole reason
-        "no with feedback" is one of the four outcomes: a refusal the model can read as
-        a redirection ("use the staging database") keeps the turn alive, and a bare
-        "denied" makes it retry the same call with different quoting.
+        Three cases, and the difference between them is what the model should do next:
+
+        A human who gave words is reproduced verbatim and first. This is the whole
+        reason "no with feedback" is one of the four outcomes: a refusal the model can
+        read as a redirection ("use the staging database") keeps the turn alive, and a
+        bare "denied" makes it retry the same call with different quoting.
+
+        A refusal with no human behind it — nobody attached, an unreadable answer — is
+        stated as what it is. It must *not* be phrased as something the user said, and it
+        must not invite the model to adjust and carry on: there is no decision to work
+        from, and retrying cannot produce one.
+
+        A human who declined and said nothing gets the third wording, which is neither.
+
+        ``detail`` carries the fact and this method owns the advice, exactly as it does
+        for a human's words — so a caller supplying a detail never has to guess what
+        sentence the model should read after it.
         """
         if feedback.strip():
             return (
                 f"the user declined and said: {feedback.strip()}\n"
                 "Take that as a correction, not a dead end: adjust the plan and continue."
+            )
+        if detail.strip():
+            return (
+                f"this was refused without any decision from the user: {detail.strip()}.\n"
+                "Do not retry it and do not treat it as a correction — nobody chose "
+                "this. Do the task another way, or tell the user what they need to run "
+                "themselves."
             )
         return (
             "the user declined this action and gave no reason. Do not retry it. "
@@ -1323,6 +1368,7 @@ __all__ = [
     "DEV_BINARIES",
     "HAZARD_FLOOR",
     "MATCHER_KINDS",
+    "NO_HUMAN_ATTACHED",
     "PATH_ARGUMENTS",
     "READ_ONLY_BINARIES",
     "SAFE_GIT_SUBCOMMANDS",
