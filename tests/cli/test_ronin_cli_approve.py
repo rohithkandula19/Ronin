@@ -23,7 +23,15 @@ from ronin.cli.approve import (
 )
 from ronin.core.types import ApprovalDecision, ApprovalRequest, DangerLevel, ToolSpec, ToolUse
 from ronin.safety.denylist import Denylist
-from ronin.safety.policy import Answer, Asker, Outcome, PolicyEngine, RuleSet, builtin_rules
+from ronin.safety.policy import (
+    Answer,
+    Asker,
+    Outcome,
+    PolicyEngine,
+    RuleSet,
+    UnattendedAsker,
+    builtin_rules,
+)
 from ronin.ui.reduce import decision_for, deny_with
 
 REQUEST = ApprovalRequest(
@@ -202,6 +210,83 @@ async def test_a_bare_no_tells_the_model_not_to_retry(key: str) -> None:
     assert "correction, not a dead end" not in decision.reason
 
 
+async def refusal_for(asker: Asker) -> str:
+    """What the model is told when ``asker`` refuses one gated call."""
+    policy = PolicyEngine(
+        rules=RuleSet(rules=builtin_rules()),
+        asker=asker,
+        denylist=Denylist(workspace_root=Path("/work"), home=Path("/home/dev")),
+    )
+    spec = ToolSpec(
+        name="bash",
+        description="Run a command.",
+        danger_level=DangerLevel.DESTRUCTIVE,
+        requires_approval=True,
+    )
+    decision = await policy.approve(
+        spec, ToolUse(id="c1", name="bash", arguments={"command": "./deploy.sh"}), rendered="x"
+    )
+    assert decision.approved is False
+    return decision.reason
+
+
+class Fixed:
+    """An asker that always gives the same answer."""
+
+    def __init__(self, answer: Answer) -> None:
+        self._answer = answer
+
+    async def ask(self, request: ApprovalRequest) -> Answer:
+        del request
+        return self._answer
+
+
+@pytest.mark.parametrize(
+    ("label", "answer"),
+    [
+        ("unattended", Answer(outcome=Outcome.NO, detail=NO_ANSWER)),
+        ("unreadable", Answer(outcome=Outcome.NO, detail=UNREADABLE)),
+    ],
+)
+async def test_a_refusal_with_nobody_behind_it_is_not_quoted_as_the_user_speaking(
+    label: str, answer: Answer
+) -> None:
+    """The bug this pair exists to stop, in the model's own words.
+
+    Through ``feedback`` these rendered as "the user declined and said: no human is
+    attached to approve this" — a sentence that contradicts itself — and then "Take that
+    as a correction, not a dead end: adjust the plan and continue", which invites a retry
+    of a call that cannot succeed. Nobody decided anything, so there is nothing to quote
+    and nothing to work from.
+    """
+    del label
+    reason = await refusal_for(Fixed(answer))
+
+    assert "declined and said" not in reason, "nobody said this"
+    assert "correction, not a dead end" not in reason, "nothing to correct towards"
+    assert "without any decision from the user" in reason
+    assert "Do not retry it" in reason
+
+
+async def test_the_default_asker_no_longer_contradicts_itself() -> None:
+    # `UnattendedAsker` is the default, so this was the most-travelled wording of all.
+    reason = await refusal_for(UnattendedAsker())
+
+    assert "no human is attached" in reason
+    assert "the user declined and said" not in reason
+
+
+async def test_a_human_who_spoke_still_outranks_a_session_detail() -> None:
+    # Both fields set: a person who actually said something wins, because that is the
+    # only case where the model has a correction to work from.
+    reason = await refusal_for(
+        Fixed(Answer(outcome=Outcome.NO, feedback="use staging", detail=NO_ANSWER))
+    )
+
+    assert "the user declined and said: use staging" in reason
+    assert NO_ANSWER not in reason
+
+
 # --------------------------------------------------------------------------- #
 # Handoff: the seam the policy asks through
 # --------------------------------------------------------------------------- #
@@ -243,7 +328,10 @@ async def test_with_no_ui_attached_the_answer_is_no() -> None:
     assert not handoff.attached
     answer = await handoff.ask(REQUEST)
     assert answer.outcome is Outcome.NO
-    assert answer.feedback == NO_ANSWER
+    # `detail`, not `feedback`: nobody said this, so it must not be quoted back to the
+    # model as the user's own words. The engine reproduces `feedback` verbatim.
+    assert answer.detail == NO_ANSWER
+    assert answer.feedback == ""
 
 
 async def test_every_question_is_asked_rather_than_answered_from_memory() -> None:
@@ -327,7 +415,10 @@ async def test_an_unreadable_answer_is_asked_again_and_then_refused() -> None:
     terminal = Terminal("what", "huh", "?")
     answer = await PromptAsker(terminal.prompt, terminal.write).ask(REQUEST)
     assert answer.outcome is Outcome.NO
-    assert answer.feedback == UNREADABLE
+    # The human was present and typed something, but none of it was an answer — so
+    # there is no decision to quote, and this rides `detail`.
+    assert answer.detail == UNREADABLE
+    assert answer.feedback == ""
     assert terminal.output.count(REASK) == 3
     assert len(terminal.asked) == 3
 
