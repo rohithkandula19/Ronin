@@ -12,12 +12,14 @@ from __future__ import annotations
 import asyncio
 import shutil
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import pytest
 import stream_harness as h
 
+from ronin.cli.gate import live_todos
 from ronin.cli.spine import Runtime
 from ronin.cli.stream import (
     CHECKPOINT_STEP,
@@ -31,11 +33,14 @@ from ronin.cli.stream import (
 )
 from ronin.context.compaction import COMPACTION_KEY
 from ronin.core.types import (
+    AgentState,
     Error,
     Event,
     Message,
     Role,
     Text,
+    Todo,
+    TodoStatus,
     ToolEnd,
     ToolResult,
     ToolStart,
@@ -43,6 +48,7 @@ from ronin.core.types import (
     unpaired_tool_uses,
 )
 from ronin.persistence.transcript import Transcript, read_events
+from ronin.tools.base import ToolContext
 from ronin.verify.repair import RepairVerdict
 from ronin.verify.runner import run_command
 
@@ -572,6 +578,105 @@ async def test_a_correction_that_missed_its_turn_is_delivered_by_the_next_one(
     kinds = [m.metadata.get("kind") for m in model.calls[1].messages]
     assert "steer" in kinds
     assert runtime.steering.pending() == ()
+
+
+class Planning:
+    """A registry that also carries a live tool context, the way the gated one does.
+
+    ``Runtime.registry`` in production is a ``GatedRegistry`` wrapping the real one, and
+    the plan lives two hops in — gate → inner → context. This gives the harness's
+    scripted registry the same second hop so the round trip can be driven end to end
+    without the whole tool stack.
+    """
+
+    def __init__(self, tools: Any, context: ToolContext) -> None:
+        self.inner = _WithContext(tools, context)
+        self._tools = tools
+
+    def specs(self) -> Any:
+        return self._tools.specs()
+
+    def get(self, name: str) -> Any:
+        return self._tools.get(name)
+
+    async def execute(self, use: Any) -> Any:
+        return await self._tools.execute(use)
+
+
+class _WithContext:
+    def __init__(self, tools: Any, context: ToolContext) -> None:
+        self._tools = tools
+        self.ctx = context
+
+
+def planning_runtime(tmp_path: Path, tools: Any) -> Runtime:
+    runtime = h.build_runtime(h.build_loaded(tmp_path), tools=tools)
+    return replace(runtime, registry=Planning(tools, ToolContext(root=tmp_path)))
+
+
+PLAN = (Todo(id="1", subject="fix the off-by-one", status=TodoStatus.IN_PROGRESS),)
+
+
+async def test_the_plan_the_tools_left_behind_rides_out_with_the_conversation(
+    tmp_path: Path,
+) -> None:
+    """The gap this closes. `todo_write` writes into the tool context, which the loop
+    cannot see through the `ToolRegistry` protocol — so `AgentState.todos` was empty on
+    every live turn, the transcript recorded no plan, and a resumed session came back
+    with an empty checklist."""
+    holder: list[Runtime] = []
+
+    def write_plan(arguments: Mapping[str, Any]) -> ToolResult:
+        del arguments
+        holder[0].registry.inner.ctx.set_todos(PLAN)  # type: ignore[attr-defined]
+        return ToolResult(ok=True, content="planned")
+
+    tools = h.ScriptedTools([h.FakeTool(name="plan", handler=write_plan)])
+    runtime = planning_runtime(tmp_path, tools)
+    holder.append(runtime)
+    model = h.ScriptedModel([h.call("plan", {}), h.say("done")])
+    conversation = Conversation(model=model)
+
+    events = await h.collect(conversation.run_prompt(runtime, "go"))
+
+    ends = [e for e in events if isinstance(e, TurnEnd)]
+    assert ends[-1].agent_state is not None
+    assert ends[-1].agent_state.todos == PLAN, "the plan never reached the state"
+    assert conversation.todos == PLAN
+    assert conversation.state.todos == PLAN, "and so is not there for a later resume"
+
+
+async def test_a_resumed_plan_is_handed_back_to_the_live_context(tmp_path: Path) -> None:
+    """The return leg. The plan comes back inside the `AgentState`, but the copy the
+    checklist and `todo_write` both read is the one in the tool context — which belongs
+    to a freshly assembled runtime and starts empty."""
+    tools = h.ScriptedTools([])
+    runtime = planning_runtime(tmp_path, tools)
+    conversation = Conversation(model=h.ScriptedModel([h.say("carrying on")]))
+    conversation.resume_from(AgentState(messages=(), todos=PLAN))
+
+    assert live_todos(runtime.registry) == (), "the fresh runtime starts with no plan"
+
+    await h.collect(conversation.run_prompt(runtime, "continue"))
+
+    assert live_todos(runtime.registry) == PLAN
+
+
+async def test_a_resumed_plan_never_overwrites_one_the_model_has_since_written(
+    tmp_path: Path,
+) -> None:
+    # The guard that makes seeding safe to attempt on every turn: once the model has a
+    # plan of its own, that copy is the authority.
+    newer = (Todo(id="9", subject="something else entirely", status=TodoStatus.IN_PROGRESS),)
+    tools = h.ScriptedTools([])
+    runtime = planning_runtime(tmp_path, tools)
+    runtime.registry.inner.ctx.set_todos(newer)  # type: ignore[attr-defined]
+    conversation = Conversation(model=h.ScriptedModel([h.say("ok")]))
+    conversation.resume_from(AgentState(messages=(), todos=PLAN))
+
+    await h.collect(conversation.run_prompt(runtime, "continue"))
+
+    assert live_todos(runtime.registry) == newer
 
 
 async def test_wall_clock_is_folded_into_the_budget_at_the_turn_boundary(

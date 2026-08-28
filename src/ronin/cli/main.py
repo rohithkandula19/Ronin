@@ -53,7 +53,6 @@ from ..core.types import (
     Event,
     Mode,
     TextDelta,
-    Todo,
     ToolEnd,
     ToolStart,
 )
@@ -93,6 +92,7 @@ from .approve import Handoff, PromptAsker
 from .bench import BenchOptions, default_suite, run_duel_command, run_eval
 from .detect import Detection, detect, real_probe
 from .doctor import run_doctor
+from .gate import live_todos
 from .harvest import HarvestOptions, run_harvest
 from .mcp_auth import SUBCOMMANDS as MCP_SUBCOMMANDS
 from .mcp_auth import McpLoginOptions, run_mcp_login
@@ -1698,25 +1698,6 @@ def _wants_modal(options: Options, streams: Streams) -> bool:
     collects an answer from, or an asker waiting for a modal that never appears.
     """
     return bool(options.tui and options.prompt and streams.isatty and textual_available())
-
-
-def live_todos(registry: object) -> tuple[Todo, ...]:
-    """The model's current plan, read off the live tool context. Empty if unreachable.
-
-    ``todo_write`` writes into ``ToolContext.todos``, which the gated registry wraps —
-    so the plan is two hops away and both are optional by design: a registry assembled
-    without a context, or a future one that does not expose it, must degrade to "no
-    plan" rather than break the status pane. ``getattr`` twice rather than an assertion,
-    for the same reason ``GatedRegistry`` reaches for its inner context that way.
-
-    Filtered to real ``Todo`` values because the context types the slot as
-    ``list[Any]``: it belongs to whatever tool owns the plan, and the UI should render
-    only what it can actually render.
-    """
-    inner = getattr(registry, "inner", registry)
-    ctx = getattr(inner, "ctx", None)
-    todos = getattr(ctx, "todos", ())
-    return tuple(todo for todo in todos if isinstance(todo, Todo))
 
 
 def _asker(handoff: Handoff | None, streams: Streams) -> Asker | None:

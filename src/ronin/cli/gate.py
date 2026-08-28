@@ -80,7 +80,7 @@ from ..context.budget import ClampMode, OutputBudget, clamp
 from ..context.compaction import paths_with_visible_read
 from ..context.filestate import WHOLE_FILE, FileStateTracker, FileStatus, ReadWindow
 from ..core.protocols import StreamingToolRegistry, ToolRegistry
-from ..core.types import Message, ToolResult, ToolSpec, ToolUse
+from ..core.types import Message, Todo, ToolResult, ToolSpec, ToolUse
 from ..mcp.tools import is_namespaced
 from ..safety.injection import CLOSE_MARKER, OPEN_MARKER, TaintTracker, wrap_and_scan
 from ..safety.policy import PolicyEngine
@@ -1095,6 +1095,52 @@ def _repair_fence(text: str, source: str) -> str:
     return text
 
 
+def live_todos(registry: object) -> tuple[Todo, ...]:
+    """The model's current plan, read off the live tool context. Empty if unreachable.
+
+    ``todo_write`` writes into ``ToolContext.todos``, which the gated registry wraps —
+    so the plan is two hops away and both are optional by design: a registry assembled
+    without a context, or a future one that does not expose it, must degrade to "no
+    plan" rather than break the status pane. ``getattr`` twice rather than an assertion,
+    for the same reason :class:`GatedRegistry` reaches for its inner context that way.
+
+    Filtered to real ``Todo`` values because the context types the slot as
+    ``list[Any]``: it belongs to whatever tool owns the plan, and a caller should see
+    only what it can actually use.
+
+    Lives here rather than in ``cli.main`` because two callers need it and ``main``
+    imports ``stream``, so ``stream`` cannot import back. :class:`GatedRegistry` is the
+    thing with an ``inner``, which makes this its neighbour.
+    """
+    inner = getattr(registry, "inner", registry)
+    ctx = getattr(inner, "ctx", None)
+    todos = getattr(ctx, "todos", ())
+    return tuple(todo for todo in todos if isinstance(todo, Todo))
+
+
+def seed_todos(registry: object, todos: Sequence[Todo]) -> bool:
+    """Put a resumed plan into the live tool context. ``False`` if there was nowhere.
+
+    The counterpart to :func:`live_todos`, and the reason it exists is resume: the plan
+    comes back inside the ``AgentState``, but the place it is *read* from is the tool
+    context, which belongs to a freshly assembled runtime and starts empty. Without this
+    a resumed session shows an empty checklist and the model's next ``todo_write``
+    restarts from nothing, having been told nothing was in progress.
+
+    Goes through ``set_todos`` rather than assigning the attribute, which matters: the
+    loop hands every tool a shallow copy of the context, so a *rebound* list is written
+    to a throwaway while a list mutated in place is shared. Assigning here would look
+    correct and change nothing the tools can see.
+    """
+    inner = getattr(registry, "inner", registry)
+    ctx = getattr(inner, "ctx", None)
+    setter = getattr(ctx, "set_todos", None)
+    if setter is None:
+        return False
+    setter(list(todos))
+    return True
+
+
 __all__ = [
     "FENCE_REPAIR_NOTE",
     "HOOK_CONTEXT_HEADER",
@@ -1108,6 +1154,8 @@ __all__ = [
     "GateStage",
     "GatedRegistry",
     "gated",
+    "live_todos",
     "resolve_path",
+    "seed_todos",
     "untrusted_source",
 ]
