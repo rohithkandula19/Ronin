@@ -233,6 +233,7 @@ module = [
     "test_loop",
     "test_loop_provider_error",
     "test_loop_steering",
+    "test_loop_todos",
     "test_net",
     "test_net_untrusted",
     "test_normalize",

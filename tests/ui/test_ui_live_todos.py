@@ -9,12 +9,19 @@ in a real session**. Three separate breaks, each individually invisible:
    and the assignment landed on a throwaway.
 2. ``ToolContext.todos`` had one writer and zero readers, despite its own docstring
    saying "read by the UI".
-3. ``AgentState.todos`` is never populated outside a resumed session, so the reducer's
+3. ``AgentState.todos`` was never populated outside a resumed session, so the reducer's
    ``TurnEnd`` branch read an empty tuple — which, once (1) and (2) were fixed, would
    have wiped a live plan the instant the turn ended.
 
 Each of the three has a test here, because each was green before and would be green
 again alone.
+
+(3) was closed only halfway at the time: the reducer stopped *wiping* the plan, but
+nothing filled ``AgentState.todos``, so the plan still never reached the transcript and
+a resumed session came back with an empty checklist. The loop now pulls it at every
+state advance and the conversation carries it, which makes the plan a round trip — out
+through ``TurnEnd.agent_state``, back in through :func:`seed_todos`. Section 4 covers
+the return leg.
 """
 
 from __future__ import annotations
@@ -26,7 +33,7 @@ from typing import ClassVar
 import pytest
 from ui_harness import happy_turn, stream
 
-from ronin.cli.main import live_todos
+from ronin.cli.gate import live_todos, seed_todos
 from ronin.core.types import AgentState, Budget, Todo, TodoStatus, ToolUse, TurnEnd, TurnState
 from ronin.tools.base import ToolContext
 from ronin.tools.registry import ToolRegistry
@@ -240,3 +247,58 @@ async def test_the_app_does_not_rebuild_its_state_for_an_unchanged_plan() -> Non
         app._refresh_todos()
 
     assert app.state.todos is first, "an unchanged plan replaced the state anyway"
+
+
+# --------------------------------------------------------------------------- #
+# 4. the return leg: a resumed plan gets back into the live context
+# --------------------------------------------------------------------------- #
+
+
+def test_seed_todos_writes_where_live_todos_reads() -> None:
+    """The round trip in one assertion. A plan restored from an ``AgentState`` has to
+    land in the same place ``todo_write`` writes to, or the checklist stays empty and
+    the model is told nothing is in progress."""
+    with tempfile.TemporaryDirectory() as directory:
+        reg = registry(Path(directory))
+
+        class Gate:
+            inner = reg
+
+        restored = (Todo(id="1", subject="carried over", status=TodoStatus.IN_PROGRESS),)
+        assert seed_todos(Gate(), restored) is True
+        assert [todo.subject for todo in live_todos(Gate())] == ["carried over"]
+
+
+async def test_a_seeded_plan_survives_the_shallow_copy_every_tool_gets() -> None:
+    """The trap that made break (1) invisible, from the other direction.
+
+    The loop hands every tool a ``replace()`` copy of the context, so a *rebound* list
+    is written to a throwaway while one mutated in place is shared. Seeding goes through
+    ``set_todos`` for exactly this reason — assigning the attribute would look correct
+    here and be invisible to every tool.
+    """
+    from dataclasses import replace as copy_context
+
+    with tempfile.TemporaryDirectory() as directory:
+        reg = registry(Path(directory))
+
+        class Gate:
+            inner = reg
+
+        seed_todos(Gate(), (Todo(id="1", subject="carried over", status=TodoStatus.PENDING),))
+        as_a_tool_sees_it = copy_context(reg.ctx, on_output=lambda _chunk: None)
+
+        assert [todo.subject for todo in as_a_tool_sees_it.todos] == ["carried over"]
+
+
+@pytest.mark.parametrize(
+    "registry_like",
+    [object(), type("NoCtx", (), {"inner": object()})()],
+    ids=["no inner", "inner without a context"],
+)
+def test_seeding_nowhere_says_so_rather_than_raising(registry_like: object) -> None:
+    # Same contract as `live_todos`: a plan is not worth an exception on a registry
+    # that was assembled without a context.
+    assert seed_todos(registry_like, (Todo(id="1", subject="x", status=TodoStatus.PENDING),)) is (
+        False
+    )

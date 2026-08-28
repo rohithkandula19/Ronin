@@ -63,6 +63,7 @@ from .types import (
     StreamReset,
     Text,
     TextDelta,
+    Todo,
     ToolEnd,
     ToolOutput,
     ToolResult,
@@ -210,12 +211,20 @@ def _advance(
     *,
     messages: Sequence[Message] | None = None,
     budget: Budget | None = None,
+    todos: Callable[[], Sequence[Todo]] | None = None,
 ) -> AgentState:
-    """The single place a new :class:`AgentState` is produced."""
+    """The single place a new :class:`AgentState` is produced.
+
+    ``todos`` is a callable rather than a value because the plan lives outside the loop
+    — in the tool context ``todo_write`` writes to — and is read at the moment the state
+    is produced, not at the moment the turn started. Passing a value would snapshot it
+    before the tools that change it have run.
+    """
     return replace(
         state,
         messages=tuple(messages) if messages is not None else state.messages,
         budget=budget if budget is not None else state.budget,
+        todos=tuple(todos()) if todos is not None else state.todos,
     )
 
 
@@ -254,6 +263,7 @@ async def run_turn(
     max_iterations: int = DEFAULT_MAX_ITERATIONS,
     max_tool_result_chars: int = DEFAULT_MAX_TOOL_RESULT_CHARS,
     steering: Callable[[], Sequence[str]] | None = None,
+    todos: Callable[[], Sequence[Todo]] | None = None,
 ) -> AsyncIterator[Event]:
     """Run one turn to completion, yielding every observable step.
 
@@ -268,6 +278,12 @@ async def run_turn(
     same reason ``policy.cancelled()`` is — the loop stays a generator over injected
     values, with nothing to receive and no second task to coordinate with. Unset, the
     loop behaves exactly as it did before there was such a thing as steering.
+
+    ``todos`` is the model's plan, pulled the same way and for the same reason: it lives
+    in the tool context that ``todo_write`` writes to, which the loop cannot see through
+    the ``ToolRegistry`` protocol. Without it ``AgentState.todos`` was empty on every
+    live turn — so the plan never reached the transcript, and a resumed session came
+    back with an empty checklist and a model that had been told nothing was in progress.
     """
     specs = list(tools.specs())
     messages: list[Message] = list(state.messages)
@@ -280,7 +296,7 @@ async def run_turn(
         yield TurnStart(turn_index=index)
 
         if policy.cancelled():
-            state = _advance(state, messages=messages, budget=budget)
+            state = _advance(state, messages=messages, budget=budget, todos=todos)
             yield TurnEnd(
                 turn_index=index,
                 state=TurnState.INTERRUPTED,
@@ -290,7 +306,7 @@ async def run_turn(
             return
 
         if (reason := policy.check_budget(budget)) is not None:
-            state = _advance(state, messages=messages, budget=budget)
+            state = _advance(state, messages=messages, budget=budget, todos=todos)
             yield TurnEnd(
                 turn_index=index,
                 state=TurnState.DONE,
@@ -336,7 +352,7 @@ async def run_turn(
                 final = chunk
 
         if final is None:
-            state = _advance(state, messages=messages, budget=budget)
+            state = _advance(state, messages=messages, budget=budget, todos=todos)
             yield Error(
                 message="model stream ended without a final message",
                 kind="protocol",
@@ -363,7 +379,7 @@ async def run_turn(
             # below would end with `DONE`.
             yield Error(message=final.error, kind="provider", recoverable=bool(calls))
             if not calls:
-                state = _advance(state, messages=messages, budget=budget)
+                state = _advance(state, messages=messages, budget=budget, todos=todos)
                 yield TurnEnd(
                     turn_index=index,
                     state=TurnState.ERROR,
@@ -376,7 +392,7 @@ async def run_turn(
 
         # -------------------------------------------------- (a) no tool calls
         if not calls:
-            state = _advance(state, messages=messages, budget=budget)
+            state = _advance(state, messages=messages, budget=budget, todos=todos)
             yield TurnEnd(
                 turn_index=index,
                 state=TurnState.DONE,
@@ -404,7 +420,9 @@ async def run_turn(
                         )
                     )
                     raise StalledError(
-                        mark, repeats, _advance(state, messages=messages, budget=budget)
+                        mark,
+                        repeats,
+                        _advance(state, messages=messages, budget=budget, todos=todos),
                     )
                 nudge_for = mark
         if nudge_for is not None:
@@ -487,7 +505,7 @@ async def run_turn(
 
         # ------------------------------------------------------- (e) interrupt
         if policy.cancelled():
-            state = _advance(state, messages=messages, budget=budget)
+            state = _advance(state, messages=messages, budget=budget, todos=todos)
             yield TurnEnd(
                 turn_index=index,
                 state=TurnState.INTERRUPTED,
@@ -497,7 +515,7 @@ async def run_turn(
             return
 
     # ------------------------------------------------------ (b) max iterations
-    state = _advance(state, messages=messages, budget=budget)
+    state = _advance(state, messages=messages, budget=budget, todos=todos)
     yield TurnEnd(
         turn_index=index,
         state=TurnState.ERROR,
