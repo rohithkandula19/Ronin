@@ -831,3 +831,231 @@ def test_the_operator_is_read_as_the_longest_one_that_matches() -> None:
 def test_a_substring_expansion_is_not_a_value_word() -> None:
     # `${x:1:2}` shares its leading colon with `:-` and means something else entirely.
     assert binaries('echo "${x:1:2}"') == ["echo"]
+
+
+# --------------------------------------------------------------------------- #
+# The scanner's character-level decisions
+#
+# Everything above pins what the parser *concludes*. This section pins the
+# decisions it concludes from — where a word ends, which backslash escapes what,
+# which bracket closes which substitution. A mutation sweep over the scanner
+# inverted or deleted two thirds of those decisions with the whole suite still
+# green, which is to say the parser could start reading commands differently and
+# nothing would have said so.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("command", "argument"),
+    [
+        ("echo a\\\nb", "ab"),
+        ("echo a\\", "a\\"),
+    ],
+)
+def test_a_backslash_outside_quotes_resolves_the_way_bash_resolves_it(
+    command: str, argument: str
+) -> None:
+    """Both expectations are what real bash builds, checked by running the word through
+    `printf "[%s]"` and reading back the argument the shell actually passed.
+
+    A line continuation has to disappear rather than survive as a newline *inside* the
+    word: a word carrying a stray newline no longer equals the program name any rule was
+    written against. A trailing backslash with nothing after it is a literal backslash,
+    and dropping it rewrites the last argument of every truncated command line.
+    """
+    assert parse_command(command)[0].argv[1] == argument
+
+
+@pytest.mark.parametrize(
+    ("command", "argument"),
+    [
+        ('echo "a\\"b"', 'a"b'),
+        ('echo "a\\\\b"', "a\\b"),
+        ('echo "\\$HOME"', "$HOME"),
+        ('echo "a\\`b"', "a`b"),
+        ('echo "a\\zb"', "a\\zb"),
+        ('echo "a\\\nb"', "ab"),
+    ],
+)
+def test_an_escape_inside_double_quotes_resolves_the_way_bash_resolves_it(
+    command: str, argument: str
+) -> None:
+    """Each expectation is what `printf "[%s]" <word>` prints under real bash.
+
+    Inside double quotes a backslash escapes only `"`, a backslash, `$`, a backtick and
+    a newline, and is an ordinary character before anything else. Wrong in either
+    direction the argument is rewritten: `"\\$HOME"` is the literal text `$HOME`, not the
+    home directory, and a path check handed `HOME` instead is checking a word nobody
+    typed.
+    """
+    assert parse_command(command)[0].argv[1] == argument
+
+
+def test_a_program_name_in_double_quotes_is_not_called_obfuscation() -> None:
+    """The double-quoted twin of the single-quoted case above.
+
+    The obfuscation check tells `"git"` from `g"i"t` by looking at whether the quotes
+    wrap the whole word, so it can only do that if both of them reach it. Lose either
+    and every double-quoted program name — `"$PYTHON" -m pytest` is the everyday one —
+    is reported as an attempt to hide something, which is a block on the plainest
+    spelling there is.
+    """
+    assert parse_command('"git" status')[0].binary_raw == '"git"'
+    assert HazardCode.OBFUSCATED_BINARY not in codes('"git" status')
+
+
+@pytest.mark.parametrize("command", ["echo hi; 'git' status", "ls 2>\n'git' status"])
+def test_the_name_of_a_command_is_not_glued_to_the_text_before_it(command: str) -> None:
+    """`binary_raw` is the word as it was written, and the obfuscation check compares it
+    against what the word resolves to.
+
+    Text left over from earlier — a finished command, or the `2` of a redirect that was
+    given no target — makes `'git'` arrive as `echohi'git'`, which no longer looks like a
+    fully quoted name. The result is a block on a command nobody obfuscated.
+    """
+    segments = parse_command(command)
+    assert segments[-1].binary_raw == "'git'"
+    assert HazardCode.OBFUSCATED_BINARY not in {hazard.code for hazard in hazards(segments)}
+
+
+def test_a_substitution_is_reported_once_not_again_for_every_later_word() -> None:
+    # A `$(...)` belongs to the word it was written in. Carried forward it is reported
+    # once per following word, and a human asked to approve the same delete three times
+    # stops reading by the third prompt — which is the one that would have differed.
+    assert binaries("echo $(rm -rf /tmp/x) one two") == ["echo", "rm"]
+
+
+@pytest.mark.parametrize(
+    ("command", "word"),
+    [
+        ("echo $(echo 'a)b') tail", "$(echo 'a)b')"),
+        ('echo $(echo "a)b") tail', '$(echo "a)b")'),
+        ('echo $(echo "a\\"b)") tail', '$(echo "a\\"b)")'),
+        ("echo $(echo \\)) tail", "$(echo \\))"),
+        ("echo $(echo $(echo inner)) tail", "$(echo $(echo inner))"),
+        ('echo "$(echo x)" tail', "$(echo x)"),
+        ("echo $(echo 'a') tail", "$(echo 'a')"),
+    ],
+)
+def test_a_substitution_ends_at_its_own_closing_bracket(command: str, word: str) -> None:
+    """Real bash builds two arguments from every one of these — `printf "[%s]"` prints
+    `[…][tail]` — so in each case the `)` that ends the substitution is the one the
+    scanner has to find, and `tail` survives as a word of its own.
+
+    The candidates it has to step past are a `)` inside single quotes, inside double
+    quotes, inside double quotes that themselves contain an escaped quote, an escaped
+    `)`, and the `)` of a nested substitution. Stop at the wrong one and the rest of the
+    command line is swallowed into the substitution: whatever followed is no longer a
+    word the gate reads, and whatever the substitution really was is no longer what gets
+    reported.
+    """
+    assert parse_command(command)[0].argv == ("echo", word, "tail")
+
+
+@pytest.mark.parametrize(
+    ("command", "word"),
+    [
+        ("echo `echo deep` tail", "`echo deep`"),
+        ("echo `echo a\\`b` tail", "`echo a\\`b`"),
+    ],
+)
+def test_a_backtick_substitution_ends_at_its_first_unescaped_backtick(
+    command: str, word: str
+) -> None:
+    # The backtick form has no bracket to balance, so the only thing standing between
+    # the substitution and the rest of the line is the backslash rule. Ignore an escaped
+    # backtick and the substitution ends early; honour one that is not there and it
+    # never ends at all — either way the words after it stop being words.
+    assert parse_command(command)[0].argv == ("echo", word, "tail")
+
+
+@pytest.mark.parametrize("command", ["FOO=$(date) make build", "FOO=`date` make build"])
+def test_the_text_shown_for_approval_starts_where_the_command_starts(command: str) -> None:
+    """`raw` is the slice a human is shown before approving.
+
+    A substitution partway through the first word must not move the start of the
+    segment. Shown as `$(date) make build` the prompt has quietly dropped the
+    environment the command runs with, and the human approves something that reads
+    differently from what runs.
+    """
+    assert parse_command(command)[0].raw == command
+
+
+@pytest.mark.parametrize(
+    ("command", "word"),
+    [("echo $(id) tail", "$(id)"), ("echo `id` tail", "`id`")],
+)
+def test_a_substitution_keeps_its_text_in_the_word_it_came_from(command: str, word: str) -> None:
+    # Hoisting the inner command into its own segment must not empty the outer word:
+    # `line` is what rules are matched against, and a rule handed `echo  tail` has lost
+    # the argument that made the command worth looking at.
+    segment = parse_command(command)[0]
+    assert segment.argv == ("echo", word, "tail")
+    assert segment.line == f"echo {word} tail"
+
+
+@pytest.mark.parametrize(
+    ("command", "written"),
+    [("$(which rm) -rf /tmp/x", "$(which rm)"), ("`which rm` -rf /tmp/x", "`which rm`")],
+)
+def test_a_substitution_used_as_the_program_name_is_still_shown_as_written(
+    command: str, written: str
+) -> None:
+    # When the program name *is* a substitution there is nothing else to show, so a
+    # `binary_raw` that lost it leaves an approval prompt naming no program at all.
+    assert parse_command(command)[0].binary_raw == written
+
+
+def test_a_leading_file_descriptor_belongs_to_the_redirect_not_to_the_arguments() -> None:
+    # `2> err.txt` captures stderr; the `2` says which stream. Read as a word instead it
+    # becomes an argument to `ls` that nobody typed, and the redirect loses the one
+    # detail that says what it captures.
+    segment = parse_command("ls 2> err.txt")[0]
+    assert segment.argv == ("ls",)
+    assert (segment.redirects[0].operator, segment.redirects[0].target) == ("2>", "err.txt")
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("echo hi >", ["echo"]),
+        ('echo $(echo "unterminated', ["echo", "echo"]),
+        ('echo "${x:-"', ["echo"]),
+        ("cat <<EOF\nunterminated", ["cat"]),
+    ],
+)
+def test_a_half_written_command_is_answered_rather_than_raised(
+    command: str, expected: list[str]
+) -> None:
+    """bash refuses to run any of these. The gate is asked about strings *before*
+    anything runs them, half-typed and truncated ones included, so it has to answer.
+
+    An exception here is a crash in the approval path rather than a denial, and a scan
+    that reads past the end looking for a delimiter that never arrives is worse: it
+    never returns, so the prompt never appears at all.
+    """
+    assert binaries(command) == expected
+
+
+def test_a_heredoc_is_consumed_once_and_the_lines_after_it_are_commands_again() -> None:
+    """A heredoc body ends at its delimiter, and the heredoc is then finished.
+
+    Left pending, the next newline swallows everything after it as a second body — so
+    `rm -rf /tmp/x` two lines below a `cat <<EOF` is filed as text and never reaches a
+    single rule. The body is data, as the test above says; the lines past the delimiter
+    are not.
+    """
+    segments = parse_command("cat <<EOF\nbody\nEOF\necho one\nrm -rf /tmp/x")
+    assert [segment.binary for segment in segments] == ["cat", "echo", "rm"]
+    assert segments[0].heredocs == ("body",)
+
+
+def test_an_expansion_inside_double_quotes_stays_one_word_however_it_is_quoted() -> None:
+    """`echo "${x:-"a b"}" tail` passes bash two arguments — `printf "[%s]"` prints
+    `[a b][tail]` — because the inner quotes belong to the expansion rather than closing
+    the outer ones.
+
+    Read the other way the word splits at the space, and every rule is then matched
+    against arguments the shell will never produce.
+    """
+    assert parse_command('echo "${x:-"a b"}" tail')[0].argv == ("echo", '${x:-"a b"}', "tail")
