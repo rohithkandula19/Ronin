@@ -513,3 +513,74 @@ def test_a_dollar_inside_double_quotes_is_not_an_ansi_c_word() -> None:
     # `"$'x'"` is literal in bash — the construct is only recognised at word level.
     (segment,) = parse_command("""echo "$'x'" """)
     assert list(segment.argv) == ["echo", "$'x'"]
+
+
+# --------------------------------------------------------------------------- #
+# Shell reserved words: grammar, not programs
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "{ rm -rf /; }",
+        "if true; then rm -rf /; fi",
+        "if false; then :; else rm -rf /; fi",
+        "for f in a b; do rm -rf /; done",
+        "while true; do rm -rf /; done",
+        "until false; do rm -rf /; done",
+    ],
+)
+def test_a_command_inside_a_compound_is_still_scanned(command: str) -> None:
+    """The body of every ``if``, ``for`` and ``while`` ever written.
+
+    ``{`` and ``then`` are shell grammar, but they were resolving as *program names* —
+    so ``rm`` became an argument to a program called ``then``, every rule that keys on
+    the binary had nothing to match, and a recursive delete of ``/`` produced no hazard
+    at all. ``( rm -rf / )`` was always fine, because parentheses are operator tokens;
+    this is that asymmetry closed.
+    """
+    assert "rm" in [segment.binary for segment in parse_command(command)]
+    codes = [hazard.code for hazard in hazards(parse_command(command))]
+    assert HazardCode.RECURSIVE_DELETE in codes
+
+
+def test_the_parenthesised_form_still_works_the_way_it_always_did() -> None:
+    # The control for the test above: this one was never broken, and must not become so.
+    assert "rm" in binaries("(rm -rf /)")
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["while true; do echo ok; done", "case x in x) ls;; esac", "{ echo hi; }"],
+)
+def test_a_harmless_compound_raises_nothing(command: str) -> None:
+    # Peeling reserved words must not invent hazards: the words left behind are loop
+    # variables and case subjects, which are not programs and must not be reported as
+    # dangerous ones.
+    assert hazards(parse_command(command)) == ()
+
+
+def test_a_reserved_word_is_peeled_as_a_prefix_not_swallowed() -> None:
+    # `resolve_binary` reports what ran and what wrapped it; a reserved word belongs in
+    # the second list, exactly like `sudo` does.
+    binary, argv, prefixes, _assignments = resolve_binary(["then", "rm", "-rf", "/"])
+    assert binary == "rm"
+    assert list(argv) == ["rm", "-rf", "/"]
+    assert "then" in prefixes
+
+
+def test_a_segment_that_is_only_reserved_words_runs_nothing() -> None:
+    # `fi` and `done` close a compound; on their own they are not a program, and
+    # reporting one would be a hazard about a command that does not exist.
+    binary, argv, _prefixes, _assignments = resolve_binary(["fi"])
+    assert binary == ""
+    assert argv == ()
+
+
+def test_a_heredoc_body_is_still_data_rather_than_commands() -> None:
+    """The deliberate non-change. ``cat <<EOF`` prints its body; the text is data, and
+    reading it as commands would flag every document that mentions ``rm``. ``bash <<EOF``
+    *is* commands, and that case was already handled."""
+    assert "rm" not in binaries("cat <<EOF\nrm -rf /\nEOF")
+    assert "rm" in binaries("bash <<EOF\nrm -rf /\nEOF")
