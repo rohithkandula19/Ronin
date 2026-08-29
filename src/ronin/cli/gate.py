@@ -85,7 +85,8 @@ from ..mcp.tools import is_namespaced
 from ..safety.injection import CLOSE_MARKER, OPEN_MARKER, TaintTracker, wrap_and_scan
 from ..safety.policy import PolicyEngine
 from ..tools.base import ToolError, optional_int
-from ..tools.files import IMAGE_SUFFIXES
+from ..tools.files import IMAGE_SUFFIXES, preview
+from ..ui.render import render_diff
 
 # --------------------------------------------------------------------------- #
 # Which tools mean what
@@ -1093,6 +1094,39 @@ def _repair_fence(text: str, source: str) -> str:
     if CLOSE_MARKER not in text:
         text = f"{text}\n{CLOSE_MARKER}"
     return text
+
+
+def live_preview(registry: object) -> Callable[[ToolUse], str | None]:
+    """A callable that renders what an edit *would do*, for the approval prompt.
+
+    The README has said for a long time that every edit is gated behind a diff
+    preview. It was not: the human was shown `edit({"new_string": …, "old_string": …})`
+    as a JSON blob, and `render_diff` -- written, tested and complete -- had no caller
+    outside the demo. This is the join, and it lives in `cli` because that is the only
+    layer allowed to know both `tools` and `ui`.
+
+    Reaches the live `ToolContext` the same two-`getattr` way as :func:`live_todos`,
+    and for the same reason: a registry without one must degrade to the old JSON line
+    rather than break approval entirely.
+    """
+
+    def render(use: ToolUse) -> str | None:
+        inner = getattr(registry, "inner", registry)
+        ctx = getattr(inner, "ctx", None)
+        resolve = getattr(ctx, "resolve", None)
+        if resolve is None:
+            return None
+        pair = preview(use.name, use.arguments, resolve=resolve)
+        if pair is None:
+            return None
+        before, after = pair
+        # Plain, not coloured. `render_approval` puts `rendered` through
+        # `styles.text`, which strips control characters so approval text cannot paint
+        # over the prompt a human is reading -- so colour added here would be removed
+        # there, and passing it would only imply a highlighting that does not survive.
+        return render_diff(before, after, path=str(use.arguments.get("path", "")))
+
+    return render
 
 
 def live_todos(registry: object) -> tuple[Todo, ...]:

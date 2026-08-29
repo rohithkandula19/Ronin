@@ -9,6 +9,7 @@ against LF, and identical repeated blocks.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 from harness import call, context, write_file
@@ -23,7 +24,7 @@ from ronin.tools import (
     number_lines,
 )
 from ronin.tools.base import ToolError
-from ronin.tools.files import MAX_READ_LINES
+from ronin.tools.files import MAX_READ_LINES, preview
 
 READ = ReadTool()
 WRITE = WriteTool()
@@ -595,3 +596,140 @@ def test_every_file_tool_says_when_not_to_use_it(tool: object) -> None:
 def test_the_mutating_tools_all_require_approval() -> None:
     for tool in (WRITE, EDIT, MULTI):
         assert tool.spec().requires_approval, tool.name
+
+
+# --------------------------------------------------------------------------- #
+# What an edit would do, before it does it
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("name", "args"),
+    [
+        ("edit", {"path": "a.py", "old_string": "one", "new_string": "ONE"}),
+        ("edit", {"path": "a.py", "old_string": "e", "new_string": "E", "replace_all": True}),
+        ("write", {"path": "a.py", "content": "replaced\n"}),
+        ("write", {"path": "fresh.py", "content": "brand new\n"}),
+        (
+            "multi_edit",
+            {
+                "path": "a.py",
+                "edits": [
+                    {"old_string": "one", "new_string": "1"},
+                    {"old_string": "two", "new_string": "2"},
+                ],
+            },
+        ),
+    ],
+)
+async def test_the_preview_is_what_the_tool_actually_does(
+    tmp_path: Path, name: str, args: dict[str, Any]
+) -> None:
+    """The test that stops a preview from drifting away from the thing it previews.
+
+    A human who approves diff A while diff B lands has been shown a lie, not a summary.
+    That is why the preview runs the same `apply_edit` the tool runs rather than a
+    second implementation of the same rules — and this compares the two directly.
+    """
+    write_file(tmp_path, "a.py", "one\ntwo\nthree\n")
+    ctx = context(tmp_path)
+    ctx.mark_read(tmp_path / "a.py")
+
+    shown = preview(name, args, resolve=ctx.resolve)
+    assert shown is not None
+    tool = {"edit": EditTool(), "write": WriteTool(), "multi_edit": MultiEditTool()}[name]
+    result = await call(tool, ctx, **args)
+
+    assert result.ok, result.error
+    assert shown[1] == (tmp_path / str(args["path"])).read_text()
+
+
+async def test_the_preview_shows_the_file_as_it_is_now(tmp_path: Path) -> None:
+    # The `before` half has to be the bytes on disk, or the diff is drawn against a
+    # file nobody has.
+    write_file(tmp_path, "a.py", "current\n")
+    ctx = context(tmp_path)
+    shown = preview(
+        "edit", {"path": "a.py", "old_string": "current", "new_string": "next"}, resolve=ctx.resolve
+    )
+    assert shown == ("current\n", "next\n")
+
+
+async def test_multi_edit_is_previewed_as_a_sequence_not_as_independent_edits(
+    tmp_path: Path,
+) -> None:
+    """Later edits see earlier results, exactly as `multi_edit` runs them.
+
+    Previewing them against the original text independently would show a diff that
+    never happens — and the second edit here only matches because the first one ran.
+    """
+    write_file(tmp_path, "a.py", "alpha\n")
+    ctx = context(tmp_path)
+    shown = preview(
+        "multi_edit",
+        {
+            "path": "a.py",
+            "edits": [
+                {"old_string": "alpha", "new_string": "beta"},
+                {"old_string": "beta", "new_string": "gamma"},
+            ],
+        },
+        resolve=ctx.resolve,
+    )
+    assert shown == ("alpha\n", "gamma\n")
+
+
+async def test_a_write_to_a_new_file_is_previewed_against_nothing(tmp_path: Path) -> None:
+    # Creating a file is an edit from the empty string, not an unpreviewable case.
+    ctx = context(tmp_path)
+    assert preview("write", {"path": "new.txt", "content": "hi\n"}, resolve=ctx.resolve) == (
+        "",
+        "hi\n",
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "args"),
+    [
+        ("read", {"path": "a.py"}),  # not an edit at all
+        ("run", {"command": "ls"}),
+        ("edit", {"path": "missing.py", "old_string": "a", "new_string": "b"}),
+        ("edit", {"path": "a.py", "old_string": "not present", "new_string": "b"}),
+        ("edit", {"path": "a.py", "old_string": "e", "new_string": "E"}),  # ambiguous
+        ("edit", {"path": "a.py"}),  # missing arguments
+        ("multi_edit", {"path": "a.py", "edits": []}),
+        ("multi_edit", {"path": "a.py", "edits": "not a list"}),
+        ("multi_edit", {"path": "a.py", "edits": ["not an object"]}),
+        ("write", {"path": "a.py"}),
+    ],
+)
+async def test_a_call_that_cannot_be_previewed_says_so_rather_than_raising(
+    tmp_path: Path, name: str, args: dict[str, Any]
+) -> None:
+    """`None`, never an exception.
+
+    A call that cannot be previewed is usually one that will fail anyway, and it should
+    fail in the tool — where the message tells the model what to change — rather than
+    taking down the approval prompt on the way there. Raising here would turn a bad
+    argument into a crash in the one code path whose job is to ask a human.
+    """
+    write_file(tmp_path, "a.py", "one\ntwo\nthree\n")
+    ctx = context(tmp_path)
+    assert preview(name, args, resolve=ctx.resolve) is None
+
+
+async def test_previewing_never_touches_the_file(tmp_path: Path) -> None:
+    # It runs before approval. Writing anything here would apply an edit the human has
+    # not yet seen, let alone agreed to.
+    path = write_file(tmp_path, "a.py", "untouched\n")
+    ctx = context(tmp_path)
+    preview(
+        "edit",
+        {"path": "a.py", "old_string": "untouched", "new_string": "changed"},
+        resolve=ctx.resolve,
+    )
+    preview("write", {"path": "a.py", "content": "clobbered"}, resolve=ctx.resolve)
+    preview("write", {"path": "brand-new.txt", "content": "x"}, resolve=ctx.resolve)
+
+    assert path.read_text() == "untouched\n"
+    assert not (tmp_path / "brand-new.txt").exists()

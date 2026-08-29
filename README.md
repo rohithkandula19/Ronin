@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-v1.0.0-blue)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-10490%20passing-brightgreen.svg)](#-whats-under-the-hood)
+[![Tests](https://img.shields.io/badge/tests-10523%20passing-brightgreen.svg)](#-whats-under-the-hood)
 [![Providers](https://img.shields.io/badge/providers-Claude%20·%20Gemini%20·%20Cerebras%20·%20Groq%20·%20OpenRouter%20·%20Ollama%20·%20OpenAI-d4a373)](#-supported-providers)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
@@ -320,7 +320,7 @@ A coding agent that reads, edits, and runs your code: every write and shell comm
   /role clear        back to default behavior
   ```
 - **Shift+Tab modes**: cycle **normal → auto-accept → plan** edit modes, shown live in the input chrome.
-- **Streaming Markdown + inline tool calls**: replies stream as rendered Markdown; tool activity renders Claude-Code-style as `⏺ Read(file)` with `⎿ result` underneath; edits are shown as syntax-highlighted diffs you approve.
+- **Streaming Markdown + inline tool calls**: replies stream as rendered Markdown; tool activity renders Claude-Code-style as `⏺ Read(file)` with `⎿ result` underneath; edits are shown as unified diffs you approve.
 - **@-file & @-URL mentions**: drop `@path` to pull a file into context, or `@https://…` to pull a web page's readable text into context. Start a message with a folder path to `cd` into it.
 - **Plan mode** (`--plan`) proposes the steps read-only, you approve, then it executes. **Resume** (`--continue`) picks up your last session.
 - **Live plan tracker**: multi-step tasks show a checklist the agent keeps current as it works — `✓` done · `▶` active · `☐` pending · `⊘` blocked · `✗` failed. It updates only from the agent's real `update_todos` state (no faked progress), and shows nothing when there's no plan.
@@ -801,7 +801,7 @@ ronin is MIT-licensed and meant to be picked up by other people. A few notes if 
 | `cli` | The `ronin` binary: coding agent, mission control, MCP client, web tools, subagents, evaluation, media, and the **31-game arcade** (`ronin play`) |
 | `deployment-templates` | Docker Compose, Modal, Vercel, and Railway |
 
-**10,490 tests** across packages and the demo/API apps passed in the current regression suite. A `FakeProvider` makes them deterministic, offline, and free: no API calls in CI.
+**10,523 tests** across packages and the demo/API apps passed in the current regression suite. A `FakeProvider` makes them deterministic, offline, and free: no API calls in CI.
 
 ## Use the modules without the CLI
 
