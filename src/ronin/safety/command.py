@@ -475,7 +475,45 @@ def _decode_ansi_c(inner: str) -> str:
     return "".join(out)
 
 
-def _nested_substitutions(inner: str) -> tuple[str, ...]:
+#: Expansion operators whose word bash evaluates to *produce a value*.
+#:
+#: The distinction matters only inside double quotes, and it is the whole of this
+#: rule. `"${x:-'$(rm -rf /)'}"` runs the delete: a `'` in a value word is an ordinary
+#: character there, not a quote, so it hides nothing. In `${x#'$(…)'}`, `${x%'…'}` and
+#: `${x:?'…'}` the same apostrophes *do* suppress the expansion and bash runs nothing --
+#: every row of this was checked by pointing the command at a throwaway directory and
+#: seeing whether it survived.
+#:
+#: Which of these fires depends on whether the variable happens to be set, which the
+#: scanner cannot know. So all of them count: `:-` runs when unset, `:+` when set, and
+#: guessing wrong in either direction is a command nobody sees.
+_VALUE_OPERATORS: tuple[str, ...] = (":-", ":=", ":+", "-", "=", "+")
+
+#: Single-character parameters that are not names: `${@:-x}`, `${*:-x}`.
+_SPECIAL_PARAMS: str = "@*$"
+
+
+def _value_word(inner: str) -> str | None:
+    """The word of a ``${name<op>word}`` body, when bash evaluates it as a value.
+
+    ``None`` for every other shape -- a pattern (``#``, ``%``, ``/``), a case
+    conversion, a substring, an error message (``:?``), a length or an indirection.
+    Those keep the ordinary reading, in which an apostrophe *is* a quote.
+    """
+    if inner[:1] in {"#", "!"}:
+        return None  # `${#x}` is a length and `${!x}` an indirection: no word at all.
+    index = 1 if inner[:1] in _SPECIAL_PARAMS else 0
+    while index < len(inner) and (inner[index].isalnum() or inner[index] == "_"):
+        index += 1
+    rest = inner[index:]
+    # Two-character operators first: `:-` must not be read as a bare `-`.
+    for operator in _VALUE_OPERATORS:
+        if rest.startswith(operator):
+            return rest[len(operator) :]
+    return None
+
+
+def _nested_substitutions(inner: str, *, quoted: bool = False) -> tuple[str, ...]:
     """Every command substitution inside a parameter expansion body, at any depth.
 
     Re-lexes the body rather than pattern-matching it, so a `$(` that is quoted, or a
@@ -491,8 +529,13 @@ def _nested_substitutions(inner: str) -> tuple[str, ...]:
     """
     if "$" not in inner and "`" not in inner:
         return ()
+    # Inside double quotes a value word's apostrophes are ordinary characters. Reading
+    # them as quotes is what let `"${x:-'$(rm -rf /)'}"` through: bash runs the delete,
+    # and two apostrophes were enough to hide it completely.
+    word = _value_word(inner) if quoted else None
+    body, literal_quotes = (word, True) if word is not None else (inner, False)
     found: list[str] = []
-    for item in _Lexer(inner, flatten_braces=True).run():
+    for item in _Lexer(body, flatten_braces=True, literal_quotes=literal_quotes).run():
         if isinstance(item, _Word):
             found.extend(item.subs)
     return tuple(found)
@@ -507,8 +550,13 @@ class _Lexer:
     written out by hand and quoting is handled inline.
     """
 
-    def __init__(self, text: str, flatten_braces: bool = False) -> None:
+    def __init__(
+        self, text: str, flatten_braces: bool = False, literal_quotes: bool = False
+    ) -> None:
         self.text = text
+        #: Set while scanning the value word of an expansion that sat inside double
+        #: quotes, where `'` is a character like any other rather than a quote.
+        self._literal_quotes = literal_quotes
         #: Set while `_nested_substitutions` scans an expansion body: `${` is stepped
         #: over instead of consumed whole, so nested bodies are read in the same pass.
         self._flatten_braces = flatten_braces
@@ -599,7 +647,7 @@ class _Lexer:
                 self._dollar_paren()
                 continue
             if ch == "$" and self._peek(1) == "{":
-                self._brace()
+                self._brace(quoted=True)
                 continue
             self._push(ch, ch)
             self.i += 1
@@ -698,7 +746,7 @@ class _Lexer:
         self.i += 1
         self._double()
 
-    def _brace(self) -> None:
+    def _brace(self, *, quoted: bool = False) -> None:
         if self._flatten_braces:
             self._push("${", "${")
             self.i += 2
@@ -711,7 +759,7 @@ class _Lexer:
         # `:+`, `?` and the `#`/`%` trim forms. Hoisting those substitutions is what
         # keeps them visible; without it the only binary this segment reports is the
         # outer one, and every rule that keys on `rm` looks straight past it.
-        self._subs.extend(_nested_substitutions(inner))
+        self._subs.extend(_nested_substitutions(inner, quoted=quoted))
         self.i = end
 
     # -- operators, redirects, heredocs ------------------------------------- #
@@ -827,7 +875,7 @@ class _Lexer:
         ch = self.text[self.i]
         if ch == "\\":
             self._escape()
-        elif ch == "'":
+        elif ch == "'" and not self._literal_quotes:
             self._single()
         elif ch == '"':
             self._double()
