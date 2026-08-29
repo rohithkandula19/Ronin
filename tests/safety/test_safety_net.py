@@ -615,3 +615,62 @@ def test_the_tool_layer_asks_this_module_rather_than_keeping_its_own_copy() -> N
     from ronin.tools import net as tool_net
 
     assert tool_net.__dict__["check_url"] is check_url
+
+
+# --------------------------------------------------------------------------- #
+# The numeric parser's guards, each of which a mutation sweep could remove with
+# the suite still green
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("host", "expected"),
+    [
+        # A hex octet beside decimal ones — the mixed spelling, which no test reached.
+        ("0x7f.0.0.1", "127.0.0.1"),
+        ("0xff.255.255.255", "255.255.255.255"),
+        # An octet of exactly 255 in a *leading* position, which is the boundary the
+        # `value > 0xFF` guard sits on. Reached only through a spelling `ipaddress`
+        # itself rejects, which is why the plain dotted quad never exercised it.
+        ("0xff.0.0.1", "255.0.0.1"),
+    ],
+)
+def test_a_hex_octet_beside_decimal_ones_still_resolves(host: str, expected: str) -> None:
+    assert parse_address(host) == ipaddress.IPv4Address(expected)
+
+
+@pytest.mark.parametrize("host", ["10.999.0.1", "256.0.0.1", "0x100.0.0.1"])
+def test_an_octet_past_255_is_not_an_address(host: str) -> None:
+    """The guard the sweep could delete silently.
+
+    Without it the octets are packed anyway and the parser invents a *different*
+    address — which for a check that decides "is this private?" is worse than refusing,
+    because the answer would be about somewhere else entirely.
+    """
+    assert parse_address(host) is None
+
+
+@pytest.mark.parametrize("host", ["-0x7f000001", "-0x1.2.3.4", "-1"])
+def test_a_negative_part_is_not_an_address(host: str) -> None:
+    """``-0x`` is accepted by the hex branch on purpose — ``int("-0x10", 16)`` parses —
+    so something downstream has to reject the negative it produces. Nothing tested that
+    it did."""
+    assert parse_address(host) is None
+
+
+@pytest.mark.parametrize("host", ["[::1", "::1]", "[", "]"])
+def test_a_half_bracketed_host_is_not_unwrapped(host: str) -> None:
+    """Brackets are the URL's syntax around an IPv6 literal, and only a matched pair is.
+    Stripping one-sided brackets would turn ``[::1`` into ``::``, which parses — a
+    malformed host silently becoming a real address."""
+    assert parse_address(host) is None
+
+
+def test_a_name_with_the_maximum_label_length_is_still_a_name() -> None:
+    # 253 is the boundary in `host_reason`, and `>` versus `>=` there was invisible to
+    # the suite. A name of exactly 253 characters is legal and must classify as a name.
+    label = "a" * 63
+    name = ".".join([label, label, label, "a" * 61])
+    assert len(name) == 253
+    assert "not a hostname" not in host_reason(name)
+    assert "not a hostname" in host_reason(f"{name}x")
