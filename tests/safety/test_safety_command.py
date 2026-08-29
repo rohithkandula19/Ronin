@@ -14,6 +14,7 @@ from ronin.safety.command import (
     Origin,
     Segment,
     Severity,
+    _decode_ansi_c,
     hazards,
     parse_command,
     resolve_binary,
@@ -405,3 +406,110 @@ def test_quotes_inside_a_substitution_do_not_end_the_scan_early() -> None:
 def test_escapes_inside_a_substitution_do_not_end_the_scan_early() -> None:
     segments = parse_command(r"echo $(printf '%s' \) ; rm -rf x)")
     assert "rm" in [s.binary for s in segments]
+
+
+# --------------------------------------------------------------------------- #
+# ANSI-C and locale quoting: the one construct that can spell a word in
+# characters that do not appear in it
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("inner", "expected"),
+    [
+        (r"\x72\x6d", "rm"),
+        (r"\162\155", "rm"),
+        (r"\x2d\x72\x66", "-rf"),
+        (r"\u002f", "/"),
+        (r"\U0000002f", "/"),
+        ("a\\tb", "a\tb"),
+        ("a\\nb", "a\nb"),
+        (r"it\'s", "it's"),
+        ("plain", "plain"),
+        ("", ""),
+        # An unrecognised escape keeps its backslash, which is what bash does.
+        (r"\q", r"\q"),
+        # `\cX` is deliberately not decoded: a control character cannot spell a
+        # program name or a flag, which is the only thing this decoding is for.
+        (r"\cA", r"\cA"),
+        # A trailing backslash is not an escape at all.
+        ("a\\", "a\\"),
+    ],
+)
+def test_ansi_c_escapes_decode_to_what_bash_produces(inner: str, expected: str) -> None:
+    assert _decode_ansi_c(inner) == expected
+
+
+def test_an_octal_escape_past_a_byte_wraps_rather_than_raising() -> None:
+    # bash wraps; a parser that raised would turn a malformed command into a crash
+    # instead of a verdict, which is the one outcome a gate must never produce.
+    assert _decode_ansi_c(r"\400") == chr(0)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        r"rm $'\x2d\x72\x66' /",
+        r"rm $'\055\162\146' /",
+    ],
+)
+def test_flags_spelled_in_ansi_c_are_still_read_as_flags(command: str) -> None:
+    """The evasion this decoding exists to close.
+
+    ``$'\x2d\x72\x66'`` *is* ``-rf`` to bash, so this is a recursive delete of ``/``.
+    Undecoded, argv held a meaningless ``$\x2d...`` word, ``has_flag`` matched nothing,
+    and the whole command produced **no hazard at all** — while the plain spelling is
+    an ``ask``. The binary was plain ``rm``, so the obfuscated-binary rule, which only
+    ever looks at the program name, had nothing to say either.
+    """
+    (segment,) = parse_command(command)
+    assert list(segment.argv) == ["rm", "-rf", "/"]
+    codes = [hazard.code for hazard in hazards([segment])]
+    assert HazardCode.RECURSIVE_DELETE in codes
+
+
+@pytest.mark.parametrize("command", [r"$'\x72\x6d' -rf /", '$"rm" -rf /'])
+def test_a_binary_spelled_in_ansi_c_resolves_and_is_still_called_obfuscated(
+    command: str,
+) -> None:
+    """Both rules now fire, where before only one could.
+
+    The program name was already caught — an encoded binary is never equal to what it
+    resolves to, so ``obfuscated_binary`` blocked it. That stays. What is new is that
+    the name also *resolves*, so the rules that key on ``rm`` apply as well.
+    """
+    (segment,) = parse_command(command)
+    assert segment.binary == "rm"
+    codes = [hazard.code for hazard in hazards([segment])]
+    assert HazardCode.OBFUSCATED_BINARY in codes
+    assert HazardCode.RECURSIVE_DELETE in codes
+
+
+def test_a_backslash_escaped_quote_does_not_end_an_ansi_c_word() -> None:
+    # Inside `$'...'` a backslash escapes the next character, `'` included, so the
+    # terminator cannot be found by a plain `find`.
+    (segment,) = parse_command(r"echo $'it\'s here'")
+    assert list(segment.argv) == ["echo", "it's here"]
+
+
+def test_an_unterminated_ansi_c_word_is_read_to_the_end_rather_than_dropped() -> None:
+    # Same leniency as an unterminated single quote: a gate that dropped the word
+    # would be reading a different command from the one bash would refuse to run.
+    (segment,) = parse_command(r"rm $'\x2d\x72\x66")
+    assert list(segment.argv) == ["rm", "-rf"]
+
+
+def test_ordinary_single_quotes_are_still_literal() -> None:
+    # The decoding must apply to `$'...'` and nothing else: `'$(id)'` is a literal
+    # string in bash, and reading it as a substitution would be a false alarm.
+    (segment,) = parse_command("echo '$(id)'")
+    assert list(segment.argv) == ["echo", "$(id)"]
+    # And no nested segment: the unquoted form really does produce one, so this is
+    # asserting a difference rather than an absence that was never there.
+    assert [s.binary for s in parse_command("echo $(id)")] == ["echo", "id"]
+
+
+def test_a_dollar_inside_double_quotes_is_not_an_ansi_c_word() -> None:
+    # `"$'x'"` is literal in bash — the construct is only recognised at word level.
+    (segment,) = parse_command("""echo "$'x'" """)
+    assert list(segment.argv) == ["echo", "$'x'"]

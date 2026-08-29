@@ -47,6 +47,7 @@ nested command.
 from __future__ import annotations
 
 import re
+import string
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -345,6 +346,81 @@ class _HereRef:
 _Item = _Word | _Op | _Redir | _HereRef
 
 
+#: The escapes ``$'...'`` gives a single character. ``\e``/``\E`` are bash extensions.
+_ANSI_C_SIMPLE = {
+    "a": "\a",
+    "b": "\b",
+    "e": "\x1b",
+    "E": "\x1b",
+    "f": "\f",
+    "n": "\n",
+    "r": "\r",
+    "t": "\t",
+    "v": "\v",
+    "\\": "\\",
+    "'": "'",
+    '"': '"',
+    "?": "?",
+}
+
+
+def _take(text: str, start: int, limit: int, allowed: str) -> str:
+    """At most ``limit`` characters from ``start`` while they are in ``allowed``."""
+    end = start
+    while end < len(text) and end - start < limit and text[end] in allowed:
+        end += 1
+    return text[start:end]
+
+
+def _decode_ansi_c(inner: str) -> str:
+    """The bytes ``$'inner'`` actually produces.
+
+    ANSI-C quoting is the one shell construct that can spell a word in characters
+    that do not appear in it: ``$'\\x72\\x6d'`` *is* ``rm``, and ``$'\\x2d\\x72\\x66'``
+    *is* ``-rf``. Left undecoded, a scanner reading argv sees neither — which is how
+    ``rm $'\\x2d\\x72\\x66' /`` reached the model with no hazard at all while bash read
+    it as a recursive delete of ``/``.
+
+    An unrecognised escape keeps its backslash, which is what bash does: ``$'\\q'``
+    is two characters. ``\\cX`` (control characters) is deliberately left in that
+    bucket — it cannot spell a program name or a flag, which is what this decoding
+    exists to expose.
+    """
+    out: list[str] = []
+    index = 0
+    while index < len(inner):
+        char = inner[index]
+        if char != "\\" or index + 1 >= len(inner):
+            out.append(char)
+            index += 1
+            continue
+        nxt = inner[index + 1]
+        if nxt in _ANSI_C_SIMPLE:
+            out.append(_ANSI_C_SIMPLE[nxt])
+            index += 2
+            continue
+        if nxt == "x" and (digits := _take(inner, index + 2, 2, string.hexdigits)):
+            out.append(chr(int(digits, 16)))
+            index += 2 + len(digits)
+            continue
+        if nxt in "01234567":
+            digits = _take(inner, index + 1, 3, "01234567")
+            # Masked rather than refused: bash wraps, and a parser that raised here
+            # would turn a malformed command into a crash instead of a verdict.
+            out.append(chr(int(digits, 8) & 0xFF))
+            index += 1 + len(digits)
+            continue
+        if nxt in "uU" and (
+            digits := _take(inner, index + 2, 4 if nxt == "u" else 8, string.hexdigits)
+        ):
+            out.append(chr(int(digits, 16)))
+            index += 2 + len(digits)
+            continue
+        out.append(char)
+        index += 1
+    return "".join(out)
+
+
 class _Lexer:
     """A character scanner over one command string.
 
@@ -506,6 +582,42 @@ class _Lexer:
         self._subs.append(inner)
         self.i = min(index + 1, len(self.text))
 
+    def _ansi_c(self) -> None:
+        """``$'...'`` — ANSI-C quoting, decoded to the characters it stands for.
+
+        Inside these quotes a backslash escapes the next character, ``'`` included, so
+        the terminator cannot be found by a plain ``find``.
+        """
+        index = self.i + 2
+        chunks: list[str] = []
+        while index < len(self.text):
+            char = self.text[index]
+            if char == "\\" and index + 1 < len(self.text):
+                chunks.append(self.text[index : index + 2])
+                index += 2
+                continue
+            if char == "'":
+                index += 1
+                break
+            chunks.append(char)
+            index += 1
+        raw = self.text[self.i : index]
+        self._push(raw, _decode_ansi_c("".join(chunks)))
+        self.i = index
+
+    def _locale_double(self) -> None:
+        """``$"..."`` — a translated string, which lexes as an ordinary double-quoted one.
+
+        The translation is a lookup in a message catalogue. With none installed bash
+        yields the contents unchanged, and a safety parser must read the word the way
+        the shell will run it on *this* machine rather than on a hypothetical localised
+        one — where, in any case, a catalogue that renamed a program name would be a
+        far larger problem than this parser.
+        """
+        self._push("$", "")
+        self.i += 1
+        self._double()
+
     def _brace(self) -> None:
         _, end = self._scan_balanced(self.i + 1, "{", "}")
         raw = self.text[self.i : end]
@@ -635,6 +747,10 @@ class _Lexer:
             self._dollar_paren()
         elif ch == "$" and self._peek(1) == "{":
             self._brace()
+        elif ch == "$" and self._peek(1) == "'":
+            self._ansi_c()
+        elif ch == "$" and self._peek(1) == '"':
+            self._locale_double()
         else:
             self._push(ch, ch)
             self.i += 1
