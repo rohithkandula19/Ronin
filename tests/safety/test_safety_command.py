@@ -584,3 +584,95 @@ def test_a_heredoc_body_is_still_data_rather_than_commands() -> None:
     *is* commands, and that case was already handled."""
     assert "rm" not in binaries("cat <<EOF\nrm -rf /\nEOF")
     assert "rm" in binaries("bash <<EOF\nrm -rf /\nEOF")
+
+
+# --------------------------------------------------------------------------- #
+# A parameter expansion can run a command
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo ${x:-$(rm -rf /etc)}",  # use a default
+        "echo ${x:=$(rm -rf /etc)}",  # assign a default
+        "echo ${x:+$(rm -rf /etc)}",  # use an alternate
+        "echo ${x?$(rm -rf /etc)}",  # error message
+        "echo ${x#$(rm -rf /etc)}",  # trim a prefix
+        "echo ${x%$(rm -rf /etc)}",  # trim a suffix
+        "echo ${x/y/$(rm -rf /etc)}",  # substitute
+        "echo ${x:-`rm -rf /etc`}",  # the backtick spelling
+        'echo "${x:-$(rm -rf /etc)}"',  # inside double quotes
+    ],
+)
+def test_a_command_inside_a_parameter_expansion_is_seen(command: str) -> None:
+    """Every one of these *runs* `rm -rf /etc` under bash.
+
+    A `${...}` body is not inert text: bash evaluates the word that produces the
+    default, the alternate, the error message or the pattern. The expansion used to be
+    pushed as one opaque word and its body thrown away, so the only binary the segment
+    reported was the outer `echo` and every rule keyed on `rm` looked straight past it.
+    """
+    assert "rm" in binaries(command)
+
+
+def test_the_expansion_is_still_one_word_in_the_line() -> None:
+    # Hoisting the inner command must not also splice it into the outer command's text:
+    # `line` is what rules are matched against, and it should read the way it was typed.
+    segments = parse_command("echo ${x:-$(rm -rf /etc)}")
+    assert segments[0].line == "echo ${x:-$(rm -rf /etc)}"
+    assert segments[0].argv == ("echo", "${x:-$(rm -rf /etc)}")
+    assert segments[1].origin is Origin.SUBSTITUTION
+
+
+def test_nesting_the_expansion_does_not_hide_the_command() -> None:
+    """The reason the body is scanned flat rather than walked down.
+
+    Any depth limit would be a bypass with a number attached: nest one level past it
+    and the command is invisible again. 200 levels is far past anything a person would
+    write, and is exactly what someone probing for that number would try.
+    """
+    for depth in (1, 2, 3, 9, 200):
+        command = "echo " + "${x:-" * depth + "$(rm -rf /etc)" + "}" * depth
+        assert "rm" in binaries(command), f"missed at depth {depth}"
+
+
+def test_a_deeply_nested_expansion_does_not_exhaust_the_stack() -> None:
+    # The same input read recursively raises RecursionError rather than answering.
+    command = "echo " + "${x:-" * 5000 + "$(rm -rf /etc)" + "}" * 5000
+    assert "rm" in binaries(command)
+
+
+def test_an_expansion_that_runs_nothing_adds_no_segment() -> None:
+    # The common case has to stay a single word: `${HOME}` is a value, not a command,
+    # and inventing a segment for it would put a nonsense binary in front of a human.
+    for command in ("echo ${x}", "echo ${x:-y}", "echo ${}", "echo ${x:-}"):
+        assert binaries(command) == ["echo"]
+
+
+def test_an_unterminated_expansion_still_yields_its_command() -> None:
+    # A missing `}` is malformed input, not a reason to stop reading: the scanner
+    # recovers everywhere else, and the substitution is the part that matters.
+    assert "rm" in binaries("echo ${x:-$(rm -rf /etc)")
+
+
+@pytest.mark.parametrize(
+    ("command", "bash_runs_it"),
+    [
+        ("""echo ${x:-"$(rm -rf /etc)"}""", True),
+        ("""echo ${x:-"`rm -rf /etc`"}""", True),
+        ("""echo ${x:-'$(rm -rf /etc)'}""", False),
+        ("""echo ${x:-\\$(rm -rf /etc)}""", False),
+    ],
+)
+def test_quoting_inside_an_expansion_decides_whether_it_runs(
+    command: str, bash_runs_it: bool
+) -> None:
+    """Each expectation was checked against real bash, by pointing the `rm` at a
+    throwaway directory and looking at whether it survived.
+
+    This is why the body is re-lexed instead of searched for `$(`: a plain text search
+    would report all four, and two of them run nothing at all. Reporting a command that
+    never runs trains a human to wave the prompt through, which costs more than it saves.
+    """
+    assert ("rm" in binaries(command)) is bash_runs_it

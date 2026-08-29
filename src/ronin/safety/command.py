@@ -455,6 +455,29 @@ def _decode_ansi_c(inner: str) -> str:
     return "".join(out)
 
 
+def _nested_substitutions(inner: str) -> tuple[str, ...]:
+    """Every command substitution inside a parameter expansion body, at any depth.
+
+    Re-lexes the body rather than pattern-matching it, so a `$(` that is quoted, or a
+    `)` that is not the real terminator, is read exactly the way it is read anywhere
+    else.
+
+    One flat pass, not a walk down the nesting. Any limit on how deep to look would be
+    a bypass with a number attached -- nest one level past it and the substitution goes
+    unseen again -- and recursion deep enough to avoid that blows the stack on
+    `"${x:-" * 5000`. Flattening has neither property: `${` inside the body is stepped
+    over rather than descended into, so a `$( )` at any depth is found in this pass and
+    the cost stays linear in the body's length.
+    """
+    if "$" not in inner and "`" not in inner:
+        return ()
+    found: list[str] = []
+    for item in _Lexer(inner, flatten_braces=True).run():
+        if isinstance(item, _Word):
+            found.extend(item.subs)
+    return tuple(found)
+
+
 class _Lexer:
     """A character scanner over one command string.
 
@@ -464,8 +487,11 @@ class _Lexer:
     written out by hand and quoting is handled inline.
     """
 
-    def __init__(self, text: str) -> None:
+    def __init__(self, text: str, flatten_braces: bool = False) -> None:
         self.text = text
+        #: Set while `_nested_substitutions` scans an expansion body: `${` is stepped
+        #: over instead of consumed whole, so nested bodies are read in the same pass.
+        self._flatten_braces = flatten_braces
         self.i = 0
         self.items: list[_Item] = []
         self._pending: list[_Here] = []
@@ -653,9 +679,19 @@ class _Lexer:
         self._double()
 
     def _brace(self) -> None:
-        _, end = self._scan_balanced(self.i + 1, "{", "}")
+        if self._flatten_braces:
+            self._push("${", "${")
+            self.i += 2
+            return
+        inner, end = self._scan_balanced(self.i + 1, "{", "}")
         raw = self.text[self.i : end]
         self._push(raw, raw)
+        # A parameter expansion body can *run* a command: bash evaluates the word in
+        # `${x:-$(rm -rf /)}` to produce the default, and the same holds for `:=`,
+        # `:+`, `?` and the `#`/`%` trim forms. Hoisting those substitutions is what
+        # keeps them visible; without it the only binary this segment reports is the
+        # outer one, and every rule that keys on `rm` looks straight past it.
+        self._subs.extend(_nested_substitutions(inner))
         self.i = end
 
     # -- operators, redirects, heredocs ------------------------------------- #
