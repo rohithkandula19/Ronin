@@ -22,7 +22,7 @@ has not is guessing.
 from __future__ import annotations
 
 import base64
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -546,3 +546,63 @@ class MultiEditTool(Tool):
             content=f"edited {path} ({len(raw_edits)} edits, {total} replacements)",
             artifacts=(str(path),),
         )
+
+
+# --------------------------------------------------------------------------- #
+# What an edit would do, before it does it
+# --------------------------------------------------------------------------- #
+
+#: Tools whose effect on a file can be shown as a diff before it is approved.
+PREVIEWABLE: frozenset[str] = frozenset({"write", "edit", "multi_edit"})
+
+
+def preview(
+    name: str, args: Mapping[str, Any], *, resolve: Callable[[str], Path]
+) -> tuple[str, str] | None:
+    """``(before, after)`` for an edit-shaped call, or ``None`` if it cannot be shown.
+
+    Built on the same :func:`apply_edit` the tools run, deliberately: a preview
+    computed by a second implementation is a preview that can drift, and a human who
+    approves diff A while diff B lands has been shown a lie rather than a summary.
+
+    Every failure is ``None`` rather than an exception. A call that cannot be previewed
+    is usually one that will fail anyway — a missing file, an ``old_string`` that does
+    not match, a binary blob — and it should fail in the tool, with the message the
+    model needs, instead of taking down the approval prompt on the way there.
+    """
+    if name not in PREVIEWABLE:
+        return None
+    try:
+        path = resolve(require_str(args, "path"))
+        if name == "write":
+            before = _read_text(path) if path.is_file() else ""
+            return before, require_str(args, "content")
+        before = _read_text(path)
+        if name == "edit":
+            after, _count = apply_edit(
+                before,
+                require_str(args, "old_string"),
+                require_str(args, "new_string"),
+                replace_all=optional_bool(args, "replace_all"),
+                path_label=str(path),
+            )
+            return before, after
+        edits = args.get("edits")
+        if not isinstance(edits, Sequence) or isinstance(edits, str) or not edits:
+            return None
+        buffer = before
+        for entry in edits:
+            if not isinstance(entry, Mapping):
+                return None
+            # Each edit sees the previous one's result, exactly as `multi_edit` runs
+            # them. Previewing them independently would show a diff that never happens.
+            buffer, _count = apply_edit(
+                buffer,
+                require_str(entry, "old_string"),
+                require_str(entry, "new_string"),
+                replace_all=optional_bool(entry, "replace_all"),
+                path_label=str(path),
+            )
+        return before, buffer
+    except (ToolError, OSError, ValueError):
+        return None

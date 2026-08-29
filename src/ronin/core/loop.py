@@ -264,6 +264,7 @@ async def run_turn(
     max_tool_result_chars: int = DEFAULT_MAX_TOOL_RESULT_CHARS,
     steering: Callable[[], Sequence[str]] | None = None,
     todos: Callable[[], Sequence[Todo]] | None = None,
+    preview: Callable[[ToolUse], str | None] | None = None,
 ) -> AsyncIterator[Event]:
     """Run one turn to completion, yielding every observable step.
 
@@ -457,7 +458,11 @@ async def run_turn(
                 continue
 
             if spec.requires_approval:
-                rendered = _render(use)
+                # A diff when one can be built, the call and its arguments otherwise.
+                # One value either way: what the event carries, what the policy is
+                # asked with and what the human reads are the same string by
+                # construction, and that is the property the gate rests on.
+                rendered = (preview(use) if preview is not None else None) or _render(use)
                 yield ApprovalRequest(
                     tool_use_id=use.id,
                     name=use.name,

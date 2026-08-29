@@ -113,7 +113,7 @@ from ..verify.runner import (
     run_plan,
     should_verify,
 )
-from .gate import live_todos, seed_todos
+from .gate import live_preview, live_todos, seed_todos
 from .spine import Runtime
 
 #: Matches ``core.loop.DEFAULT_MAX_ITERATIONS``. Restated because it is part of
@@ -813,6 +813,9 @@ class Conversation:
                 # `TurnEnd.agent_state` is the one the tools left behind, not the one
                 # the turn started with.
                 todos=lambda: live_todos(runtime.registry),
+                # What the human reads before approving an edit. Falls back to the
+                # call and its arguments whenever a diff cannot be built.
+                preview=live_preview(runtime.registry),
             )
             async for event in stream:
                 if isinstance(event, ToolStart) and self._mutating(runtime, event.name):

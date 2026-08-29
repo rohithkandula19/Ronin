@@ -1174,3 +1174,41 @@ async def test_an_interrupt_during_the_approval_pass_answers_the_remaining_calls
     assert [b.tool_use_id for b in blocks] == ["t1", "t2"]
     assert all(b.is_error and "interrupted" in b.content for b in blocks)
     assert only_turn_end(events).stop_reason == StopReason.INTERRUPTED.value
+
+
+async def test_an_injected_preview_is_what_the_human_is_shown_and_the_policy_is_asked() -> None:
+    """The seam that puts a diff in front of an edit.
+
+    One string, still: the event, the policy call and the human's screen all carry the
+    same `rendered`. That the two cannot diverge is the property the gate rests on, and
+    it is why the preview is folded into `rendered` rather than added beside it.
+    """
+    tools = FakeTools({"deploy": (GATED, succeeds("deployed"))})
+    model = FakeModel([tool_turn(call("u1", "deploy", env="prod")), text_turn("done")])
+    policy = FakePolicy()
+    events = await run_events(
+        model, tools, policy, preview=lambda use: f"--- a/x\n+++ b/x\n+{use.name}"
+    )
+    request = of_type(events, ApprovalRequest)[0]
+    assert request.rendered == "--- a/x\n+++ b/x\n+deploy"
+    assert policy.approvals[0].rendered == request.rendered
+
+
+async def test_a_preview_that_declines_falls_back_to_the_call_and_its_arguments() -> None:
+    # A file that moved, an `old_string` that stopped matching, a tool that is not an
+    # edit at all. The prompt still has to say something, and the JSON line is what it
+    # said before there was ever a diff.
+    tools = FakeTools({"deploy": (GATED, succeeds("deployed"))})
+    model = FakeModel([tool_turn(call("u1", "deploy", env="prod")), text_turn("done")])
+    events = await run_events(model, tools, FakePolicy(), preview=lambda _use: None)
+    assert of_type(events, ApprovalRequest)[0].rendered == 'deploy({"env": "prod"})'
+
+
+async def test_an_empty_preview_falls_back_rather_than_showing_a_blank_prompt() -> None:
+    # `render_diff` returns a note rather than "" for two identical texts, but a future
+    # one might not, and an approval prompt with nothing in it is the worst outcome
+    # here: it asks a human to agree to something it declined to describe.
+    tools = FakeTools({"deploy": (GATED, succeeds("deployed"))})
+    model = FakeModel([tool_turn(call("u1", "deploy", env="prod")), text_turn("done")])
+    events = await run_events(model, tools, FakePolicy(), preview=lambda _use: "")
+    assert of_type(events, ApprovalRequest)[0].rendered == 'deploy({"env": "prod"})'

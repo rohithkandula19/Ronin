@@ -632,7 +632,7 @@ def pytest_spec() -> VerifySpec:
 def build_runtime(
     loaded: Loaded,
     *,
-    tools: ScriptedTools | None = None,
+    tools: ScriptedTools | RealToolRegistry | None = None,
     git: Callable[..., Any] | None = None,
     transcript: Transcript | None = None,
     context_window: int = 4_000,
