@@ -160,6 +160,25 @@ _WRAPPER_VALUE_FLAGS: Mapping[str, frozenset[str]] = {
     "watch": frozenset({"-n", "--interval"}),
 }
 
+#: Flags whose *following words* are a command, up to a ``;`` or ``+`` terminator.
+#:
+#: Unlike :data:`WRAPPERS`, the binary here is a real program doing real work --
+#: ``find`` is not a prefix to peel off. The command it runs sits in the middle of its
+#: argv, so a resolver that reads only the first word reports ``find`` and stops.
+#: ``find . -exec rm -rf {} \;`` deletes the tree and used to raise no hazard at all.
+#:
+#: ``-ok`` and ``-okdir`` prompt the user per file before running. They are listed
+#: anyway: the prompt is ``find``'s, shown after Ronin has already decided, and a
+#: human who has been told nothing is about to run is being asked the wrong question.
+EXEC_ARGUMENT_FLAGS: Mapping[str, frozenset[str]] = {
+    "find": frozenset({"-exec", "-execdir", "-ok", "-okdir"}),
+}
+
+#: What ends an ``-exec`` clause. ``\;`` runs the command once per match and ``+``
+#: batches the matches into one run; the difference is how often, not what.
+_EXEC_TERMINATORS: frozenset[str] = frozenset({";", "+"})
+
+
 #: ``VAR=value`` at the head of a segment is an environment assignment, not a program.
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
@@ -185,6 +204,7 @@ class Origin(StrEnum):
     EVAL = "eval"
     INTERPRETER = "interpreter"
     HEREDOC = "heredoc"
+    EXEC_ARGUMENT = "exec-argument"
 
 
 # --------------------------------------------------------------------------- #
@@ -952,6 +972,29 @@ def _group_items(items: Sequence[_Item]) -> list[_Group]:
     return groups
 
 
+def _exec_payloads(argv: Sequence[str], flags: frozenset[str]) -> tuple[str, ...]:
+    """Each command introduced by one of ``flags``, in the order they appear.
+
+    A clause runs from the word after the flag to the next ``;`` or ``+``. One argv can
+    hold several (`find . -exec a \\; -exec b \\;`), and the last one may be
+    unterminated if the command was truncated -- taking it anyway is the safer read,
+    since the alternative is to say nothing about a command that is plainly there.
+    """
+    found: list[str] = []
+    index = 0
+    while index < len(argv):
+        if argv[index] not in flags:
+            index += 1
+            continue
+        index += 1
+        start = index
+        while index < len(argv) and argv[index] not in _EXEC_TERMINATORS:
+            index += 1
+        if index > start:
+            found.append(" ".join(argv[start:index]))
+    return tuple(found)
+
+
 def _payload_after(argv: Sequence[str], flags: Sequence[str]) -> str | None:
     for index, word in enumerate(argv):
         if word in flags and index + 1 < len(argv):
@@ -1035,6 +1078,10 @@ def _parse_nested(
         # re-parsing the wrapper would duplicate it and invent a nonsense binary.
         if not _is_bare_substitution(payload):
             _parse_into(payload, out, depth=depth + 1, parent=index, origin=Origin.EVAL)
+    exec_flags = EXEC_ARGUMENT_FLAGS.get(segment.binary)
+    if exec_flags is not None:
+        for payload in _exec_payloads(segment.argv, exec_flags):
+            _parse_into(payload, out, depth=depth + 1, parent=index, origin=Origin.EXEC_ARGUMENT)
     flags = CODE_INTERPRETERS.get(segment.binary)
     if flags is not None:
         payload = _payload_after(segment.argv, flags)
@@ -1274,6 +1321,7 @@ __all__ = [
     "CODE_INTERPRETERS",
     "DECODER_BINARIES",
     "EVAL_BINARIES",
+    "EXEC_ARGUMENT_FLAGS",
     "FETCH_BINARIES",
     "HARMLESS_DEVICES",
     "SHELL_EXECUTORS",
