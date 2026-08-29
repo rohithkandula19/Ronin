@@ -761,3 +761,73 @@ def test_the_terminator_is_not_swallowed_into_the_command() -> None:
     assert segments[1].argv == ("rm", "-rf", "{}")
     plus = parse_command("find . -exec rm -rf {} +")
     assert plus[1].argv == ("rm", "-rf", "{}")
+
+
+# --------------------------------------------------------------------------- #
+# Apostrophes inside a double-quoted expansion
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "operator",
+    [":-", "-", ":=", "=", ":+", "+"],
+)
+def test_apostrophes_do_not_hide_a_command_in_a_quoted_value_word(operator: str) -> None:
+    """`echo "${x:-'$(rm -rf /etc)'}"` deletes the directory.
+
+    Inside double quotes an apostrophe in a *value* word is an ordinary character, not
+    a quote — so it hides nothing from bash while hiding everything from a scanner that
+    reads it as one. Two apostrophes took this from "ask, recursive delete" to silent.
+
+    Which operator fires depends on whether the variable happens to be set, which the
+    scanner cannot know: `:-` runs when unset, `:+` when set. So all six count.
+    """
+    command = 'echo "${x' + operator + "'$(rm -rf /etc)'}\""
+    assert "rm" in binaries(command)
+    assert worst_severity(hazards(parse_command(command))) is Severity.ASK
+
+
+@pytest.mark.parametrize("operator", [":?", "?", "#", "%"])
+def test_apostrophes_in_a_pattern_or_message_still_mean_what_they_say(operator: str) -> None:
+    """The other half, and the reason this is not just "treat every body as quoted".
+
+    In a pattern (`#`, `%`) or an error message (`:?`), the apostrophes *do* suppress
+    the expansion and bash runs nothing — verified the same way, by pointing the
+    payload at a throwaway directory and finding it still there. Reporting these would
+    be crying wolf on four shapes to catch six, which teaches a human to wave the next
+    prompt through.
+    """
+    assert binaries('echo "${x' + operator + "'$(rm -rf /etc)'}\"") == ["echo"]
+
+
+@pytest.mark.parametrize("operator", [":-", "-", ":=", "=", ":+", "+", ":?", "?", "#", "%"])
+def test_an_unapostrophed_body_is_seen_whatever_the_operator(operator: str) -> None:
+    # Every one of these runs under bash, quoted or not. This is what PR #231 fixed and
+    # what the apostrophe rule must not undo.
+    assert "rm" in binaries('echo "${x' + operator + '$(rm -rf /etc)}"')
+
+
+@pytest.mark.parametrize("operator", [":-", "-", ":=", "=", ":+", "+"])
+def test_apostrophes_outside_double_quotes_still_quote(operator: str) -> None:
+    """Unquoted, `'` is a quote again and bash runs nothing — the rule is about the
+    double quotes around the expansion, not about the expansion."""
+    assert binaries("echo ${x" + operator + "'$(rm -rf /etc)'}") == ["echo"]
+
+
+def test_a_length_or_an_indirection_has_no_value_word() -> None:
+    # `${#x}` is a character count and `${!x}` reads the variable named by x. Neither
+    # has a word to expand, and treating the name as one would misread the body.
+    assert binaries('echo "${#x}"') == ["echo"]
+    assert binaries('echo "${!x}"') == ["echo"]
+
+
+def test_the_operator_is_read_as_the_longest_one_that_matches() -> None:
+    # `:-` must not be read as a bare `-` with a stray colon: the word would then start
+    # one character late and the substitution at its head would be cut in half.
+    assert "rm" in binaries("echo \"${x:-'$(rm -rf /etc)'}\"")
+    assert "rm" in binaries("echo \"${x:='$(rm -rf /etc)'}\"")
+
+
+def test_a_substring_expansion_is_not_a_value_word() -> None:
+    # `${x:1:2}` shares its leading colon with `:-` and means something else entirely.
+    assert binaries('echo "${x:1:2}"') == ["echo"]
