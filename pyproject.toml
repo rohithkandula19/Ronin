@@ -360,6 +360,7 @@ module = [
     "test_ui_keys",
     "test_ui_live_todos",
     "test_ui_mentions",
+    "test_ui_paste",
     "test_ui_reduce",
     "test_ui_render",
     "test_ui_steering_and_errors",

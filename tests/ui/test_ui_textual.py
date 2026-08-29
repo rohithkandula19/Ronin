@@ -1011,3 +1011,116 @@ async def test_ordinary_typing_never_asks_the_orchestrator_for_the_file_list() -
         await _typed_into(app, pilot, "no mentions here at all")
 
         assert asked == []
+
+
+# --------------------------------------------------------------------------- #
+# multi-line paste, driven through the pilot
+# --------------------------------------------------------------------------- #
+
+
+async def _paste(app: object, pilot: Any, text: str) -> Any:
+    """Deliver a paste the way Textual does: straight to the focused widget.
+
+    Not through `pilot.press`. A bracketed paste never becomes key events — the
+    parser buffers the whole run and posts one `events.Paste` — so pressing the
+    characters would exercise a path that cannot happen.
+    """
+    from textual import events
+
+    line = _input(app)
+    line.focus()
+    await pilot.pause()
+    line.post_message(events.Paste(text))
+    await pilot.pause()
+    return line
+
+
+async def test_a_multi_line_paste_keeps_every_line_it_was_given() -> None:
+    """Textual's own handler is `event.text.splitlines()[0]`.
+
+    Before this, pasting a forty-line traceback put one line in the box and dropped
+    the rest with no warning: the person saw a short line, pressed enter, and the
+    model answered a question nobody had asked.
+    """
+    submitted: list[str] = []
+    app = _build_app(Session(events=stream(happy_turn()), on_submit=submitted.append))
+    async with app.run_test() as pilot:
+        line = await _paste(app, pilot, "first line\nsecond line\nthird line")
+
+        assert line.value != "first line", "the base handler must not get the text"
+        assert "3 lines" in line.value
+
+        await pilot.press("enter")
+        await pilot.pause()
+        assert submitted == ["first line\nsecond line\nthird line"]
+
+
+async def test_a_multi_line_paste_is_one_submission_not_several() -> None:
+    # The newlines are inside a stashed value, so nothing can read them as enters.
+    submitted: list[str] = []
+    app = _build_app(Session(events=stream(happy_turn()), on_submit=submitted.append))
+    async with app.run_test() as pilot:
+        await _paste(app, pilot, "one\ntwo\nthree\nfour")
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert len(submitted) == 1
+
+
+async def test_a_single_line_paste_still_lands_in_the_line_as_text() -> None:
+    # The common case must not grow a marker: what you pasted is what the box holds.
+    submitted: list[str] = []
+    app = _build_app(Session(events=stream(happy_turn()), on_submit=submitted.append))
+    async with app.run_test() as pilot:
+        line = await _paste(app, pilot, "just one line")
+
+        assert line.value == "just one line"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert submitted == ["just one line"]
+
+
+async def test_a_paste_lands_where_the_cursor_is_and_keeps_the_typing_around_it() -> None:
+    # Pasting into a half-written sentence is the ordinary way this gets used.
+    submitted: list[str] = []
+    app = _build_app(Session(events=stream(happy_turn()), on_submit=submitted.append))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await _typed_into(app, pilot, "explain ")
+        await _paste(app, pilot, "a\nb")
+        await _typed_into(app, pilot, " please")
+
+        await pilot.press("enter")
+        await pilot.pause()
+        assert submitted == ["explain a\nb please"]
+
+
+async def test_history_recalls_the_pasted_text_not_the_marker() -> None:
+    """The book is cleared with the line, so a recalled marker would name a paste
+    nobody is holding — and would reach the model as its own literal text."""
+    submitted: list[str] = []
+    app = _build_app(Session(events=stream(happy_turn()), on_submit=submitted.append))
+    async with app.run_test() as pilot:
+        await _paste(app, pilot, "alpha\nbeta")
+        await pilot.press("enter")
+        await pilot.pause()
+
+        await pilot.press("up")
+        await pilot.pause()
+        assert _input(app).value == "alpha\nbeta"
+
+
+async def test_the_stash_does_not_leak_into_the_next_prompt() -> None:
+    # Cleared with the line it belonged to. A marker typed later is just text.
+    submitted: list[str] = []
+    app = _build_app(Session(events=stream(happy_turn()), on_submit=submitted.append))
+    async with app.run_test() as pilot:
+        line = await _paste(app, pilot, "a\nb")
+        marker = line.value
+        await pilot.press("enter")
+        await pilot.pause()
+
+        await _typed_into(app, pilot, marker)
+        await pilot.press("enter")
+        await pilot.pause()
+        assert submitted[-1] == marker

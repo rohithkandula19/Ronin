@@ -65,6 +65,7 @@ from ronin.core.types import (
 
 from .commands import is_command
 from .mentions import NO_COMPLETION, Completion, accept, active_mention, rank
+from .paste import NO_PASTES, PasteBook, expand, stash
 from .reduce import (
     REASON_KEY,
     SPINNER_INTERVAL_SECONDS,
@@ -355,6 +356,9 @@ class KeyController:
     #: The ``@file`` paths on offer. Here beside the history because both are what the
     #: arrow keys mean, and which one they mean depends on whether this is open.
     completion: Completion = NO_COMPLETION
+    #: Multi-line pastes held aside for the line currently being typed. Here rather
+    #: than on the app so it can be tested without a terminal, like the history above.
+    pastes: PasteBook = NO_PASTES
     clock: Callable[[], float] = time.monotonic
 
     def press_escape(self) -> EscapeAction:
@@ -456,6 +460,40 @@ def _build_app(session: Session) -> Any:
     modal_base: Any = textual_screen.ModalScreen
     static: Any = textual_widgets.Static
     input_widget: Any = textual_widgets.Input
+
+    class PromptInput(input_widget):  # type: ignore[misc]  # base is Any: lazy import
+        """The prompt line, with a paste that keeps every line it was given.
+
+        Textual's own handler is ``event.text.splitlines()[0]`` — a forty-line
+        traceback becomes one line and the rest is dropped with no sign that anything
+        happened. Here a paste of two or more lines is stashed and a marker takes its
+        place; :func:`ronin.ui.paste.expand` puts the text back on submit.
+
+        ``Paste`` is delivered straight to the focused widget rather than bubbling, and
+        the base handler stops it, so this cannot be done from the app's own
+        ``on_paste``. Overriding is the only seam. Textual walks the whole MRO and runs
+        *every* matching handler, so suppressing the base one takes
+        ``prevent_default()``; ``stop()`` alone would let it run and eat the text.
+        """
+
+        #: Set by the app after construction. A plain attribute rather than an
+        #: argument because Textual owns the constructor signature.
+        keys: Any = None
+        on_stashed: Any = None
+
+        def _on_paste(self, event: Any) -> None:
+            if not event.text or self.keys is None:
+                return
+            self.keys.pastes, inserted = stash(self.keys.pastes, event.text)
+            selection = self.selection
+            if selection.is_empty:
+                self.insert_text_at_cursor(inserted)
+            else:
+                self.replace(inserted, *selection)
+            event.prevent_default()
+            event.stop()
+            if self.on_stashed is not None:
+                self.on_stashed()
 
     class ApprovalModal(modal_base):  # type: ignore[misc]  # base is Any: lazy import
         """One approval, taking the whole screen until the human answers it.
@@ -595,7 +633,12 @@ def _build_app(session: Session) -> Any:
             # The multi-turn affordance. Docked above the status line so streaming text
             # fills the space between. Present even when `on_submit` is unset (demo /
             # replay); the submit handler simply has nothing to hand a prompt to then.
-            yield input_widget(placeholder=INPUT_PLACEHOLDER, id=INPUT_ID)
+            line = PromptInput(placeholder=INPUT_PLACEHOLDER, id=INPUT_ID)
+            line.keys = self.keys
+            # Repaint when a paste is stashed, so the notice saying what was captured
+            # appears at the moment it happens rather than on the next keystroke.
+            line.on_stashed = self._paint
+            yield line
             yield static("", id=STATUS_ID)
 
         def on_input_changed(self, event: Any) -> None:
@@ -627,7 +670,13 @@ def _build_app(session: Session) -> Any:
             turn is the orchestrator's business, reached only through the injected
             ``on_submit``; the app itself starts nothing.
             """
-            text = event.value
+            # Expanded before anything else looks at it, so every path below — the
+            # history, a slash command, a steer, the model — sees the text that was
+            # actually pasted rather than the marker standing in for it. The book is
+            # cleared with the line it belonged to; a marker recalled from history
+            # after that would name a paste nobody is holding.
+            text = expand(event.value, self.keys.pastes)
+            self.keys.pastes = NO_PASTES
             event.input.value = ""
             if not text.strip():
                 return
