@@ -91,6 +91,40 @@ DECODER_BINARIES: frozenset[str] = frozenset(
 #: Words peeled off the front of a segment while looking for the real program.
 #: ``xargs`` is here on purpose: ``echo / | xargs rm -rf`` runs ``rm``, and a resolver
 #: that stopped at ``xargs`` would report a harmless-looking binary.
+#: Shell reserved words that *introduce* a command rather than being one.
+#:
+#: Without these, ``{ rm -rf /; }`` resolved to a program called ``{`` and the ``rm``
+#: after it was read as its argument — so every rule that keys on the binary had
+#: nothing to match, and a recursive delete of ``/`` produced no hazard at all. The
+#: same held for ``then``, ``do`` and ``else``, which is to say for the body of every
+#: ``if``, ``for`` and ``while`` ever written. ``( … )`` was already fine because
+#: parentheses are operator tokens; this closes the asymmetry.
+#:
+#: Peeled through the same path as :data:`WRAPPERS` because the shape is identical —
+#: a word that precedes the real program — but kept as its own set: these are grammar,
+#: not programs, and a reader should not have to wonder which ``time`` is meant.
+SHELL_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "{",
+        "}",
+        "!",
+        "if",
+        "then",
+        "elif",
+        "else",
+        "fi",
+        "while",
+        "until",
+        "for",
+        "select",
+        "do",
+        "done",
+        "case",
+        "esac",
+        "in",
+    }
+)
+
 WRAPPERS: frozenset[str] = frozenset(
     {
         "sudo",
@@ -802,6 +836,12 @@ def resolve_binary(
             index += 1
             continue
         name = PurePosixPath(word).name
+        if word in SHELL_KEYWORDS:
+            # Grammar, not a program: `then` runs nothing, so the next word is the
+            # command. No flag-skipping — a reserved word takes no options.
+            prefixes.append(word)
+            index += 1
+            continue
         if name in WRAPPERS:
             prefixes.append(name)
             index += 1
@@ -1201,6 +1241,7 @@ __all__ = [
     "FETCH_BINARIES",
     "HARMLESS_DEVICES",
     "SHELL_EXECUTORS",
+    "SHELL_KEYWORDS",
     "WRAPPERS",
     "Hazard",
     "HazardCode",
