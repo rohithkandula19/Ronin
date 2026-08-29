@@ -62,7 +62,16 @@ def test_a_semicolon_inside_double_quotes_is_not_a_separator() -> None:
 
 
 def test_an_escaped_semicolon_is_not_a_separator() -> None:
-    assert binaries(r"find . -name '*.py' -exec wc -l {} \;") == ["find"]
+    """The `\\;` ends find's `-exec` clause; it does not split the command in two.
+
+    Asserted on the *top-level* segments, because `wc` does now appear -- as the
+    command the clause runs, nested under the `find` that runs it. The distinction is
+    the whole point: a sibling would mean the shell had split here, and it does not.
+    """
+    segments = parse_command(r"find . -name '*.py' -exec wc -l {} \;")
+    assert [s.binary for s in segments if s.depth == 0] == ["find"]
+    assert [s.binary for s in segments] == ["find", "wc"]
+    assert segments[1].origin is Origin.EXEC_ARGUMENT
 
 
 def test_a_line_continuation_does_not_split_a_command() -> None:
@@ -676,3 +685,79 @@ def test_quoting_inside_an_expansion_decides_whether_it_runs(
     never runs trains a human to wave the prompt through, which costs more than it saves.
     """
     assert ("rm" in binaries(command)) is bash_runs_it
+
+
+# --------------------------------------------------------------------------- #
+# A command carried in an argument
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        r"find . -exec rm -rf {} \;",
+        r"find . -execdir rm -rf {} \;",
+        r"find . -ok rm -rf {} \;",
+        r"find . -okdir rm -rf {} \;",
+        "find . -exec rm -rf {} +",
+        r"find / -name x -exec rm -rf {} \; -print",
+        "find . -exec rm -rf {} ';'",  # quoted rather than escaped
+        'find . -exec rm -rf {} ";"',
+    ],
+)
+def test_a_command_run_by_find_is_seen(command: str) -> None:
+    r"""`find . -exec rm -rf {} \;` deletes the tree, and used to raise no hazard at all.
+
+    `find` is not a wrapper to peel off the front -- it is a real program doing real
+    work, and the command it runs sits in the middle of its argv. A resolver that reads
+    the first word reports `find` and stops, so every rule keyed on `rm` had nothing to
+    match. `bash -c` and heredoc bodies were already read this way; this is the same
+    channel wearing a different flag.
+    """
+    segments = parse_command(command)
+    assert "rm" in [segment.binary for segment in segments]
+    assert worst_severity(hazards(segments)) is Severity.ASK
+
+
+def test_the_inner_command_is_nested_under_the_find_that_runs_it() -> None:
+    # Not a sibling: a human reading the prompt needs to see that the `rm` is find's
+    # doing, and `origin` is what says so.
+    segments = parse_command(r"find . -exec rm -rf {} \;")
+    assert segments[0].binary == "find"
+    assert segments[1].binary == "rm"
+    assert segments[1].origin is Origin.EXEC_ARGUMENT
+    assert segments[1].depth == 1
+    assert segments[1].parent == 0
+
+
+def test_every_exec_clause_is_read_not_just_the_first() -> None:
+    # `find` accepts as many as you write, and stopping at the first would leave the
+    # dangerous one invisible whenever it is written second.
+    segments = parse_command(r"find . -exec echo a \; -exec rm -rf / \;")
+    assert [segment.binary for segment in segments] == ["find", "echo", "rm"]
+
+
+def test_an_unterminated_exec_clause_is_still_read() -> None:
+    # A missing `\;` is malformed input, not a reason to say nothing about a command
+    # that is plainly written there.
+    assert "rm" in binaries("find . -exec rm -rf {}")
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["find . -name '*.py'", "find . -type f", "find . -exec", "find .", "find . -print"],
+)
+def test_an_ordinary_find_still_runs_nothing(command: str) -> None:
+    # The cost of reading arguments as commands is false positives, and a `find` that
+    # searches is the overwhelmingly common case. `-exec` with nothing after it is the
+    # edge that would invent a segment out of an empty word list.
+    assert binaries(command) == ["find"]
+
+
+def test_the_terminator_is_not_swallowed_into_the_command() -> None:
+    # `;` and `+` end the clause; reading either as an argument would hand the model's
+    # command an operand it never wrote.
+    segments = parse_command(r"find . -exec rm -rf {} \;")
+    assert segments[1].argv == ("rm", "-rf", "{}")
+    plus = parse_command("find . -exec rm -rf {} +")
+    assert plus[1].argv == ("rm", "-rf", "{}")
