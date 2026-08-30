@@ -1140,3 +1140,63 @@ def test_the_phrase_has_to_follow_the_binary_to_count() -> None:
     # `foreach` is an ordinary word. A file with that name handed to another subcommand
     # is not an instruction to run whatever follows it.
     assert binaries("git add submodule foreach rm") == ["git"]
+
+
+# --------------------------------------------------------------------------- #
+# find, deleting without naming a program
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["find . -delete", "find / -delete", "find /etc -name '*.conf' -delete"],
+)
+def test_find_delete_is_a_recursive_delete(command: str) -> None:
+    """`find . -delete` removes the tree and named no program at all.
+
+    The `-exec` fix could not help here: there is no inner command to surface, because
+    `find` does the deleting itself. `find` always descends, so `-delete` *is* the
+    recursive spelling — there is no non-recursive form of it to distinguish.
+
+    Reported under `recursive_delete` rather than a code of its own: that is what it is,
+    and a second name for one idea leaves every rule keyed on the first one blind.
+    """
+    segments = parse_command(command)
+    found = hazards(segments)
+    assert HazardCode.RECURSIVE_DELETE in {hazard.code for hazard in found}
+    assert worst_severity(found) is Severity.ASK
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "find . -print",
+        "find . -name '*.py'",
+        "find /etc -type f",
+        "find . -deletex",  # a different flag that merely starts the same way
+        "find .",
+    ],
+)
+def test_a_find_that_only_looks_is_still_free(command: str) -> None:
+    # Searching is what `find` is for and is overwhelmingly the common case. `-deletex`
+    # is the edge that a prefix match rather than an exact one would get wrong.
+    assert hazards(parse_command(command)) == ()
+
+
+def test_the_exact_flag_match_is_what_finds_a_long_option() -> None:
+    """`-delete` is seven characters, and `has_flag` only expands *short* clusters.
+
+    Before this, every caller passed either a two-character flag (`-r`) or a `--long`
+    one, so the exact-match branch in `has_flag` was unreachable in practice — deleting
+    it changed nothing observable. This is the caller that makes it load-bearing, and
+    the test says so out loud, because the next person to run a mutation sweep over that
+    function deserves to know why the branch is there.
+    """
+    segment = parse_command("find / -delete")[0]
+    assert segment.has_flag("-delete")
+    # And a documented sharp edge, pinned rather than quietly changed: `has_flag`
+    # expands any single-dash word as a cluster, so `-delete` also answers to `-d`,
+    # `-e`, `-l` and `-t`. That is right for `-rf` and wrong for find's long options,
+    # but every current caller asks about flags this cannot confuse, and narrowing it
+    # would risk the cluster matching that four real rules depend on.
+    assert segment.has_flag("-d"), "reads -delete as a cluster; see the comment above"

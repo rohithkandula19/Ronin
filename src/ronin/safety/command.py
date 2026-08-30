@@ -1358,6 +1358,17 @@ def _segment_hazards(segments: Sequence[Segment], index: int, segment: Segment) 
             f"the program name is written as {segment.binary_raw!r} but resolves to "
             f"`{segment.binary}` — quoting a binary mid-word only ever hides it",
         )
+    if segment.binary == "find" and segment.has_flag("-delete"):
+        # `find` always descends, so there is no non-recursive spelling of this and no
+        # flag to key on: `-delete` *is* the recursion. Reported as a recursive delete
+        # rather than under a code of its own because that is exactly what it is, and a
+        # second name for one idea would leave every rule keyed on the first one blind.
+        yield hazard(
+            HazardCode.RECURSIVE_DELETE,
+            Severity.ASK,
+            "`find -delete` removes every match beneath the starting point: confirm the "
+            "filter is narrow enough, since there is no undo and no listing first",
+        )
     if segment.binary == "rm":
         recursive = segment.has_flag("-r", "-R", "--recursive")
         if segment.has_flag("--no-preserve-root"):

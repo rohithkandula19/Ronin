@@ -310,3 +310,53 @@ def test_path_traversal_is_normalised_before_the_workspace_check() -> None:
     hits = guard.check_path("src/../../outside/x.txt", write=True)
     assert hits and hits[0].code is DenyCode.OUTSIDE_WORKSPACE
     assert "/work/outside/x.txt" in hits[0].detail
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("find / -delete", DenyCode.RM_ROOT),
+        ("find ~ -delete", DenyCode.RM_HOME),
+        (f"find {HOME} -delete", DenyCode.RM_HOME),
+    ],
+)
+def test_find_delete_is_refused_where_rm_would_be(command: str, expected: DenyCode) -> None:
+    """`find / -delete` empties the machine exactly as `rm -rf /` does.
+
+    It was allowed while `rm -rf /` was refused, because the refusal keyed on the
+    binary being `rm` and on a recursion flag `find` has no need for.
+    """
+    guard = Denylist(workspace_root=WORKSPACE, home=HOME)
+    assert expected in {hit.code for hit in guard.check_command(command)}
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["find /etc -name '*.conf'", "find /etc -type f", "find / -print", "find /etc"],
+)
+def test_a_find_that_only_reads_is_not_refused_wherever_it_looks(command: str) -> None:
+    # The whole point of separating a read from a write: searching outside the
+    # workspace is nobody's problem, and refusing it would make the guard noise.
+    guard = Denylist(workspace_root=WORKSPACE, home=HOME)
+    assert guard.check_command(command) == ()
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("find /etc -name '*.conf' -delete", DenyCode.OUTSIDE_WORKSPACE),
+        ("find ~/.ssh -delete", DenyCode.SECRET_WRITE),
+        (f"find {HOME}/.ssh/id_rsa -delete", DenyCode.SECRET_WRITE),
+        ("find ~/.aws -delete", DenyCode.SECRET_WRITE),
+    ],
+)
+def test_a_deleting_find_is_judged_as_a_write_not_a_read(command: str, expected: DenyCode) -> None:
+    """`find` is the one binary whose paths are read *or* written depending on a flag.
+
+    Left as a read, `find /etc -name '*.conf' -delete` passed untouched, and deleting
+    your SSH keys was reported as `key_material_read` — the right file, the wrong verb,
+    and a sentence that would tell someone their keys had been *looked at* while they
+    were being removed.
+    """
+    guard = Denylist(workspace_root=WORKSPACE, home=HOME)
+    assert expected in {hit.code for hit in guard.check_command(command)}
