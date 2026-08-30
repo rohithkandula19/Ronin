@@ -174,6 +174,45 @@ EXEC_ARGUMENT_FLAGS: Mapping[str, frozenset[str]] = {
     "find": frozenset({"-exec", "-execdir", "-ok", "-okdir"}),
 }
 
+#: Flags whose *next word* is a whole command, quoted as one argument.
+#:
+#: Unlike :data:`EXEC_ARGUMENT_FLAGS` there is no terminator to find: the command is a
+#: single argv word because the shell already collapsed the quotes around it. That is
+#: the same shape as ``bash -c`` and it is read the same way.
+#:
+#: Every entry was checked by running it in a throwaway repository and seeing whether a
+#: marker file appeared, because ``git``'s own documentation is not consistent about
+#: which of these go through a shell.
+COMMAND_ARGUMENT_FLAGS: Mapping[str, frozenset[str]] = {
+    "git": frozenset(
+        {
+            "-x",
+            "--exec",
+            "--tree-filter",
+            "--index-filter",
+            "--commit-filter",
+            "--env-filter",
+            "--msg-filter",
+            "--parent-filter",
+        }
+    ),
+}
+
+#: Subcommand phrases after which *everything else* is a command to run.
+#:
+#: ``git submodule foreach 'rm -rf /etc'`` deletes the directory once per submodule and
+#: reported binary ``git``, no hazards. ``git bisect run`` is the same idea with the
+#: command spelled as plain argv rather than one quoted word; joining the remainder
+#: reads both, since a quoted word rejoins to exactly what was written.
+#:
+#: Options belonging to the phrase itself -- ``--recursive``, ``-q`` -- are skipped, so
+#: the command is found rather than mistaken for one of them.
+COMMAND_SUBCOMMANDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("git", ("submodule", "foreach")),
+    ("git", ("bisect", "run")),
+)
+
+
 #: What ends an ``-exec`` clause. ``\;`` runs the command once per match and ``+``
 #: batches the matches into one run; the difference is how often, not what.
 _EXEC_TERMINATORS: frozenset[str] = frozenset({";", "+"})
@@ -1043,6 +1082,24 @@ def _exec_payloads(argv: Sequence[str], flags: frozenset[str]) -> tuple[str, ...
     return tuple(found)
 
 
+def _subcommand_payload(argv: Sequence[str], phrase: Sequence[str]) -> str | None:
+    """Everything after ``phrase``, as one command, or ``None`` if it is not there.
+
+    The phrase has to match in order and immediately after the binary, so a file called
+    ``foreach`` passed to some other subcommand is not mistaken for one of these.
+    """
+    words = argv[1:]
+    if len(words) <= len(phrase) or tuple(words[: len(phrase)]) != tuple(phrase):
+        return None
+    rest = list(words[len(phrase) :])
+    # Only the *leading* options belong to the phrase. Dropping every option word
+    # would eat the inner command's own flags, and `rm /etc` is not `rm -rf /etc`:
+    # the hazard scanner keys on `-r`, so the delete would go quiet again.
+    while rest and rest[0].startswith("-"):
+        rest.pop(0)
+    return " ".join(rest) or None
+
+
 def _payload_after(argv: Sequence[str], flags: Sequence[str]) -> str | None:
     for index, word in enumerate(argv):
         if word in flags and index + 1 < len(argv):
@@ -1129,6 +1186,17 @@ def _parse_nested(
     exec_flags = EXEC_ARGUMENT_FLAGS.get(segment.binary)
     if exec_flags is not None:
         for payload in _exec_payloads(segment.argv, exec_flags):
+            _parse_into(payload, out, depth=depth + 1, parent=index, origin=Origin.EXEC_ARGUMENT)
+    command_flags = COMMAND_ARGUMENT_FLAGS.get(segment.binary)
+    if command_flags is not None:
+        payload = _payload_after(segment.argv, tuple(command_flags))
+        if payload:
+            _parse_into(payload, out, depth=depth + 1, parent=index, origin=Origin.EXEC_ARGUMENT)
+    for binary, phrase in COMMAND_SUBCOMMANDS:
+        if segment.binary != binary:
+            continue
+        payload = _subcommand_payload(segment.argv, phrase)
+        if payload:
             _parse_into(payload, out, depth=depth + 1, parent=index, origin=Origin.EXEC_ARGUMENT)
     flags = CODE_INTERPRETERS.get(segment.binary)
     if flags is not None:
@@ -1367,6 +1435,8 @@ def worst_severity(found: Sequence[Hazard]) -> Severity | None:
 
 __all__ = [
     "CODE_INTERPRETERS",
+    "COMMAND_ARGUMENT_FLAGS",
+    "COMMAND_SUBCOMMANDS",
     "DECODER_BINARIES",
     "EVAL_BINARIES",
     "EXEC_ARGUMENT_FLAGS",
