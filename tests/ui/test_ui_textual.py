@@ -484,9 +484,10 @@ async def test_the_app_never_constructs_an_approval_decision() -> None:
 
 
 def _input(app: object) -> Any:
-    from textual.widgets import Input
+    """The prompt line. A `TextArea` since it learned to hold more than one line."""
+    from textual.widgets import TextArea
 
-    return app.query_one(f"#{INPUT_ID}", Input)  # type: ignore[attr-defined]
+    return app.query_one(f"#{INPUT_ID}", TextArea)  # type: ignore[attr-defined]
 
 
 async def test_a_submitted_message_reaches_on_submit_and_clears_the_line() -> None:
@@ -497,17 +498,17 @@ async def test_a_submitted_message_reaches_on_submit_and_clears_the_line() -> No
         line = _input(app)
         line.focus()
         await pilot.pause()
-        line.value = "delete the temp files"
+        line.text = "delete the temp files"
         await pilot.press("enter")
         await pilot.pause()
     assert submitted == ["delete the temp files"], "Enter hands the message to on_submit"
-    assert line.value == "", "the line clears after a submit"
+    assert line.text == "", "the line clears after a submit"
 
 
 async def _typed(app: object, pilot: Any, text: str) -> None:
     """Put ``text`` on the focused prompt line and send it."""
     line = _input(app)
-    line.value = text
+    line.text = text
     await pilot.press("enter")
     await pilot.pause()
 
@@ -531,13 +532,13 @@ async def test_up_and_down_walk_the_prompts_that_were_sent() -> None:
 
         await pilot.press("up")
         await pilot.pause()
-        assert line.value == "second prompt"
+        assert line.text == "second prompt"
         await pilot.press("up")
         await pilot.pause()
-        assert line.value == "first prompt"
+        assert line.text == "first prompt"
         await pilot.press("down")
         await pilot.pause()
-        assert line.value == "second prompt"
+        assert line.text == "second prompt"
 
 
 async def test_a_half_written_prompt_survives_a_trip_through_history() -> None:
@@ -554,14 +555,14 @@ async def test_a_half_written_prompt_survives_a_trip_through_history() -> None:
         await pilot.pause()
         await _typed(app, pilot, "an earlier prompt")
 
-        line.value = "half written"
+        line.text = "half written"
         await pilot.press("up")
         await pilot.pause()
-        assert line.value == "an earlier prompt"
+        assert line.text == "an earlier prompt"
         await pilot.press("down")
         await pilot.pause()
 
-        assert line.value == "half written", "the draft did not come back"
+        assert line.text == "half written", "the draft did not come back"
 
 
 async def test_up_with_nothing_in_history_leaves_the_line_alone() -> None:
@@ -572,12 +573,12 @@ async def test_up_with_nothing_in_history_leaves_the_line_alone() -> None:
         line = _input(app)
         line.focus()
         await pilot.pause()
-        line.value = "nothing sent yet"
+        line.text = "nothing sent yet"
 
         await pilot.press("up")
         await pilot.pause()
 
-        assert line.value == "nothing sent yet"
+        assert line.text == "nothing sent yet"
 
 
 async def test_the_cursor_lands_at_the_end_of_a_recalled_prompt() -> None:
@@ -624,7 +625,7 @@ async def test_a_slash_command_is_recalled_too() -> None:
         await pilot.pause()
 
         assert ran == ["/cost"], "the command still ran"
-        assert line.value == "/cost", "and it is recallable"
+        assert line.text == "/cost", "and it is recallable"
 
 
 async def test_the_arrows_are_left_alone_when_the_prompt_line_is_not_focused() -> None:
@@ -638,14 +639,14 @@ async def test_the_arrows_are_left_alone_when_the_prompt_line_is_not_focused() -
         line.focus()
         await pilot.pause()
         await _typed(app, pilot, "recorded")
-        line.value = "still here"
+        line.text = "still here"
         app.set_focus(None)
         await pilot.pause()
 
         await pilot.press("up")
         await pilot.pause()
 
-        assert line.value == "still here", "history moved with the line unfocused"
+        assert line.text == "still here", "history moved with the line unfocused"
 
 
 async def test_a_blank_submit_is_not_a_turn() -> None:
@@ -656,7 +657,7 @@ async def test_a_blank_submit_is_not_a_turn() -> None:
         line = _input(app)
         line.focus()
         await pilot.pause()
-        line.value = "   "  # whitespace only
+        line.text = "   "  # whitespace only
         await pilot.press("enter")
         await pilot.pause()
     assert submitted == [], "a blank/whitespace submit is dropped, not run"
@@ -671,10 +672,10 @@ async def test_the_input_line_is_present_even_with_no_on_submit() -> None:
         line = _input(app)
         line.focus()
         await pilot.pause()
-        line.value = "ignored"
+        line.text = "ignored"
         await pilot.press("enter")
         await pilot.pause()
-        assert line.value == "", "still cleared, even with nothing consuming it"
+        assert line.text == "", "still cleared, even with nothing consuming it"
 
 
 # --------------------------------------------------------------------------- #
@@ -738,13 +739,13 @@ async def test_a_message_typed_mid_turn_steers_instead_of_queueing_a_new_turn() 
         line = _input(app)
         line.focus()
         await pilot.pause()
-        line.value = "actually use pathlib"
+        line.text = "actually use pathlib"
         await pilot.press("enter")
         await pilot.pause()
 
         assert steering.pending() == ("actually use pathlib",)
         assert submitted == [], "a mid-turn message must not also start a new turn"
-        assert line.value == ""
+        assert line.text == ""
         shown = _text(app, QUEUED_ID)
         assert "actually use pathlib" in shown
         assert "next step" in shown, "the line has to say when it lands, or esc is a guess"
@@ -770,7 +771,7 @@ async def test_a_message_typed_between_turns_starts_a_turn_rather_than_steering(
         line = _input(app)
         line.focus()
         await pilot.pause()
-        line.value = "now do the other thing"
+        line.text = "now do the other thing"
         await pilot.press("enter")
         await pilot.pause()
 
@@ -789,7 +790,7 @@ async def test_with_no_steering_seam_a_mid_turn_message_queues_exactly_as_before
         line = _input(app)
         line.focus()
         await pilot.pause()
-        line.value = "held for later"
+        line.text = "held for later"
         await pilot.press("enter")
         await pilot.pause()
 
@@ -827,7 +828,7 @@ async def test_the_steering_line_clears_when_the_loop_takes_the_message() -> Non
         line = _input(app)
         line.focus()
         await pilot.pause()
-        line.value = "use pathlib"
+        line.text = "use pathlib"
         await pilot.press("enter")
         await pilot.pause()
         assert "use pathlib" in _text(app, QUEUED_ID)
@@ -888,8 +889,8 @@ async def test_tab_inserts_the_selected_path_and_closes_the_picker() -> None:
         await pilot.press("tab")
         await pilot.pause()
 
-        assert line.value == "look at src/ronin/ui/app.py "
-        assert line.cursor_position == len(line.value)
+        assert line.text == "look at src/ronin/ui/app.py "
+        assert line.cursor_position == len(line.text)
         assert _text(app, MENTIONS_ID) == "", "the picker closes once it has been used"
 
 
@@ -904,7 +905,7 @@ async def test_the_arrows_choose_a_path_while_the_picker_is_open() -> None:
         await pilot.press("tab")
         await pilot.pause()
 
-        assert line.value == "src/ronin/cli/main.py "
+        assert line.text == "src/ronin/cli/main.py "
 
 
 async def test_the_arrows_go_back_to_the_history_once_the_picker_is_closed() -> None:
@@ -931,11 +932,11 @@ async def test_the_arrows_go_back_to_the_history_once_the_picker_is_closed() -> 
         await pilot.pause()
         assert _text(app, MENTIONS_ID) == ""
 
-        line.value = ""
+        line.text = ""
         await pilot.press("up")
         await pilot.pause()
 
-        assert line.value == "first message", "up must be the history again"
+        assert line.text == "first message", "up must be the history again"
 
 
 async def test_an_email_address_does_not_open_a_file_picker() -> None:
@@ -993,7 +994,7 @@ async def test_with_no_file_seam_an_at_is_ordinary_text() -> None:
         assert _text(app, MENTIONS_ID) == ""
         await pilot.press("tab")
         await pilot.pause()
-        assert line.value == "@app", "tab must not eat the line when nothing is offered"
+        assert line.text == "@app", "tab must not eat the line when nothing is offered"
 
 
 async def test_ordinary_typing_never_asks_the_orchestrator_for_the_file_list() -> None:
@@ -1047,8 +1048,8 @@ async def test_a_multi_line_paste_keeps_every_line_it_was_given() -> None:
     async with app.run_test() as pilot:
         line = await _paste(app, pilot, "first line\nsecond line\nthird line")
 
-        assert line.value != "first line", "the base handler must not get the text"
-        assert "3 lines" in line.value
+        assert line.text != "first line", "the base handler must not get the text"
+        assert "3 lines" in line.text
 
         await pilot.press("enter")
         await pilot.pause()
@@ -1074,7 +1075,7 @@ async def test_a_single_line_paste_still_lands_in_the_line_as_text() -> None:
     async with app.run_test() as pilot:
         line = await _paste(app, pilot, "just one line")
 
-        assert line.value == "just one line"
+        assert line.text == "just one line"
         await pilot.press("enter")
         await pilot.pause()
         assert submitted == ["just one line"]
@@ -1107,7 +1108,7 @@ async def test_history_recalls_the_pasted_text_not_the_marker() -> None:
 
         await pilot.press("up")
         await pilot.pause()
-        assert _input(app).value == "alpha\nbeta"
+        assert _input(app).text == "alpha\nbeta"
 
 
 async def test_the_stash_does_not_leak_into_the_next_prompt() -> None:
@@ -1116,7 +1117,7 @@ async def test_the_stash_does_not_leak_into_the_next_prompt() -> None:
     app = _build_app(Session(events=stream(happy_turn()), on_submit=submitted.append))
     async with app.run_test() as pilot:
         line = await _paste(app, pilot, "a\nb")
-        marker = line.value
+        marker = line.text
         await pilot.press("enter")
         await pilot.pause()
 
@@ -1124,3 +1125,120 @@ async def test_the_stash_does_not_leak_into_the_next_prompt() -> None:
         await pilot.press("enter")
         await pilot.pause()
         assert submitted[-1] == marker
+
+
+# --------------------------------------------------------------------------- #
+# a prompt that holds more than one line
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("key", ["alt+enter", "ctrl+j"])
+async def test_a_newline_can_be_typed_rather_than_only_pasted(key: str) -> None:
+    """The whole point of the widget change.
+
+    A multi-line paste already survived — it is stashed behind a marker — but *typing*
+    the second line of a commit message was impossible, and the workaround was to
+    compose the text somewhere else and paste it back.
+
+    Two keys are tested because terminals disagree about what they can report:
+    `shift+enter` needs the Kitty keyboard protocol, and `ctrl+j` is what a plain
+    terminal sends for a linefeed. Binding one of them would have left some users with
+    no way to do this at all.
+    """
+    submitted: list[str] = []
+    app = _build_app(Session(events=stream(happy_turn()), on_submit=submitted.append))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        line = _input(app)
+        line.focus()
+        await pilot.pause()
+        line.text = "first"
+        line.cursor_position = len("first")
+        await pilot.press(key)
+        await pilot.pause()
+        assert line.text == "first\n", f"{key} puts a newline in the text"
+        line.insert("second")
+        await pilot.press("enter")
+        await pilot.pause()
+    assert submitted == ["first\nsecond"], "both lines are sent as one message"
+
+
+async def test_enter_still_sends_instead_of_opening_a_line() -> None:
+    # A text area treats Enter as a newline, and this one must not: sending is what the
+    # key is for, and a prompt is one line far more often than not.
+    submitted: list[str] = []
+    app = _build_app(Session(events=stream(happy_turn()), on_submit=submitted.append))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        line = _input(app)
+        line.focus()
+        await pilot.pause()
+        line.text = "just one line"
+        await pilot.press("enter")
+        await pilot.pause()
+    assert submitted == ["just one line"]
+    assert line.text == "", "the line clears rather than growing a second row"
+
+
+async def test_history_yields_to_the_cursor_once_the_prompt_has_two_lines() -> None:
+    """`up` in the middle of a message means "the line above", not "discard this".
+
+    History is still reachable — from the top line, where moving up would do nothing
+    anyway — so nothing is lost and the editor behaves the way an editor should. This is
+    the one behaviour the migration changes rather than preserves.
+    """
+    app = _build_app(Session(events=stream(happy_turn()), on_submit=lambda _text: None))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        line = _input(app)
+        line.focus()
+        await pilot.pause()
+        await _typed(app, pilot, "an older prompt")
+
+        line.text = "alpha\nbeta"
+        line.cursor_position = len("alpha\nbeta")  # on the second line
+        await pilot.press("up")
+        await pilot.pause()
+        assert line.text == "alpha\nbeta", "the draft survives; the cursor just moved"
+        assert line.cursor_location[0] == 0, "the cursor is on the first line now"
+
+        # From the top line there is nowhere further up to go, so history takes over.
+        await pilot.press("up")
+        await pilot.pause()
+        assert line.text == "an older prompt", "history is still reachable from the top"
+
+
+async def test_history_still_works_from_a_single_line_prompt() -> None:
+    # The common case, unchanged: one line means the cursor is already at the top and
+    # the bottom, so `up` is history exactly as it was before.
+    app = _build_app(Session(events=stream(happy_turn()), on_submit=lambda _text: None))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        line = _input(app)
+        line.focus()
+        await pilot.pause()
+        await _typed(app, pilot, "remembered")
+        await pilot.press("up")
+        await pilot.pause()
+        assert line.text == "remembered"
+
+
+async def test_the_cursor_offset_survives_a_round_trip_through_rows_and_columns() -> None:
+    """`mentions.py` speaks flat offsets and a text area speaks `(row, column)`.
+
+    The conversion is the one place this migration could corrupt something quietly: an
+    off-by-one here puts the `@` picker on the wrong token, which is exactly the kind of
+    bug that looks like the picker "sometimes not working".
+    """
+    app = _build_app(Session(events=stream(happy_turn())))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        line = _input(app)
+        line.text = "alpha\nbeta\ngamma"
+        await pilot.pause()
+        for offset in range(len(line.text) + 1):
+            line.cursor_position = offset
+            assert line.cursor_position == offset, f"offset {offset} did not round-trip"
+        # Past the end clamps to the end rather than raising or wrapping.
+        line.cursor_position = 999
+        assert line.cursor_position == len(line.text)

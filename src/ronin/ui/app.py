@@ -114,7 +114,7 @@ MENTIONS_ID = "mentions"
 BANNER_ID = "banner"
 
 #: Placeholder shown in the empty input line.
-INPUT_PLACEHOLDER = "type a message, Enter to send — esc interrupt, shift+tab mode, ctrl+c quit"
+INPUT_PLACEHOLDER = "Enter sends, alt+enter newline — esc interrupt, shift+tab mode, ctrl+c quit"
 
 APP_CSS = """
 Screen { layout: vertical; }
@@ -127,7 +127,7 @@ Screen { layout: vertical; }
 #queued { height: auto; padding: 0 1; }
 #mentions { height: auto; padding: 0 1; }
 #banner { height: auto; padding: 1 1 0 1; }
-#prompt-input { dock: bottom; height: 3; margin: 0 1; }
+#prompt-input { dock: bottom; height: auto; max-height: 12; min-height: 3; margin: 0 1; }
 #status { height: 1; dock: bottom; padding: 0 1; }
 """
 
@@ -460,34 +460,102 @@ def _build_app(session: Session) -> Any:
     modal_base: Any = textual_screen.ModalScreen
     static: Any = textual_widgets.Static
     input_widget: Any = textual_widgets.Input
+    text_area_widget: Any = textual_widgets.TextArea
 
-    class PromptInput(input_widget):  # type: ignore[misc]  # base is Any: lazy import
-        """The prompt line, with a paste that keeps every line it was given.
+    class PromptArea(text_area_widget):  # type: ignore[misc]  # base is Any: lazy import
+        """The prompt line: a real editor, so a newline can be typed as well as pasted.
 
-        Textual's own handler is ``event.text.splitlines()[0]`` — a forty-line
-        traceback becomes one line and the rest is dropped with no sign that anything
-        happened. Here a paste of two or more lines is stashed and a marker takes its
-        place; :func:`ronin.ui.paste.expand` puts the text back on submit.
+        Was a single-line ``Input``. Pasting a traceback already survived -- a multi-line
+        paste is stashed and a marker stands in for it -- but *typing* the second line of
+        a commit message or a shell snippet was simply impossible, and the workaround was
+        to paste text you had to compose somewhere else first.
 
-        ``Paste`` is delivered straight to the focused widget rather than bubbling, and
-        the base handler stops it, so this cannot be done from the app's own
-        ``on_paste``. Overriding is the only seam. Textual walks the whole MRO and runs
-        *every* matching handler, so suppressing the base one takes
-        ``prevent_default()``; ``stop()`` alone would let it run and eat the text.
+        `Enter` still sends, because sending is what the key is for and every prompt in
+        this program is one line more often than not. A newline is `alt+enter`, `ctrl+j`
+        or `shift+enter` -- three keys for one job because terminals disagree about which
+        of them they can even report: `shift+enter` needs the Kitty keyboard protocol,
+        and `ctrl+j` is what a plain terminal sends for a linefeed.
+
+        The rest of the program speaks flat text and a flat cursor offset, which is what
+        `mentions.py` was built around. `TextArea` speaks `(row, column)`. That
+        conversion lives here, in :attr:`cursor_position`, rather than at each call site:
+        one adapter at the boundary beats four of them inland.
         """
 
-        #: Set by the app after construction. A plain attribute rather than an
-        #: argument because Textual owns the constructor signature.
+        #: Set by the app after construction. Plain attributes rather than constructor
+        #: arguments because Textual owns the signature.
         keys: Any = None
         on_stashed: Any = None
+        #: Called with the submitted text. The widget decides *when* a line is sent; what
+        #: happens to it afterwards is entirely the app's business.
+        on_send: Any = None
+        #: Consulted first for `up`, `down` and `tab`. Returns True if the app took the
+        #: key -- the `@` picker is open, or history moved -- and False to let it mean
+        #: what it means in any editor. Without this the base bindings would claim both
+        #: arrows and history would be unreachable.
+        on_nav: Any = None
+
+        #: Keys that put a newline in the text instead of sending it.
+        NEWLINE_KEYS = ("alt+enter", "ctrl+j", "shift+enter")
+
+        @property
+        def cursor_position(self) -> int:
+            """The cursor as an offset into :attr:`text`, counting the newlines."""
+            # `int(...)` because the base class is a lazy `Any`, so `cursor_location`
+            # carries no type of its own and the sum would silently become `Any` too.
+            row, column = self.cursor_location
+            lines = str(self.text).split("\n")
+            return sum(len(line) + 1 for line in lines[:row]) + int(column)
+
+        @cursor_position.setter
+        def cursor_position(self, offset: int) -> None:
+            remaining = max(offset, 0)
+            for row, line in enumerate(self.text.split("\n")):
+                if remaining <= len(line):
+                    self.move_cursor((row, remaining))
+                    return
+                remaining -= len(line) + 1
+            self.move_cursor(self.document.end)
+
+        def _on_key(self, event: Any) -> None:
+            """Runs ahead of the base handler and of the bindings, so this decides first.
+
+            `prevent_default` is what actually suppresses them: Textual walks the whole
+            MRO and runs every matching handler, so returning early is not enough --
+            the base `_on_key` would still insert a newline for `enter`.
+            """
+            if event.key in self.NEWLINE_KEYS:
+                event.stop()
+                event.prevent_default()
+                self.insert("\n")
+                return
+            if event.key in ("up", "down", "tab") and self.on_nav is not None:
+                if self.on_nav(event):
+                    event.stop()
+                    event.prevent_default()
+                return
+            if event.key == "enter":
+                event.stop()
+                event.prevent_default()
+                if self.on_send is not None:
+                    self.on_send(self.text)
+                return
 
         def _on_paste(self, event: Any) -> None:
+            """A multi-line paste is stashed and a marker stands in for it.
+
+            Kept exactly as it was when the line could not render a newline at all. It
+            is still the right behaviour: forty lines of traceback dropped into the box
+            would bury the sentence being written, and a marker naming what was captured
+            reads better than the wall it replaces. What changed is that this is now a
+            choice rather than the only option.
+            """
             if not event.text or self.keys is None:
                 return
             self.keys.pastes, inserted = stash(self.keys.pastes, event.text)
             selection = self.selection
             if selection.is_empty:
-                self.insert_text_at_cursor(inserted)
+                self.insert(inserted)
             else:
                 self.replace(inserted, *selection)
             event.prevent_default()
@@ -633,51 +701,60 @@ def _build_app(session: Session) -> Any:
             # The multi-turn affordance. Docked above the status line so streaming text
             # fills the space between. Present even when `on_submit` is unset (demo /
             # replay); the submit handler simply has nothing to hand a prompt to then.
-            line = PromptInput(placeholder=INPUT_PLACEHOLDER, id=INPUT_ID)
+            # `soft_wrap` so a long line folds instead of scrolling sideways, and no
+            # line numbers: this is a prompt, not a file being edited.
+            line = PromptArea(
+                placeholder=INPUT_PLACEHOLDER, id=INPUT_ID, soft_wrap=True, show_line_numbers=False
+            )
             line.keys = self.keys
             # Repaint when a paste is stashed, so the notice saying what was captured
             # appears at the moment it happens rather than on the next keystroke.
             line.on_stashed = self._paint
+            line.on_send = self._send_prompt
+            line.on_nav = self._take_nav_key
             yield line
             yield static("", id=STATUS_ID)
 
-        def on_input_changed(self, event: Any) -> None:
+        def on_text_area_changed(self, event: Any) -> None:
             """Every edit of the prompt line: recompute what ``@`` is offering.
 
-            Guarded on the widget id because the approval modal's reason line is an
-            ``Input`` too, and its ``Changed`` messages bubble through here on their way
-            up. Completing file paths into a denial reason would be nonsense.
+            Guarded on the widget id even though the approval modal's reason line is an
+            ``Input`` and no longer sends this message at all: the guard costs one
+            comparison and is what stops a second text area, added later, from silently
+            completing file paths into somewhere they make no sense.
 
             ``on_files`` is consulted only once the token under the cursor is actually a
             mention, so ordinary typing never reaches the orchestrator's tree walk.
             """
-            if self.session.on_files is None or event.input.id != INPUT_ID:
+            line = event.text_area
+            if self.session.on_files is None or line.id != INPUT_ID:
                 return
             before = self.keys.completion
-            offered = self.keys.offer(
-                event.value, event.input.cursor_position, self.session.on_files
-            )
+            offered = self.keys.offer(line.text, line.cursor_position, self.session.on_files)
             if offered != before:
                 self.state = self.state.with_completion(offered)
                 self._paint()
 
-        def on_input_submitted(self, event: Any) -> None:
+        def _send_prompt(self, raw: str) -> None:
             """Enter in the prompt line: hand a non-empty message to ``on_submit``, clear.
 
-            Textual dispatches ``Input.Submitted`` here by name. The line is cleared
-            unconditionally (so trailing whitespace never lingers) but a blank submit is
-            dropped — an empty prompt is not a turn. Whether a submitted prompt becomes a
-            turn is the orchestrator's business, reached only through the injected
-            ``on_submit``; the app itself starts nothing.
+            Called by :class:`PromptArea` rather than dispatched by Textual: a text area
+            has no ``Submitted`` message, because in every other program Enter is a
+            newline there. Here it sends, and the widget says so by calling this.
+
+            The line is cleared unconditionally (so trailing whitespace never lingers)
+            but a blank submit is dropped — an empty prompt is not a turn. Whether a
+            submitted prompt becomes a turn is the orchestrator's business, reached only
+            through the injected ``on_submit``; the app itself starts nothing.
             """
             # Expanded before anything else looks at it, so every path below — the
             # history, a slash command, a steer, the model — sees the text that was
             # actually pasted rather than the marker standing in for it. The book is
             # cleared with the line it belonged to; a marker recalled from history
             # after that would name a paste nobody is holding.
-            text = expand(event.value, self.keys.pastes)
+            text = expand(raw, self.keys.pastes)
             self.keys.pastes = NO_PASTES
-            event.input.value = ""
+            self.query_one(f"#{INPUT_ID}", text_area_widget).text = ""
             if not text.strip():
                 return
             # Recorded before dispatch, so a slash command is recalled too: `/model
@@ -837,60 +914,57 @@ def _build_app(session: Session) -> Any:
             ):
                 self.query_one(f"#{region}", static).update(text)
 
-        def on_key(self, event: Any) -> None:
+        def _take_nav_key(self, event: Any) -> bool:
             """``tab`` takes an offered path; ``up``/``down`` choose one, else walk history.
 
-            Handled here rather than as an app ``BINDING`` because a priority binding
-            fires ahead of the focused widget and would take these keys away from the
-            approval modal's reason line. Non-priority ``on_key`` on the app sees only
-            what the focused widget did not consume, and Textual's single-line ``Input``
-            consumes neither arrow.
+            Returns True when the app claims the key. Called *by the prompt widget*
+            rather than reached as an app ``on_key``, because a text area binds both
+            arrows to cursor movement and consumes them before the app ever sees them.
+            Asking first is what keeps history reachable.
 
-            Guarded on the prompt line actually having focus, so arrows keep meaning
-            whatever they mean everywhere else — scrolling the transcript, moving inside
-            some future multi-line editor — instead of being globally hijacked.
+            The `@` picker wins while it is open: it is transient and directly under the
+            cursor, where the history is not, and it closes the moment the token stops
+            being a mention. `escape` is deliberately *not* a dismissal — it interrupts
+            the turn, which is the most important key on the screen, and a picker is not
+            worth overloading it. `enter` still sends: if it took the selection instead,
+            a message containing an `@` word could never be sent in one keystroke.
 
-            The arrows are shared, and the ``@`` picker wins while it is open: it is
-            transient and directly under the cursor, where the history is not, and it
-            closes the moment the token stops being a mention. ``escape`` is
-            deliberately *not* a dismissal — it interrupts the turn, which is the most
-            important key on the screen, and a picker is not worth overloading it.
-            ``enter`` still submits: if it took the selection instead, a message
-            containing an ``@`` word could never be sent in one keystroke.
+            History yields to the editor once the prompt has more than one line. `up` in
+            the middle of a three-line message means "the line above", not "throw this
+            away and show me something older" — so history is offered only from the top
+            line (and `down` from the bottom), which is where it costs nothing and is
+            what every shell with a multi-line editor does.
             """
-            if event.key not in ("up", "down", "tab"):
-                return
-            line = self.query_one(f"#{INPUT_ID}", input_widget)
+            line = self.query_one(f"#{INPUT_ID}", text_area_widget)
             if self.focused is not line:
-                return
+                return False
             if self.keys.completion.open:
-                event.stop()
-                event.prevent_default()
                 if event.key == "tab":
-                    line.value, cursor = self.keys.take_completion(line.value, line.cursor_position)
+                    line.text, cursor = self.keys.take_completion(line.text, line.cursor_position)
                     line.cursor_position = cursor
                 else:
                     self.keys.move_completion(-1 if event.key == "up" else 1)
                 self.state = self.state.with_completion(self.keys.completion)
                 self._paint()
-                return
+                return True
             if event.key == "tab":
                 # Nothing on offer: leave tab to whatever it means elsewhere (focus).
-                return
+                return False
+            row, _column = line.cursor_location
+            last = line.text.count("\n")
+            if (event.key == "up" and row > 0) or (event.key == "down" and row < last):
+                return False
             recalled = (
-                self.keys.recall_older(line.value)
-                if event.key == "up"
-                else self.keys.recall_newer()
+                self.keys.recall_older(line.text) if event.key == "up" else self.keys.recall_newer()
             )
-            event.stop()
-            event.prevent_default()
             if recalled is None:
                 # Nothing older, or not browsing: hold the line as it is rather than
                 # clearing it. A history key that empties the box loses work.
-                return
-            line.value = recalled
-            # End of line, so editing a recalled prompt starts where you would type.
-            line.action_end()
+                return True
+            line.text = recalled
+            # End of the text, so editing a recalled prompt starts where you would type.
+            line.cursor_position = len(recalled)
+            return True
 
         def action_escape(self) -> None:
             action = self.keys.press_escape()
