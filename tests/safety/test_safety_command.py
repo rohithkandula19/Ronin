@@ -1059,3 +1059,84 @@ def test_an_expansion_inside_double_quotes_stays_one_word_however_it_is_quoted()
     against arguments the shell will never produce.
     """
     assert parse_command('echo "${x:-"a b"}" tail')[0].argv == ("echo", '${x:-"a b"}', "tail")
+
+
+# --------------------------------------------------------------------------- #
+# A command carried in a git argument
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git submodule foreach 'rm -rf /etc'",
+        "git submodule foreach --recursive 'rm -rf /etc'",
+        "git submodule foreach -q rm -rf /etc",
+        "git submodule foreach rm -rf /etc",
+        "git bisect run rm -rf /etc",
+        "git rebase -x 'rm -rf /etc' --root",
+        "git rebase --exec 'rm -rf /etc' --root",
+        "git filter-branch --tree-filter 'rm -rf /etc' HEAD",
+        "git filter-branch --index-filter 'rm -rf /etc' HEAD",
+    ],
+)
+def test_a_command_git_runs_for_you_is_seen(command: str) -> None:
+    """`git submodule foreach 'rm -rf /etc'` deletes the directory once per submodule.
+
+    Same class as the `find -exec` fix and the same blind spot: `git` is a real program
+    doing real work, and the command it runs sits in the middle of its argv. A resolver
+    that reads the first word reports `git` and stops.
+
+    Every one of these was confirmed by running it in a throwaway repository with a real
+    submodule and watching for a marker file, because git's own documentation is not
+    consistent about which of them go through a shell.
+    """
+    segments = parse_command(command)
+    assert "rm" in [segment.binary for segment in segments]
+    assert worst_severity(hazards(segments)) is Severity.ASK
+
+
+def test_the_inner_command_keeps_its_own_flags() -> None:
+    """The bug this nearly shipped with.
+
+    `--recursive` belongs to `foreach` and has to be skipped; `-rf` belongs to `rm` and
+    must not be. Dropping every option word reads the payload as `rm /etc`, which is a
+    different command — the hazard scanner keys on `-r`, so the delete goes quiet again
+    while the binary still looks caught.
+    """
+    segments = parse_command("git submodule foreach --recursive rm -rf /etc")
+    inner = [segment for segment in segments if segment.binary == "rm"]
+    assert inner and inner[0].argv == ("rm", "-rf", "/etc")
+
+
+def test_the_inner_command_is_nested_under_the_git_that_runs_it() -> None:
+    segments = parse_command("git submodule foreach 'rm -rf /etc'")
+    assert segments[0].binary == "git"
+    assert segments[1].origin is Origin.EXEC_ARGUMENT
+    assert (segments[1].depth, segments[1].parent) == (1, 0)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git status",
+        "git commit -m 'fix the thing'",
+        "git log --format=%s",
+        "git rebase --root",
+        "git submodule update --init",
+        "git submodule foreach",  # nothing after the phrase
+        "git submodule foreach --recursive",  # options only
+        "git diff --stat",
+    ],
+)
+def test_ordinary_git_still_runs_nothing_of_its_own(command: str) -> None:
+    # False positives are the real cost of reading arguments as commands, and ordinary
+    # git is overwhelmingly the common case. The last two are the edges that would
+    # invent a segment out of an empty word list.
+    assert binaries(command) == ["git"]
+
+
+def test_the_phrase_has_to_follow_the_binary_to_count() -> None:
+    # `foreach` is an ordinary word. A file with that name handed to another subcommand
+    # is not an instruction to run whatever follows it.
+    assert binaries("git add submodule foreach rm") == ["git"]
