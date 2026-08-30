@@ -38,7 +38,7 @@ tui = ["textual>=8.2.8,<9"]
 # Multi-language repo maps. `ronin.context.repomap` ships a stdlib-`ast` parser that
 # is exact for Python and needs nothing, so this extra widens language coverage
 # rather than enabling the feature.
-repomap = ["tree-sitter-language-pack>=0.9"]
+repomap = ["tree-sitter-language-pack>=1.15.8"]
 # Real sockets: provider HTTP/SSE streaming and MCP's network transports. Both
 # import httpx inside the sender that needs it, and both are fully tested offline
 # against injected transports, so this is only needed to talk to something real.
@@ -140,7 +140,7 @@ markers = [
 [dependency-groups]
 dev = [
     "mypy>=2.3.1",
-    "ruff>=0.16.3",
+    "ruff>=0.16.4",
     "pytest-cov>=5.0",
 ]
 
