@@ -198,6 +198,106 @@ COMMAND_ARGUMENT_FLAGS: Mapping[str, frozenset[str]] = {
     ),
 }
 
+#: Config keys whose *value* is a command line git will execute.
+#:
+#: `git -c core.sshCommand='rm -rf /etc' fetch` runs the delete. The command is not an
+#: argument here -- it is a configuration value, which is why the flag tables above
+#: cannot see it.
+#:
+#: Split by shape because git's key grammar is not flat: some are exact, some carry a
+#: user-chosen name in the middle (`filter.<whatever>.clean`), and some are a whole
+#: section (`pager.<subcommand>`).
+_CONFIG_COMMAND_KEYS: frozenset[str] = frozenset(
+    {
+        "core.pager",
+        "core.editor",
+        "core.sshcommand",
+        "sequence.editor",
+        "diff.external",
+        "gpg.program",
+        "uploadpack.packobjectshook",
+    }
+)
+
+#: `(prefix, suffix)` pairs, with a name of git's user's choosing in between.
+_CONFIG_COMMAND_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("filter.", ".clean"),
+    ("filter.", ".smudge"),
+    ("filter.", ".process"),
+    ("diff.", ".textconv"),
+    ("diff.", ".command"),
+    ("merge.", ".driver"),
+    ("gpg.", ".program"),
+)
+
+#: Whole sections where every key's value is a command.
+_CONFIG_COMMAND_SECTIONS: tuple[str, ...] = ("pager.",)
+
+#: Keys where a leading `!` is what makes the value a shell line rather than a name.
+#: `alias.co=checkout` is a git subcommand; `alias.co=!rm -rf /` is a delete.
+#: `credential.helper=foo` names the program `git-credential-foo`, which is not a shell
+#: line and not this parser's business.
+_CONFIG_BANG_KEYS: tuple[str, ...] = ("alias.", "credential.helper")
+
+#: Environment variables that are the same setting through a different door.
+#: `GIT_SSH_COMMAND='rm -rf /etc' git fetch` needs no `-c` at all.
+_GIT_COMMAND_ENV: frozenset[str] = frozenset(
+    {
+        "GIT_PAGER",
+        "GIT_EDITOR",
+        "GIT_SEQUENCE_EDITOR",
+        "GIT_SSH_COMMAND",
+        "GIT_EXTERNAL_DIFF",
+        "GIT_ASKPASS",
+        "SSH_ASKPASS",
+    }
+)
+
+
+def _config_command(key: str, value: str) -> str | None:
+    """The command in a git config value, or ``None`` when the value is not one."""
+    name = key.strip().lower()
+    for bang in _CONFIG_BANG_KEYS:
+        if name.startswith(bang) and value.startswith("!"):
+            return value[1:] or None
+    if name in _CONFIG_COMMAND_KEYS:
+        return value or None
+    if any(name.startswith(section) for section in _CONFIG_COMMAND_SECTIONS):
+        return value or None
+    for prefix, suffix in _CONFIG_COMMAND_PATTERNS:
+        if name.startswith(prefix) and name.endswith(suffix) and len(name) > len(prefix + suffix):
+            return value or None
+    return None
+
+
+def _config_commands(
+    argv: Sequence[str], assignments: Sequence[tuple[str, str]]
+) -> tuple[str, ...]:
+    """Every command git would run because of a ``-c`` setting or an environment name."""
+    found: list[str] = []
+    index = 1
+    while index < len(argv):
+        word = argv[index]
+        setting = ""
+        if word == "-c" and index + 1 < len(argv):
+            index += 1
+            setting = argv[index]
+        elif word.startswith("-c") and len(word) > 2:
+            setting = word[2:]  # `-ccore.pager=…`, which git also accepts
+        elif word.startswith("--config="):
+            setting = word[len("--config=") :]
+        if setting and "=" in setting:
+            key, value = setting.split("=", 1)
+            command = _config_command(key, value)
+            if command:
+                found.append(command)
+        index += 1
+    for name, value in assignments:
+        if name in _GIT_COMMAND_ENV and value:
+            found.append(value)
+    return tuple(found)
+
+
 #: Subcommand phrases after which *everything else* is a command to run.
 #:
 #: ``git submodule foreach 'rm -rf /etc'`` deletes the directory once per submodule and
@@ -1197,6 +1297,9 @@ def _parse_nested(
     if command_flags is not None:
         payload = _payload_after(segment.argv, tuple(command_flags))
         if payload:
+            _parse_into(payload, out, depth=depth + 1, parent=index, origin=Origin.EXEC_ARGUMENT)
+    if segment.binary == "git":
+        for payload in _config_commands(segment.argv, segment.assignments):
             _parse_into(payload, out, depth=depth + 1, parent=index, origin=Origin.EXEC_ARGUMENT)
     for binary, phrase in COMMAND_SUBCOMMANDS:
         if segment.binary != binary:

@@ -156,8 +156,13 @@ def test_resolve_binary_is_usable_on_its_own() -> None:
 
 
 def test_the_matched_line_uses_the_resolved_binary_not_the_written_one() -> None:
-    """A rule written as `^git status` has to survive an absolute path and a wrapper."""
-    assert lines("env GIT_PAGER=cat /usr/bin/git status") == ["git status"]
+    """A rule written as `^git status` has to survive an absolute path and a wrapper.
+
+    `cat` is in the list beside it because `GIT_PAGER` names a program git will run, and
+    that is now read wherever it appears. The claim this test exists for is unchanged:
+    the resolved line is there for a rule to match.
+    """
+    assert "git status" in lines("env GIT_PAGER=cat /usr/bin/git status")
 
 
 # --------------------------------------------------------------------------- #
@@ -1268,3 +1273,126 @@ def test_a_segment_that_runs_nothing_has_no_raw_program_name() -> None:
     # `FOO=bar` alone runs no program, so there is no program name to have written.
     segment = parse_command("FOO=bar")[0]
     assert (segment.binary, segment.binary_raw) == ("", "")
+
+
+# --------------------------------------------------------------------------- #
+# A command hidden in a git configuration value
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git -c alias.z='!rm -rf /etc' z",
+        "git -c core.pager='rm -rf /etc' log",
+        "git -c core.editor='rm -rf /etc' commit",
+        "git -c core.sshCommand='rm -rf /etc' fetch",
+        "git -c sequence.editor='rm -rf /etc' rebase -i",
+        "git -c diff.external='rm -rf /etc' diff",
+        "git -c filter.lfs.clean='rm -rf /etc' add -A",
+        "git -c filter.lfs.smudge='rm -rf /etc' checkout .",
+        "git -c diff.bin.textconv='rm -rf /etc' diff",
+        "git -c merge.ours.driver='rm -rf /etc' merge x",
+        "git -c pager.log='rm -rf /etc' log",
+        "git -c gpg.program='rm -rf /etc' tag -s x",
+        "git -c gpg.ssh.program='rm -rf /etc' tag -s x",
+        "git -c credential.helper='!rm -rf /etc' fetch",
+        "git -c uploadpack.packObjectsHook='rm -rf /etc' upload-pack .",
+    ],
+)
+def test_a_command_hidden_in_a_git_config_value_is_seen(command: str) -> None:
+    """`git -c core.sshCommand='rm -rf /etc' fetch` runs the delete.
+
+    Not an argument and not a subcommand — a *configuration value*, which is why the
+    flag and phrase tables cannot reach it. git will happily take a program to run from
+    any of these keys.
+
+    Which of them fire was measured against real git in a throwaway repository, not
+    read off the documentation.
+    """
+    segments = parse_command(command)
+    assert "rm" in [segment.binary for segment in segments]
+    assert worst_severity(hazards(segments)) is Severity.ASK
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git -ccore.pager='rm -rf /etc' log",  # glued, which git also accepts
+        "git --config=core.pager='rm -rf /etc' log",
+        "git -c CORE.SSHCOMMAND='rm -rf /etc' fetch",  # keys are case-insensitive
+        "git -c Core.Pager='rm -rf /etc' log",
+    ],
+)
+def test_every_spelling_of_the_setting_is_read(command: str) -> None:
+    # One spelling missed is the whole rule missed, and git accepts all of these.
+    assert "rm" in binaries(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "GIT_SSH_COMMAND='rm -rf /etc' git fetch",
+        "GIT_PAGER='rm -rf /etc' git log",
+        "GIT_EDITOR='rm -rf /etc' git commit",
+        "GIT_SEQUENCE_EDITOR='rm -rf /etc' git rebase -i",
+        "GIT_EXTERNAL_DIFF='rm -rf /etc' git diff",
+        "env GIT_PAGER='rm -rf /etc' git log",
+    ],
+)
+def test_the_same_setting_through_an_environment_variable_is_seen(command: str) -> None:
+    """`-c` is one door into the same room. No flag is needed at all.
+
+    Reading only the flag would have left the shorter spelling of the same attack
+    completely unwatched.
+    """
+    assert "rm" in binaries(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git -c alias.co=checkout co",  # a git subcommand, not a shell line
+        "git -c credential.helper=cache fetch",  # names git-credential-cache
+        "git -c user.name='rm -rf /etc' commit",  # a value git never executes
+        "git -c http.proxy='rm -rf /etc' fetch",
+        "git -c core.pager= log",  # empty value
+        "git status",
+        "FOO='rm -rf /etc' git log",  # not one of git's own variables
+    ],
+)
+def test_a_config_value_git_never_runs_stays_quiet(command: str) -> None:
+    """The other half of the rule, and the reason it is a table rather than "any value".
+
+    `alias.co=checkout` is the overwhelmingly common shape and runs no shell at all —
+    the `!` is what makes an alias a command. `credential.helper=cache` names the
+    program `git-credential-cache`, which is not a shell line. Flagging either would be
+    noise on the two settings people actually use.
+    """
+    assert binaries(command) == ["git"]
+
+
+def test_the_bang_is_what_makes_an_alias_a_command() -> None:
+    # The single character the whole alias rule turns on.
+    assert "rm" in binaries("git -c alias.z='!rm -rf /etc' z")
+    assert binaries("git -c alias.z='rm -rf /etc' z") == ["git"]
+
+
+def test_the_inner_command_is_nested_under_the_git_that_would_run_it() -> None:
+    segments = parse_command("git -c core.sshCommand='rm -rf /etc' fetch")
+    assert segments[0].binary == "git"
+    assert segments[1].origin is Origin.EXEC_ARGUMENT
+    assert (segments[1].depth, segments[1].parent) == (1, 0)
+
+
+def test_a_harmless_pager_is_surfaced_but_raises_nothing() -> None:
+    """`core.pager=less` names a program git runs, so it is read like any other.
+
+    Surfacing it costs an extra segment in the list and nothing else: `less` raises no
+    hazard, so the prompt says exactly what it said before. The alternative considered
+    was to skip values that are a bare program name — which would have read `less` and
+    `cat` as noise correctly, and `core.sshCommand=poweroff` as noise incorrectly. One
+    word is enough to be dangerous, so the rule does not try to judge by shape.
+    """
+    assert binaries("git -c core.pager=less log") == ["git", "less"]
+    assert hazards(parse_command("git -c core.pager=less log")) == ()

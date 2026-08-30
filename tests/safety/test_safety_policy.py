@@ -127,11 +127,43 @@ def test_a_regex_allow_rule_is_never_matched_against_a_whole_compound_command() 
 
 
 def test_a_matcher_sees_the_resolved_command_when_narrowed_to_a_segment() -> None:
+    """An absolute path and a wrapper must not stop `^git status` from matching.
+
+    The example used to carry `GIT_PAGER=cat`, which now names a second program and so
+    is a second segment to match; that is a different claim, pinned on its own below.
+    A plain assignment keeps this test about the thing it is named for.
+    """
     rules = RuleSet(
         rules=(Rule(tool="bash", matcher=CommandRegex(r"^git status"), decision=Decision.ALLOW),)
     )
-    verdict = engine(rules=rules).evaluate(BASH, use("env GIT_PAGER=cat /usr/bin/git status"))
+    verdict = engine(rules=rules).evaluate(BASH, use("env FOO=1 /usr/bin/git status"))
     assert verdict.decision is Decision.ALLOW
+
+
+def test_a_pager_named_in_the_environment_is_a_second_command_to_allow() -> None:
+    """The accepted cost of reading git's config values, pinned so it stays visible.
+
+    `GIT_PAGER=cat git status` runs two programs, and an allowlist requires every one of
+    them to match — so a rule written for `git status` alone no longer covers it. That is
+    the price of catching `GIT_PAGER='rm -rf /etc'`, which is the same shape with a
+    different word in it, and a rule that judged by shape would miss the single-word
+    dangerous cases.
+
+    A rule that names both is still allowed, which is the escape hatch for anyone whose
+    allowlist this tightens.
+    """
+    narrow = RuleSet(
+        rules=(Rule(tool="bash", matcher=CommandRegex(r"^git status"), decision=Decision.ALLOW),)
+    )
+    command = use("env GIT_PAGER=cat /usr/bin/git status")
+    assert engine(rules=narrow).evaluate(BASH, command).decision is not Decision.ALLOW
+
+    both = RuleSet(
+        rules=(
+            Rule(tool="bash", matcher=CommandRegex(r"^(git status|cat)$"), decision=Decision.ALLOW),
+        )
+    )
+    assert engine(rules=both).evaluate(BASH, command).decision is Decision.ALLOW
 
 
 # --------------------------------------------------------------------------- #
