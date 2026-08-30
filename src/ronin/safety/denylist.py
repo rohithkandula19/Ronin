@@ -350,7 +350,7 @@ class Denylist:
         self, segments: Sequence[Segment], index: int, segment: Segment, cwd: Path
     ) -> Iterator[DenyHit]:
         binary = segment.binary
-        if binary == "rm":
+        if binary in {"rm", "find"}:
             yield from self._rm_hits(segment)
         if binary == "dd":
             yield from self._dd_hits(segment)
@@ -386,10 +386,26 @@ class Denylist:
         """
         if segment.binary in {"sed", "perl", "ruby", "awk"}:
             return segment.has_flag("-i", "--in-place")
+        if segment.binary == "find":
+            # `find /etc -name x` reads; `find /etc -delete` removes. Without this the
+            # starting point is a path nobody is writing to, and `find / -delete` was
+            # allowed while `rm -rf /` was refused.
+            return segment.has_flag("-delete")
         return segment.binary in WRITE_BINARIES
 
     def _rm_hits(self, segment: Segment) -> Iterator[DenyHit]:
-        if not segment.has_flag("-r", "-R", "--recursive"):
+        """Root and home targets of a recursive delete, whichever program is doing it.
+
+        `find` needs no `-r`: descending is what it does, so `-delete` is already the
+        recursive spelling and asking it for a recursion flag would let the whole shape
+        through.
+        """
+        recursive = (
+            segment.has_flag("-delete")
+            if segment.binary == "find"
+            else segment.has_flag("-r", "-R", "--recursive")
+        )
+        if not recursive:
             return
         for word in segment.operands:
             kind = self._delete_class(word, segment)
