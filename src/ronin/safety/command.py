@@ -1129,7 +1129,13 @@ def _parse_into(
     for group in _group_items(items):
         heredoc_bodies = tuple(here.body for here in group.heredocs)
         binary, argv, prefixes, assignments = resolve_binary([w.value for w in group.words])
-        binary_raw = group.words[0].raw if group.words else ""
+        # The raw text of the word that *became* the program, not of the first word in
+        # the segment. `resolve_binary` peels leading assignments and wrappers, so those
+        # are not the same word -- and comparing the wrong one against `binary` reads as
+        # obfuscation. `CFLAGS='-O2 -g' make` was refused outright on that basis: the
+        # quotes belong to a compiler flag, and the program name was never hidden.
+        offset = len(group.words) - len(argv)
+        binary_raw = group.words[offset].raw if argv else ""
         segment = Segment(
             raw=text[group.start : group.end].strip(),
             binary=binary,

@@ -1200,3 +1200,71 @@ def test_the_exact_flag_match_is_what_finds_a_long_option() -> None:
     # but every current caller asks about flags this cannot confuse, and narrowing it
     # would risk the cluster matching that four real rules depend on.
     assert segment.has_flag("-d"), "reads -delete as a cluster; see the comment above"
+
+
+# --------------------------------------------------------------------------- #
+# An environment assignment is not a hidden program name
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "CFLAGS='-O2 -g' make",
+        'CC="gcc" make -j4',
+        "PYTHONPATH='src' pytest -q",
+        "NODE_OPTIONS='--max-old-space-size=4096' npm run build",
+        "GIT_AUTHOR_NAME='Ada L' git commit -m x",
+        "LANG='en_US.UTF-8' ls",
+        "env FOO='a b' make",
+    ],
+)
+def test_a_quoted_environment_assignment_is_not_obfuscation(command: str) -> None:
+    """`CFLAGS='-O2 -g' make` was refused outright, at the harshest severity there is.
+
+    `binary_raw` was the raw text of the segment's *first* word, and `resolve_binary`
+    peels leading assignments and wrappers — so on any command with an assignment the
+    two described different words, and the obfuscation check read that disagreement as
+    a program name being hidden. The quotes belong to a compiler flag; nothing was
+    hidden.
+
+    A scanner that blocks an ordinary build is worse than one rule quieter: it teaches
+    the person reading the prompt that the prompt is wrong, and the next real refusal
+    gets waved through with the rest.
+    """
+    segments = parse_command(command)
+    codes = {hazard.code for hazard in hazards(segments)}
+    assert HazardCode.OBFUSCATED_BINARY not in codes
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["CFLAGS='-O2 -g' make", "env FOO='a b' make", "sudo -u root make", "FOO=bar git log"],
+)
+def test_binary_raw_names_the_word_that_became_the_program(command: str) -> None:
+    # The invariant behind the fix, asserted directly: whatever `binary` resolved from,
+    # `binary_raw` is that same word as it was written.
+    segment = parse_command(command)[0]
+    assert segment.binary_raw.strip("\"'") == segment.binary
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        r"r''m -rf /",
+        r"r\m -rf x",
+        r"env FOO=1 r''m -rf /",  # the assignment must not shield the real name
+        r"$'\x72\x6d' -rf /",
+    ],
+)
+def test_a_genuinely_hidden_program_name_is_still_caught(command: str) -> None:
+    # The other direction, and the reason the check exists. Quoting a binary mid-word
+    # only ever hides it, and peeling assignments must not cost that.
+    codes = {hazard.code for hazard in hazards(parse_command(command))}
+    assert HazardCode.OBFUSCATED_BINARY in codes
+
+
+def test_a_segment_that_runs_nothing_has_no_raw_program_name() -> None:
+    # `FOO=bar` alone runs no program, so there is no program name to have written.
+    segment = parse_command("FOO=bar")[0]
+    assert (segment.binary, segment.binary_raw) == ("", "")
