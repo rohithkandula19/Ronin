@@ -273,7 +273,12 @@ def _config_command(key: str, value: str) -> str | None:
 def _config_commands(
     argv: Sequence[str], assignments: Sequence[tuple[str, str]]
 ) -> tuple[str, ...]:
-    """Every command git would run because of a ``-c`` setting or an environment name."""
+    """Every command git would run because of a ``-c`` setting or an environment name.
+
+    ``--config-env`` is resolved against ``assignments`` because that is where the value
+    lives when it was written on the same line. A variable inherited from the ambient
+    environment is not here to be read, and is not guessed at.
+    """
     found: list[str] = []
     index = 1
     while index < len(argv):
@@ -286,6 +291,13 @@ def _config_commands(
             setting = word[2:]  # `-ccore.pager=…`, which git also accepts
         elif word.startswith("--config="):
             setting = word[len("--config=") :]
+        elif word.startswith("--config-env="):
+            # `--config-env=key=VAR` takes the value from the environment rather than
+            # from the word, so the command is only here when the variable is set on
+            # this same line. `V='rm -rf /etc' git --config-env=core.sshCommand=V …`
+            # is the whole attack in one command, and that is the shape a model emits.
+            key, _, name = word[len("--config-env=") :].partition("=")
+            setting = f"{key}={dict(assignments).get(name, '')}" if name else ""
         if setting and "=" in setting:
             key, value = setting.split("=", 1)
             command = _config_command(key, value)

@@ -1396,3 +1396,63 @@ def test_a_harmless_pager_is_surfaced_but_raises_nothing() -> None:
     """
     assert binaries("git -c core.pager=less log") == ["git", "less"]
     assert hazards(parse_command("git -c core.pager=less log")) == ()
+
+
+# --------------------------------------------------------------------------- #
+# The config value that git reads out of the environment
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "V='rm -rf /etc' git --config-env=core.sshCommand=V ls-remote ssh://x/r",
+        "V='rm -rf /etc' git --config-env=core.pager=V log",
+        "V='rm -rf /etc' git --config-env=sequence.editor=V rebase -i",
+        "V='!rm -rf /etc' git --config-env=alias.z=V z",
+    ],
+)
+def test_a_config_value_taken_from_the_environment_is_still_read(command: str) -> None:
+    """`--config-env` names a *variable* instead of carrying the value.
+
+    When that variable is set on the same line the command is right there to read, and
+    that is the shape a model emits: the whole attack in one line. Reported the same way
+    as the `-c` spelling, because it is the same setting.
+
+    The three that matter were run against real git in a throwaway repository;
+    `user.name` was run too and correctly did nothing.
+    """
+    assert "rm" in binaries(command)
+
+
+def test_an_ambient_variable_is_not_guessed_at() -> None:
+    """The honest limit of this, stated as a test rather than left to be discovered.
+
+    With no assignment on the line the value lives in the inherited environment, which
+    is not part of the command and cannot be read from it. Reporting a command here
+    would mean inventing one; reporting a *hazard* is a separate question and a new
+    policy surface, so this stays quiet and the gap stays written down.
+    """
+    assert binaries("git --config-env=core.sshCommand=V ls-remote ssh://x/r") == ["git"]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "V='rm -rf /etc' git --config-env=user.name=V commit",  # not a command key
+        "V='rm -rf /etc' git --config-env= log",  # nothing after the flag
+        "V='rm -rf /etc' git --config-env=core.pager log",  # no variable named
+        "git --config-env=core.pager=V log",  # variable never set
+    ],
+)
+def test_a_config_env_that_names_nothing_runnable_stays_quiet(command: str) -> None:
+    # The malformed shapes are where a split on `=` invents a key or a value out of an
+    # empty string; `user.name` is the reminder that the key still has to be one git
+    # runs a program for.
+    assert binaries(command) == ["git"]
+
+
+def test_the_variable_is_matched_by_name_not_by_position() -> None:
+    # Two assignments, and only the one the flag names supplies the value.
+    command = "A='rm -rf /etc' B=less git --config-env=core.pager=B log"
+    assert binaries(command) == ["git", "less"]
