@@ -1506,3 +1506,64 @@ def test_only_dd_gets_its_operands_unwrapped() -> None:
     odd filename and should be read as written.
     """
     assert parse_command("touch of=/etc/passwd")[0].path_words == ("of=/etc/passwd",)
+
+
+# --------------------------------------------------------------------------- #
+# Putting an argv back together without losing what the quotes did
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        r"find . -exec sh -c 'rm -rf /etc' \;",
+        r"find . -exec bash -c 'rm -rf /etc' \;",
+        r"find . -execdir sh -c 'rm -rf /etc' \;",
+        "find . -exec sh -c 'rm -rf /etc' +",
+        "git bisect run sh -c 'rm -rf /etc'",
+        "git submodule foreach sh -c 'rm -rf /etc'",
+    ],
+)
+def test_a_shell_nested_inside_an_argument_keeps_its_whole_command(command: str) -> None:
+    r"""`find . -exec sh -c 'rm -rf /etc' \;` ran the delete and was allowed.
+
+    The words are `["sh", "-c", "rm -rf /etc"]`, and joining them bare gives
+    `sh -c rm -rf /etc` — which re-parses as `sh -c rm` with `-rf` and `/etc` as stray
+    arguments to `sh`. The delete shrank to the single word `rm`, which names no path,
+    so the denylist had nothing to refuse.
+
+    Introduced by the fix that first read these clauses: the extraction was right and
+    the *rejoining* threw the quotes away.
+    """
+    segments = parse_command(command)
+    deepest = [segment.line for segment in segments if segment.depth >= 2]
+    assert deepest == ["rm -rf /etc"], "the inner command must survive intact"
+
+
+def test_a_lone_word_is_a_command_line_and_is_not_requoted() -> None:
+    """The other half, and the regression the first version of this fix caused.
+
+    `git submodule foreach 'rm -rf /etc'` hands the shell one string that *is* a command
+    line. Quoting it turns the whole thing into a single literal word, and the binary
+    came back as `etc`. Several words are an argv and need requoting; one word is
+    already a line and must be used as written.
+    """
+    assert binaries("git submodule foreach 'rm -rf /etc'") == ["git", "rm"]
+    assert binaries("git submodule foreach rm -rf /etc") == ["git", "rm"]
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        (r"find . -exec rm -rf /etc \;", ("rm", "-rf", "/etc")),
+        (r"find . -name '*.py' -exec wc -l {} \;", ("wc", "-l", "{}")),
+        ("find . -exec rm -rf {} +", ("rm", "-rf", "{}")),
+    ],
+)
+def test_an_ordinary_clause_is_unchanged_by_the_requoting(
+    command: str, expected: tuple[str, ...]
+) -> None:
+    # Words with nothing special in them must come back exactly as they went in — `{}`
+    # included, since requoting it would hand the command a different operand.
+    inner = [segment for segment in parse_command(command) if segment.depth == 1]
+    assert inner and inner[0].argv == expected

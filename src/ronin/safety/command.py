@@ -47,6 +47,7 @@ nested command.
 from __future__ import annotations
 
 import re
+import shlex
 import string
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -1217,8 +1218,20 @@ def _exec_payloads(argv: Sequence[str], flags: frozenset[str]) -> tuple[str, ...
         while index < len(argv) and argv[index] not in _EXEC_TERMINATORS:
             index += 1
         if index > start:
-            found.append(" ".join(argv[start:index]))
+            found.append(_rejoin(argv[start:index]))
     return tuple(found)
+
+
+def _rejoin(words: Sequence[str]) -> str:
+    """Put argv words back together as a command line, keeping what the quotes did.
+
+    A plain ``" ".join`` loses them, and losing them changes the command: the words of
+    ``find . -exec sh -c 'rm -rf /etc' \\;`` are ``["sh", "-c", "rm -rf /etc"]``, and
+    joined bare they re-parse as ``sh -c rm`` with ``-rf`` and ``/etc`` as stray
+    arguments to ``sh``. The delete became the single word ``rm`` and the denylist saw
+    nothing to refuse.
+    """
+    return " ".join(shlex.quote(word) for word in words)
 
 
 def _subcommand_payload(argv: Sequence[str], phrase: Sequence[str]) -> str | None:
@@ -1236,7 +1249,13 @@ def _subcommand_payload(argv: Sequence[str], phrase: Sequence[str]) -> str | Non
     # the hazard scanner keys on `-r`, so the delete would go quiet again.
     while rest and rest[0].startswith("-"):
         rest.pop(0)
-    return " ".join(rest) or None
+    if not rest:
+        return None
+    # One word left means the shell already collapsed the quotes around a whole command
+    # line -- `git submodule foreach 'rm -rf /etc'` -- and it is used as written.
+    # Several words are an argv, and joining those needs the quoting put back, or
+    # `sh -c 'rm -rf /etc'` re-parses as `sh -c rm` with two stray arguments.
+    return rest[0] if len(rest) == 1 else _rejoin(rest)
 
 
 def _payload_after(argv: Sequence[str], flags: Sequence[str]) -> str | None:
