@@ -1695,3 +1695,131 @@ def test_the_program_out_of_a_split_string_is_not_read_as_obfuscation() -> None:
     assert HazardCode.OBFUSCATED_BINARY in {
         hazard.code for hazard in hazards(parse_command(r"\rm -rf x"))
     }
+
+
+# --------------------------------------------------------------------------- #
+# Wrappers that hold an operand before the command
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("command", "prefixes"),
+    [
+        # `flock` locks a file, then runs what follows. Options come before the file:
+        # `flock FILE --verbose cmd` is rejected by flock itself, measured.
+        ("flock /tmp/lock rm -rf /etc", ("flock",)),
+        ("flock -n /tmp/lock rm -rf /etc", ("flock",)),
+        ("flock -w 1 /tmp/lock rm -rf /etc", ("flock",)),
+        ("flock --wait 1 /tmp/lock rm -rf /etc", ("flock",)),
+        # `chroot` takes the new root, then the command.
+        ("chroot / rm -rf /etc", ("chroot",)),
+        ("chroot --skip-chdir / rm -rf /etc", ("chroot",)),
+        ("chroot --userspec root:root / rm -rf /etc", ("chroot",)),
+        # `unshare` is a plain prefix; its flags are the only thing before the program.
+        ("unshare rm -rf /etc", ("unshare",)),
+        ("unshare -f --map-root-user rm -rf /etc", ("unshare",)),
+        ("unshare --propagation private rm -rf /etc", ("unshare",)),
+        # `setarch` takes an optional personality.
+        ("setarch linux32 rm -rf /etc", ("setarch",)),
+        ("setarch --addr-no-randomize rm -rf /etc", ("setarch",)),
+        # Still nests.
+        ("flock /tmp/lock sudo rm -rf /etc", ("flock", "sudo")),
+    ],
+)
+def test_a_wrapper_that_takes_an_operand_still_names_the_program(
+    command: str, prefixes: tuple[str, ...]
+) -> None:
+    """Each of these runs the delete; each was reported as the wrapper and nothing else.
+
+    Measured against the real binaries: the file goes away in every case. `flock`,
+    `chroot`, `unshare` and `setarch` are the same shape as `timeout 5 rm -rf /`, which
+    was already peeled — they were simply missing from the table, so the deny list was
+    handed `flock` and had nothing to say about it.
+    """
+    segment = parse_command(command)[0]
+    assert segment.binary == "rm"
+    assert segment.argv == ("rm", "-rf", "/etc")
+    assert segment.prefixes == prefixes
+
+
+def test_a_wrapper_operand_is_taken_once_and_not_repeatedly() -> None:
+    """The lock file is one word; the next word is the program even if it looks alike.
+
+    `timeout` used to consume every duration-shaped word in a row, which was harmless
+    only because a second one never occurs. `flock` accepts *anything* as its operand,
+    so consuming greedily there would eat the program itself.
+    """
+    segment = parse_command("flock 5 5 -rf /etc")[0]
+    assert segment.binary == "5"
+    assert segment.argv == ("5", "-rf", "/etc")
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["timeout 5 rm x", "timeout -k 1 5 rm x", "timeout 1.5s rm x", "timeout 5 sudo rm x"],
+)
+def test_timeout_is_unchanged_by_the_generalisation(command: str) -> None:
+    # `timeout`'s duration was the hand-written case the table was generalised from.
+    assert parse_command(command)[0].binary == "rm"
+
+
+@pytest.mark.parametrize(
+    ("command", "binary"),
+    [
+        # A personality is recognised by name because it is optional — anything else in
+        # that position is the program. Guessing wrong would drop the program entirely.
+        ("setarch rm -rf /etc", "rm"),
+        ("setarch uname26 rm -rf /etc", "rm"),
+        # Not a wrapper's operand: an ordinary program whose first argument is a path.
+        ("cat /tmp/lock", "cat"),
+    ],
+)
+def test_an_optional_operand_is_recognised_and_not_assumed(command: str, binary: str) -> None:
+    assert parse_command(command)[0].binary == binary
+
+
+@pytest.mark.parametrize("command", ["flock /tmp/lock", "chroot /newroot", "unshare", "setarch"])
+def test_a_wrapper_with_nothing_after_it_names_no_program(command: str) -> None:
+    """Same as bare `sudo`, which has always reported no program and kept the prefix.
+
+    `chroot /newroot` on its own does start a shell, so this is a real if narrow loss —
+    stated rather than papered over, and the prefix is still there for a caller that
+    wants to act on it.
+    """
+    segment = parse_command(command)[0]
+    assert segment.binary == ""
+    assert segment.prefixes == (command.split()[0],)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "flock /tmp/lock -c 'rm -rf /etc'",
+        "flock -n /tmp/lock -c 'rm -rf /etc'",
+        "flock /tmp/lock --command 'rm -rf /etc'",
+    ],
+)
+def test_the_line_flock_hands_to_a_shell_is_a_command(command: str) -> None:
+    """`flock -c` runs its value through a shell — measured: `-c 'echo a | wc -l'`
+    prints `1`, so the pipe is real.
+
+    Peeling `flock` away is exactly what hid this. With the wrapper gone and its lock
+    file taken as the operand, the quoted line was simply the next word, and the
+    segment came back naming a program called `rm -rf /etc`.
+    """
+    segments = parse_command(command)
+    inner = [segment for segment in segments if segment.depth == 1]
+    assert inner and inner[0].origin is Origin.SHELL_C
+    assert inner[0].argv == ("rm", "-rf", "/etc")
+    assert HazardCode.RECURSIVE_DELETE in {hazard.code for hazard in hazards(segments)}
+    # And the line is not *also* left in the outer segment as a program. Skipping only
+    # the flag and not its value named a program `etc` with a single argument
+    # `rm -rf /etc` — a command nobody ran, reported next to the one that did.
+    assert segments[0].binary == ""
+    assert segments[0].prefixes == ("flock",)
+
+
+def test_the_lock_file_is_not_confused_with_the_command_line() -> None:
+    # `-c` must follow the lock file for flock to accept it, so the two never compete
+    # for the same word; the operand rule and the flag rule are checked in that order.
+    assert binaries("flock /tmp/lock rm -rf /etc") == ["rm"]
