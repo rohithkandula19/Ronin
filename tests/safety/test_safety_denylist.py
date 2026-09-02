@@ -360,3 +360,39 @@ def test_a_deleting_find_is_judged_as_a_write_not_a_read(command: str, expected:
     """
     guard = Denylist(workspace_root=WORKSPACE, home=HOME)
     assert expected in {hit.code for hit in guard.check_command(command)}
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("dd if=/dev/zero of=/etc/passwd", DenyCode.OUTSIDE_WORKSPACE),
+        ("dd of=/etc/passwd if=/dev/zero", DenyCode.OUTSIDE_WORKSPACE),
+        ("dd if=/dev/zero of=/etc/passwd bs=1M count=1", DenyCode.OUTSIDE_WORKSPACE),
+        (f"dd if=/dev/zero of={HOME}/.ssh/id_rsa", DenyCode.SECRET_WRITE),
+        (f"dd if={HOME}/.ssh/id_rsa of=/tmp/stolen", DenyCode.SECRET_WRITE),
+    ],
+)
+def test_dd_writing_outside_the_workspace_is_refused(command: str, expected: DenyCode) -> None:
+    """`dd if=/dev/zero of=/etc/passwd` was allowed outright.
+
+    It overwrites the file — verified on a throwaway target, where eighteen bytes of
+    content became four null bytes — and `truncate -s0` on the same path was already
+    refused. The difference was only how `dd` spells its arguments.
+    """
+    guard = Denylist(workspace_root=WORKSPACE, home=HOME)
+    assert expected in {hit.code for hit in guard.check_command(command)}
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        f"dd if=/dev/zero of={WORKSPACE}/out.img bs=1M count=10",
+        "dd if=/dev/zero of=out.img bs=1M count=10",
+        "dd bs=1M count=10 status=progress",
+    ],
+)
+def test_dd_inside_the_workspace_is_still_allowed(command: str) -> None:
+    # Writing an image into the workspace is ordinary work, and reading the path
+    # properly must not turn it into a refusal.
+    guard = Denylist(workspace_root=WORKSPACE, home=HOME)
+    assert guard.check_command(command) == ()

@@ -484,9 +484,36 @@ class Segment:
         names a file even though the word has no ``/`` in it, and that is exactly the
         case a "looks like a path" test gets wrong.
         """
-        words = [word for word in self.operands if _looks_like_path(word)]
+        words: list[str] = []
+        for word in self.operands:
+            # `dd of=/etc/passwd` names a path the way no other program does, and the
+            # `key=` in front of it is what hid the path from every check that resolves
+            # one. Unwrapped here so every caller sees the target, not the operand.
+            candidate = _dd_path(self.binary, word) or word
+            if _looks_like_path(candidate):
+                words.append(candidate)
         words.extend(r.target for r in self.redirects if r.names_a_file)
         return tuple(words)
+
+
+#: ``dd``'s operands are ``key=value``, and two of those values are paths.
+#:
+#: `dd if=/dev/zero of=/etc/passwd` zeroes the file. The word in the argv is
+#: `of=/etc/passwd`, so a path check reads the whole thing as one odd relative name and
+#: finds nothing outside the workspace -- while `truncate -s0 /etc/passwd`, the same
+#: destruction spelled normally, was refused. `bs=`, `count=`, `seek=` and the rest are
+#: numbers and are left alone.
+_DD_PATH_OPERANDS: tuple[str, ...] = ("of=", "if=")
+
+
+def _dd_path(binary: str, word: str) -> str | None:
+    """The path inside a ``dd`` operand, or ``None`` when the word is not one."""
+    if binary != "dd":
+        return None
+    for prefix in _DD_PATH_OPERANDS:
+        if word.startswith(prefix):
+            return word[len(prefix) :] or None
+    return None
 
 
 def _looks_like_path(word: str) -> bool:

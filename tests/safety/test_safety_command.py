@@ -1456,3 +1456,53 @@ def test_the_variable_is_matched_by_name_not_by_position() -> None:
     # Two assignments, and only the one the flag names supplies the value.
     command = "A='rm -rf /etc' B=less git --config-env=core.pager=B log"
     assert binaries(command) == ["git", "less"]
+
+
+# --------------------------------------------------------------------------- #
+# dd names its paths in a way no other program does
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("dd if=/dev/zero of=/etc/passwd", ("/dev/zero", "/etc/passwd")),
+        ("dd of=/etc/passwd if=/dev/zero", ("/etc/passwd", "/dev/zero")),
+        ("dd if=/dev/zero of=/etc/passwd bs=1M count=1", ("/dev/zero", "/etc/passwd")),
+        ("dd bs=4M count=1 if=/dev/zero of=/tmp/x", ("/dev/zero", "/tmp/x")),
+    ],
+)
+def test_a_dd_operand_yields_the_path_and_not_the_key(
+    command: str, expected: tuple[str, ...]
+) -> None:
+    """`dd if=/dev/zero of=/etc/passwd` zeroes the file, and reported nothing at all.
+
+    The argv word is `of=/etc/passwd`. Every check that *resolves* a path read that whole
+    string as one odd relative name and found nothing outside the workspace — while
+    `truncate -s0 /etc/passwd`, the same destruction spelled normally, was refused.
+
+    Two checks did still fire, which is what made this easy to miss: `dd_block_device`
+    and the secret patterns match on substrings, so `of=/dev/sda` and
+    `of=…/.ssh/id_rsa` were caught by accident while the workspace boundary was not.
+    """
+    assert parse_command(command)[0].path_words == expected
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["dd bs=1M count=10 status=progress", "dd --help", "dd", "dd of= if="],
+)
+def test_a_dd_operand_that_names_no_path_yields_none(command: str) -> None:
+    # `bs`, `count`, `seek` and the rest are numbers. An empty value is not a path
+    # either, and splitting on `=` would otherwise offer the empty string as one.
+    assert parse_command(command)[0].path_words == ()
+
+
+def test_only_dd_gets_its_operands_unwrapped() -> None:
+    """`key=value` as a bare operand is `dd`'s convention and almost nobody else's.
+
+    A leading assignment is already peeled by `resolve_binary`; this is about words
+    *after* the program, where for any other binary `of=/etc/passwd` really is just an
+    odd filename and should be read as written.
+    """
+    assert parse_command("touch of=/etc/passwd")[0].path_words == ("of=/etc/passwd",)
