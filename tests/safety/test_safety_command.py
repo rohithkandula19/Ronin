@@ -1567,3 +1567,131 @@ def test_an_ordinary_clause_is_unchanged_by_the_requoting(
     # included, since requoting it would hand the command a different operand.
     inner = [segment for segment in parse_command(command) if segment.depth == 1]
     assert inner and inner[0].argv == expected
+
+
+# --------------------------------------------------------------------------- #
+# `env -S`, which runs its value
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("command", "argv"),
+    [
+        ("env -S 'rm -rf /etc'", ("rm", "-rf", "/etc")),
+        ("env -S'rm -rf /etc'", ("rm", "-rf", "/etc")),
+        ("env --split-string='rm -rf /etc'", ("rm", "-rf", "/etc")),
+        ("env --split-string 'rm -rf /etc'", ("rm", "-rf", "/etc")),
+        # `S` last in a short cluster. Measured against coreutils 9.4: `-iS'…'` and
+        # `-vS'…'` both run the line.
+        ("env -iS'rm -rf /etc'", ("rm", "-rf", "/etc")),
+        ("env -vS'rm -rf /etc'", ("rm", "-rf", "/etc")),
+        # Attached with no quotes, so the value is one word and the rest is argv.
+        ("env -Srm -rf /etc", ("rm", "-rf", "/etc")),
+        # A value that is only part of the line: `env` appends what follows.
+        ("env -S 'rm -rf' /etc", ("rm", "-rf", "/etc")),
+        # Quotes inside the value are the value's own.
+        ("""env -S 'rm -rf "/etc"'""", ("rm", "-rf", "/etc")),
+    ],
+)
+def test_the_command_env_splits_out_of_a_flag_is_the_command(
+    command: str, argv: tuple[str, ...]
+) -> None:
+    """`-S` is not a setting: GNU `env` splits the value and runs it.
+
+    It was listed as a flag whose value to skip, alongside `-u NAME` and `-C DIR`, and
+    skipping it left *nothing*: `env -S 'rm -rf /etc'` resolved to the empty binary
+    with an empty argv, so the hazard scanner and the deny list both had no program to
+    object to. Every refusal in the system was one quoted word away from being turned
+    off.
+    """
+    segment = parse_command(command)[0]
+    assert segment.binary == "rm"
+    assert segment.argv == argv
+    assert segment.prefixes == ("env",)
+
+
+@pytest.mark.parametrize(
+    ("command", "code"),
+    [
+        ("env -S 'rm -rf /etc'", HazardCode.RECURSIVE_DELETE),
+        ("env -S 'rm -rf --no-preserve-root /'", HazardCode.NO_PRESERVE_ROOT),
+        ("env -S 'sh -c 'rm -rf /etc''", HazardCode.SHELL_C_PAYLOAD),
+    ],
+)
+def test_a_hazard_inside_the_split_string_is_still_a_hazard(command: str, code: HazardCode) -> None:
+    # The point of resolving the program is that everything downstream gets to run.
+    assert code in {hazard.code for hazard in hazards(parse_command(command))}
+
+
+def test_a_pipe_inside_the_split_string_is_an_argument_and_not_a_pipe() -> None:
+    """`env -S` splits, it does not run a shell.
+
+    Measured: `env -S 'echo a | wc -l'` prints `a | wc -l`. So the split words go back
+    into the *word* stream, not through the lexer again — feeding them to the lexer
+    would invent a `wc` segment that never runs, and a report of commands that do not
+    exist is how a reviewer learns to stop reading the report.
+    """
+    segments = parse_command("env -S 'echo a | wc -l'")
+    assert [segment.binary for segment in segments] == ["echo"]
+    assert segments[0].argv == ("echo", "a", "|", "wc", "-l")
+
+
+def test_an_assignment_inside_the_split_string_is_an_assignment() -> None:
+    """`env -S 'FOO=1 rm -f x'` sets `FOO` and runs `rm`, measured.
+
+    Splicing the split words back into the stream rather than parsing them apart is
+    what makes this fall out: the loop that already understands `env FOO=1 rm` sees
+    the same words and does the same thing.
+    """
+    segment = parse_command("env -S 'FOO=1 rm -f x'")[0]
+    assert segment.binary == "rm"
+    assert segment.assignments == (("FOO", "1"),)
+
+
+@pytest.mark.parametrize(
+    ("command", "binary"),
+    [
+        # `-u` and `-C` take the rest of the cluster as their value, so the `S` is part
+        # of that value and no splitting happens. Measured: `env -uS'rm -f x'` unsets a
+        # variable named `S'rm -f x'` and deletes nothing.
+        ("env -uS'rm -f x' ls", "ls"),
+        ("env -CS'rm -f x' ls", "ls"),
+        # A bare `-S` with nothing after it splits nothing.
+        ("env -S", ""),
+        # Not `env`, so `-S` is that program's own flag.
+        ("sort -S 'rm -rf /etc' file", "sort"),
+        # Long options that merely start the same way.
+        ("env --split-string-ish ls", "ls"),
+    ],
+)
+def test_a_flag_that_only_looks_like_split_string_is_left_alone(command: str, binary: str) -> None:
+    assert parse_command(command)[0].binary == binary
+
+
+def test_a_split_string_the_shell_cannot_parse_still_yields_its_words() -> None:
+    """An unbalanced quote makes `shlex` refuse the whole string.
+
+    Refusing would hide every word in it, which is the one outcome worse than splitting
+    it imperfectly, so the fallback is a plain whitespace split.
+    """
+    segment = parse_command("""env -S "rm -rf /etc '" """)[0]
+    assert segment.binary == "rm"
+    assert "/etc" in segment.argv
+
+
+def test_the_program_out_of_a_split_string_is_not_read_as_obfuscation() -> None:
+    """No word was written that *is* the program, so there is nothing to compare.
+
+    The obfuscation check reads the raw text of the word that became the program, found
+    by counting back from the end of the segment. A split makes the argv longer than
+    what was written, so the count runs off the front and wraps onto the flag itself:
+    `-S'ls -l /tmp'` against `ls` looks exactly like a hidden name. It is not — the
+    quotes are `-S`'s own syntax — and the refusal would land on ordinary work.
+    """
+    for command in ("env -S'ls -l /tmp'", "env --split-string='ls -l /tmp'"):
+        found = {hazard.code for hazard in hazards(parse_command(command))}
+        assert HazardCode.OBFUSCATED_BINARY not in found, command
+    # And a genuinely hidden name is still caught when it is spelled out.
+    assert HazardCode.OBFUSCATED_BINARY in {
+        hazard.code for hazard in hazards(parse_command(r"\rm -rf x"))
+    }

@@ -27,7 +27,9 @@ live:
 2. **Wrapper prefixes are stripped.** ``sudo``, ``env FOO=1``, ``nohup``, ``time``,
    ``command``, ``xargs``, ``timeout 5`` and a leading ``VAR=value`` are peeled off
    until a real program name is left, and the peeled prefixes are kept on the segment
-   rather than discarded — the fact that ``sudo`` was there is itself a hazard.
+   rather than discarded — the fact that ``sudo`` was there is itself a hazard. A
+   wrapper flag whose value is *itself* a command line, ``env -S 'rm -rf /etc'``, is
+   split back into words rather than skipped.
 3. **Substitution is a segment, not a token.** ``echo `rm -rf /``` runs ``rm``. Inner
    commands are returned as their own segments carrying ``depth > 0`` and a ``parent``
    index, so a caller can both judge them and explain where they came from.
@@ -152,7 +154,7 @@ WRAPPERS: frozenset[str] = frozenset(
 _WRAPPER_VALUE_FLAGS: Mapping[str, frozenset[str]] = {
     "sudo": frozenset({"-u", "-g", "-p", "-C", "-h", "-U", "-r", "-t"}),
     "doas": frozenset({"-u", "-C"}),
-    "env": frozenset({"-u", "-C", "-S", "--unset", "--chdir"}),
+    "env": frozenset({"-u", "-C", "--unset", "--chdir"}),
     "nice": frozenset({"-n", "--adjustment"}),
     "ionice": frozenset({"-c", "-n", "-p"}),
     "timeout": frozenset({"-s", "-k", "--signal", "--kill-after"}),
@@ -1110,6 +1112,7 @@ def resolve_binary(
     """
     prefixes: list[str] = []
     assignments: list[tuple[str, str]] = []
+    words = list(words)
     index = 0
     while index < len(words):
         word = words[index]
@@ -1139,6 +1142,11 @@ def resolve_binary(
                 if candidate == "--":
                     index += 1
                     break
+                after = words[index + 1] if index + 1 < len(words) else None
+                if name == "env" and (split := _split_string(candidate, after)) is not None:
+                    line, taken = split
+                    words[index : index + taken] = _shell_words(line)
+                    continue
                 if candidate.startswith("-") and candidate != "-":
                     index += 1
                     if candidate in value_flags and index < len(words):
@@ -1157,6 +1165,54 @@ def resolve_binary(
 
 def _is_duration(word: str) -> bool:
     return bool(re.fullmatch(r"\d+(\.\d+)?[smhd]?", word))
+
+
+#: ``env`` short options that take the rest of the cluster as their own value, so a
+#: later ``S`` in the same cluster is that value's text and not a flag. Measured:
+#: ``env -uS'rm -f x'`` unsets a variable named ``S'rm -f x'`` and deletes nothing.
+_ENV_CLUSTER_STOPS: str = "uC"
+
+
+def _split_string(word: str, following: str | None) -> tuple[str, int] | None:
+    """``env``'s ``-S`` command line and the number of words it occupies, or ``None``.
+
+    ``-S`` is not a setting. GNU ``env`` splits its value and *runs* it, so
+    ``env -S 'rm -rf /etc'`` is a delete wearing one extra word. Skipping the value
+    the way ``-u NAME`` is skipped left nothing behind to scan: the whole command
+    resolved to the empty string and every check downstream had no binary to object
+    to.
+
+    All the spellings ``env`` accepts, each one measured against coreutils 9.4:
+    ``-S LINE``, ``-SLINE``, ``--split-string=LINE``, ``--split-string LINE``, and
+    ``S`` last in a short cluster such as ``-iS'…'``.
+    """
+    if word in {"-S", "--split-string"}:
+        return (following, 2) if following is not None else None
+    if word.startswith("--split-string="):
+        return word[len("--split-string=") :], 1
+    if not word.startswith("-") or word.startswith("--"):
+        return None
+    for offset, letter in enumerate(word[1:], start=1):
+        if letter in _ENV_CLUSTER_STOPS:
+            return None
+        if letter == "S":
+            return word[offset + 1 :], 1
+    return None
+
+
+def _shell_words(line: str) -> list[str]:
+    """``line`` split the way ``env -S`` splits it.
+
+    Close enough on purpose: ``shlex`` honours the quotes and backslashes ``-S`` does,
+    and where it disagrees -- ``${VAR}``, which ``env`` expands and ``shlex`` leaves
+    alone -- the literal is what gets scanned, which is the cautious direction. An
+    unbalanced quote is a string ``shlex`` refuses to split at all, and refusing would
+    hide the words, so those fall back to whitespace.
+    """
+    try:
+        return shlex.split(line)
+    except ValueError:
+        return line.split()
 
 
 @dataclass(slots=True)
@@ -1292,8 +1348,13 @@ def _parse_into(
         # are not the same word -- and comparing the wrong one against `binary` reads as
         # obfuscation. `CFLAGS='-O2 -g' make` was refused outright on that basis: the
         # quotes belong to a compiler flag, and the program name was never hidden.
+        # `env -S 'rm -rf /etc'` has no such word at all: the program comes out of a
+        # flag's value, so the argv is no longer the tail of what was written and the
+        # arithmetic below would land on the flag. An empty raw says "nothing was
+        # written to compare against", which is the truth and raises no hazard.
         offset = len(group.words) - len(argv)
-        binary_raw = group.words[offset].raw if argv else ""
+        spelled_out = argv and offset >= 0 and group.words[offset].value == argv[0]
+        binary_raw = group.words[offset].raw if spelled_out else ""
         segment = Segment(
             raw=text[group.start : group.end].strip(),
             binary=binary,
