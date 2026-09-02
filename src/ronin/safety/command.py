@@ -51,7 +51,7 @@ from __future__ import annotations
 import re
 import shlex
 import string
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import PurePosixPath
@@ -146,6 +146,10 @@ WRAPPERS: frozenset[str] = frozenset(
         "xargs",
         "busybox",
         "watch",
+        "flock",
+        "chroot",
+        "unshare",
+        "setarch",
     }
 )
 
@@ -161,7 +165,99 @@ _WRAPPER_VALUE_FLAGS: Mapping[str, frozenset[str]] = {
     "xargs": frozenset({"-n", "-I", "-P", "-d", "-a", "-E", "-L", "-s", "--replace"}),
     "stdbuf": frozenset({"-i", "-o", "-e"}),
     "watch": frozenset({"-n", "--interval"}),
+    "flock": frozenset(
+        {"-w", "--wait", "--timeout", "-E", "--conflict-exit-code", "-c", "--command"}
+    ),
+    "chroot": frozenset({"--userspec", "--groups"}),
+    "unshare": frozenset(
+        {
+            "-S",
+            "-G",
+            "-R",
+            "-w",
+            "--setuid",
+            "--setgid",
+            "--root",
+            "--wd",
+            "--map-user",
+            "--map-group",
+            "--map-users",
+            "--map-groups",
+            "--propagation",
+        }
+    ),
 }
+
+#: Wrapper flags whose value is a whole shell command line.
+#:
+#: ``flock /tmp/lock -c 'rm -rf /etc'`` runs the line through a shell -- measured:
+#: ``flock /tmp/lock -c 'echo a | wc -l'`` prints ``1``, so the pipe is real. The flag
+#: is keyed on the *prefix* rather than the binary because peeling the wrapper is
+#: exactly what hides the line: with ``flock`` gone and its lock file taken as the
+#: operand, the quoted line is simply the next word, and the segment came back naming
+#: a program called ``rm -rf /etc``.
+#:
+#: ``-c`` has to follow the lock file. Measured: ``flock -c LINE FILE`` runs nothing,
+#: ``flock FILE -c LINE`` runs the line. Nothing here depends on the order, so an
+#: invalid spelling is read anyway rather than being quietly dropped.
+WRAPPER_COMMAND_FLAGS: Mapping[str, frozenset[str]] = {
+    "flock": frozenset({"-c", "--command"}),
+}
+
+#: Wrappers whose first non-flag word is an operand rather than the program.
+#:
+#: ``timeout 5 rm -rf /`` was already handled by hand; the rest arrived with the same
+#: shape. ``flock`` locks a file and ``chroot`` enters a directory before running what
+#: follows, and ``setarch`` may be given a personality to run under. Reading the
+#: operand as the program is how ``flock /tmp/lock rm -rf /etc`` came back as ``flock``
+#: with nothing else to say.
+#:
+#: At most one is consumed. ``timeout`` used to swallow every duration-shaped word in
+#: a row, which was harmless only because a second one never occurs.
+_WRAPPER_OPERAND: Mapping[str, Callable[[str], bool]] = {
+    "timeout": lambda word: _is_duration(word),
+    "setarch": lambda word: word in _SETARCH_PERSONALITIES,
+    "flock": lambda _word: True,
+    "chroot": lambda _word: True,
+}
+
+#: Everything ``setarch --list`` prints. Unlike ``flock``'s lock file the personality
+#: is optional, so it can only be recognised by name -- and guessing wrong would read
+#: the program as a personality and drop it.
+_SETARCH_PERSONALITIES: frozenset[str] = frozenset(
+    {
+        "uname26",
+        "linux32",
+        "linux64",
+        "i386",
+        "i486",
+        "i586",
+        "i686",
+        "athlon",
+        "x86_64",
+        "ppc",
+        "ppc64",
+        "ppc32",
+        "ppc64le",
+        "s390",
+        "s390x",
+        "sparc",
+        "sparc32",
+        "sparc32bash",
+        "sparc64",
+        "mips",
+        "mips64",
+        "mips32",
+        "ia64",
+        "arm",
+        "armv7l",
+        "armv8l",
+        "aarch64",
+        "parisc",
+        "parisc32",
+        "parisc64",
+    }
+)
 
 #: Flags whose *following words* are a command, up to a ``;`` or ``+`` terminator.
 #:
@@ -1132,6 +1228,7 @@ def resolve_binary(
             prefixes.append(name)
             index += 1
             value_flags = _WRAPPER_VALUE_FLAGS.get(name, frozenset())
+            is_operand = _WRAPPER_OPERAND.get(name)
             while index < len(words):
                 candidate = words[index]
                 if _ASSIGNMENT.match(candidate) and name in {"env", "sudo", "doas"}:
@@ -1152,7 +1249,8 @@ def resolve_binary(
                     if candidate in value_flags and index < len(words):
                         index += 1
                     continue
-                if name == "timeout" and _is_duration(candidate):
+                if is_operand is not None and is_operand(candidate):
+                    is_operand = None
                     index += 1
                     continue
                 break
@@ -1402,6 +1500,15 @@ def _parse_nested(
                 _parse_into(
                     redirect.target, out, depth=depth + 1, parent=index, origin=Origin.HEREDOC
                 )
+    for prefix in segment.prefixes:
+        wrapper_flags = WRAPPER_COMMAND_FLAGS.get(prefix)
+        if wrapper_flags is None:
+            continue
+        # The peeled words, not `segment.argv`: the flag and its line were stripped on
+        # the way to naming the program, so the argv no longer holds either.
+        payload = _payload_after([word.value for word in group.words], tuple(wrapper_flags))
+        if payload:
+            _parse_into(payload, out, depth=depth + 1, parent=index, origin=Origin.SHELL_C)
     if segment.binary in EVAL_BINARIES and len(segment.argv) > 1:
         payload = " ".join(segment.argv[1:])
         # `eval "$(curl …)"` already yielded the inner fetch as a substitution segment;
@@ -1684,6 +1791,7 @@ __all__ = [
     "SHELL_EXECUTORS",
     "SHELL_KEYWORDS",
     "WRAPPERS",
+    "WRAPPER_COMMAND_FLAGS",
     "Hazard",
     "HazardCode",
     "Origin",
