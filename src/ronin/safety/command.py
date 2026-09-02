@@ -80,6 +80,9 @@ CODE_INTERPRETERS: Mapping[str, tuple[str, ...]] = {
     "ruby": ("-e",),
     "node": ("-e", "--eval"),
     "php": ("-r",),
+    # Documented gawk, not executed here -- this image ships mawk, which has no `-e`.
+    # Left in rather than out: a spelling nobody checks is how the last four got in.
+    "gawk": ("-e", "--source"),
 }
 
 #: Command-line flags for shell executors that spell ``-c`` some other way as well.
@@ -96,6 +99,28 @@ SHELL_COMMAND_FLAGS: Mapping[str, tuple[str, ...]] = {
 #: ``su`` is matched as the program and ``runuser`` as a peeled prefix, which is
 #: simply where each of them ends up.
 PRIVILEGE_ESCALATORS: frozenset[str] = frozenset({"sudo", "doas", "su", "runuser"})
+
+#: Interpreters that take their program as an *operand* rather than behind a flag.
+#:
+#: ``awk 'BEGIN{system("rm -rf /etc")}'`` deletes the tree and was reported as ``awk``
+#: and nothing else. ``perl -e`` and ``python -c`` were already read; awk was missed
+#: because its program is not attached to a flag -- it is simply the first word that is
+#: not an option.
+#:
+#: The value is the option flags that consume the *next* word, so the scan can tell an
+#: option's value from the program.
+PROGRAM_INTERPRETERS: Mapping[str, frozenset[str]] = {
+    "awk": frozenset({"-F", "-v", "--field-separator", "--assign"}),
+    "gawk": frozenset({"-F", "-v", "--field-separator", "--assign"}),
+    "mawk": frozenset({"-F", "-v", "--field-separator", "--assign"}),
+    "nawk": frozenset({"-F", "-v", "--field-separator", "--assign"}),
+}
+
+#: Flags that mean the program came from somewhere other than the command line, so
+#: there is no operand to read: ``-f`` names a file, and gawk's ``-e`` carries the
+#: program itself and is handled as a code flag instead. With either present the first
+#: plain word is *data*, and reading it as a program would report a phantom.
+_PROGRAM_ELSEWHERE: tuple[str, ...] = ("-f", "--file", "-e", "--source")
 
 #: Builtins that run their argument as a command.
 EVAL_BINARIES: frozenset[str] = frozenset({"eval", "source", "."})
@@ -1440,6 +1465,67 @@ def _subcommand_payload(argv: Sequence[str], phrase: Sequence[str]) -> str | Non
     return rest[0] if len(rest) == 1 else _rejoin(rest)
 
 
+#: The whole of awk's vocabulary for running a command. Enumerated against the real
+#: program rather than guessed, and it is closed by the language rather than by taste:
+#:
+#: * ``system("cmd")`` -- also ``system(variable)`` and ``system ("cmd")`` with a space
+#: * ``print … | "cmd"`` -- an output pipe
+#: * ``"cmd" | getline`` -- an input pipe
+#: * ``|&`` -- gawk's co-process
+#:
+#: Every one needs the token ``system`` or a ``|``. There is no way around them: awk has
+#: no ``eval``, and ``@`` indirection reaches user functions, not builtins -- measured,
+#: ``@c("rm -f x")`` with ``c="sys" "tem"`` runs nothing. ``|`` has no other meaning
+#: inside an awk program; POSIX awk has no bitwise-or operator and gawk spells it
+#: ``or()``.
+#:
+#: ``print > "file"`` writes a file without running anything, and is a gap in what a
+#: caller can see rather than one this closes.
+_AWK_SHELL_TOKENS: tuple[str, ...] = ("system", "|")
+
+
+def _reaches_a_shell(program: str) -> bool:
+    """Whether an awk program has any way to run a command.
+
+    The alternative was to hand *every* awk program to the scanner. Measured, that
+    costs more than it buys: ``awk '{print $1}' access.log`` flattens to a segment
+    named ``{print``, and an allow rule reading ``^awk `` then stops covering the
+    command it was written for, because a segment nobody wrote does not match it. A
+    safety check that makes ``awk '{print $1}'`` prompt is a check that gets switched
+    off, and an off check catches nothing.
+    """
+    return any(token in program for token in _AWK_SHELL_TOKENS)
+
+
+def _program_argument(argv: Sequence[str], value_flags: frozenset[str]) -> str | None:
+    """The program text an interpreter takes as its first operand, or ``None``.
+
+    ``awk -F, -v n=1 'BEGIN{system("rm -rf /etc")}' data.csv`` has to skip two options
+    and one option value before the program, and stop before the data file. Returning
+    the wrong word here is worse than returning nothing: a data filename read as a
+    program reports a command that never runs.
+    """
+    index = 1
+    while index < len(argv):
+        word = argv[index]
+        if word == "--":
+            index += 1
+            break
+        if not word.startswith("-") or word == "-":
+            break
+        for flag in _PROGRAM_ELSEWHERE:
+            # `-fprog.awk` attaches, `--file=prog.awk` attaches with `=`, and both
+            # spellings mean the operand is data.
+            if (
+                word == flag
+                or word.startswith(f"{flag}=")
+                or (len(flag) == 2 and word.startswith(flag))
+            ):
+                return None
+        index += 2 if word in value_flags else 1
+    return argv[index] if index < len(argv) else None
+
+
 def _payload_after(argv: Sequence[str], flags: Sequence[str]) -> str | None:
     """The word a command-carrying flag takes, whichever way the flag is spelled.
 
@@ -1583,6 +1669,17 @@ def _parse_nested(
         payload = _subcommand_payload(segment.argv, phrase)
         if payload:
             _parse_into(payload, out, depth=depth + 1, parent=index, origin=Origin.EXEC_ARGUMENT)
+    program_flags = PROGRAM_INTERPRETERS.get(segment.binary)
+    if program_flags is not None:
+        program = _program_argument(segment.argv, program_flags)
+        if program and _reaches_a_shell(program):
+            _parse_into(
+                _flatten_code(program),
+                out,
+                depth=depth + 1,
+                parent=index,
+                origin=Origin.INTERPRETER,
+            )
     flags = CODE_INTERPRETERS.get(segment.binary)
     if flags is not None:
         payload = _payload_after(segment.argv, flags)
@@ -1839,6 +1936,7 @@ __all__ = [
     "FETCH_BINARIES",
     "HARMLESS_DEVICES",
     "PRIVILEGE_ESCALATORS",
+    "PROGRAM_INTERPRETERS",
     "SHELL_EXECUTORS",
     "SHELL_KEYWORDS",
     "WRAPPERS",
