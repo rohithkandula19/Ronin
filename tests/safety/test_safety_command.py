@@ -2127,3 +2127,38 @@ def test_a_bare_e_command_runs_the_input_and_is_a_stated_gap() -> None:
     fix, so this is pinned as a known gap rather than left to look like coverage.
     """
     assert [segment.depth for segment in parse_command("sed 'e' f")] == [0]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # Measured against the python yq: `-yi` and `--in-place --yaml-output` both
+        # rewrite the file on disk. `--inplace` is the Go yq's spelling of the same
+        # flag, and which one is installed is not something the parser can know.
+        "yq -yi '.a=1' /etc/config.yml",
+        "yq --in-place -y '.a=1' /etc/config.yml",
+        "yq --inplace '.a=1' /etc/config.yml",
+        "yq -i '.a=1' /etc/config.yml",
+        # The ones that were already covered, so the shared list is checked both ways.
+        "sed -i 's/a/b/' /etc/config.yml",
+        "perl -i -pe 's/a/b/' /etc/config.yml",
+    ],
+)
+def test_rewriting_a_file_in_place_is_the_same_hazard_whichever_tool_does_it(
+    command: str,
+) -> None:
+    """`yq` was missing from the list, and `yq` is on the read-only allowlist.
+
+    So `yq -yi '.a=1' /etc/config.yml` rewrote a file outside the workspace and came
+    back *allowed* — while `sed -i` doing exactly that was refused. Two names for one
+    operation should not get two answers.
+    """
+    assert HazardCode.IN_PLACE_EDIT in {hazard.code for hazard in hazards(parse_command(command))}
+
+
+@pytest.mark.parametrize("command", ["yq '.a' config.yml", "yq -y '.a' config.yml"])
+def test_reading_with_yq_is_not_an_in_place_edit(command: str) -> None:
+    # `yq` without the flag prints, exactly as `sed` without `-i` does.
+    assert HazardCode.IN_PLACE_EDIT not in {
+        hazard.code for hazard in hazards(parse_command(command))
+    }

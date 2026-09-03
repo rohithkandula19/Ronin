@@ -396,3 +396,38 @@ def test_dd_inside_the_workspace_is_still_allowed(command: str) -> None:
     # properly must not turn it into a refusal.
     guard = Denylist(workspace_root=WORKSPACE, home=HOME)
     assert guard.check_command(command) == ()
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("yq -yi '.a=1' /etc/config.yml", DenyCode.OUTSIDE_WORKSPACE),
+        ("yq --in-place -y '.a=1' /etc/config.yml", DenyCode.OUTSIDE_WORKSPACE),
+        ("yq --inplace '.a=1' /etc/config.yml", DenyCode.OUTSIDE_WORKSPACE),
+        ("yq -yi '.a=1' ~/.ssh/config", DenyCode.SECRET_WRITE),
+        # The same operation under the name that was already covered, so the shared
+        # list is exercised from both ends.
+        ("sed -i 's/a/b/' /etc/config.yml", DenyCode.OUTSIDE_WORKSPACE),
+    ],
+)
+def test_an_in_place_edit_leaves_the_workspace_whichever_tool_writes_it(
+    command: str, expected: DenyCode
+) -> None:
+    """`yq` rewrites files and `yq` is on the read-only allowlist.
+
+    Without the refusal the allowlist has the last word and `yq -yi` outside the
+    workspace comes back allowed — the hazard alone only makes it a prompt, and a
+    prompt is not what `sed -i` on the same path gets.
+    """
+    guard = Denylist(workspace_root=WORKSPACE, home=HOME)
+    assert expected in {hit.code for hit in guard.check_command(command)}
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["yq '.a' /etc/config.yml", "yq -y '.a' /etc/config.yml", "jq '.a' /etc/config.json"],
+)
+def test_reading_a_file_outside_the_workspace_with_yq_is_not_refused(command: str) -> None:
+    # Reading is not writing, exactly as `sed -n '1,5p' /etc/hosts` is not.
+    guard = Denylist(workspace_root=WORKSPACE, home=HOME)
+    assert guard.check_command(command) == ()

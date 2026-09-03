@@ -49,6 +49,8 @@ from .command import (
     CODE_INTERPRETERS,
     EVAL_BINARIES,
     FETCH_BINARIES,
+    IN_PLACE_EDITORS,
+    IN_PLACE_FLAGS,
     SHELL_EXECUTORS,
     Segment,
     parse_command,
@@ -384,8 +386,8 @@ class Denylist:
         ``sed FILE`` prints; ``sed -i FILE`` rewrites. Treating the two the same would
         deny ``sed -n '1,5p' /etc/hosts``, which is a read and nobody's problem.
         """
-        if segment.binary in {"sed", "perl", "ruby", "awk"}:
-            return segment.has_flag("-i", "--in-place")
+        if segment.binary in {*IN_PLACE_EDITORS, "awk"}:
+            return segment.has_flag(*IN_PLACE_FLAGS)
         if segment.binary == "find":
             # `find /etc -name x` reads; `find /etc -delete` removes. Without this the
             # starting point is a path nobody is writing to, and `find / -delete` was
