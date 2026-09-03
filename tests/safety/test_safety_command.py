@@ -2052,3 +2052,78 @@ def test_an_awk_program_that_cannot_run_anything_is_left_alone(command: str) -> 
     """
     assert [segment.depth for segment in parse_command(command)] == [0]
     assert not hazards(parse_command(command))
+
+
+# --------------------------------------------------------------------------- #
+# sed, which can run a command too
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # The `e` flag on a substitution runs the replacement, in any flag order and
+        # with any delimiter.
+        r"sed 's/x/rm -rf \/etc/e' f",
+        r"sed 's/x/rm -rf \/etc/ge' f",
+        r"sed 's/x/rm -rf \/etc/eg' f",
+        "sed 's|x|rm -rf /etc|e' f",
+        "sed 's#x#rm -rf /etc#e' f",
+        r"sed -e 's/x/rm -rf \/etc/e' f",
+        r"sed --expression='s/x/rm -rf \/etc/e' f",
+        r"sed '/x/{s/x/rm -rf \/etc/e}' f",
+        # The `e` command, bare and addressed and after a separator.
+        "sed 'e rm -rf /etc' f",
+        "sed '1e rm -rf /etc' f",
+        "sed '/x/e rm -rf /etc' f",
+        "sed 'p;e rm -rf /etc' f",
+        # Two scripts, and the dangerous one is the second.
+        r"sed -e 's/q/z/' -e 's/x/rm -rf \/etc/e' f",
+    ],
+)
+def test_the_command_a_sed_script_runs_is_read(command: str) -> None:
+    """Every one of these deletes the tree, and every one was `allow`.
+
+    `sed` sits on the read-only allowlist, whose comment says none of its entries can
+    change a byte. GNU sed's `e` flag and `e` command both hand text to a shell —
+    measured, `s/x/echo a | wc -l/e` prints `1`, so the pipe is real.
+    """
+    inner = [segment for segment in parse_command(command) if segment.depth]
+    assert any(segment.binary == "rm" for segment in inner), command
+    assert HazardCode.RECURSIVE_DELETE in {
+        hazard.code for hazard in hazards(parse_command(command))
+    }
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # None of these run anything, and each one holds an `e` where a search for one
+        # would trip: in a filename, in a regex, in a label, in appended text, in a
+        # comment. That is why the script is walked rather than scanned.
+        "sed 's/a/b/' f",
+        "sed 's/a/b/g' f",
+        "sed 's/a/b/w notes-e.txt' f",
+        "sed '/error/d' log.txt",
+        "sed ':e;n;be' f",
+        "sed '1a rm -rf /etc' f",
+        "sed '1i rm -rf /etc' f",
+        "sed '#e rm -rf /etc' f",
+        "sed 'y/abc/xyz/' f",
+        "sed -n '1,5p' /etc/hosts",
+        "sed -f script.sed f",
+    ],
+)
+def test_a_sed_script_that_runs_nothing_is_left_alone(command: str) -> None:
+    assert [segment.depth for segment in parse_command(command)] == [0]
+    assert not hazards(parse_command(command))
+
+
+def test_a_bare_e_command_runs_the_input_and_is_a_stated_gap() -> None:
+    """`sed 'e'` runs whatever arrives on stdin — measured, the input line executes.
+
+    There is no command text to report, and saying "this runs its input" needs a hazard
+    code that does not exist yet. Adding one is a policy surface rather than a parser
+    fix, so this is pinned as a known gap rather than left to look like coverage.
+    """
+    assert [segment.depth for segment in parse_command("sed 'e' f")] == [0]
