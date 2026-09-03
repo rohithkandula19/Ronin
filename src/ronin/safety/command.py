@@ -682,8 +682,42 @@ class Segment:
             candidate = _dd_path(self.binary, word) or word
             if _looks_like_path(candidate):
                 words.append(candidate)
+        # An output flag's value is a path whether or not it looks like one, and the
+        # welded spellings never reach `operands` at all -- same reason a redirect
+        # target skips the heuristic below.
+        words.extend(target for target in self.output_targets if target not in words)
         words.extend(r.target for r in self.redirects if r.names_a_file)
         return tuple(words)
+
+    @property
+    def output_targets(self) -> tuple[str, ...]:
+        """Files and directories this segment writes because a flag named them."""
+        return _output_targets(self.binary, self.argv)
+
+
+#: Flags whose value is a file or directory the program *writes*, on programs that
+#: otherwise only read -- so the write had nothing looking at it.
+#:
+#: ``curl -o /etc/passwd URL`` and ``sort -o /etc/passwd f`` both overwrite the file,
+#: and ``curl``, ``wget`` and ``sort`` are all on the read-only allowlist, whose comment
+#: says none of its entries can change a byte. So these were *allowed*, not asked
+#: about, while the same write spelled as ``> /etc/passwd`` was refused.
+#:
+#: Two things were wrong, and the second is worse. Written apart, the path did reach
+#: :attr:`Segment.path_words` but was read as a *read*, because the segment's program is
+#: not a write binary. Written welded to the flag -- ``-o/etc/passwd``,
+#: ``--output=/etc/passwd`` -- it produced no path word at all: :attr:`Segment.operands`
+#: drops every word starting with ``-``, so there was not even a read to check.
+#:
+#: Per-binary because the same letter means different things. ``curl -O`` takes no value
+#: at all (it names the file after the URL -- measured: ``curl -sO
+#: file:///etc/hostname`` writes ``hostname``), so listing it under ``curl`` would eat
+#: the URL as a write target. Under ``wget`` the same letter *is* the output file.
+OUTPUT_FLAGS: Mapping[str, tuple[str, ...]] = {
+    "curl": ("-o", "--output", "--output-dir"),
+    "wget": ("-O", "--output-document", "-P", "--directory-prefix"),
+    "sort": ("-o", "--output"),
+}
 
 
 #: ``dd``'s operands are ``key=value``, and two of those values are paths.
@@ -694,6 +728,40 @@ class Segment:
 #: destruction spelled normally, was refused. `bs=`, `count=`, `seek=` and the rest are
 #: numbers and are left alone.
 _DD_PATH_OPERANDS: tuple[str, ...] = ("of=", "if=")
+
+
+def _output_targets(binary: str, argv: Sequence[str]) -> tuple[str, ...]:
+    """Files and directories named by an output flag, however the flag is written.
+
+    All four spellings, since a check that reads three of them is a check with a fourth
+    way past it: ``-o FILE``, ``-oFILE``, ``--output FILE``, ``--output=FILE``.
+
+    A value of ``-`` is standard output rather than a file called ``-`` -- measured for
+    both, ``curl -o -`` and ``wget -O-`` leave a file of that name alone -- so it is not
+    a write target.
+    """
+    flags = OUTPUT_FLAGS.get(binary)
+    if flags is None:
+        return ()
+    found: list[str] = []
+    index = 1
+    while index < len(argv):
+        word = argv[index]
+        for flag in flags:
+            if word == flag:
+                if index + 1 < len(argv):
+                    found.append(argv[index + 1])
+                    index += 1
+                break
+            if word.startswith(f"{flag}="):
+                found.append(word[len(flag) + 1 :])
+                break
+            # Only a short flag can carry its value welded on with nothing between.
+            if len(flag) == 2 and not flag.startswith("--") and word.startswith(flag):
+                found.append(word[len(flag) :])
+                break
+        index += 1
+    return tuple(value for value in found if value and value != "-")
 
 
 def _dd_path(binary: str, word: str) -> str | None:
@@ -2106,6 +2174,7 @@ __all__ = [
     "HARMLESS_DEVICES",
     "IN_PLACE_EDITORS",
     "IN_PLACE_FLAGS",
+    "OUTPUT_FLAGS",
     "PRIVILEGE_ESCALATORS",
     "PROGRAM_INTERPRETERS",
     "SHELL_EXECUTORS",

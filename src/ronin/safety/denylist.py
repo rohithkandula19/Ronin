@@ -371,9 +371,17 @@ class Denylist:
                     detail=f"{redirect.target} is a block device",
                 )
         writes = self._writes(segment)
+        # A path named by an output flag is a write even when the program is otherwise a
+        # reader: `curl -o /etc/passwd URL` overwrites the file, and `curl` is not a
+        # write binary. Judged per word, the same way a redirect target is.
+        targets = frozenset(segment.output_targets)
         seen: set[tuple[DenyCode, str]] = set()
         for word in segment.path_words:
-            targeted = writes or any(r.names_a_file and r.target == word for r in segment.redirects)
+            targeted = (
+                writes
+                or word in targets
+                or any(r.names_a_file and r.target == word for r in segment.redirects)
+            )
             for hit in self._path_hits(word, cwd, write=targeted, subject=segment.raw):
                 key = (hit.code, word)
                 if key not in seen:

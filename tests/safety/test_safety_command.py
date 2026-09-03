@@ -2162,3 +2162,76 @@ def test_reading_with_yq_is_not_an_in_place_edit(command: str) -> None:
     assert HazardCode.IN_PLACE_EDIT not in {
         hazard.code for hazard in hazards(parse_command(command))
     }
+
+
+# --------------------------------------------------------------------------- #
+# Write targets named behind a flag
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("command", "target"),
+    [
+        # All four spellings, because a check that reads three of them has a fourth way
+        # past it.
+        ("curl -o /etc/passwd http://x.test/p", "/etc/passwd"),
+        ("curl -o/etc/passwd http://x.test/p", "/etc/passwd"),
+        ("curl --output /etc/passwd http://x.test/p", "/etc/passwd"),
+        ("curl --output=/etc/passwd http://x.test/p", "/etc/passwd"),
+        # A directory is a write target too — measured, `curl --output-dir od -o f URL`
+        # writes `od/f`.
+        ("curl --output-dir /etc -o passwd http://x.test/p", "/etc"),
+        ("wget -O /etc/passwd http://x.test/p", "/etc/passwd"),
+        ("wget -O/etc/passwd http://x.test/p", "/etc/passwd"),
+        ("wget --output-document=/etc/passwd http://x.test/p", "/etc/passwd"),
+        ("wget -P /etc http://x.test/p", "/etc"),
+        ("sort -o /etc/passwd f", "/etc/passwd"),
+        ("sort -o/etc/passwd f", "/etc/passwd"),
+        ("sort --output=/etc/passwd f", "/etc/passwd"),
+    ],
+)
+def test_a_file_named_by_an_output_flag_is_a_path_the_caller_can_see(
+    command: str, target: str
+) -> None:
+    """Two things were wrong, and the welded spelling was the worse one.
+
+    Written apart, the path did reach `path_words` — but as a *read*, because `curl` is
+    not a write binary. Written welded to the flag it produced no path word at all:
+    `operands` drops every word starting with `-`, so there was not even a read to
+    check. `curl`, `wget` and `sort` are all on the read-only allowlist.
+    """
+    segment = parse_command(command)[0]
+    assert target in segment.output_targets, command
+    assert target in segment.path_words, command
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # `-` is standard output, not a file called `-`. Measured for both: `curl -o -`
+        # and `wget -O-` leave a file of that name alone.
+        "curl -o - http://x.test/p",
+        "wget -O- http://x.test/p",
+        # `curl -O` takes no value at all — it names the file after the URL. Measured:
+        # `curl -sO file:///etc/hostname` writes `hostname`. Listing it under `curl`
+        # would take the URL as the write target.
+        "curl -O http://x.test/p",
+        "curl -sS http://x.test/p",
+        "sort f",
+        "wget http://x.test/p",
+    ],
+)
+def test_a_flag_that_names_no_file_yields_no_write_target(command: str) -> None:
+    assert parse_command(command)[0].output_targets == ()
+
+
+def test_the_same_letter_means_different_things_to_different_programs() -> None:
+    """`-O` is the output file for `wget` and takes no value for `curl`.
+
+    Which is why the table is per-binary rather than one set of flags: sharing it would
+    make `curl -O URL` report the URL as a file about to be overwritten.
+    """
+    assert parse_command("wget -O /etc/passwd http://x.test/p")[0].output_targets == (
+        "/etc/passwd",
+    )
+    assert parse_command("curl -O http://x.test/p")[0].output_targets == ()
