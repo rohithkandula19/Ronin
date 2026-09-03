@@ -785,10 +785,32 @@ def _output_targets(binary: str, argv: Sequence[str]) -> tuple[str, ...]:
     both, ``curl -o -`` and ``wget -O-`` leave a file of that name alone -- so it is not
     a write target.
     """
+    found: list[str] = []
     flags = OUTPUT_FLAGS.get(binary)
-    if flags is None:
+    if flags is not None:
+        found.extend(value for _flag, value in _flag_values(argv, flags) if value and value != "-")
+    found.extend(_program_write_targets(binary, argv))
+    return tuple(found)
+
+
+def _program_write_targets(binary: str, argv: Sequence[str]) -> tuple[str, ...]:
+    """Files an interpreter's own program names for writing.
+
+    A flag is not the only way to name a file to overwrite: ``awk`` redirects with
+    ``> "file"`` and ``sed`` writes with ``w file``, both inside the program text, and
+    both were invisible. Reported alongside the flag-named ones rather than as their own
+    kind, because the deny list already treats an output target as a write and that is
+    exactly what these are.
+    """
+    program_flags = PROGRAM_INTERPRETERS.get(binary)
+    if program_flags is None:
         return ()
-    return tuple(value for _flag, value in _flag_values(argv, flags) if value and value != "-")
+    if binary == "sed":
+        scripts = [_program_argument(argv, program_flags) or ""]
+        scripts.extend(_payloads_after(argv, _SED_SCRIPT_FLAGS))
+        return tuple(target for script in scripts for target in _sed_write_targets(script))
+    program = _program_argument(argv, program_flags)
+    return _awk_write_targets(program) if program else ()
 
 
 def _flag_values(argv: Sequence[str], flags: Sequence[str]) -> tuple[tuple[str, str], ...]:
@@ -1739,6 +1761,28 @@ def _subcommand_payload(argv: Sequence[str], phrase: Sequence[str]) -> str | Non
 _AWK_SHELL_TOKENS: tuple[str, ...] = ("system", "|")
 
 
+#: An awk redirect: ``>`` or ``>>`` and then a quoted filename.
+#:
+#: ``>`` cannot be the trigger on its own -- it is awk's comparison operator too, and
+#: ``awk '{if ($1 > 5) print}'`` is ordinary work. Requiring the quoted string is what
+#: separates a redirect from a comparison, since a number needs no quotes.
+#:
+#: ``awk '{if ($1 > "5") print}'`` is a string comparison and does match. That costs a
+#: path word ``5``, which resolves inside the workspace and raises nothing.
+_AWK_REDIRECT = re.compile(r'>>?\s*"([^"]+)"')
+
+
+def _awk_write_targets(program: str) -> tuple[str, ...]:
+    """Files an awk program writes with ``print > "file"`` or ``>>``.
+
+    Measured: ``awk 'BEGIN{print "clobbered" > "f"}'`` replaces the file's contents. The
+    shell-token test that decides whether to read the program at all does not cover
+    this, because a redirect needs neither ``system`` nor ``|`` -- so the write was
+    invisible even though the same program's ``system(...)`` would not have been.
+    """
+    return tuple(match.group(1) for match in _AWK_REDIRECT.finditer(program))
+
+
 def _reaches_a_shell(program: str) -> bool:
     """Whether an awk program has any way to run a command.
 
@@ -1785,6 +1829,17 @@ def _sed_address(script: str, index: int) -> int:
     return index
 
 
+def _sed_write_targets(script: str) -> tuple[str, ...]:
+    """Files a sed script writes: ``s///w FILE``, ``w FILE``, ``W FILE``.
+
+    Measured against GNU sed 4.9 -- ``sed -n 's/x/clobbered/w f'`` replaces the file's
+    contents. The walker already had to find where that filename ends, because an ``e``
+    inside it must not read as the execute flag; it was stepping over the name rather
+    than reporting it.
+    """
+    return _sed_walk(script)[1]
+
+
 def _sed_commands(script: str) -> tuple[str, ...]:
     """Every command ``script`` hands to a shell.
 
@@ -1792,7 +1847,19 @@ def _sed_commands(script: str) -> tuple[str, ...]:
     ``s/x/y/w notes-e.txt``, in ``/error/d`` and in ``:e;n;be``, none of which run
     anything -- and a check that refuses those is a check that gets turned off.
     """
+    return _sed_walk(script)[0]
+
+
+def _sed_walk(script: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """One pass over a sed script: the commands it runs and the files it writes.
+
+    Both come out of the same walk on purpose. Two walks would be two chances to
+    disagree about where a filename ends, and that boundary is the whole difficulty --
+    it is what keeps the ``e`` in ``s/x/y/w notes-e.txt`` from reading as the execute
+    flag.
+    """
     found: list[str] = []
+    writes: list[str] = []
     index = 0
     while index < len(script):
         char = script[index]
@@ -1828,11 +1895,20 @@ def _sed_commands(script: str) -> tuple[str, ...]:
             index = stop + 1
             continue
         if letter in _SED_LINE_ARGUMENT:
-            index = _sed_end_of_line(script, index)
+            break_at = script.find("\n", index)
+            stop = len(script) if break_at < 0 else break_at
+            if letter in "wW":
+                # This is where a `w` filename lands, whether it came from a `w`
+                # command or from the flags of a substitution -- `_sed_flags` stops at
+                # the `w` and lets the walk take it from here.
+                target = script[index:stop].strip()
+                if target:
+                    writes.append(target)
+            index = stop + 1
             continue
         while letter in _SED_NO_ARGUMENT and index < len(script) and script[index].isdigit():
             index += 1
-    return tuple(found)
+    return tuple(found), tuple(writes)
 
 
 def _sed_end_of_line(script: str, index: int) -> int:
