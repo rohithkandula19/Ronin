@@ -1936,3 +1936,119 @@ def test_a_command_flag_bundled_into_a_cluster_is_still_the_command_flag(
 )
 def test_a_long_option_is_not_a_bundle_of_short_ones(command: str) -> None:
     assert [segment.depth for segment in parse_command(command)] == [0]
+
+
+# --------------------------------------------------------------------------- #
+# awk, whose program is an operand
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # A program from a file is not on the command line, in any of the three
+        # spellings — so the operand is *data*, and reading it as a program reports one
+        # that never runs. The file name is what makes this visible: a script called
+        # `system.awk` carries the token, and without the rule the parser would hand
+        # `system.awk` to the scanner as though it were awk source.
+        "awk -f system.awk data.csv",
+        "awk -fsystem.awk data.csv",
+        "awk --file=system.awk data.csv",
+    ],
+)
+def test_a_program_awk_reads_from_a_file_is_not_on_the_command_line(command: str) -> None:
+    assert [segment.depth for segment in parse_command(command)] == [0]
+
+
+def test_a_program_behind_a_flag_is_read_once_and_not_twice() -> None:
+    """`gawk -e 'prog' data` carries its program behind a flag, the shape `perl -e` has.
+
+    Without the rule that says so, the operand rule would *also* fire and hand the same
+    text to the scanner a second time — one command reported as two is how a reviewer
+    learns to stop counting.
+    """
+    inner = [
+        segment for segment in parse_command("gawk -e 'BEGIN{system(\"x\")}' d") if segment.depth
+    ]
+    assert [segment.binary for segment in inner] == ["BEGIN{system", "x", ""]
+
+
+@pytest.mark.parametrize(
+    ("command", "inner"),
+    [
+        ("""awk 'BEGIN{system("rm -rf /etc")}'""", "rm"),
+        ("""awk '{system("rm -rf /etc")}' f""", "rm"),
+        # `system ("cmd")` with a space between the name and the paren runs — measured.
+        ("""awk 'BEGIN{system ("rm -rf /etc")}'""", "rm"),
+        # An output pipe hands the text to a shell.
+        ("""awk 'BEGIN{print "rm -rf /etc" | "sh"}'""", "sh"),
+        # Options and their values come before the program; the data file comes after.
+        ("""awk -F, -v n=1 'BEGIN{system("rm -rf /etc")}' data.csv""", "rm"),
+        # Same program under every name it ships as.
+        ("""mawk 'BEGIN{system("rm -rf /etc")}'""", "rm"),
+        ("""nawk 'BEGIN{system("rm -rf /etc")}'""", "rm"),
+        # gawk carries a program behind `-e` as well, which is the shape `perl -e` has.
+        ("""gawk -e 'BEGIN{system("rm -rf /etc")}'""", "rm"),
+    ],
+)
+def test_the_command_an_awk_program_runs_is_read(command: str, inner: str) -> None:
+    """`awk` was missing from every interpreter table.
+
+    `perl -e` and `python -c` were read from the start; awk was missed because its
+    program is not attached to a flag — it is simply the first word that is not an
+    option. So `awk 'BEGIN{system("rm -rf /etc")}'` deleted the tree and the parse
+    reported `awk`, alone, with no hazard and no refusal.
+    """
+    assert inner in binaries(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # The command is held in a variable, so the flattener sees `system(s)` and has
+        # no way to know what `s` holds.
+        """awk 'BEGIN{s="rm -rf /etc"; system(s)}'""",
+        # An input pipe: the text is there but `getline` sits where the program would.
+        """awk 'BEGIN{"rm -rf /etc" | getline x}'""",
+    ],
+)
+def test_a_command_awk_holds_in_a_variable_is_escalated_even_when_it_cannot_be_named(
+    command: str,
+) -> None:
+    """Where the flattening runs out, stated rather than implied.
+
+    Splitting an interpreter's source on punctuation is deliberately crude, and these
+    two shapes are where it stops short: the delete is in the text but the parser cannot
+    say `rm` is the program. What it can still say is that this awk program reaches a
+    shell, which escalates the whole command to `ask` — the same crudeness `python -c`
+    has always had, and the reason inline code carries a hazard of its own.
+    """
+    found = {hazard.code for hazard in hazards(parse_command(command))}
+    assert HazardCode.INTERPRETER_PAYLOAD in found
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "awk '{print $1}' access.log",
+        """awk 'BEGIN{FS=","}{s+=$2}END{print s}' data.csv""",
+        "awk -F: '{print $1}' /etc/passwd",
+        "awk",
+    ],
+)
+def test_an_awk_program_that_cannot_run_anything_is_left_alone(command: str) -> None:
+    """The reason this is a token test and not a blanket one.
+
+    Handing *every* awk program to the scanner was the other option, and it was measured
+    before being rejected: `awk '{print $1}' access.log` flattens to a segment named
+    `{print`, and an allow rule reading `^awk ` then stops covering the command it was
+    written for, because a segment nobody wrote does not match it. A check that makes
+    `awk '{print $1}'` prompt is a check that gets switched off.
+
+    What makes the narrow version safe is that awk's vocabulary for running a command is
+    closed by the language: `system`, an output pipe, an input pipe, gawk's `|&`. Every
+    one needs the token `system` or a `|`, awk has no `eval`, and `@` indirection
+    reaches user functions rather than builtins.
+    """
+    assert [segment.depth for segment in parse_command(command)] == [0]
+    assert not hazards(parse_command(command))
