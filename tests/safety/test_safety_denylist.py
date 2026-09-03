@@ -637,3 +637,54 @@ def test_moving_a_key_out_of_the_project_is_refused_whatever_it_is_called(name: 
 def test_a_credential_named_by_its_place_is_matched_only_there(command: str, refused: bool) -> None:
     guard = Denylist(workspace_root=WORKSPACE, home=HOME)
     assert bool(guard.check_command(command)) is refused, command
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        """awk 'BEGIN{print "x" > "/etc/passwd"}'""",
+        """awk 'BEGIN{print "x" >> "/etc/passwd"}'""",
+        'sed -n "s/x/y/w /etc/passwd" f',
+        'sed -n "w /etc/passwd" f',
+        'sed -e "s/x/y/w /etc/passwd" f',
+    ],
+)
+def test_an_interpreter_writing_outside_the_workspace_is_refused(command: str) -> None:
+    """These overwrite the file and were allowed outright.
+
+    Reported as output targets rather than as a new kind, so the refusal that already
+    covers `curl -o /etc/passwd` covers these too without a second rule to keep in step.
+    """
+    guard = Denylist(workspace_root=WORKSPACE, home=HOME)
+    assert DenyCode.OUTSIDE_WORKSPACE in {hit.code for hit in guard.check_command(command)}
+
+
+def test_writing_to_a_key_is_a_write_and_not_only_a_read() -> None:
+    """The second half of the same defect.
+
+    When the target *was* noticed — by a substring match on a secret directory — it came
+    back as `key_material_read`. Writing to `authorized_keys` is a write, and saying
+    only "read" understates what the command does.
+    """
+    guard = Denylist(workspace_root=WORKSPACE, home=HOME)
+    codes = {
+        hit.code
+        for hit in guard.check_command(
+            f"""awk 'BEGIN{{printf "x" > "{HOME}/.ssh/authorized_keys"}}'"""
+        )
+    }
+    assert DenyCode.SECRET_WRITE in codes
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        """awk 'BEGIN{print "x" > "out.txt"}'""",
+        'sed -n "s/x/y/w out.txt" f',
+        """awk '{if ($1 > 5) print}' f""",
+        "sed -n '1,5p' f",
+    ],
+)
+def test_writing_inside_the_workspace_stays_ordinary(command: str) -> None:
+    guard = Denylist(workspace_root=WORKSPACE, home=HOME)
+    assert guard.check_command(command) == ()

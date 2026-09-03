@@ -2299,3 +2299,64 @@ def test_a_flag_that_sends_no_file_yields_no_payload_target(command: str) -> Non
     # Asserted on `payload_targets` directly: a bare filename is not a path word, so a
     # check phrased against the deny list would pass here no matter what the table said.
     assert parse_command(command)[0].payload_targets == ()
+
+
+@pytest.mark.parametrize(
+    ("command", "target"),
+    [
+        # awk redirects. Measured: `awk 'BEGIN{print "clobbered" > "f"}'` replaces the
+        # file's contents.
+        ("""awk 'BEGIN{print "x" > "/etc/passwd"}'""", "/etc/passwd"),
+        ("""awk 'BEGIN{print "x" >> "/etc/passwd"}'""", "/etc/passwd"),
+        ("""awk 'BEGIN{printf "x" > "/etc/passwd"}'""", "/etc/passwd"),
+        # sed's three write channels, measured against GNU sed 4.9.
+        ('sed -n "s/x/y/w /etc/passwd" f', "/etc/passwd"),
+        ('sed -n "w /etc/passwd" f', "/etc/passwd"),
+        ('sed -n "W /etc/passwd" f', "/etc/passwd"),
+        ('sed -e "s/x/y/w /etc/passwd" f', "/etc/passwd"),
+        ('sed -n "s/x/y/gw /etc/passwd" f', "/etc/passwd"),
+    ],
+)
+def test_a_file_an_interpreter_writes_from_its_own_program_is_seen(
+    command: str, target: str
+) -> None:
+    """A flag is not the only way to name a file to overwrite.
+
+    The shell-token test that decides whether an awk program is read at all keys on
+    `system` and `|`, and a redirect has neither — so the write was invisible even
+    though the same program's `system(...)` would not have been. sed's `w` was the same
+    story: the walker already found where that filename ends, in order to step over it.
+    """
+    assert target in parse_command(command)[0].output_targets, command
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # `>` is awk's comparison operator too. Triggering on it alone would surface
+        # every comparison and bring back exactly the noise the token test avoids.
+        """awk '{if ($1 > 5) print}' f""",
+        """awk '{if ($1 >= 5) print}' f""",
+        "awk '{print $1}' f",
+        # sed without a write channel.
+        'sed -n "1,5p" f',
+        'sed "s/a/b/g" f',
+        # A label containing `w` is not a write.
+        'sed ":w;n;bw" f',
+    ],
+)
+def test_a_program_that_writes_nothing_names_no_target(command: str) -> None:
+    # Asserted on `output_targets` directly: a bare filename is not a path word, so a
+    # check phrased through the deny list could pass without the rule doing anything.
+    assert parse_command(command)[0].output_targets == ()
+
+
+def test_a_string_comparison_is_accepted_as_the_price_of_the_quote_rule() -> None:
+    """`awk '{if ($1 > "5") print}'` matches, and that is the stated cost.
+
+    A number needs no quotes, so requiring one is what separates a redirect from a
+    comparison. A string comparison has quotes and looks the same. It costs a path word
+    `5`, which resolves inside the workspace and raises nothing — a false positive with
+    no consequence, which is the right side to err on.
+    """
+    assert parse_command("""awk '{if ($1 > "5") print}' f""")[0].output_targets == ("5",)
