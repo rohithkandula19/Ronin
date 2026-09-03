@@ -114,6 +114,7 @@ PROGRAM_INTERPRETERS: Mapping[str, frozenset[str]] = {
     "gawk": frozenset({"-F", "-v", "--field-separator", "--assign"}),
     "mawk": frozenset({"-F", "-v", "--field-separator", "--assign"}),
     "nawk": frozenset({"-F", "-v", "--field-separator", "--assign"}),
+    "sed": frozenset({"-l", "--line-length"}),
 }
 
 #: Flags that mean the program came from somewhere other than the command line, so
@@ -121,6 +122,30 @@ PROGRAM_INTERPRETERS: Mapping[str, frozenset[str]] = {
 #: program itself and is handled as a code flag instead. With either present the first
 #: plain word is *data*, and reading it as a program would report a phantom.
 _PROGRAM_ELSEWHERE: tuple[str, ...] = ("-f", "--file", "-e", "--source")
+
+#: ``sed``'s two ways to run a command, both GNU extensions and both measured against
+#: GNU sed 4.9:
+#:
+#: * the ``e`` flag on a substitution -- ``sed 's/x/rm -rf \/etc/e'`` runs the
+#:   replacement. In any flag order (``ge``, ``eg``) and with any delimiter.
+#: * the ``e`` command -- ``sed 'e rm -rf /etc'``, with or without an address.
+#:
+#: Neither could be found by searching for an ``e``: ``sed 's/x/y/w notes-e.txt'`` has
+#: one in a *filename*, ``sed '/error/d'`` in a regex, and ``sed ':e;n;be'`` in a label.
+#: All three run nothing, so the script is walked rather than scanned.
+#:
+#: ``sed 'e'`` with no argument runs the *input line* -- whatever arrives on stdin
+#: becomes the command. There is no text to report and saying so needs a hazard code
+#: that does not exist yet, so it is left as a stated gap rather than a quiet one.
+_SED_SCRIPT_FLAGS: tuple[str, ...] = ("-e", "--expression")
+
+#: Substitution flags that are not ``e`` and do not end the flags.
+_SED_SUBSTITUTION_FLAGS: str = "gpiImM0123456789"
+
+#: sed commands taking no argument, and those taking the rest of the line (text for
+#: ``a``/``i``/``c``, a filename for ``r``/``w``, a label for ``b``/``t``/``:``).
+_SED_NO_ARGUMENT: str = "dDgGhHnNpPxzF=lL"
+_SED_LINE_ARGUMENT: str = "aicrRwW:btT"
 
 #: Builtins that run their argument as a command.
 EVAL_BINARIES: frozenset[str] = frozenset({"eval", "source", "."})
@@ -1497,6 +1522,113 @@ def _reaches_a_shell(program: str) -> bool:
     return any(token in program for token in _AWK_SHELL_TOKENS)
 
 
+def _sed_field(script: str, index: int, delimiter: str) -> tuple[str, int]:
+    """One delimiter-terminated field of a ``s`` or ``y`` command, and where it ends."""
+    out: list[str] = []
+    while index < len(script):
+        char = script[index]
+        if char == "\\" and index + 1 < len(script):
+            out.append(script[index : index + 2])
+            index += 2
+            continue
+        if char == delimiter:
+            return "".join(out), index + 1
+        out.append(char)
+        index += 1
+    return "".join(out), index
+
+
+def _sed_address(script: str, index: int) -> int:
+    """Past any address in front of a command: ``12``, ``$``, ``/re/``, ``\\%re%``."""
+    while index < len(script):
+        char = script[index]
+        if char.isdigit() or char in "$,~+":
+            index += 1
+            continue
+        if char in "/\\":
+            delimiter = "/" if char == "/" else script[index + 1 : index + 2] or "/"
+            _, index = _sed_field(script, index + 1 if char == "/" else index + 2, delimiter)
+            while index < len(script) and script[index] in "IM":
+                index += 1
+            continue
+        break
+    return index
+
+
+def _sed_commands(script: str) -> tuple[str, ...]:
+    """Every command ``script`` hands to a shell.
+
+    The script is walked rather than searched. Searching for an ``e`` finds the one in
+    ``s/x/y/w notes-e.txt``, in ``/error/d`` and in ``:e;n;be``, none of which run
+    anything -- and a check that refuses those is a check that gets turned off.
+    """
+    found: list[str] = []
+    index = 0
+    while index < len(script):
+        char = script[index]
+        if char in " \t\n;{}!":
+            index += 1
+            continue
+        if char == "#":
+            index = _sed_end_of_line(script, index)
+            continue
+        index = _sed_address(script, index)
+        while index < len(script) and script[index] in " \t!":
+            index += 1
+        if index >= len(script):
+            break
+        letter = script[index]
+        index += 1
+        if letter in "sy":
+            if index >= len(script):
+                break
+            delimiter = script[index]
+            _, index = _sed_field(script, index + 1, delimiter)
+            replacement, index = _sed_field(script, index, delimiter)
+            index, executes = _sed_flags(script, index)
+            if executes and replacement:
+                found.append(replacement.replace(f"\\{delimiter}", delimiter))
+            continue
+        if letter == "e":
+            break_at = script.find("\n", index)
+            stop = len(script) if break_at < 0 else break_at
+            command = script[index:stop].strip()
+            if command:
+                found.append(command)
+            index = stop + 1
+            continue
+        if letter in _SED_LINE_ARGUMENT:
+            index = _sed_end_of_line(script, index)
+            continue
+        while letter in _SED_NO_ARGUMENT and index < len(script) and script[index].isdigit():
+            index += 1
+    return tuple(found)
+
+
+def _sed_end_of_line(script: str, index: int) -> int:
+    end = script.find("\n", index)
+    return len(script) if end < 0 else end + 1
+
+
+def _sed_flags(script: str, index: int) -> tuple[int, bool]:
+    """Past a substitution's flags, and whether ``e`` was among them."""
+    executes = False
+    while index < len(script):
+        flag = script[index]
+        if flag == "e":
+            executes = True
+            index += 1
+            continue
+        if flag in _SED_SUBSTITUTION_FLAGS:
+            index += 1
+            continue
+        # Anything else ends the flags. `w` ends them too, and the filename after it
+        # is then consumed by the line-argument branch in the caller -- which is what
+        # keeps the `e` in `s/x/y/w notes-e.txt` from being read as a flag.
+        break
+    return index, executes
+
+
 def _program_argument(argv: Sequence[str], value_flags: frozenset[str]) -> str | None:
     """The program text an interpreter takes as its first operand, or ``None``.
 
@@ -1524,6 +1656,22 @@ def _program_argument(argv: Sequence[str], value_flags: frozenset[str]) -> str |
                 return None
         index += 2 if word in value_flags else 1
     return argv[index] if index < len(argv) else None
+
+
+def _payloads_after(argv: Sequence[str], flags: Sequence[str]) -> tuple[str, ...]:
+    """Every value given for ``flags``, not just the first.
+
+    ``sed -e 's/q/z/' -e 's/x/rm -rf \\/etc/e'`` is one command with two scripts, and
+    the dangerous one is the second.
+    """
+    found: list[str] = []
+    for position, word in enumerate(argv):
+        for flag in flags:
+            if word == flag and position + 1 < len(argv):
+                found.append(argv[position + 1])
+            elif word.startswith(f"{flag}="):
+                found.append(word[len(flag) + 1 :])
+    return tuple(found)
 
 
 def _payload_after(argv: Sequence[str], flags: Sequence[str]) -> str | None:
@@ -1669,8 +1817,16 @@ def _parse_nested(
         payload = _subcommand_payload(segment.argv, phrase)
         if payload:
             _parse_into(payload, out, depth=depth + 1, parent=index, origin=Origin.EXEC_ARGUMENT)
+    if segment.binary == "sed":
+        scripts = [_program_argument(segment.argv, PROGRAM_INTERPRETERS["sed"]) or ""]
+        scripts.extend(_payloads_after(segment.argv, _SED_SCRIPT_FLAGS))
+        for script in scripts:
+            for payload in _sed_commands(script):
+                # sed runs it through a shell -- measured, `s/x/echo a | wc -l/e`
+                # prints `1`, so the pipe is real.
+                _parse_into(payload, out, depth=depth + 1, parent=index, origin=Origin.SHELL_C)
     program_flags = PROGRAM_INTERPRETERS.get(segment.binary)
-    if program_flags is not None:
+    if program_flags is not None and segment.binary != "sed":
         program = _program_argument(segment.argv, program_flags)
         if program and _reaches_a_shell(program):
             _parse_into(
