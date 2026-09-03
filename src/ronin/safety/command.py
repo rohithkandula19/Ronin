@@ -147,6 +147,19 @@ _SED_SUBSTITUTION_FLAGS: str = "gpiImM0123456789"
 _SED_NO_ARGUMENT: str = "dDgGhHnNpPxzF=lL"
 _SED_LINE_ARGUMENT: str = "aicrRwW:btT"
 
+#: Programs that rewrite a file in place rather than printing to standard output.
+#:
+#: ``yq`` was missing, and ``yq`` is on the read-only allowlist -- so
+#: ``yq -yi '.a=1' /etc/config.yml`` rewrote a file outside the workspace and was
+#: *allowed*, while ``sed -i`` doing the same thing was refused. Measured against
+#: yq 0.0.0 (the python one): ``-yi`` and ``--in-place --yaml-output`` both change the
+#: file on disk.
+#:
+#: ``--inplace`` without the hyphen is the Go yq's spelling of the same flag; both are
+#: listed because which one is installed is not something the parser can know.
+IN_PLACE_EDITORS: frozenset[str] = frozenset({"sed", "perl", "ruby", "yq"})
+IN_PLACE_FLAGS: tuple[str, ...] = ("-i", "--in-place", "--inplace")
+
 #: Builtins that run their argument as a command.
 EVAL_BINARIES: frozenset[str] = frozenset({"eval", "source", "."})
 
@@ -2042,7 +2055,7 @@ def _segment_hazards(segments: Sequence[Segment], index: int, segment: Segment) 
                 Severity.BLOCK,
                 f"writing to {redirect.target} overwrites a device, not a file",
             )
-    if segment.binary in {"sed", "perl", "ruby"} and segment.has_flag("-i", "--in-place"):
+    if segment.binary in IN_PLACE_EDITORS and segment.has_flag(*IN_PLACE_FLAGS):
         yield hazard(
             HazardCode.IN_PLACE_EDIT,
             Severity.ASK,
@@ -2091,6 +2104,8 @@ __all__ = [
     "EXEC_ARGUMENT_FLAGS",
     "FETCH_BINARIES",
     "HARMLESS_DEVICES",
+    "IN_PLACE_EDITORS",
+    "IN_PLACE_FLAGS",
     "PRIVILEGE_ESCALATORS",
     "PROGRAM_INTERPRETERS",
     "SHELL_EXECUTORS",
