@@ -17,9 +17,9 @@ failure mode that is silent if it is only written down:
    only ever *request* a capability — :meth:`StandingOrders.granted` intersects
    with what the deployment actually has. A Retainer cannot talk its way into a
    capability its host does not possess.
-2. **A blanket allow is not standing orders, it is the absence of them.** A
-   :class:`Grant` of ``allow`` on every tool with no condition is refused at
-   construction, because the whole design rests on authority being enumerated.
+2. **A blanket allow is not standing orders, it is the absence of them.**
+   :class:`StandingOrders` refuses a rule allowing every tool with no match,
+   because the whole design rests on authority being enumerated.
 3. **An escalation's state and its answer agree.** An answered escalation
    carries an answer and an open one does not, so no caller has to guess whether
    an empty string means "not yet" or "they said nothing".
@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
-from ronin.safety.policy import Decision
+from ronin.safety.policy import Decision, Rule
 
 # --------------------------------------------------------------------------- #
 # Vocabulary
@@ -168,38 +168,6 @@ class Post:
 
 
 @dataclass(frozen=True, slots=True)
-class Grant:
-    """One clause of standing orders, in the form a human writes it.
-
-    This is the *declarative* form. Compiling it into a
-    :class:`~ronin.safety.policy.Rule` belongs to the next layer, so this module
-    stays free of matcher construction and this record stays reviewable by
-    someone who is deciding what a Retainer should be allowed to do rather than
-    how the gate works.
-    """
-
-    tool: str
-    decision: Decision
-    where: str = ""
-    """A matcher source — a path glob or a command pattern. Empty means any use."""
-    reason: str = ""
-
-    def __post_init__(self) -> None:
-        if not self.tool:
-            raise ValueError("Grant.tool is required ('*' for any tool)")
-        if self.tool == "*" and not self.where and self.decision is Decision.ALLOW:
-            raise ValueError(
-                "a blanket allow is not standing orders, it is the absence of them: "
-                "name the tools, or narrow it with `where`"
-            )
-
-    def describe(self) -> str:
-        scope = f" where {self.where}" if self.where else ""
-        tail = f" ({self.reason})" if self.reason else ""
-        return f"{self.decision.value} {self.tool}{scope}{tail}"
-
-
-@dataclass(frozen=True, slots=True)
 class Budgets:
     """The bounds on one run.
 
@@ -236,12 +204,24 @@ class StandingOrders:
 
     brief: str = ""
     tools: frozenset[str] = frozenset()
-    grants: tuple[Grant, ...] = ()
+    grants: tuple[Rule, ...] = ()
+    """Written as JSON and parsed by :func:`ronin.safety.settings.parse_rule` — the
+    same parser and the same syntax as ``settings.json``, deliberately. A Retainer's
+    orders being a *second* permission language is how the two drift."""
     default: Decision = Decision.DENY
     """What happens when no grant matches. Denying is the only safe unattended floor."""
     budgets: Budgets = field(default_factory=Budgets)
     wants: frozenset[Capability] = frozenset()
     """Capabilities these orders draw on. A request, never a grant — see :meth:`granted`."""
+
+    def __post_init__(self) -> None:
+        for rule in self.grants:
+            blanket = rule.tool == "*" and rule.matcher.specificity == 0
+            if blanket and rule.decision is Decision.ALLOW:
+                raise ValueError(
+                    "a blanket allow is not standing orders, it is the absence of "
+                    "them: name the tools, or narrow the match"
+                )
 
     def granted(self, deployment: Deployment) -> frozenset[Capability]:
         """The capabilities actually available: what was asked for, intersected.

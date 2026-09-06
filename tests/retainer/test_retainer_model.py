@@ -21,7 +21,6 @@ from ronin.retainer.model import (
     EffectKind,
     Escalation,
     EscalationState,
-    Grant,
     Post,
     Retainer,
     StandingOrders,
@@ -120,37 +119,6 @@ def test_post_carries_an_optional_branch() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Grant — invariant 2, no blanket allow
-# --------------------------------------------------------------------------- #
-
-
-def test_blanket_allow_is_refused() -> None:
-    with pytest.raises(ValueError, match="blanket allow"):
-        Grant(tool="*", decision=Decision.ALLOW)
-
-
-def test_blanket_allow_is_fine_once_it_is_narrowed() -> None:
-    narrowed = Grant(tool="*", decision=Decision.ALLOW, where="src/**")
-    assert narrowed.where == "src/**"
-
-
-def test_blanket_ask_and_deny_are_the_point_of_a_wildcard() -> None:
-    assert Grant(tool="*", decision=Decision.DENY).tool == "*"
-    assert Grant(tool="*", decision=Decision.ASK).tool == "*"
-
-
-def test_grant_requires_a_tool() -> None:
-    with pytest.raises(ValueError, match="required"):
-        Grant(tool="", decision=Decision.DENY)
-
-
-def test_grant_describes_itself_with_scope_and_reason() -> None:
-    grant = Grant(tool="bash", decision=Decision.ASK, where="git push*", reason="it is a push")
-    assert grant.describe() == "ask bash where git push* (it is a push)"
-    assert Grant(tool="read", decision=Decision.ALLOW).describe() == "allow read"
-
-
-# --------------------------------------------------------------------------- #
 # Budgets
 # --------------------------------------------------------------------------- #
 
@@ -185,9 +153,10 @@ def test_standing_orders_default_to_denying() -> None:
 
 
 def test_prose_and_enforcement_are_separate_fields() -> None:
-    written = orders(brief="you may do anything at all", grants=(Grant("read", Decision.ALLOW),))
+    """Orders may say anything; what is enforced is the rules and the default."""
+    written = orders(brief="you may do anything at all")
     assert written.brief == "you may do anything at all"
-    assert tuple(g.tool for g in written.grants) == ("read",)
+    assert written.grants == ()
     assert written.default is Decision.DENY
 
 
