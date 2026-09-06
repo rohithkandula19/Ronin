@@ -15,16 +15,14 @@ from typing import Any
 
 import pytest
 
+from ronin.retainer.adapters.common import APPROVING, read_answer, strip_quotes_and_code
 from ronin.retainer.adapters.github import (
-    APPROVING,
     WAKING_EVENTS,
     Mention,
     ask_body,
     escalation_summons,
     mentions,
-    read_answer,
     read_mention,
-    strip_quotes_and_code,
     to_summons,
     without_handle,
 )

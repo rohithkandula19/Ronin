@@ -256,6 +256,8 @@ module = [
     "test_repo_analyze",
     "test_resilience",
     "test_retainer_adapters_github",
+    "test_retainer_adapters_slack",
+    "test_retainer_adapters_telegram",
     "test_retainer_ask",
     "test_retainer_ledger",
     "test_retainer_model",

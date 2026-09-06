@@ -38,6 +38,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Final
 
+from ronin.retainer.adapters.common import strip_quotes_and_code
 from ronin.retainer.model import Channel, Summons, SummonsKind
 
 #: The events worth waking a Retainer for. Everything else GitHub sends —
@@ -52,10 +53,6 @@ WAKING_EVENTS: Final[Mapping[str, tuple[str, ...]]] = {
 
 #: Marks a bot account. GitHub appends it to every App's login.
 BOT_SUFFIX: Final = "[bot]"
-
-_FENCED = re.compile(r"```.*?```", re.DOTALL)
-_INLINE_CODE = re.compile(r"`[^`\n]*`")
-_QUOTED = re.compile(r"^\s*>.*$", re.MULTILINE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,17 +74,6 @@ class Mention:
     def thread(self) -> str:
         """The conversation key: ``owner/repo#number``, stable across events."""
         return f"{self.repo}#{self.number}"
-
-
-def strip_quotes_and_code(text: str) -> str:
-    """Remove fenced blocks, inline code and quoted lines.
-
-    Order matters: fenced blocks first, because a ``>`` inside one is code and
-    not a quote, and removing quotes first would leave the fence unbalanced.
-    """
-    without_fences = _FENCED.sub(" ", text)
-    without_code = _INLINE_CODE.sub(" ", without_fences)
-    return _QUOTED.sub(" ", without_code)
 
 
 def mentions(text: str, handle: str) -> bool:
@@ -245,28 +231,6 @@ Reply with `@{handle} allow {escalation}` or `@{handle} deny {escalation}`.
 Anyone with write access to this repository can answer. Approving permits the
 action above and nothing else — it does not undo anything already done."""
 
-_ANSWER = re.compile(
-    r"(?<![A-Za-z0-9_-])(?P<verdict>allow|deny|approve|reject)\s+(?P<id>esc-[A-Za-z0-9]+)",
-    re.IGNORECASE,
-)
-
-#: The words that mean yes. Spelling both ``allow`` and ``approve`` costs
-#: nothing and saves a person who typed the obvious synonym from being ignored.
-APPROVING: Final = frozenset({"allow", "approve"})
-
-
-def read_answer(text: str) -> tuple[str, bool] | None:
-    """An escalation id and whether it was approved, or ``None`` if not an answer.
-
-    Quoted and code-fenced text is stripped first, for the same reason mentions
-    are: a Retainer must not read its own instructions back out of the quoted
-    copy of the message it posted.
-    """
-    match = _ANSWER.search(strip_quotes_and_code(text))
-    if match is None:
-        return None
-    return match.group("id"), match.group("verdict").lower() in APPROVING
-
 
 def ask_body(*, retainer: str, handle: str, tool: str, rendered: str, escalation: str) -> str:
     """The comment that puts an escalation to the thread."""
@@ -280,7 +244,6 @@ def ask_body(*, retainer: str, handle: str, tool: str, rendered: str, escalation
 
 
 __all__ = [
-    "APPROVING",
     "BOT_SUFFIX",
     "ESCALATION_TEMPLATE",
     "WAKING_EVENTS",
@@ -288,9 +251,7 @@ __all__ = [
     "ask_body",
     "escalation_summons",
     "mentions",
-    "read_answer",
     "read_mention",
-    "strip_quotes_and_code",
     "to_summons",
     "without_handle",
 ]
