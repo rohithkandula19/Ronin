@@ -281,6 +281,7 @@ module = [
     "test_ronin_cli_read_fidelity",
     "test_ronin_cli_repo",
     "test_ronin_cli_repo_render",
+    "test_ronin_cli_retain",
     "test_ronin_cli_sdk",
     "test_ronin_cli_serve",
     "test_ronin_cli_skills",
