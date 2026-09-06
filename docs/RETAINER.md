@@ -296,7 +296,9 @@ before the other two are worth writing.
 3. **Where does an escalation land?** In the thread that caused it (visible to
    everyone in the repo or channel), or pushed privately to you? Needed at step 5.
 4. **Post granularity:** one workspace per Retainer, or one per repo per
-   Retainer? The second is more isolation and more disk. Needed at step 4.
+   Retainer? The second is more isolation and more disk. Needed at step 8 —
+   the thread map already stores a workspace per binding, so both shapes are
+   representable and nothing before then has to assume one.
 5. **Whose hands does it act with?** Its own bot identity, or yours? A separate
    identity means separate permissions and a clean audit trail; yours means it
    can do exactly what you can, which is both the convenience and the problem.
@@ -323,6 +325,7 @@ deliberately not packages and every module shares one flat namespace.
 | 7a | `retainer/adapters/github.py` — mention in, comment out | The reference adapter, once everything it needs is proven. |
 | 7b | `retainer/adapters/slack.py` | Second adapter. Proves the core is really platform-agnostic. |
 | 7c | `retainer/adapters/telegram.py` | Third adapter. Not the v1 `packages/cli` bot, which is v1 code. |
+| 8 | `retainer/posts.py` — repo → workspace | Clone or worktree. Decision 4 is answered here, not before. |
 | 9 | `retainer/routines.py` — the scheduler | Emits the same `Summons`. Last, because it multiplies whatever is already wrong. |
 
 The egress proxy (§6.7) is deliberately outside this list. It is a separate

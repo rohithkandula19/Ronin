@@ -258,6 +258,7 @@ module = [
     "test_retainer_ledger",
     "test_retainer_model",
     "test_retainer_orders",
+    "test_retainer_threads",
     "test_ronin_agents_hook_normalize",
     "test_ronin_cli_acp",
     "test_ronin_cli_approve",
