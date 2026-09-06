@@ -28,7 +28,7 @@ classifiers = [
 # Caps match the versions actually tested in uv.lock — bump deliberately.
 dependencies = [
     "anthropic>=0.117.1,<1.0",
-    "pydantic>=2.5,<3",
+    "pydantic>=2.13.5,<3",
     "typer>=0.12,<1",
     "rich>=13.7,<16",
     "textual>=8.2.8,<9",
