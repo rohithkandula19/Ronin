@@ -102,6 +102,19 @@ LAYER_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     # tool layer here at all is the point: it was previously unconstrained, so
     # nothing would have noticed a second, less defensible edge appearing.
     ("tools", ("ronin.providers", "ronin.agents", "ronin.mcp", *ABOVE)),
+    # `retainer` is the standing-teammate plane (docs/RETAINER.md): the records, the
+    # compiled standing orders, the effect ledger and the thread map. It may read
+    # `safety` (a Retainer's authority is a PolicyEngine ruleset), `persistence` (a
+    # thread resumes a session) and `tools` (the reply channel is a gated tool).
+    #
+    # It may **not** import `cli`, and that is the load-bearing entry: the wire surface
+    # lives at `cli/retain.py` beside `http_api.py`, `serve.py` and `acp.py`, because
+    # driving `cli.sdk.Agent` is the application layer's job. Were this edge allowed,
+    # the plane would grow its own copy of the wiring and the two would drift.
+    # `providers`, `agents` and `mcp` are forbidden for the usual reason: a Retainer
+    # must not know which model is answering, and it has no subagents yet — when it
+    # does, that is an edit here with a justification, not a silent new import.
+    ("retainer", ("ronin.providers", "ronin.agents", "ronin.mcp", *ABOVE)),
 )
 
 

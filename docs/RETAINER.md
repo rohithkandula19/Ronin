@@ -90,10 +90,11 @@ routine.* Never automate on the first attempt.
 
 ## 2. The object model
 
-Six records. Everything else in this document is machinery for moving them.
+Seven records. Everything else in this document is machinery for moving them.
 
 | Record | What it is | Lifetime |
 |---|---|---|
+| **Deployment** | One place Retainers run, and the capabilities that place holds. | Durable. Operational, not per-Retainer. |
 | **Retainer** | A named identity with standing orders, a post, skills and routines. | Durable. Edited by a human. |
 | **Post** | The workspace a Retainer holds — a repo checkout or worktree, plus its `.ronin/`. | Durable. Rebuildable from git. |
 | **Standing Orders** | The compiled authority: allowed tools, policy ruleset, escalation rules, budgets. | Durable. Versioned; a change is an audit event. |
@@ -262,27 +263,45 @@ Seven components. Nothing else.
 
 ---
 
-## 7. Decisions I need from you
+## 7. Decisions
 
 `RONIN.md`: *if a design decision has two reasonable options, stop and ask me, do
-not build both.* Five qualify. Nothing in §8 starts before these are answered.
+not build both.* Five qualified. Two are answered; three are not yet needed and
+are asked at the step that needs them.
 
-1. **Where does a Retainer run?** A hosted daemon, or a daemon on your own
-   machine? This is not only ops. *Amazon v. Perplexity* (9th Cir., 2026-08-04)
-   held that the CFAA's safe harbour applies only where the agent's
-   communications pass through **the user's own computer**; a server-hosted agent
-   falls outside it, and contract claims survive regardless. If Retainers are
-   hosted, browser-driving third-party sites is off the table as a capability.
-2. **First adapter: GitHub App or Slack?** My default is GitHub — Ronin already
-   lives there, and an App gives real identity, real permissions, and a webhook
-   with a signature. Say otherwise and I will build Slack first instead.
+**1. Where does a Retainer run? — Both.** A daemon on your own machine and a
+hosted one, the operator's choice per deployment. That answer has a consequence
+the design has to carry rather than remember: *Amazon v. Perplexity* (9th Cir.,
+2026-08-04) held that the CFAA's safe harbour reaches only agents whose
+communications pass through **the user's own computer**, so browser-driving
+third-party sites is defensible locally and is not defensible from a server.
+
+So **browser use is a property of the deployment, not of the Retainer**. A
+`Deployment` refuses to hold `Capability.BROWSER` when it is hosted, and standing
+orders can only ever *request* a capability — `StandingOrders.granted()`
+intersects the request with what the deployment actually has. Moving a Retainer
+from a laptop to a server quietly narrows what it can do; it cannot be argued
+into the capability by its own orders, and nobody has to remember the case law at
+the point of use.
+
+**2. Which adapters? — All three.** GitHub, Slack and Telegram. This does not
+change the build order; it splits step 7 into 7a/7b/7c. The core stays
+platform-agnostic, which is exactly what makes the second and third adapter cheap
+instead of three times the work. GitHub lands first as the reference adapter,
+because the escalation and reply paths have to be proven against one real surface
+before the other two are worth writing.
+
+**Still open, asked when they bite:**
+
 3. **Where does an escalation land?** In the thread that caused it (visible to
-   everyone in the repo or channel), or pushed privately to you?
+   everyone in the repo or channel), or pushed privately to you? Needed at step 5.
 4. **Post granularity:** one workspace per Retainer, or one per repo per
-   Retainer? The second is more isolation and more disk.
+   Retainer? The second is more isolation and more disk. Needed at step 4.
 5. **Whose hands does it act with?** Its own bot identity, or yours? A separate
    identity means separate permissions and a clean audit trail; yours means it
    can do exactly what you can, which is both the convenience and the problem.
+   Needed at step 7a. The `Retainer.acts_as` field represents both without
+   deciding.
 
 ---
 
@@ -301,8 +320,10 @@ deliberately not packages and every module shares one flat namespace.
 | 4 | `retainer/threads.py` — thread ⇄ session | The missing half of resume. |
 | 5 | `retainer/ask.py` — `ThreadAsker` + escalation records | §3.3, still with no network anywhere. |
 | 6 | `cli/retain.py` — the wire surface | Mirrors `http_api.py`: a total, socket-free `route()` plus signature checks. |
-| 7 | `retainer/adapters/github.py` — mention in, comment out | The first adapter, once everything it needs is proven. |
-| 8 | `retainer/routines.py` — the scheduler | Emits the same `Summons`. Last, because it multiplies whatever is already wrong. |
+| 7a | `retainer/adapters/github.py` — mention in, comment out | The reference adapter, once everything it needs is proven. |
+| 7b | `retainer/adapters/slack.py` | Second adapter. Proves the core is really platform-agnostic. |
+| 7c | `retainer/adapters/telegram.py` | Third adapter. Not the v1 `packages/cli` bot, which is v1 code. |
+| 9 | `retainer/routines.py` — the scheduler | Emits the same `Summons`. Last, because it multiplies whatever is already wrong. |
 
 The egress proxy (§6.7) is deliberately outside this list. It is a separate
 process and quite possibly not Python in this repository; it should not block the

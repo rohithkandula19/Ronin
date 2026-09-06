@@ -166,6 +166,7 @@ files = [
     "tests/persistence",
     "tests/providers",
     "tests/repo",
+    "tests/retainer",
     "tests/safety",
     "tests/scripts",
     "tests/telemetry",
@@ -176,7 +177,7 @@ files = [
 strict = true
 warn_unreachable = true
 explicit_package_bases = true
-mypy_path = "src:scripts:tests/agents:tests/cli:tests/context:tests/core:tests/evalsuite:tests/ext:tests/mcp:tests/obs:tests/persistence:tests/providers:tests/repo:tests/safety:tests/scripts:tests/telemetry:tests/tools:tests/ui:tests/verify"
+mypy_path = "src:scripts:tests/agents:tests/cli:tests/context:tests/core:tests/evalsuite:tests/ext:tests/mcp:tests/obs:tests/persistence:tests/providers:tests/repo:tests/retainer:tests/safety:tests/scripts:tests/telemetry:tests/tools:tests/ui:tests/verify"
 
 # pytest's @parametrize is an untyped decorator as far as mypy is concerned;
 # that is a property of pytest, not a hole in our typing. Enumerated rather
@@ -253,6 +254,7 @@ module = [
     "test_registry",
     "test_repo_analyze",
     "test_resilience",
+    "test_retainer_model",
     "test_ronin_agents_hook_normalize",
     "test_ronin_cli_acp",
     "test_ronin_cli_approve",
@@ -408,6 +410,7 @@ include = [
     "tests/persistence/**/*.py",
     "tests/providers/**/*.py",
     "tests/repo/**/*.py",
+    "tests/retainer/**/*.py",
     "tests/safety/**/*.py",
     "tests/scripts/**/*.py",
     "tests/telemetry/**/*.py",
