@@ -291,10 +291,21 @@ instead of three times the work. GitHub lands first as the reference adapter,
 because the escalation and reply paths have to be proven against one real surface
 before the other two are worth writing.
 
+**3. Where does an escalation land, and who may answer? — In the thread, and
+anyone with write access.** These two turned out to be one decision. If people
+other than the owner may answer, the request has to be *visible* to them, so the
+full ask goes in the thread where the work is; a private notification goes to the
+owner as well, so it does not sit unseen. "Detail in private" and "collaborators
+may answer" cannot both be true.
+
+The consequence is that authority now depends on an identity, and the identity
+must be **verified by the adapter** — never `Summons.actor`, which is a display
+name an external system supplied. `EscalationStore.answer` takes the verified id
+and a predicate; it defaults to letting nobody answer, so a caller that forgets
+to pass one gets the narrow rule rather than an open door.
+
 **Still open, asked when they bite:**
 
-3. **Where does an escalation land?** In the thread that caused it (visible to
-   everyone in the repo or channel), or pushed privately to you? Needed at step 5.
 4. **Post granularity:** one workspace per Retainer, or one per repo per
    Retainer? The second is more isolation and more disk. Needed at step 8 —
    the thread map already stores a workspace per binding, so both shapes are

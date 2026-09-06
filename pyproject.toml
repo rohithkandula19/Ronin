@@ -255,6 +255,7 @@ module = [
     "test_registry",
     "test_repo_analyze",
     "test_resilience",
+    "test_retainer_ask",
     "test_retainer_ledger",
     "test_retainer_model",
     "test_retainer_orders",

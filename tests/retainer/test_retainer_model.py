@@ -29,7 +29,7 @@ from ronin.retainer.model import (
     by_id,
     summons_id,
 )
-from ronin.safety.policy import Decision
+from ronin.safety.policy import Decision, Outcome
 
 WORKSPACE = Path("/srv/posts/ronin")
 
@@ -285,7 +285,7 @@ def test_an_escalation_needs_an_id() -> None:
 
 def test_an_open_escalation_carries_no_answer() -> None:
     with pytest.raises(ValueError, match="cannot carry an answer"):
-        escalation(answer=Decision.ALLOW)
+        escalation(answer=Outcome.YES_ONCE)
 
 
 def test_an_answered_escalation_must_carry_one() -> None:
@@ -295,24 +295,33 @@ def test_an_answered_escalation_must_carry_one() -> None:
 
 def test_resolving_returns_a_new_record_and_leaves_the_original_open() -> None:
     asked = escalation(session="s-1", checkpoint="c-1")
-    answered = asked.resolved(Decision.ALLOW)
+    answered = asked.resolved(Outcome.YES_ONCE, by="rohithkandula19")
     assert asked.open
     assert not answered.open
-    assert answered.answer is Decision.ALLOW
+    assert answered.answer is Outcome.YES_ONCE
     assert (answered.session, answered.checkpoint) == ("s-1", "c-1")
+    assert answered.answered_by == "rohithkandula19"
+
+
+def test_yes_for_this_session_has_nothing_to_apply_to() -> None:
+    """The run that asked has ended by the time anybody answers."""
+    with pytest.raises(ValueError, match="nothing to apply to"):
+        escalation().resolved(Outcome.YES_SESSION)
+    with pytest.raises(ValueError, match="nothing to apply to"):
+        escalation(state=EscalationState.ANSWERED, answer=Outcome.YES_SESSION)
 
 
 def test_an_escalation_cannot_be_answered_twice() -> None:
-    answered = escalation().resolved(Decision.DENY)
+    answered = escalation().resolved(Outcome.NO)
     with pytest.raises(ValueError, match="already answered"):
-        answered.resolved(Decision.ALLOW)
+        answered.resolved(Outcome.YES_ONCE)
 
 
 def test_an_expired_escalation_is_not_open_and_takes_no_answer() -> None:
     expired = escalation(state=EscalationState.EXPIRED)
     assert not expired.open
     with pytest.raises(ValueError, match="already expired"):
-        expired.resolved(Decision.ALLOW)
+        expired.resolved(Outcome.YES_ONCE)
 
 
 # --------------------------------------------------------------------------- #

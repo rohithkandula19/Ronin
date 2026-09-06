@@ -20,9 +20,12 @@ failure mode that is silent if it is only written down:
 2. **A blanket allow is not standing orders, it is the absence of them.**
    :class:`StandingOrders` refuses a rule allowing every tool with no match,
    because the whole design rests on authority being enumerated.
-3. **An escalation's state and its answer agree.** An answered escalation
-   carries an answer and an open one does not, so no caller has to guess whether
-   an empty string means "not yet" or "they said nothing".
+3. **An escalation's state and its answer agree**, and the answer is one that
+   still means something. An answered escalation carries an answer and an open
+   one does not, so no caller guesses whether empty means "not yet" or "they
+   said nothing" — and ``yes, for this session`` is refused outright, because the
+   session an escalation was raised in has already ended by the time anybody
+   answers.
 4. **Every outward effect has a key before it has a result.** :class:`Effect`
    computes its own ledger key from content, so an idempotency check cannot be
    skipped by forgetting to pass one.
@@ -37,7 +40,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
-from ronin.safety.policy import Decision, Rule
+from ronin.safety.policy import Decision, Outcome, Rule
 
 # --------------------------------------------------------------------------- #
 # Vocabulary
@@ -323,7 +326,13 @@ class Escalation:
     session: str = ""
     checkpoint: str = ""
     state: EscalationState = EscalationState.OPEN
-    answer: Decision | None = None
+    answer: Outcome | None = None
+    """The human's answer. An :class:`~ronin.safety.policy.Outcome` rather than a
+    :class:`~ronin.safety.policy.Decision`, because a person answering has the four
+    choices the approval ladder gives them — not the three a rule has."""
+    answered_by: str = ""
+    """The *verified* id of whoever answered, from the adapter. Never
+    :attr:`Summons.actor`, which is a display name an external system supplied."""
 
     def __post_init__(self) -> None:
         if not self.id:
@@ -335,12 +344,18 @@ class Escalation:
             raise ValueError("an answered escalation must carry the answer")
         if not answered and self.answer is not None:
             raise ValueError(f"a {self.state.value} escalation cannot carry an answer")
+        if self.answer is Outcome.YES_SESSION:
+            raise ValueError(
+                "an escalation outlives the session it was raised in — that run "
+                "already ended — so 'yes for this session' has nothing to apply to. "
+                "Answer once, or persist it into the standing orders."
+            )
 
     @property
     def open(self) -> bool:
         return self.state is EscalationState.OPEN
 
-    def resolved(self, answer: Decision) -> Escalation:
+    def resolved(self, answer: Outcome, *, by: str = "") -> Escalation:
         """The same escalation, answered. Returns a new record; nothing mutates."""
         if not self.open:
             raise ValueError(f"escalation {self.id} is already {self.state.value}")
@@ -354,6 +369,7 @@ class Escalation:
             checkpoint=self.checkpoint,
             state=EscalationState.ANSWERED,
             answer=answer,
+            answered_by=by,
         )
 
 
