@@ -49,7 +49,7 @@ def orders(**kwargs: Any) -> StandingOrders:
         **{
             "brief": "keep CI green",
             "tools": frozenset({"read", "bash"}),
-            "default": Decision.DENY,
+            "default": Decision.ASK,
             "budgets": Budgets(),
             **kwargs,
         }

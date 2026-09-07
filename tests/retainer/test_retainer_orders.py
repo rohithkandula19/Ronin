@@ -36,9 +36,11 @@ CAPABILITY_TOOLS = {
 # --------------------------------------------------------------------------- #
 
 
-def test_unmatched_calls_are_denied_because_nobody_is_attached() -> None:
-    authority = compile_orders(orders(), laptop())
-    assert authority.ruleset.default is Decision.DENY
+def test_the_orders_default_becomes_the_rulesets_default() -> None:
+    """Ask, not deny — see `StandingOrders.default`. Deny cannot escalate."""
+    assert compile_orders(orders(), laptop()).ruleset.default is Decision.ASK
+    strict = orders(default=Decision.DENY)
+    assert compile_orders(strict, laptop()).ruleset.default is Decision.DENY
 
 
 def test_orders_start_from_the_builtin_floor_rather_than_replacing_it() -> None:
@@ -52,11 +54,12 @@ def test_orders_are_appended_so_they_win_among_equals() -> None:
     assert authority.ruleset.rules[-1] is mine
 
 
-def test_a_caller_can_supply_its_own_floor() -> None:
-    bare = RuleSet(rules=(), default=Decision.ASK)
+def test_a_caller_can_supply_its_own_base_ruleset() -> None:
+    """The base contributes rules; the *default* always comes from the orders."""
+    bare = RuleSet(rules=(), default=Decision.DENY)
     authority = compile_orders(orders(), laptop(), base=bare)
     assert authority.ruleset.rules == ()
-    assert authority.ruleset.default is Decision.DENY
+    assert authority.ruleset.default is Decision.ASK
 
 
 # --------------------------------------------------------------------------- #
@@ -215,7 +218,7 @@ def test_describe_leads_with_what_is_published_and_what_went_away() -> None:
     assert "capabilities: shell" in text
     assert "browse is not published" in text
     assert "allow read where any use of this tool" in text
-    assert text.endswith("anything else: deny")
+    assert text.endswith("anything else: ask")
 
 
 def test_describe_says_none_rather_than_nothing_when_no_tool_is_published() -> None:

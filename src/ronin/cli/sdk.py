@@ -55,7 +55,7 @@ from typing import Any
 from ..context.compaction import Summarizer
 from ..core.types import AgentState, Budget, Event, Mode
 from ..providers.router import Router, load_config
-from ..safety.policy import Asker
+from ..safety.policy import Asker, Rule
 from ..tools.base import Tool
 from ..ui.headless import ApprovalTracker, exit_code_for
 from ..ui.reduce import ViewState, reduce_event
@@ -294,6 +294,8 @@ class Agent:
         conversation: Conversation | None = None,
         asker: Asker | None = None,
         tools: Sequence[Tool] = (),
+        rules: Sequence[Rule] = (),
+        allow_tools: frozenset[str] | None = None,
     ) -> Agent:
         """Load the workspace at ``path`` and assemble a runtime for it.
 
@@ -310,6 +312,13 @@ class Agent:
         answers instead. It is a constructor argument rather than something settable
         later because the policy engine is built here: an agent's approval authority
         cannot change under a turn that is already running.
+
+        ``rules`` and ``allow_tools`` are the same argument in the other direction:
+        an authority the caller compiled, rather than one read from the workspace.
+        ``rules`` are appended to the settings ruleset; ``allow_tools`` restricts
+        which tools are published at all, which is a stronger statement than a deny
+        rule — an absent tool is never proposed. Both are constructor arguments for
+        the reason ``asker`` is: the engine and the registry are built here.
         """
         paths = Paths.discover(path, home=home)
         flags: dict[str, object] = {} if mode is None else {"mode": mode.value}
@@ -323,6 +332,8 @@ class Agent:
             connect_mcp=connect_mcp,
             asker=asker,
             extra_tools=tools,
+            extra_rules=rules,
+            allow_tools=allow_tools,
         )
         if loaded.mode is Mode.PLAN:
             runtime = plan_runtime(runtime)

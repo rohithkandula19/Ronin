@@ -656,6 +656,8 @@ async def build_runtime(
     transport_provider: TransportProvider | None = None,
     oauth_driver: OAuthDriver | None = None,
     extra_tools: Sequence[Tool] = (),
+    extra_rules: Sequence[Rule] = (),
+    allow_tools: frozenset[str] | None = None,
 ) -> Runtime:
     """Turn a :class:`~ronin.cli.spine.Loaded` into live, wired objects.
 
@@ -669,6 +671,23 @@ async def build_runtime(
 
     Nothing about a failed MCP server or an unavailable sandbox raises: each becomes a
     note on ``Runtime.loaded``.
+
+    ``extra_rules`` and ``allow_tools`` are the two halves of an authority an
+    embedder compiled elsewhere — ``ronin.retainer.orders.Authority`` is the one
+    that exists. They are parameters here rather than files in the workspace for
+    the same reason ``extra_tools`` is: a rule written into
+    ``.ronin/settings.json`` is a rule the agent running in that workspace could
+    edit. ``extra_rules`` are appended to the settings ruleset, so they win among
+    rules of equal specificity — the documented "last wins among equals".
+
+    ``allow_tools`` narrows the registry **before** :func:`~ronin.cli.gate.gated`
+    wraps it, which is the whole reason it lives in here and not in a
+    ``plan_runtime``-style transform applied afterwards. Narrowing the *gated*
+    registry would mean either re-gating by hand — duplicating this assembly — or
+    handing the loop an ungated one. A name the workspace does not have becomes a
+    :class:`~ronin.cli.spine.Note` rather than an error, because standing orders
+    naming ``web_fetch`` on a deployment with no search group configured should be
+    told so, not crash and not silently shrink.
     """
     paths = loaded.paths
     settings = loaded.settings
@@ -697,7 +716,7 @@ async def build_runtime(
     engine_sandbox = _engine_sandbox(loaded.sandbox)
     writer = LocalRuleWriter(paths.local_settings)
     policy = PolicyEngine(
-        rules=settings.ruleset(),
+        rules=settings.ruleset().with_rules(extra_rules),
         asker=asker if asker is not None else UnattendedAsker(),
         denylist=denylist,
         mode=loaded.mode,
@@ -780,6 +799,25 @@ async def build_runtime(
         )
         notes.extend(mcp_notes)
         closers.append(mcp_closer)
+
+    if allow_tools is not None:
+        have = {spec.name for spec in inner.specs()}
+        keep = [name for name in sorted(allow_tools) if name in have]
+        missing = sorted(allow_tools - have)
+        if missing:
+            notes.append(
+                Note(
+                    subject="tool allowlist",
+                    detail=(
+                        f"{', '.join(missing)} not available in this workspace, so "
+                        "they are not published — the rest of the allowlist stands"
+                    ),
+                )
+            )
+        # Narrowed here, above the extras and MCP fold-in and below `gated`, so an
+        # allowlist may name a tool an embedder brought or an MCP server exposed,
+        # and whatever survives is gated exactly like a builtin.
+        inner = inner.subset(keep, ctx=ctx) if keep else ToolRegistry((), ctx)
 
     files = FileStateTracker()
     hooks = HookRunner(config=loaded.hooks, cwd=str(paths.workspace_root), env=ctx.env)

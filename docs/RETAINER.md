@@ -130,6 +130,28 @@ safety layer and it is already written.
 
 ### 3.2 Standing authority — compiled, not described
 
+**The floor is `ask`, not `deny`, and that is not a relaxation.**
+`PolicyEngine.approve` returns on `deny` *without* consulting the asker, so a
+Retainer whose floor is `deny` can never raise an escalation: every unmatched
+call is refused outright and there is nothing for a human to answer. `ask` runs
+nothing unapproved either, and what `ask` *means* is decided by the asker —
+a refusal under `UnattendedAsker`, a question in the thread under `ThreadAsker`.
+A `deny` floor throws that choice away.
+
+This was wrong in the first draft of this document and in `model.py`, and only
+wiring §6's seam exposed it. The escalation path was dead code.
+
+Two consequences worth stating, because both are counter-intuitive:
+
+- **The unconditional denylist is not escalatable, by design.** `git push
+  --force` is `deny` and stays `deny`; there is no approval that unlocks it.
+  Escalation lives in the `ask` band. Unconditional means unconditional.
+- **The builtin allowlist was calibrated for a human at a terminal.** Against
+  the real settings ruleset, `npm publish` and `make deploy` resolve to `allow`,
+  because `npm` and `make` are development binaries. That is a reasonable trade
+  when somebody is watching the terminal and a much worse one for a Retainer
+  running at 3am. Narrowing it for unattended use is not done here.
+
 A Retainer's standing orders compile into two artefacts:
 
 - a `PolicyEngine` ruleset, and
@@ -329,11 +351,16 @@ the workspace for the code the Retainer is running to edit.
 
 ## 8. Build order
 
-**All nine are built.** Each landed as its own change, green before the next, as
-with the safety campaign. What remains outside the list is the egress proxy
-(§6.7) and the wiring that hands a compiled `Authority` to `Agent.open()` — the
-former is a separate process by design, the latter is the one seam left between
-the plane and the engine.
+**All nine are built, and so is the seam.** Each landed as its own change, green
+before the next, as with the safety campaign. `cli/retainer_run.py` closes the
+gap between the plane and the engine: `build_runtime` and `Agent.open` gained
+`extra_rules`/`rules` and `allow_tools`, so a compiled `Authority` becomes a real
+`PolicyEngine` ruleset and a real registry narrowing — the latter applied
+*before* `gated()` wraps it, because narrowing a gated registry would mean either
+re-gating by hand or handing the loop an ungated one.
+
+What remains outside the list is the egress proxy (§6.7), a separate process by
+design.
 
 One change at a time, each green before the next, as with the safety campaign.
 Test files follow the tree's convention — `tests/retainer/test_retainer_<topic>.py`,

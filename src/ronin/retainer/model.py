@@ -211,8 +211,23 @@ class StandingOrders:
     """Written as JSON and parsed by :func:`ronin.safety.settings.parse_rule` — the
     same parser and the same syntax as ``settings.json``, deliberately. A Retainer's
     orders being a *second* permission language is how the two drift."""
-    default: Decision = Decision.DENY
-    """What happens when no grant matches. Denying is the only safe unattended floor."""
+    default: Decision = Decision.ASK
+    """What happens when no grant matches.
+
+    **Ask, not deny**, and the difference is not a relaxation — it is what makes
+    escalation possible at all. ``PolicyEngine.approve`` returns immediately on
+    ``deny`` without consulting the asker, so a Retainer whose floor is ``deny``
+    can never raise an escalation: every unmatched call is refused outright and
+    the run ends with nothing for a human to answer.
+
+    ``ask`` is exactly as safe, because nothing runs unapproved either way, and
+    what ``ask`` *means* is decided by the asker rather than fixed here. With
+    :class:`~ronin.safety.policy.UnattendedAsker` it is a refusal; with
+    :class:`~ronin.retainer.ask.ThreadAsker` it is a question in the thread. A
+    ``deny`` floor throws that choice away. Under both, the unconditional
+    denylist still bites — unconditional means unconditional.
+
+    Set ``deny`` deliberately for a Retainer that must never ask anybody."""
     budgets: Budgets = field(default_factory=Budgets)
     wants: frozenset[Capability] = frozenset()
     """Capabilities these orders draw on. A request, never a grant — see :meth:`granted`."""

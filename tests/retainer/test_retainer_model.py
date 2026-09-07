@@ -148,8 +148,21 @@ def test_budget_defaults_are_deliberately_low() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_standing_orders_default_to_denying() -> None:
-    assert StandingOrders().default is Decision.DENY
+def test_standing_orders_default_to_asking_not_denying() -> None:
+    """`deny` would make escalation dead code, and it is not any safer.
+
+    ``PolicyEngine.approve`` returns on ``deny`` *without* consulting the asker,
+    so a Retainer whose floor is ``deny`` can never raise an escalation — every
+    unmatched call is refused outright and there is nothing for a human to
+    answer. ``ask`` runs nothing unapproved either, and what it *means* is left
+    to the asker: a refusal under ``UnattendedAsker``, a question in the thread
+    under ``ThreadAsker``. Found by wiring the seam, not by reading.
+    """
+    assert StandingOrders().default is Decision.ASK
+
+
+def test_a_deny_floor_is_still_available_deliberately() -> None:
+    assert StandingOrders(default=Decision.DENY).default is Decision.DENY
 
 
 def test_prose_and_enforcement_are_separate_fields() -> None:
@@ -157,7 +170,7 @@ def test_prose_and_enforcement_are_separate_fields() -> None:
     written = orders(brief="you may do anything at all")
     assert written.brief == "you may do anything at all"
     assert written.grants == ()
-    assert written.default is Decision.DENY
+    assert written.default is Decision.ASK
 
 
 # --------------------------------------------------------------------------- #
