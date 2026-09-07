@@ -329,6 +329,12 @@ the workspace for the code the Retainer is running to edit.
 
 ## 8. Build order
 
+**All nine are built.** Each landed as its own change, green before the next, as
+with the safety campaign. What remains outside the list is the egress proxy
+(§6.7) and the wiring that hands a compiled `Authority` to `Agent.open()` — the
+former is a separate process by design, the latter is the one seam left between
+the plane and the engine.
+
 One change at a time, each green before the next, as with the safety campaign.
 Test files follow the tree's convention — `tests/retainer/test_retainer_<topic>.py`,
 with one `tests/retainer/retainer_harness.py`, because the test trees are
@@ -368,6 +374,7 @@ Named from measured evidence, each with the mechanism that answers it.
 | Prompt injection from the thread | The lethal trifecta: private data, untrusted content, external communication | Untrusted content is already tainted and gated. The reply tool is an effect and passes the gate like any other. |
 | Notification fatigue | The practical ceiling is roughly 3–5 notifications per person per day | Acting proactively and *notifying* proactively are separate budgets. Finishing quietly and leaving a draft PR beats a ping. |
 | Skills rotting silently | Tool-schema drift breaks recorded routines | A routine records the tool schemas it was built against and escalates on drift instead of improvising. |
+| A slept machine waking with a backlog | An hourly routine, a laptop asleep a week, and 168 windows passed | Firing advances the clock to *now*, not by one interval, so overdue is not owed. A routine reports how many windows it missed and runs once. |
 
 ---
 
@@ -377,7 +384,11 @@ Named from measured evidence, each with the mechanism that answers it.
   Decision 7.1 governs whether that ever changes.
 - **No teaching by demonstration.** Skills already exist in this repo as files
   (`ext/skills`); recording a browser is a different product.
-- **No Retainer-to-Retainer messaging.** See §9.
+- **No Retainer-to-Retainer messaging.** Not a cap that could be raised:
+  `Routine` has one `retainer` field and no target, so "have Sentry poke Scout"
+  is unrepresentable. That is the only version of this rule that survives
+  somebody being clever, and it is pinned by a test that asserts the absence of
+  a target field rather than the presence of a limit.
 - **No customer-facing or regulated use.** No rehearsal mode, no confidence
   thresholds, no response-level audit export. Until those exist, this is an
   internal teammate.
