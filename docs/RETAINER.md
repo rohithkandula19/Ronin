@@ -304,17 +304,26 @@ name an external system supplied. `EscalationStore.answer` takes the verified id
 and a predicate; it defaults to letting nobody answer, so a caller that forgets
 to pass one gets the narrow rule rather than an open door.
 
-**Still open, asked when they bite:**
+**4. Post granularity? — One workspace per repo per Retainer.** Three
+repositories means three checkouts. It costs disk and buys two things worth
+more: a half-finished edit in one repo can never be visible to a run about
+another, and a corrupt checkout is re-cloned without touching the rest.
 
-4. **Post granularity:** one workspace per Retainer, or one per repo per
-   Retainer? The second is more isolation and more disk. Needed at step 8 —
-   the thread map already stores a workspace per binding, so both shapes are
-   representable and nothing before then has to assume one.
-5. **Whose hands does it act with?** Its own bot identity, or yours? A separate
-   identity means separate permissions and a clean audit trail; yours means it
-   can do exactly what you can, which is both the convenience and the problem.
-   Needed at step 7a. The `Retainer.acts_as` field represents both without
-   deciding.
+The layout is nested — `<root>/<retainer>/<owner>/<name>` — rather than joining
+the repo with a separator, because `a__b/c` and `a/b__c` collide under any
+separator you pick, and two repositories quietly sharing one directory is
+exactly the isolation this decision was meant to buy, gone. Repository names
+arrive from webhooks, so every segment is validated as path input and `.` and
+`..` are refused by name; dots otherwise are fine, because `foo.js` is an
+ordinary repository name.
+
+**5. Whose hands? — Its own bot identity.** Separate permissions, an audit trail
+that says plainly which commits were the agent's, and revoking it does not
+revoke you. The identity is passed as `git -c user.name=… -c user.email=…` on
+every invocation rather than written into the checkout's config: command-line
+`-c` outranks every config file, so a cloned repository cannot make the
+Retainer's commits appear to come from somebody else, and there is no file in
+the workspace for the code the Retainer is running to edit.
 
 ---
 
