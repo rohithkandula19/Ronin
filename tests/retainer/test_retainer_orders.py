@@ -8,6 +8,8 @@ capability removes tools rather than adding a deny rule. Without it, someone
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from retainer_harness import laptop, orders, retainer, rule, server
 
@@ -20,7 +22,15 @@ from ronin.retainer.orders import (
     describe,
     parse_grants,
 )
-from ronin.safety.policy import AnyUse, Decision, MatchTarget, Rule, RuleSet
+from ronin.safety.policy import (
+    UNATTENDED_SOURCE,
+    AnyUse,
+    Decision,
+    MatchTarget,
+    Rule,
+    RuleSet,
+    unattended_rules,
+)
 
 #: What the application layer would pass in. Kept local to the test on purpose —
 #: the module under test must not carry its own copy. See its docstring.
@@ -57,9 +67,53 @@ def test_orders_are_appended_so_they_win_among_equals() -> None:
 def test_a_caller_can_supply_its_own_base_ruleset() -> None:
     """The base contributes rules; the *default* always comes from the orders."""
     bare = RuleSet(rules=(), default=Decision.DENY)
-    authority = compile_orders(orders(), laptop(), base=bare)
+    authority = compile_orders(orders(), laptop(), base=bare, narrow_unattended=False)
     assert authority.ruleset.rules == ()
     assert authority.ruleset.default is Decision.ASK
+
+
+# --------------------------------------------------------------------------- #
+# The unattended narrowings
+# --------------------------------------------------------------------------- #
+
+
+def compiled(**kwargs: Any) -> RuleSet:
+    return compile_orders(orders(), laptop(), **kwargs).ruleset
+
+
+def test_a_retainer_gets_the_unattended_narrowings_by_default() -> None:
+    """A Retainer is unattended by definition, so the narrowing is not opt-in.
+
+    What it takes back is covered where it lives, in ``tests/safety``. Here the
+    claim is only that a compiled authority carries it without being asked.
+    """
+    sources = {rule.source for rule in compiled().rules}
+    assert UNATTENDED_SOURCE in sources
+    assert set(unattended_rules()) <= set(compiled().rules)
+
+
+def test_the_narrowings_can_be_turned_off_for_the_whole_deployment() -> None:
+    """The operator-level escape hatch. Deliberately not reachable from the orders:
+    a floor the restricted thing can edit is not a floor."""
+    assert not any(
+        rule.source == UNATTENDED_SOURCE for rule in compiled(narrow_unattended=False).rules
+    )
+
+
+def test_orders_still_come_last_with_the_narrowings_in_place() -> None:
+    """The narrowings sit with the floor they narrow. Otherwise "orders are appended,
+    so they win among equals" would be true everywhere except here."""
+    mine = rule("read", Decision.ALLOW)
+    assert compile_orders(orders(grants=(mine,)), laptop()).ruleset.rules[-1] is mine
+
+
+def test_a_grant_cannot_punch_a_hole_in_a_narrowing() -> None:
+    """Appending wins among *equals*; restrictiveness is settled first. A Retainer
+    that writes itself an ``npm publish`` allowance still gets asked."""
+    allowance = rule("bash", Decision.ALLOW, command="^npm publish")
+    ruleset = compile_orders(orders(grants=(allowance,)), laptop()).ruleset
+    target = MatchTarget(tool="bash", arguments={"command": "npm publish"})
+    assert ruleset.resolve(target).decision is Decision.ASK
 
 
 # --------------------------------------------------------------------------- #

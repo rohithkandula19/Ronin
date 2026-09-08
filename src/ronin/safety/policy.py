@@ -298,6 +298,11 @@ def glob_to_regex(pattern: str) -> str:
 #: Layer name for rules compiled into the binary rather than read from a file.
 BUILTIN_SOURCE = "builtin"
 
+#: Provenance for the unattended narrowings. Named separately from
+#: :data:`BUILTIN_SOURCE` so an operator reading an audit trail can tell "this is
+#: how Ronin ships" from "this applied because nobody was watching".
+UNATTENDED_SOURCE = "unattended"
+
 
 @dataclass(frozen=True, slots=True)
 class Rule:
@@ -764,6 +769,105 @@ def builtin_rules() -> tuple[Rule, ...]:
 #: Ruleset used when no configuration has been loaded at all.
 def builtin_ruleset() -> RuleSet:
     return RuleSet(rules=builtin_rules(), default=Decision.ASK)
+
+
+#: Commands the builtin allowlist lets through that nobody should be able to run
+#: with no human present, paired with why.
+#:
+#: :data:`DEV_BINARIES` is calibrated for somebody at a terminal: ``npm``, ``make``,
+#: ``cargo`` and ``terraform`` are development tools, and allowing them saves a
+#: prompt on every test run. That trade is right when a person is watching and
+#: wrong at 3am — ``npm publish`` ships a package to a public registry, ``npm
+#: unpublish --force`` permanently removes one, and ``terraform destroy`` is
+#: exactly what it says. All of those resolve to *allow* today.
+#:
+#: **These are not new prohibitions, they are narrowings of an existing
+#: allowance**, and each pattern names a subcommand rather than a binary, so
+#: ``npm test``, ``make lint``, ``cargo build``, ``terraform plan`` and ``kubectl
+#: get`` keep their allowance. That precision is the whole design: a rule broad
+#: enough to cover the binary would also cover the test run, and an unattended
+#: agent that has to ask before running tests is an agent nobody deploys.
+#:
+#: Only transitions are listed, and the suite pins that: ``docker push``, ``twine
+#: upload``, ``gh pr merge``, ``git push``, ``flit publish``, ``./gradlew publish``
+#: and the cloud CLIs already resolve to *ask* because their binaries are not in
+#: :data:`DEV_BINARIES`, so naming them here would suggest this table is doing
+#: work it is not. Add an entry when a binary joins that list, not before.
+#:
+#: The last entry is the one exception to naming a subcommand: ``make``, ``just``
+#: and ``task`` targets are freeform, so all it can do is read the target's name.
+#: It deliberately over-asks — ``make publish-docs-check`` costs one escalation —
+#: because the alternative is missing ``make publish-prod``.
+UNATTENDED_ASK: tuple[tuple[str, str], ...] = (
+    (
+        r"^(npm|yarn|pnpm|bun|deno)\s+(publish|unpublish)\b",
+        "publishes or withdraws a package on a public registry",
+    ),
+    (
+        r"^(cargo|poetry|uv|hatch)\s+publish\b",
+        "publishes a package on a public registry",
+    ),
+    (r"^gem\s+push\b", "publishes a gem on a public registry"),
+    (r"^dotnet\s+nuget\s+push\b", "publishes a package on a public registry"),
+    (
+        r"^(?:bundle\s+exec\s+)?rake\s+release\b",
+        "the bundler release task tags and pushes a gem",
+    ),
+    (r"^mvn\b.*\bdeploy\b", "the deploy phase publishes to a remote repository"),
+    (r"^gradle\b.*\bpublish", "publishes to a remote repository"),
+    (
+        r"^terraform\s+(apply|destroy|import|taint)\b",
+        "changes real infrastructure, and destroy is not recoverable from here",
+    ),
+    (
+        r"^terraform\s+state\s+(rm|mv|push)\b",
+        "rewrites the state file the rest of the world is described by",
+    ),
+    (
+        r"^kubectl\s+(apply|delete|patch|replace|scale|drain|cordon)\b",
+        "changes a live cluster",
+    ),
+    (
+        r"^helm\s+(install|upgrade|uninstall|rollback)\b",
+        "changes a live cluster",
+    ),
+    (
+        r"^(make|just|task)\s+\S*(deploy|release|publish|push)\b",
+        "the target name says it leaves this machine",
+    ),
+)
+
+
+def unattended_rules() -> tuple[Rule, ...]:
+    """Narrowings of the builtin allowlist for a run with nobody attached.
+
+    A function, not a constant, for the reason :func:`builtin_rules` is one: a
+    mutable global that softens policy in place is a security hole with a short
+    fuse.
+
+    **How these win, and why it is not obvious.** Rule precedence is *specificity
+    first*: :meth:`RuleSet.resolve` keeps the most specific matches and only then
+    takes the most restrictive among them. The builtin dev-binary allowance is a
+    :class:`CommandRegex`, so it has specificity ``(2, 1)`` — and so do these.
+    They therefore *tie* with it and win on restrictiveness, which is exactly
+    what is wanted. A broader rule would have lost outright, quietly, the same
+    way a tool-wide deny loses to a narrow allow.
+
+    Every one is ``unwaivable``, following ``git push``: a Retainer answering one
+    escalation must not be able to write down "yes, publish to npm from now on".
+    The human can still say yes to the call in front of them.
+    """
+    return tuple(
+        Rule(
+            tool="bash",
+            matcher=CommandRegex(pattern),
+            decision=Decision.ASK,
+            source=UNATTENDED_SOURCE,
+            reason=reason,
+            unwaivable=True,
+        )
+        for pattern, reason in UNATTENDED_ASK
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -1372,6 +1476,8 @@ __all__ = [
     "PATH_ARGUMENTS",
     "READ_ONLY_BINARIES",
     "SAFE_GIT_SUBCOMMANDS",
+    "UNATTENDED_ASK",
+    "UNATTENDED_SOURCE",
     "Answer",
     "AnyUse",
     "Asker",
@@ -1393,4 +1499,5 @@ __all__ = [
     "builtin_ruleset",
     "glob_to_regex",
     "most_restrictive",
+    "unattended_rules",
 ]

@@ -146,11 +146,46 @@ Two consequences worth stating, because both are counter-intuitive:
 - **The unconditional denylist is not escalatable, by design.** `git push
   --force` is `deny` and stays `deny`; there is no approval that unlocks it.
   Escalation lives in the `ask` band. Unconditional means unconditional.
-- **The builtin allowlist was calibrated for a human at a terminal.** Against
-  the real settings ruleset, `npm publish` and `make deploy` resolve to `allow`,
-  because `npm` and `make` are development binaries. That is a reasonable trade
-  when somebody is watching the terminal and a much worse one for a Retainer
-  running at 3am. Narrowing it for unattended use is not done here.
+- **The builtin allowlist was calibrated for a human at a terminal, so it is
+  narrowed here.** Against the real settings ruleset, `npm publish`, `npm
+  unpublish --force`, `terraform destroy`, `kubectl delete` and `make deploy` all
+  resolve to `allow`, because `npm`, `terraform`, `kubectl` and `make` are in
+  `DEV_BINARIES`. That is a reasonable trade when somebody is watching the
+  terminal — nobody wants a prompt before `npm test` — and a much worse one for a
+  Retainer running at 3am. `unattended_rules()`
+  (`src/ronin/safety/policy.py`) takes that part of the allowance back: twelve
+  patterns moving 44 measured commands from `allow` to `ask`, each naming a
+  *subcommand* so `npm test`, `cargo build`, `terraform plan`, `kubectl get` and
+  `make lint` keep theirs. `compile_orders(..., narrow_unattended=True)` applies
+  them by default, because a Retainer is unattended by definition.
+
+  Three things about it are worth knowing before editing it:
+
+  - **They win by tying, not by being broader.** Precedence is specificity
+    first, and the dev-binary allowance is a `CommandRegex` with specificity
+    `(2, 1)`. Each narrowing is too, so it ties and then wins on
+    restrictiveness. A rule broad enough to say "ask about the shell" would
+    have *lost* to the allowance, silently — the same trap a tool-wide `deny`
+    falls into against a narrow `allow`. That is pinned as a test.
+  - **Standing orders cannot punch individual holes in it.** A grant ties on
+    specificity and loses on restrictiveness, and restrictiveness is settled
+    before "last wins among equals", so appending a grant does not get round
+    it. Every narrowing is `unwaivable`, following `git push`, so no answered
+    escalation writes down a standing yes either. The escape hatches are
+    answering each escalation, or `narrow_unattended=False` — an operator
+    decision about a deployment, not a line in a config the Retainer's own
+    workspace holds.
+  - **Only transitions are listed.** `docker push`, `twine upload`, `gh pr
+    merge`, `git push`, `flit publish` and the cloud CLIs already resolve to
+    `ask` because their binaries are not in `DEV_BINARIES`. Naming them would
+    make the table look like it were doing work it is not. The suite pins both
+    halves — that every listed command was `allow` before, and that every
+    pattern in the table is exercised.
+
+  What is *not* narrowed: the one entry that cannot name a subcommand. `make`,
+  `just` and `task` targets are freeform, so all the rule can read is the
+  target's name, and it deliberately over-asks — `make publish-docs-check`
+  costs one escalation — because the alternative is missing `make publish-prod`.
 
 A Retainer's standing orders compile into two artefacts:
 

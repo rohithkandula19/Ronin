@@ -32,7 +32,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from ronin.retainer.model import Capability, Deployment, Retainer, StandingOrders
-from ronin.safety.policy import Rule, RuleSet, builtin_ruleset
+from ronin.safety.policy import Rule, RuleSet, builtin_ruleset, unattended_rules
 from ronin.safety.settings import parse_rule
 
 #: Provenance for rules that came from a Retainer's orders. Rules carry where they
@@ -75,6 +75,7 @@ def compile_orders(
     *,
     capability_tools: Mapping[Capability, frozenset[str]] = NO_CAPABILITY_TOOLS,
     base: RuleSet | None = None,
+    narrow_unattended: bool = True,
 ) -> Authority:
     """Compile standing orders against the deployment they will run on.
 
@@ -83,9 +84,27 @@ def compile_orders(
     than a replacement. Orders are appended, which is what gives them precedence
     among rules of equal specificity — the documented "last wins among equals".
 
-    The default decision comes from the orders, and :class:`StandingOrders`
-    defaults it to ``deny``. That is the only safe floor when the thing asking
-    has nobody to ask.
+    The default decision comes from the orders. :class:`StandingOrders` defaults
+    it to ``ask``, which is what makes escalation possible at all — see that
+    field's own note.
+
+    ``narrow_unattended`` applies :func:`~ronin.safety.policy.unattended_rules`,
+    which takes back the part of the builtin dev-binary allowance that should
+    never have applied with nobody watching: ``npm publish``, ``npm unpublish
+    --force``, ``terraform destroy``, ``kubectl delete`` and the rest resolve to
+    *allow* today because ``npm``, ``terraform`` and ``kubectl`` are development
+    tools. Each narrowing names a subcommand, so ``npm test``, ``terraform plan``
+    and ``kubectl get`` keep their allowance.
+
+    **Standing orders cannot punch individual holes in it.** The narrowings tie
+    with an orders grant on specificity and win on restrictiveness — which is
+    settled before "last wins among equals", so appending a grant does not get
+    round it — and they are ``unwaivable``, so a Retainer cannot allow itself
+    ``npm publish`` and cannot remember a yes. That is deliberate: a floor the
+    restricted thing can edit is not a floor. The escape hatches are answering
+    the escalation each time, or
+    turning the whole narrowing off here — an operator decision about a
+    deployment, not a line in a config the Retainer's own workspace holds.
     """
     granted = orders.granted(deployment)
     withheld = orders.denied(deployment)
@@ -105,8 +124,17 @@ def compile_orders(
     )
 
     floor = builtin_ruleset() if base is None else base
+    narrowings = unattended_rules() if narrow_unattended else ()
     return Authority(
-        ruleset=RuleSet(rules=(*floor.rules, *orders.grants), default=orders.default),
+        ruleset=RuleSet(
+            # Narrowings sit with the floor they narrow, so orders stay last and
+            # "last wins among equals" keeps meaning what it says elsewhere.
+            # Position is not what makes them stick: they tie with a grant on
+            # specificity and beat it on restrictiveness, and restrictiveness is
+            # settled before last-wins is consulted.
+            rules=(*floor.rules, *narrowings, *orders.grants),
+            default=orders.default,
+        ),
         tools=frozenset(orders.tools - set(removed)),
         granted=granted,
         withheld=withheld,
@@ -120,6 +148,7 @@ def authority_for(
     *,
     capability_tools: Mapping[Capability, frozenset[str]] = NO_CAPABILITY_TOOLS,
     base: RuleSet | None = None,
+    narrow_unattended: bool = True,
 ) -> Authority:
     """:func:`compile_orders` for a whole Retainer, which is the usual caller."""
     return compile_orders(
@@ -127,6 +156,7 @@ def authority_for(
         deployment,
         capability_tools=capability_tools,
         base=base,
+        narrow_unattended=narrow_unattended,
     )
 
 

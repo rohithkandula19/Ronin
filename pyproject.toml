@@ -347,6 +347,7 @@ module = [
     "test_safety_sandbox",
     "test_safety_settings",
     "test_safety_suites",
+    "test_safety_unattended",
     "test_search",
     "test_search_edges",
     "test_searcher",
