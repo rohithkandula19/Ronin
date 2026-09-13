@@ -36,8 +36,12 @@ from ronin.cli.scan import (
 )
 from ronin.safety.credentials import Finding
 
+#: Assembled rather than written as one token, for the reason `key()` in
+#: `tests/safety/test_safety_credentials.py` spells out: a synthetic value that is
+#: still key-*shaped* trips every scanner pointed at this tree, `ronin scan`
+#: included, and a security tool people learn to ignore has stopped working.
 LIVE = "ghp_" + "g5Kd8Wq2LzNb7XcVaTeRyUiOpMnBhG"
-AWS = "AKIAQ7RWZP2MLN4KXTBV"
+AWS = "AKIA" + "Q7RWZP2MLN4KXTBV"
 
 
 def _tree(root: Path, files: dict[str, str]) -> Path:

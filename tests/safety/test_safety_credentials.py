@@ -37,29 +37,54 @@ from ronin.safety.credentials import (
     suppressed,
 )
 
+
+def key(prefix: str, body: str) -> str:
+    """A sample credential, assembled at run time and never written as one token.
+
+    This matters more than it looks. Every value below is synthetic, but a
+    credential scanner cannot know that — and a file full of key-shaped literals
+    trips this repository's *own* `ronin scan`, GitHub's secret scanning, and
+    whatever else an operator points at the tree. Each hit is a false positive
+    somebody has to triage, forever, and a security tool people learn to ignore is
+    a security tool that has stopped working.
+
+    Splitting each value at a point the pattern needs to be contiguous means the
+    key exists only in memory. `\bAKIA[0-9A-Z]{16}\b` cannot match `"AKIA", "Q7…"`
+    because what follows `AKIA` in the source is a quote.
+
+    The allow-pragma would also have worked and is deliberately not used: a
+    pragma asks every reader to trust an annotation, while a value that never
+    exists in the file needs no trust.
+    """
+    return prefix + body
+
+
 #: One realistic value per pattern kind. Written out rather than generated from the
 #: regexes, because a sample derived from the pattern would pass by construction and
 #: prove only that the derivation works.
 SAMPLES: dict[str, str] = {
-    "anthropic-key": "sk-ant-api03-" + "q7Fw2nR8xLm4vTgH1Zb6",
-    "openai-key": "sk-proj-" + "a" * 40,
-    "stripe-live-sk": "sk_live_" + "51HxQpLmNbVcXzAsDfGh",
-    "stripe-test-sk": "sk_test_" + "51HxQpLmNbVcXzAsDfGh",
-    "stripe-rk": "rk_live_" + "51HxQpLmNbVcXzAsDfGh",
-    "stripe-pk": "pk_live_" + "51HxQpLmNbVcXzAsDfGh",
-    "github-pat": "ghp_" + "g5Kd8Wq2LzNb7XcVaTeRyUiOpMnBhG",
-    "github-oauth": "gho_" + "g5Kd8Wq2LzNb7XcVaTeR",
-    "slack-bot": "xoxb-2154-8891-" + "kQw7ZrTn3LpXvBmCdEfG",
-    "slack-user": "xoxp-2154-8891-4471-" + "kQw7ZrTn3LpXvBmCdEfG",
-    "slack-app": "xapp-1-A04KQ-8891-" + "kQw7ZrTn3LpXvBmCdEfG",
-    "aws-akid": "AKIA" + "Q7RWZP2MLN4KXTBV",
-    "linear-key": "lin_api_" + "8WqZr3TnLpXvBmCdEfGh",
-    "jwt": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K",
-    "fernet": "gAAAAA" + "B" * 50,
-    "notion-secret": "secret_" + "c" * 40,
-    "resend-key": "re_" + "8WqZr3TnLpXvBmCdEfGh",
-    "private-key": "-----BEGIN RSA PRIVATE KEY-----",
+    "anthropic-key": key("sk-ant-", "api03-q7Fw2nR8xLm4vTgH1Zb6"),
+    "openai-key": key("sk-proj-", "a" * 40),
+    "stripe-live-sk": key("sk_live_", "51HxQpLmNbVcXzAsDfGh"),
+    "stripe-test-sk": key("sk_test_", "51HxQpLmNbVcXzAsDfGh"),
+    "stripe-rk": key("rk_live_", "51HxQpLmNbVcXzAsDfGh"),
+    "stripe-pk": key("pk_live_", "51HxQpLmNbVcXzAsDfGh"),
+    "github-pat": key("ghp_", "g5Kd8Wq2LzNb7XcVaTeRyUiOpMnBhG"),
+    "github-oauth": key("gho_", "g5Kd8Wq2LzNb7XcVaTeR"),
+    "slack-bot": key("xoxb-2154-8891-", "kQw7ZrTn3LpXvBmCdEfG"),
+    "slack-user": key("xoxp-2154-8891-4471-", "kQw7ZrTn3LpXvBmCdEfG"),
+    "slack-app": key("xapp-1-A04KQ-8891-", "kQw7ZrTn3LpXvBmCdEfG"),
+    "aws-akid": key("AKIA", "Q7RWZP2MLN4KXTBV"),
+    "linear-key": key("lin_api_", "8WqZr3TnLpXvBmCdEfGh"),
+    "jwt": key("eyJhbGciOiJIUzI1NiJ9.", "eyJzdWIiOiIxMjM0In0.dBjftJeZ4CVPmB92K"),
+    "fernet": key("gAAAAA", "B" * 50),
+    "notion-secret": key("secret_", "c" * 40),
+    "resend-key": key("re_", "8WqZr3TnLpXvBmCdEfGh"),
+    "private-key": key("-----BEGIN RSA ", "PRIVATE KEY-----"),
 }
+
+#: The one sample spelled out more than once below, so it is named once here.
+AWS = SAMPLES["aws-akid"]
 
 
 def test_every_pattern_has_a_sample() -> None:
@@ -117,7 +142,7 @@ def test_a_hint_that_is_the_secret_is_caught_by_the_first_clause() -> None:
     """The obvious failure, and the one `revealing`'s character count would miss:
     equality and containment are checked before any ratio, because a hint that *is*
     the key has no fraction elided to measure."""
-    secret = "AKIAQ7RWZP2MLN4KXTBV"
+    secret = AWS
     assert revealing(secret, secret)
     assert revealing(f"aws-akid: {secret}", secret)
 
@@ -131,7 +156,7 @@ def test_the_v1_safety_gate_could_not_fire() -> None:
     for every input the function can produce — including for a hint that is almost all
     of the key. The check was decorative, and this pins that the replacement is not.
     """
-    secret = "AKIAQ7RWZP2MLN4KXTBV"
+    secret = AWS
     leaky = secret[:16] + "…" + secret[-2:]
 
     assert secret not in leaky, "the v1 condition"  # v1 would have let this through
@@ -215,7 +240,7 @@ def test_a_finding_is_comparable_so_tests_can_say_what_they_expect() -> None:
     rather than an accident of this example — and it is what AWS's own console shows
     to identify a key.
     """
-    (found,) = find_secrets("AKIAQ7RWZP2MLN4KXTBV\n", "t.py")
+    (found,) = find_secrets(AWS + "\n", "t.py")
     assert found == Finding(path="t.py", line=1, kind="aws-akid", hint="AKIA…XTBV")
 
 

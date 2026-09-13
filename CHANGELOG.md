@@ -68,6 +68,19 @@ All notable changes to this project will be documented here. Format follows [Kee
   the receiver's threads still open a fresh loop per delivery, which is unaffected.
   Tested end to end offline: real webhook bytes, a real HMAC signature, through the real
   `route`, out to an injected poster.
+- **The new scanner's own test fixtures tripped it, and the fixtures were wrong.**
+  `ronin scan` reported six findings in this repository — its own samples. Every value is
+  synthetic, but a scanner cannot know that, and a key-*shaped* literal in a tracked file
+  is a false positive somebody triages forever, in `ronin scan`, in GitHub's secret
+  scanning, and in whatever else is pointed at the tree. A security tool people learn to
+  ignore has stopped working. The samples are now assembled at run time from two pieces
+  split where the pattern needs to be contiguous, so the key exists only in memory and no
+  pragma is needed — `\bAKIA[0-9A-Z]{16}\b` cannot match `"AKIA", "Q7…"` because what
+  follows `AKIA` in the source is a quote. The allow-pragma would also have worked and is
+  deliberately not used: a pragma asks every reader to trust an annotation, and a value
+  that is never in the file needs no trust. The literals remain in the commit that
+  introduced them, which `ronin scan --history` will say — correctly, and with nothing to
+  rotate.
 - **`ronin scan` — sweep for leaked credentials, report `file:line + kind`, never the
   value (`safety/credentials.py`, `cli/scan.py`).** The first feature carried across
   from v1 by the consolidation, and the one that most obviously should not have been
