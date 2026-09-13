@@ -37,6 +37,31 @@ All notable changes to this project will be documented here. Format follows [Kee
   without the `tui` extra, and `--no-tui`.
 
 ### Added
+- **`ronin scan` — sweep for leaked credentials, report `file:line + kind`, never the
+  value (`safety/credentials.py`, `cli/scan.py`).** The first feature carried across
+  from v1 by the consolidation, and the one that most obviously should not have been
+  reachable only through a binary that is being deleted. v1 had it as `ronin1 dev scan`
+  on top of `ronin_hardening.secret_scanner`; this tree imports no `packages/`
+  distribution, so the pattern set came with it — seventeen provider-prefixed patterns
+  plus a PEM `BEGIN` line, which the v1 set omitted because it was written for inline
+  keys and which is the highest-bleed leak there is.
+  **The safety gate is now real.** v1 documented "the raw matched value is asserted
+  absent from every emitted hint before returning" and implemented it as
+  `if match in hint` — a condition that cannot fire, because a hint always contains an
+  ellipsis and a match never does. It was decorative. The replacement, `revealing()`,
+  is checkable and fires: at most four characters from each end, and only when that
+  leaves half the value elided; a hint that fails degrades to the bare kind. The
+  shortest thing the pattern set matches is an AWS key id, so four of its sixteen
+  variable characters are the disclosed floor — the same fragment AWS's own console
+  prints.
+  **`--history` is the half that catches what a working-tree scan cannot**: deleting a
+  key and committing the deletion leaves the blob in the pack, so a clean tree can sit
+  on a leaking repository. **Exit 1 when it finds something**, which with `--quiet`
+  makes it a pre-commit hook; **exit 2 when it could not look** — no git, not a
+  repository — because a scanner that reports clean because it never ran is worse than
+  no scanner. `--staged` scans the index, `--output-format json` is new so a CI step
+  can act on the result, and the renderer is plain text rather than Rich because the
+  one command whose absence is a security problem must work on a bare install.
 - **The rest of the session-audit queue: steering, error surfacing, cost visibility.**
   Frictions 3–5 from the X0 audit, closing it out.
   **`esc` now stops a command that is already running.** The cooperative cancel flag is

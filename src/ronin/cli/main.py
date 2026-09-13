@@ -103,6 +103,7 @@ from .mcp_auth import SUBCOMMANDS as MCP_SUBCOMMANDS
 from .mcp_auth import McpLoginOptions, run_mcp_login
 from .repo import SUBCOMMANDS as REPO_SUBCOMMANDS
 from .repo import RepoOptions, run_repo
+from .scan import ScanOptions, run_scan
 from .sdk import Agent, load_router
 from .serve import build_server
 from .spine import Paths
@@ -198,6 +199,7 @@ class Command(StrEnum):
     API = "api"
     PLUGIN = "plugin"
     REPO = "repo"
+    SCAN = "scan"
 
 
 #: The words that may lead a command line. ``run`` and ``version`` are absent on
@@ -337,6 +339,8 @@ class Options:
     #: Present for ``repo`` only, same rule as ``bench``: ``None`` everywhere else so a
     #: path that reads it without checking the command fails loudly.
     repo: RepoOptions | None = None
+    #: Present for ``scan`` only. Same rule as ``repo`` above.
+    scan: ScanOptions | None = None
     #: Present for ``mcp login`` only; ``None`` everywhere else, same fail-loud rule.
     mcp_login: McpLoginOptions | None = None
 
@@ -476,6 +480,17 @@ def build_parser() -> _Parser:
             "  plugin add PATH | list     install a local plugin bundle (skills, mcp, "
             "agents,\n"
             "                             commands, hooks) or list installed ones\n"
+            "  repo map|health|explain PATH|deadcode\n"
+            "                             read-only analysis of the tree: shape, static "
+            "signals,\n"
+            "                             one file's neighbours, import-graph leaves\n"
+            "  scan [--history|--staged]  sweep for leaked credentials and report "
+            "file:line +\n"
+            "                             kind, never the value. Exits 1 when it finds "
+            "any, so\n"
+            "                             --quiet backs a pre-commit hook. --history "
+            "reads every\n"
+            "                             commit, where a deleted key still lives\n"
             "\n"
             "eval/duel flags: --suite PATH, --model NAME (repeat for duel), "
             "--parallel N,\n"
@@ -781,7 +796,7 @@ def build_parser() -> _Parser:
         dest="repo_root",
         default=None,
         metavar="DIR",
-        help="repo root to analyse (repo); defaults to the working directory",
+        help="root to analyse (repo, scan); defaults to the working directory",
     )
     parser.add_argument(
         "--top",
@@ -790,6 +805,36 @@ def build_parser() -> _Parser:
         default=None,
         metavar="N",
         help="how many top-ranked modules `repo map` lists",
+    )
+    parser.add_argument(
+        "--history",
+        action="store_true",
+        help="scan every commit's added lines, not the working tree — a deleted key "
+        "is still in the pack",
+    )
+    parser.add_argument(
+        "--staged",
+        action="store_true",
+        help="scan only what is staged for commit (scan); for a pre-commit hook",
+    )
+    parser.add_argument(
+        "--since",
+        default="",
+        metavar="WHEN",
+        help="with --history: only commits since this date or ref, as git reads it",
+    )
+    parser.add_argument(
+        "--max-commits",
+        dest="max_commits",
+        type=int,
+        default=0,
+        metavar="N",
+        help="with --history: stop after N commits (0 walks them all)",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="print nothing and answer with the exit status alone (scan)",
     )
     return parser
 
@@ -964,6 +1009,8 @@ def parse(argv: Sequence[str]) -> Options | Usage:
         return _plugin_options(namespace, words)
     if command is Command.REPO:
         return _repo_options(namespace, words)
+    if command is Command.SCAN:
+        return _scan_options(namespace, words)
 
     prompt = namespace.print_prompt if namespace.print_prompt is not None else words
     headless = namespace.print_prompt is not None
@@ -1426,6 +1473,49 @@ def _repo_options(namespace: argparse.Namespace, words: str) -> Options | Usage:
     return Options(command=Command.REPO, cwd=Path(namespace.cwd), repo=repo)
 
 
+def _scan_options(namespace: argparse.Namespace, words: str) -> Options | Usage:
+    """``scan [--history | --staged]`` — sweep for credentials, report locations only.
+
+    Takes no positional argument, and says so rather than ignoring one: ``ronin scan
+    src/`` looks exactly like a path-taking command to anybody who has used another
+    scanner, and silently sweeping the whole tree instead would be a clean report about
+    the wrong thing.
+
+    ``--history`` and ``--staged`` are alternatives, not a combination: one reads
+    commits and the other reads the index. Asking for both is a question with no
+    answer, so it is refused instead of resolved by declaration order.
+    """
+    if words:
+        return Usage(
+            f"{PROGRAM} scan: takes no arguments; use --root DIR to scan somewhere "
+            "other than the working directory\n"
+        )
+    if namespace.history and namespace.staged:
+        return Usage(
+            f"{PROGRAM} scan: --history and --staged scan different things (commits "
+            "and the index). Pick one.\n"
+        )
+    if namespace.max_commits < 0:
+        return Usage(f"{PROGRAM} scan: --max-commits cannot be negative\n")
+    if (namespace.since or namespace.max_commits) and not namespace.history:
+        return Usage(
+            f"{PROGRAM} scan: --since and --max-commits only mean something with --history\n"
+        )
+    return Options(
+        command=Command.SCAN,
+        cwd=Path(namespace.cwd),
+        scan=ScanOptions(
+            root=Path(namespace.repo_root) if namespace.repo_root else Path(namespace.cwd),
+            history=namespace.history,
+            staged=namespace.staged,
+            since=namespace.since,
+            max_commits=namespace.max_commits,
+            quiet=namespace.quiet,
+            as_json=namespace.output_format == OutputFormat.JSON.value,
+        ),
+    )
+
+
 def _mcp_login_options(namespace: argparse.Namespace, words: str) -> Options | Usage:
     """``mcp login <server>`` — run the attended OAuth flow for one configured server.
 
@@ -1502,6 +1592,8 @@ async def dispatch(
         return _plugin(options, paths, streams)
     if options.command is Command.REPO:
         return _repo(options, streams)
+    if options.command is Command.SCAN:
+        return _scan(options, streams)
     if options.command is Command.MCP:
         return await _mcp_login(options, env, streams)
 
@@ -1597,6 +1689,32 @@ def _repo(options: Options, streams: Streams) -> int:
         streams.err(f"{PROGRAM}: internal error: repo without options\n")
         return EXIT_ERROR
     code, out, err = run_repo(repo)
+    if err:
+        streams.err(err)
+    if out:
+        streams.out(out)
+    return code
+
+
+def _scan(options: Options, streams: Streams) -> int:
+    """``scan``: sweep for credentials. Read-only, offline, no wizard.
+
+    Before the first-run wizard for the same reason ``repo`` is: somebody asking
+    whether their tree is leaking must not have ``.ronin/`` written into it as the
+    answer.
+
+    The exit code is the product, not a side effect — ``1`` for found, ``2`` for could
+    not look — so this returns what :func:`~ronin.cli.scan.run_scan` decided rather
+    than mapping it onto the CLI's own codes. ``EXIT_ERROR`` happens to be ``1`` and
+    ``EXIT_USAGE`` ``2``, which is a coincidence this deliberately does not lean on:
+    "your repository contains a key" is not a usage error, and a reader of either
+    constant here would be misled about which one it is.
+    """
+    scan = options.scan
+    if scan is None:  # pragma: no cover - parse always supplies one for this command
+        streams.err(f"{PROGRAM}: internal error: scan without options\n")
+        return EXIT_ERROR
+    code, out, err = run_scan(scan)
     if err:
         streams.err(err)
     if out:

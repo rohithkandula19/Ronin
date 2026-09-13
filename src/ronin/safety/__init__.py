@@ -5,12 +5,15 @@ A gate that prompts on ``ls -la`` gets switched off inside a day, and a switched
 protects nothing at all. So the allowlist is broad on purpose, the refusals explain
 themselves, and "no" carries feedback the model can act on instead of ending the turn.
 
-Seven modules, in dependency order:
+Eight modules, in dependency order:
 
 * :mod:`~ronin.safety.command` — parses a command line into segments and resolves each
   segment's real binary. Everything else is built on it, because a regex over a raw
   string cannot answer "what will this actually run": ``echo safe; rm -rf /`` says
   ``echo`` at the front and deletes the filesystem at the back.
+* :mod:`~ronin.safety.credentials` — where a leaked key is, never what it is. Pure and
+  stdlib-only; the tree walk and the ``git`` calls that feed it are ``ronin.cli.scan``'s,
+  which is what keeps every match decision testable with a string.
 * :mod:`~ronin.safety.denylist` — the short list of actions no approval can authorize,
   each with why it is unconditional and what to do instead. Only ``--yolo`` removes it.
 * :mod:`~ronin.safety.injection` — all tool output is data; content is flagged, never
@@ -77,6 +80,12 @@ from .command import (
     parse_command,
     resolve_binary,
     worst_severity,
+)
+from .credentials import (
+    Finding,
+    find_secrets,
+    find_secrets_in_diff,
+    mask,
 )
 from .denylist import (
     DENY_REASONS,
@@ -202,6 +211,7 @@ __all__ = [
     "Denylist",
     "DockerSandbox",
     "Exact",
+    "Finding",
     "Hazard",
     "HazardCode",
     "InjectionFinding",
@@ -236,10 +246,13 @@ __all__ = [
     "builtin_ruleset",
     "check_url",
     "detect",
+    "find_secrets",
+    "find_secrets_in_diff",
     "glob_to_regex",
     "hazards",
     "host_reason",
     "load_settings",
+    "mask",
     "most_restrictive",
     "parse_address",
     "parse_command",
