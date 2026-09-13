@@ -78,6 +78,7 @@ from ..ui.headless import (
     ApprovalTracker,
     OutputFormat,
     exit_code_for,
+    failed_before_start,
     run_headless,
 )
 from ..ui.reduce import ViewState, reduce_event, summarize_arguments, summarize_result
@@ -1809,14 +1810,48 @@ def _resume(
     return found
 
 
+async def _reported(
+    events: AsyncIterator[Event], failures: list[ProviderError]
+) -> AsyncIterator[Event]:
+    """``events``, with a transport failure turned into an ``Error`` event.
+
+    A provider failure is *raised*, not emitted, so it used to propagate straight
+    through ``run_headless``: ``--output-format json`` wrote **zero bytes** and
+    ``stream-json`` stopped after ``turn_start`` with no ``result`` and no closing
+    event. A consumer that asked for a machine-readable stream got an unterminated
+    one, or nothing at all, and had to parse English off stderr to learn why.
+
+    Converted here rather than inside ``run_headless`` because ``ui`` may import only
+    ``core`` and ``ui`` — it cannot name ``ProviderError``, and that restriction is
+    what keeps every surface testable with no model and no network. This module is
+    where knowing about providers is allowed.
+
+    The exception is captured rather than re-raised: an ``Error`` in the state is
+    already what ``exit_code_for`` counts and what the ``result`` record reports, so
+    the status and the JSON both come out right, and the caller still writes the
+    human sentence to stderr. stdout is the machine's channel, stderr is the
+    person's, and a failure belongs on both.
+    """
+    try:
+        async for event in events:
+            yield event
+    except ProviderError as exc:
+        failures.append(exc)
+        yield Error(message=str(exc) or exc.__class__.__name__, kind="provider")
+
+
 async def _headless(options: Options, agent: Agent, streams: Streams) -> int:
     """``ronin -p``. The exit code is ``run_headless``'s, unchanged."""
+    failures: list[ProviderError] = []
     result = await run_headless(
-        agent.stream(
-            options.prompt,
-            budget=options.budget,
-            max_iterations=options.max_iterations,
-            verify=options.verify,
+        _reported(
+            agent.stream(
+                options.prompt,
+                budget=options.budget,
+                max_iterations=options.max_iterations,
+                verify=options.verify,
+            ),
+            failures,
         ),
         output_format=options.output_format,
         write=streams.out,
@@ -1825,6 +1860,8 @@ async def _headless(options: Options, agent: Agent, streams: Streams) -> int:
     )
     for note in agent.conversation.notes:
         streams.err(f"note: {note}\n")
+    for failure in failures:
+        streams.err(provider_failure_message(failure))
     return result.exit_code
 
 
@@ -2545,6 +2582,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         # Retries and failover raise once exhausted. Reaching the user as a stack trace is
         # the worst version of the worst moment, and it lands hardest on the flaky local
         # endpoints Ronin is aimed at.
+        #
+        # A failure *before* the stream opens — an unreadable models.toml, a model the
+        # router cannot build — lands here rather than in `_reported`, and a caller who
+        # asked for JSON must still get JSON. Without this, `--output-format json`
+        # wrote zero bytes for the whole class of config errors and the only account
+        # of what happened was English on stderr.
+        if parsed.output_format in (OutputFormat.JSON, OutputFormat.STREAM_JSON):
+            streams.out(failed_before_start(str(exc) or exc.__class__.__name__))
+            streams.flush()
         streams.err(provider_failure_message(exc))
         return EXIT_ERROR
 
