@@ -35,13 +35,20 @@ what lets the whole package be tested offline with no repo, no terminal and no b
 
 Known gaps, named rather than papered over:
 
-* The deny list's path classification uses ``normpath``, not ``resolve``, so it does not
-  follow a **symlink**: ``rm -rf ./link`` is judged by the literal ``./link``, not by where
-  the link points. This is deliberate, not a hole in the write boundary — the deny list
-  analyses bash *command text* and must never touch the disk (see :meth:`Denylist.resolve`).
-  The actual file-write confinement is ``ToolContext.resolve`` in the tools layer, which
-  *does* resolve symlinks and refuses any target outside the workspace, so ``read``/
-  ``write``/``edit`` cannot escape the tree through a symlink.
+* The deny list's **command-text** path classification uses ``normpath``, not ``resolve``,
+  so it does not follow a **symlink**: ``rm -rf ./link`` is judged by the literal
+  ``./link``, not by where the link points. That is deliberate — the deny list analyses
+  a command that has not run, where the path may not exist yet and reading the disk
+  would answer a question about a different moment (see :meth:`Denylist.resolve`).
+
+  A file tool's ``path=`` argument is a different lane and is **not** symlink-blind:
+  :func:`~ronin.safety.denylist.link_target` resolves it, and both the rules and the
+  unconditional list are checked against the literal spelling *and* the target. This
+  paragraph used to claim ``ToolContext.resolve`` covered the gap, and it does not:
+  confinement refuses a target outside the workspace, which says nothing about an
+  in-tree link to an in-tree protected path. ``docs -> .git`` made ``docs/config`` a
+  name for ``.git/config``, every rule saw ``docs/config``, and under ``auto_edit``
+  the write landed with no human in the path.
 * Taint tracking is substring matching over fetched spans: it catches a copied span and
   misses a paraphrase. The tradeoff is argued in :mod:`~ronin.safety.injection`.
 * Variables other than ``$HOME`` are not expanded, so ``rm -rf "$TARGET"`` is judged on

@@ -317,6 +317,59 @@ def is_dynamic(word: str) -> bool:
     return bool(_DYNAMIC.search(word))
 
 
+def link_target(word: str, base: Path) -> str | None:
+    """Where ``word`` really lands, when a symlink makes that a different file.
+
+    ``None`` when no link is involved and the path already names its own target —
+    the overwhelmingly common case, and the one that must stay free.
+
+    A link **anywhere** in the path counts, not only at the end. ``docs -> .git``
+    makes ``docs/config`` a name for ``.git/config`` while ``docs/config`` is not
+    itself a link, and that is the shape with the worst ending: a write there lands
+    on git's config, which runs commands on the next git invocation.
+
+    This is the **file-tool argument** lane, and it is the one place in this module
+    that touches the filesystem. :meth:`Denylist.resolve` is symlink-blind on purpose
+    because it analyses bash *command text*: the path may not exist yet, and reading
+    the disk to judge a command that has not run would be answering a different
+    question. A file tool's ``path=`` argument is not that — the tool is about to open
+    exactly this path, ``ToolContext.resolve`` is about to follow exactly this link,
+    and so the check has to look where the tool will look.
+
+    Not looking is what let a checked-in ``docs -> .git`` (or ``notes.txt -> .env``)
+    be judged as ``docs``: a deny rule on ``.git/**`` did not match, the unconditional
+    ``.env`` rule did not fire, confinement passed because the target is *inside* the
+    tree, and the write landed on ``.git/config``. Under ``auto_edit`` no human saw
+    any of it.
+
+    Returned relative to ``base`` when it lands inside it, because that is the
+    spelling rules are written in. A target outside the tree comes back absolute;
+    confinement refuses those separately, and a rule may still want to name one.
+    """
+    try:
+        # The root is resolved first, and that is not a detail. On macOS the workspace
+        # is routinely reached through a link of its own — `/tmp` is `/private/tmp`,
+        # and a pytest tmp_path is `/var/folders/...` behind `/private/var/folders/...`
+        # — so comparing a resolved path against an unresolved root reports *every*
+        # path as relocated, and every deny rule would start matching things it never
+        # named. Resolving both sides is what keeps this about the link the user made.
+        root = base.resolve()
+        raw = Path(word)
+        candidate = Path(os.path.normpath(str(raw if raw.is_absolute() else root / raw)))
+        real = candidate.resolve()
+    except (OSError, ValueError, RuntimeError):
+        # A broken link, a loop, a path too long, a name the platform refuses. None of
+        # those is a symlink pointing at something protected, and a safety check that
+        # raises is a session that dies on a malformed filename.
+        return None
+    if real == candidate:
+        return None
+    try:
+        return str(real.relative_to(root))
+    except ValueError:
+        return str(real)
+
+
 @dataclass(frozen=True, slots=True)
 class Denylist:
     """The unconditional floor, parameterised by the one session it protects.
@@ -585,11 +638,14 @@ class Denylist:
         promises never to make. So it is symlink-blind **by design** — ``rm -rf ./link``
         is judged by the literal ``./link``, not by where the link points.
 
-        That is a limitation of the command-text heuristic, not of Ronin's write
-        confinement. The file tools resolve their paths through ``ToolContext.resolve``
-        (the tools layer), which *does* follow symlinks and refuses any target outside the
-        workspace — so a ``write``/``edit`` cannot escape the tree through a symlink even
-        in the cases this text check would not flag.
+        That is a limitation of the command-text heuristic. The *argument* lane does not
+        share it: :func:`link_target` resolves a file tool's ``path=`` and the checks run
+        against both spellings.
+
+        This docstring used to say the gap was covered by ``ToolContext.resolve``
+        refusing targets outside the workspace. That is true and beside the point — an
+        in-tree link to an in-tree protected file passes confinement by definition, and
+        that is the case that mattered.
         """
         expanded = self.expand(word)
         path = Path(expanded)

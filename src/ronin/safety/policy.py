@@ -71,7 +71,7 @@ from ..core.types import (
     ToolUse,
 )
 from .command import Hazard, Segment, Severity, hazards, parse_command
-from .denylist import DenyHit, Denylist
+from .denylist import DenyHit, Denylist, link_target
 from .injection import TaintHit, TaintTracker
 from .sandbox import SANDBOX_AUTO_APPROVES, Sandbox
 
@@ -141,6 +141,14 @@ class MatchTarget:
     arguments: Mapping[str, Any]
     segment: Segment | None = None
     command_field: str = COMMAND_ARGUMENT
+    link_targets: tuple[str, ...] = ()
+    """Where this call's path arguments actually land, when a symlink moves them.
+
+    Matched *in addition to* the literal spelling, never instead of it, so a rule
+    fires if either name is denied. That is the same "most restrictive wins" the
+    ruleset uses everywhere else, and it is the only safe direction: a link is a
+    second name for a file, and a rule about the file has to cover both.
+    """
 
     @property
     def command_text(self) -> str:
@@ -167,6 +175,7 @@ class MatchTarget:
                 out.append(value)
             elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
                 out.extend(item for item in value if isinstance(item, str))
+        out.extend(self.link_targets)
         return tuple(out)
 
 
@@ -1172,7 +1181,10 @@ class PolicyEngine:
         answer back to ``ask``. Exact is safe here precisely because it is exact: it
         approves one byte-for-byte string and generalises to nothing.
         """
-        whole = rules.resolve(MatchTarget(tool=spec.name, arguments=use.arguments))
+        links = self._link_targets(use)
+        whole = rules.resolve(
+            MatchTarget(tool=spec.name, arguments=use.arguments, link_targets=links)
+        )
         if not segments:
             return (whole,)
         per_segment = [
@@ -1210,6 +1222,27 @@ class PolicyEngine:
         """Whether a segment runs anything. ``FOO=bar`` on its own does not."""
         return bool(segment.binary) or any(r.names_a_file for r in segment.redirects)
 
+    def _link_targets(self, use: ToolUse) -> tuple[str, ...]:
+        """Every path argument's real destination, when a symlink makes it a different one.
+
+        Empty without a denylist, because that is where the workspace root lives — and
+        a resolution relative to the wrong root is worse than none. Empty for the
+        ordinary call too: nothing here touches the disk unless an argument names a
+        path, and `link_target` returns ``None`` for anything that is not a link.
+        """
+        if self.denylist is None:
+            return ()
+        base = self.denylist.workspace_root
+        found: list[str] = []
+        for key, value in sorted(use.arguments.items()):
+            if key not in PATH_ARGUMENTS:
+                continue
+            for path in _as_paths(value):
+                target = link_target(str(path), base)
+                if target is not None and target not in found:
+                    found.append(target)
+        return tuple(found)
+
     def _deny_hits(
         self, spec: ToolSpec, use: ToolUse, segments: Sequence[Segment]
     ) -> tuple[DenyHit, ...]:
@@ -1225,6 +1258,13 @@ class PolicyEngine:
                 continue
             for path in _as_paths(value):
                 hits.extend(self.denylist.check_path(path, write=writes))
+        # And again by where those paths actually land. The unconditional list is
+        # about *files* — `.env`, a private key, `.git/` — and a symlink is a second
+        # name for one. Checking only the name the model typed meant `notes.txt`
+        # pointing at `.env` was judged as `notes.txt`, and `docs -> .git` put a
+        # write on `.git/config`: arbitrary code on the next git invocation.
+        for target in self._link_targets(use):
+            hits.extend(self.denylist.check_path(target, write=writes))
         return tuple(hits)
 
     def _relax(self, decision: Decision, spec: ToolSpec) -> Decision:
