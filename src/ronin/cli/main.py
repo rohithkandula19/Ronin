@@ -37,7 +37,9 @@ import argparse
 import asyncio
 import os
 import sys
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
+import threading
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
@@ -46,6 +48,7 @@ from typing import Any, TextIO
 from ..agents.hooks import MATCH_ALL
 from ..context.compaction import context_breakdown
 from ..context.fileindex import FileIndex
+from ..core.fanout import EventHub
 from ..core.types import (
     ApprovalRequest,
     Budget,
@@ -106,6 +109,13 @@ from .status import context_share, current_branch
 from .stream import DEFAULT_MAX_ITERATIONS, CompactionPairingError
 from .telemetry_cmd import TelemetryOptions, Verb
 from .telemetry_cmd import run as run_telemetry
+from .watch import (
+    TOKEN_ENV,
+    WATCH_PATH,
+    bound_address,
+    build_watch_server,
+    mint_token,
+)
 from .wire import load_workspace
 from .wizard import apply_plan, plan_config, plan_first_run, run_smoke, write_config
 
@@ -282,6 +292,10 @@ class Options:
     #: setting, because a profile a workspace can switch off is not one you can hand
     #: to an auditor.
     restricted: bool = False
+    #: ``None`` for no watch stream; a port to serve one on, ``0`` for an ephemeral
+    #: one. A port rather than a bool because "let me watch this" and "on the port my
+    #: tunnel already forwards" are the same request asked twice otherwise.
+    watch_port: int | None = None
     cwd: Path = field(default_factory=lambda: Path("."))
     #: ``None`` for no resume; ``""`` for ``--resume`` with no id (the latest here).
     resume: str | None = None
@@ -505,6 +519,23 @@ def build_parser() -> _Parser:
             "locked down: no shell, no web tools, settings files ignored, mode cannot "
             "be raised (also RONIN_RESTRICTED=1)"
         ),
+    )
+    # Two flags rather than one `--watch [PORT]`, and the reason is the shape of the
+    # command line this lives on. Ronin takes its prompt as bare words, so an optional
+    # argument swallowed the first one: `ronin --watch fix the test` died with
+    # "invalid int value: 'fix'" — on the most natural way anyone would type it.
+    parser.add_argument(
+        "--watch",
+        action="store_true",
+        help="stream this session's events over SSE on loopback, for a second screen",
+    )
+    parser.add_argument(
+        "--watch-port",
+        dest="watch_port",
+        type=int,
+        default=None,
+        metavar="PORT",
+        help="the port --watch serves on (default: any free one); implies --watch",
     )
     parser.add_argument(
         "--sandbox", action="store_true", help="run commands in a sandbox when one is available"
@@ -893,6 +924,17 @@ def parse(argv: Sequence[str]) -> Options | Usage:
             )
         resume = ""
 
+    watch_port = namespace.watch_port
+    if watch_port is not None and not 0 <= watch_port <= 65535:
+        return Usage(
+            f"{PROGRAM}: error: --watch-port takes a port between 0 and 65535 (0 asks "
+            "for any free one)"
+        )
+    # Naming a port is asking for the stream; requiring both flags would only ever
+    # produce a run where the user typed a port and got no watcher.
+    if watch_port is None and namespace.watch:
+        watch_port = 0
+
     return Options(
         command=command,
         prompt=prompt,
@@ -900,6 +942,7 @@ def parse(argv: Sequence[str]) -> Options | Usage:
         output_format=chosen,
         mode=Mode(namespace.mode) if namespace.mode else None,
         restricted=restricted,
+        watch_port=watch_port,
         yolo=bool(namespace.yolo),
         sandbox=bool(namespace.sandbox),
         cwd=Path(namespace.cwd),
@@ -1441,9 +1484,10 @@ async def dispatch(
             return resumed.exit_code
         for note in agent.loaded.notes:
             streams.err(note.line() + "\n")
-        if options.headless:
-            return await _headless(options, agent, streams)
-        return await _interactive(options, agent, streams, handoff)
+        with _watching(options, agent, env, streams):
+            if options.headless:
+                return await _headless(options, agent, streams)
+            return await _interactive(options, agent, streams, handoff)
     finally:
         if owns:
             await agent.aclose()
@@ -1996,6 +2040,60 @@ async def _reported(
     except ProviderError as exc:
         failures.append(exc)
         yield Error(message=str(exc) or exc.__class__.__name__, kind="provider")
+
+
+@contextmanager
+def _watching(
+    options: Options, agent: Agent, env: Mapping[str, str], streams: Streams
+) -> Iterator[None]:
+    """Serve this session's events over SSE for as long as it runs, if asked.
+
+    Started *after* the agent assembled: a URL printed before the workspace loaded is
+    one the user reaches for while the session is busy failing to start.
+
+    Loopback, always. The stream is plaintext HTTP carrying source, diffs and command
+    output, and binding it to a LAN interface would be handing that to the network in
+    exchange for saving a tunnel. ``ssh -L`` or a mesh VPN is the supported way to
+    reach it from a phone, and it is the one that encrypts.
+
+    A port that will not bind is a note, not a failure. The session is the thing the
+    user asked for; the watch stream is an extra, and killing the run because 8900 was
+    taken would be the tail wagging the dog.
+    """
+    if options.watch_port is None:
+        yield
+        return
+    hub = EventHub()
+    try:
+        server = build_watch_server(
+            ("127.0.0.1", options.watch_port),
+            hub=hub,
+            token=env.get(TOKEN_ENV) or mint_token(),
+        )
+    except OSError as exc:
+        streams.err(f"note: watch — could not bind port {options.watch_port}: {exc}\n")
+        yield
+        return
+    thread = threading.Thread(target=server.serve_forever, name="ronin-watch", daemon=True)
+    thread.start()
+    streams.err(
+        f"watch: http://{bound_address(server.server_address)}{WATCH_PATH}"
+        f"?token={server.watch.token}\n"
+        "  read-only, loopback only — forward the port to reach it from elsewhere\n"
+    )
+    streams.flush()
+    agent.watched(hub)
+    try:
+        yield
+    finally:
+        agent.watched(None)
+        # Close before shutdown, in that order: closing ends every watcher's stream at
+        # the last event of the session, so a watcher sees the session finish rather
+        # than the socket vanish under it.
+        hub.close()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 async def _headless(options: Options, agent: Agent, streams: Streams) -> int:

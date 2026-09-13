@@ -53,6 +53,7 @@ from types import TracebackType
 from typing import Any
 
 from ..context.compaction import Summarizer
+from ..core.fanout import EventHub
 from ..core.types import AgentState, Budget, Event, Mode
 from ..providers.router import Router, load_config
 from ..safety.policy import Asker, Rule
@@ -221,14 +222,20 @@ class Run:
 
     async def _events(self) -> AsyncIterator[Event]:
         runtime = await self._agent._opened()
-        async for event in self._agent.conversation.run_prompt(
+        turn = self._agent.conversation.run_prompt(
             runtime,
             self._prompt,
             budget=self._budget,
             max_iterations=self._max_iterations,
             summarizer=self._summarizer,
             verify=self._verify,
-        ):
+        )
+        # The one place a session's events fan out. Every front end — the TUI, the
+        # line session, `-p`, the SDK — reaches the loop through here, so a watcher
+        # attached to the agent sees all of them and no renderer has to remember to
+        # cooperate.
+        hub = self._agent.watch
+        async for event in turn if hub is None else hub.tee(turn):
             yield event
 
     async def _fold(self) -> AgentResult:
@@ -275,6 +282,14 @@ class Agent:
         self._config: AgentConfig | None = None if isinstance(target, Runtime) else target
         self._conversation = Conversation() if conversation is None else conversation
         self._closed = False
+        self.watch: EventHub | None = None
+        """Where a copy of every event goes, for anybody watching this session.
+
+        Set by :meth:`watched`, read in exactly one place — :meth:`_Stream._events`,
+        which every front end goes through. A tee anywhere else would be one a new
+        renderer could forget to call, and a watcher that silently sees nothing is
+        worse than one that cannot connect.
+        """
 
     # ------------------------------------------------------------------ opening
 
@@ -349,6 +364,16 @@ class Agent:
         if resume is not None:
             agent._conversation.resume_from(resume)
         return agent
+
+    def watched(self, hub: EventHub | None) -> Agent:
+        """Send a copy of every event to ``hub``. ``None`` stops it. Returns self.
+
+        Not a constructor argument, because the hub is bound to a socket the CLI opens
+        *after* it knows the agent assembled — an agent that fails to open should not
+        have published a URL first.
+        """
+        self.watch = hub
+        return self
 
     # --------------------------------------------------------------- inspection
 

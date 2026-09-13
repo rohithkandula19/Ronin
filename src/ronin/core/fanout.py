@@ -152,6 +152,19 @@ class EventHub:
         finally:
             self.close()
 
+    async def tee(self, events: AsyncIterator[Event]) -> AsyncIterator[Event]:
+        """Publish everything ``events`` yields *and* pass it through unchanged.
+
+        The shape a live session needs, as opposed to :meth:`drain`: the terminal is
+        still the consumer of the stream, and the watchers are a copy taken on the way
+        past. It does not close the hub, because a session outlives one turn and a
+        watcher that got disconnected between prompts would have nothing to come back
+        to.
+        """
+        async for event in events:
+            self.publish(event)
+            yield event
+
     # --------------------------------------------------------- the subscribers
 
     def subscribe(self, *, since: int | None = None) -> Subscription:
