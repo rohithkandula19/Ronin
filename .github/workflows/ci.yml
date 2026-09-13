@@ -202,14 +202,13 @@ jobs:
           uv --project "$GITHUB_WORKSPACE" run ronin1 util relay connect --help
           uv --project "$GITHUB_WORKSPACE" run ronin1 util telegram --help
 
-      # The v2 console script, which nothing checked before: `ronin2` was declared and
-      # `pyproject.toml` was only proved importable by a unit test. Both names now have
-      # to actually launch, from the venv, the way a user reaches them.
-      - name: Smoke test the v2 CLI (ronin / ronin2)
+      # The v2 console script, which nothing checked before: the name was declared and
+      # `pyproject.toml` was only proved importable by a unit test. It now has to
+      # actually launch, from the venv, the way a user reaches it.
+      - name: Smoke test the v2 CLI (ronin)
         run: |
-          mkdir -p /tmp/ronin2-smoke && cd /tmp/ronin2-smoke
+          mkdir -p /tmp/ronin-v2-smoke && cd /tmp/ronin-v2-smoke
           uv --project "$GITHUB_WORKSPACE" run ronin --version
-          uv --project "$GITHUB_WORKSPACE" run ronin2 --version
           uv --project "$GITHUB_WORKSPACE" run ronin --help
           # `doctor` exits 1 on a box with no provider key and no local model server —
           # which this runner is, by design. That non-zero is doctor working correctly

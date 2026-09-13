@@ -19,7 +19,7 @@ What it walks through, in the order a session does it:
    **repair attempt** that gives up honestly when the failure signature stops moving;
 5. a **compaction** that folds the middle, keeps the most recent tool result per file
    path in full, and says so where the user can see it;
-6. the same live session **served over MCP** — what ``ronin2 mcp-serve`` does — driven by
+6. the same live session **served over MCP** — what ``ronin mcp-serve`` does — driven by
    the real ``McpClient`` over an in-memory pipe, with the permission mode deciding what
    a remote client is even shown;
 7. the whole session **written to a transcript and replayed** with no unpaired tool
@@ -525,7 +525,7 @@ async def main() -> int:
                         _bullet(("note: " if index == 0 else "      ") + line)
 
             # ------------------------------------------------- mcp-serve
-            _heading("5. the same session, served over MCP (`ronin2 mcp-serve`)")
+            _heading("5. the same session, served over MCP (`ronin mcp-serve`)")
             failures += await _serve_section(runtime, conversation)
         finally:
             await runtime.aclose()
@@ -609,7 +609,7 @@ async def _serve_section(runtime: Any, conversation: Conversation) -> int:
 
     No subprocess and no second process: :func:`~ronin.mcp.transport.memory_duplex` puts
     both ends of the pipe in memory, so what runs here is exactly what runs when Claude
-    Desktop spawns ``ronin2 mcp-serve`` — the same :class:`~ronin.mcp.server.McpServer`,
+    Desktop spawns ``ronin mcp-serve`` — the same :class:`~ronin.mcp.server.McpServer`,
     the same framing, the same :class:`~ronin.mcp.client.McpClient`.
 
     The two facts worth watching: the mode decides what is even *published*, and a

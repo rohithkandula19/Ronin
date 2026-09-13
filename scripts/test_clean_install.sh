@@ -67,16 +67,17 @@ echo "  ok: ronin installed alone, exactly as 'dependencies = []' promises"
 echo "== console script =="
 RONIN="$VENV/bin/ronin"
 [ -x "$RONIN" ] || fail "console script 'ronin' missing"
-# `ronin2` is declared alongside `ronin` and points at the same entry point. Asserted
-# rather than assumed: the two names are what the consolidation is removing, and this
-# line is the one that has to change when `ronin` becomes the only one.
-[ -x "$VENV/bin/ronin2" ] || fail "console script 'ronin2' missing"
+# And nothing else. `ronin2` is on this list because it used to be on the other one: it
+# was declared alongside `ronin`, pointing at the same entry point, and the consolidation
+# removed it — so the wheel is checked for its absence rather than trusted to have
+# dropped it. `ronin1` and `ro` are v1's names and were never this distribution's.
+#
 # `if`, not `[ … ] && fail`: under `set -e` a false test at the head of an `&&` list
 # makes the list non-zero and kills the script, so a negative assertion would "pass"
 # by aborting the run before the smoke tests below ever happened.
-for foreign in ronin1 ro; do
+for foreign in ronin2 ronin1 ro; do
   if [ -e "$VENV/bin/$foreign" ]; then
-    fail "the ronin wheel claimed '$foreign'; that name is not this distribution's"
+    fail "the ronin wheel claimed '$foreign'; this distribution declares 'ronin' alone"
   fi
 done
 

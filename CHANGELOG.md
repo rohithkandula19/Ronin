@@ -5,6 +5,19 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Changed
+- **One command, not two: `ronin2` is gone (`pyproject.toml`).** There were two names
+  for one program, and the second one read like a second product — which is how it was
+  read. `ronin` and `ronin2` resolved to the same `ronin.cli.main:main`; nothing behind
+  them differed. The alias existed because v1 (`packages/cli`) held the short name and
+  two distributions declaring one console script means whichever installs second
+  silently wins, so this tree shipped as `ronin2` rather than contest the word. v1's
+  entry point was renamed `ronin1` and `ronin` came here — at which point the alias was
+  kept "so nothing that already typed it breaks", and that is the decision now reversed.
+  The docs, the CI smoke step, the telemetry disclosure and every docstring that spelled
+  it now say `ronin`. The clean-install gate had an assertion that `ronin2` is *present*;
+  it now asserts the wheel declares `ronin` alone, alongside `ronin1` and `ro`, and a
+  unit test pins the count rather than any spelling, so a future alias is a decision
+  someone makes on purpose instead of a line nobody notices.
 - **A bare `ronin` now opens the TUI, and slash commands work there
   (`cli/main.py`, `ui/`).** The session audit's second-biggest friction, and one that
   was not on any list: the default start landed in the line REPL, while the richer

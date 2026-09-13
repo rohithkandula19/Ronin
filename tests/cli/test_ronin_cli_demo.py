@@ -44,7 +44,7 @@ SCENES: tuple[str, ...] = (
     "2. one mutating turn: gate, checkpoint, verify, repair",
     "3. compaction: fold the middle, keep the diffs",
     "4. what the session degraded on",
-    "5. the same session, served over MCP (`ronin2 mcp-serve`)",
+    "5. the same session, served over MCP (`ronin mcp-serve`)",
     "6. the transcript, written and replayed",
     "what this proves",
 )

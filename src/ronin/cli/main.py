@@ -1055,7 +1055,7 @@ def _sessions_options(namespace: argparse.Namespace, words: str) -> Options | Us
 def _mcp_serve_options(namespace: argparse.Namespace, words: str) -> Options | Usage:
     """``mcp-serve`` argv. Takes no prompt, and says so rather than ignoring one.
 
-    A prompt is refused instead of dropped because ``ronin2 mcp-serve "fix the test"``
+    A prompt is refused instead of dropped because ``ronin mcp-serve "fix the test"``
     reads as though it would run something — and a server that silently discarded the
     request would sit there answering frames while its user waited for an answer.
 

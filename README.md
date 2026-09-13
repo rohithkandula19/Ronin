@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-v1.0.0-blue)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-11902%20passing-brightgreen.svg)](#-whats-under-the-hood)
+[![Tests](https://img.shields.io/badge/tests-11903%20passing-brightgreen.svg)](#-whats-under-the-hood)
 [![Providers](https://img.shields.io/badge/providers-Claude%20·%20Gemini%20·%20Cerebras%20·%20Groq%20·%20OpenRouter%20·%20Ollama%20·%20OpenAI-d4a373)](#-supported-providers)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
@@ -30,14 +30,15 @@ $ ronin1 --offline                             # air-gapped: local brain, zero e
 > claiming one name means whichever was installed second silently wins. Most command
 > examples below still read `ronin …`; substitute `ronin1`.
 >
-> **`ronin`** (and its long-standing alias **`ronin2`**) is the **v2** tree at
+> **`ronin`** is the **v2** tree at
 > `src/ronin` — a smaller, strictly-typed rebuild with its own docs in
 > [docs/site/quickstart.md](docs/site/quickstart.md). Its verbs are not v1's: a bare
 > prompt, `-p`, `doctor`, `sessions`, `export`, `eval`, `duel`, `telemetry`, `mcp-serve`.
 > The two ship side by side on purpose until `tests/evals/` has measured both.
 >
 > The two-letter `ro` alias is gone: `ro` meaning v1 while `ronin` means v2 is the same
-> silent swap in miniature.
+> silent swap in miniature. So is `ronin2` — it named the same program as `ronin`, and a
+> second word for one program reads as a second program.
 >
 > **Platform support:** macOS and Linux are supported. Windows is supported via **WSL** (run the same install command inside a WSL shell) — native Windows is not yet supported. Requires Python 3.11+ and `git`.
 
@@ -801,7 +802,7 @@ ronin is MIT-licensed and meant to be picked up by other people. A few notes if 
 | `cli` | The `ronin` binary: coding agent, mission control, MCP client, web tools, subagents, evaluation, media, and the **31-game arcade** (`ronin play`) |
 | `deployment-templates` | Docker Compose, Modal, Vercel, and Railway |
 
-**11,902 tests** across packages and the demo/API apps passed in the current regression suite. A `FakeProvider` makes them deterministic, offline, and free: no API calls in CI.
+**11,903 tests** across packages and the demo/API apps passed in the current regression suite. A `FakeProvider` makes them deterministic, offline, and free: no API calls in CI.
 
 ## Use the modules without the CLI
 
