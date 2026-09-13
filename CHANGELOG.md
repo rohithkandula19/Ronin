@@ -37,6 +37,37 @@ All notable changes to this project will be documented here. Format follows [Kee
   without the `tui` extra, and `--no-tui`.
 
 ### Added
+- **`ronin retain check | serve | tick` — the Retainer plane had no front door
+  (`cli/retain_cmd.py`).** Every piece existed and none of it was reachable. The
+  registry parser had positional error messages (`registry.retainers[2].orders.grants[1]`)
+  that nothing could invoke; the receiver could be bound and nothing bound it;
+  `run_summons` could act on a summons and nothing produced one from a webhook. An
+  operator's only way to find out their `retainers.json` was wrong was to start a daemon
+  that did not exist.
+  `check` reads the registry and reports what the deployment holds — including the
+  capabilities a Retainer **asked for and did not get**, which `granted()` drops in
+  silence by design (it intersects rather than validates, so moving a Retainer to a
+  hosted deployment narrows it instead of refusing to start). `serve` binds the receiver
+  and acts on deliveries. `tick` fires every due routine once and exits, for cron.
+  **Routing adds no schema.** GitHub routes on the repository, because a mention carries
+  `owner/name` and each Retainer's `post.repo` is exactly that. Slack and Telegram carry
+  no repository, so they serve the single Retainer on that channel and refuse two at
+  startup with `--retainer` named as the fix — picking the first is not a routing rule,
+  it is an accident that looks like one. One receiver per channel, because one receiver
+  verifies one signing scheme.
+  Refused before anything binds: no signing secret (an unconfigured receiver that
+  accepts everything is a public endpoint that runs an agent), no handle (without one a
+  Retainer cannot tell its own posts from anyone else's, so it answers itself), a channel
+  nobody serves, a Retainer not in the registry, a Retainer whose record does not list the
+  channel. One bad summons becomes a logged line rather than an exception: a daemon that
+  dies on one stops serving every other Retainer, and a 500 tells the platform to
+  redeliver the same failing request.
+  **A bug found by typing the command.** `run_retain` was synchronous and called
+  `asyncio.run`, which raised `cannot be called from a running event loop` the first time
+  `tick` ran for real — `dispatch` already holds a loop. It runs on the caller's loop now;
+  the receiver's threads still open a fresh loop per delivery, which is unaffected.
+  Tested end to end offline: real webhook bytes, a real HMAC signature, through the real
+  `route`, out to an injected poster.
 - **`ronin scan` — sweep for leaked credentials, report `file:line + kind`, never the
   value (`safety/credentials.py`, `cli/scan.py`).** The first feature carried across
   from v1 by the consolidation, and the one that most obviously should not have been

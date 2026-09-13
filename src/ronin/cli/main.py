@@ -46,6 +46,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, TextIO
 
+from ronin.retainer.model import Channel
+
 from ..agents.hooks import MATCH_ALL
 from ..context.compaction import context_breakdown
 from ..context.fileindex import FileIndex
@@ -103,6 +105,8 @@ from .mcp_auth import SUBCOMMANDS as MCP_SUBCOMMANDS
 from .mcp_auth import McpLoginOptions, run_mcp_login
 from .repo import SUBCOMMANDS as REPO_SUBCOMMANDS
 from .repo import RepoOptions, run_repo
+from .retain_cmd import SUBCOMMANDS as RETAIN_SUBCOMMANDS
+from .retain_cmd import RetainOptions, run_retain
 from .scan import ScanOptions, run_scan
 from .sdk import Agent, load_router
 from .serve import build_server
@@ -199,6 +203,7 @@ class Command(StrEnum):
     API = "api"
     PLUGIN = "plugin"
     REPO = "repo"
+    RETAIN = "retain"
     SCAN = "scan"
 
 
@@ -341,6 +346,8 @@ class Options:
     repo: RepoOptions | None = None
     #: Present for ``scan`` only. Same rule as ``repo`` above.
     scan: ScanOptions | None = None
+    #: Present for ``retain`` only. Same rule again.
+    retain: RetainOptions | None = None
     #: Present for ``mcp login`` only; ``None`` everywhere else, same fail-loud rule.
     mcp_login: McpLoginOptions | None = None
 
@@ -484,6 +491,10 @@ def build_parser() -> _Parser:
             "                             read-only analysis of the tree: shape, static "
             "signals,\n"
             "                             one file's neighbours, import-graph leaves\n"
+            "  retain check|serve|tick    read the retainer registry, serve its "
+            "webhook\n"
+            "                             receiver, or fire the routines that are "
+            "due once\n"
             "  scan [--history|--staged]  sweep for leaked credentials and report "
             "file:line +\n"
             "                             kind, never the value. Exits 1 when it finds "
@@ -836,6 +847,27 @@ def build_parser() -> _Parser:
         action="store_true",
         help="print nothing and answer with the exit status alone (scan)",
     )
+    parser.add_argument(
+        "--registry",
+        default=None,
+        metavar="FILE",
+        help="the retainer registry to read (retain); defaults to retainers.json "
+        "beside settings.json",
+    )
+    parser.add_argument(
+        "--channel",
+        choices=[channel.value for channel in Channel],
+        default=Channel.GITHUB.value,
+        help="which platform this receiver serves (retain serve); one per port, "
+        "because one port means one signing scheme",
+    )
+    parser.add_argument(
+        "--retainer",
+        default="",
+        metavar="ID",
+        help="serve or tick exactly this retainer (retain); otherwise every one "
+        "reachable on the channel",
+    )
     return parser
 
 
@@ -1011,6 +1043,8 @@ def parse(argv: Sequence[str]) -> Options | Usage:
         return _repo_options(namespace, words)
     if command is Command.SCAN:
         return _scan_options(namespace, words)
+    if command is Command.RETAIN:
+        return _retain_options(namespace, words)
 
     prompt = namespace.print_prompt if namespace.print_prompt is not None else words
     headless = namespace.print_prompt is not None
@@ -1516,6 +1550,43 @@ def _scan_options(namespace: argparse.Namespace, words: str) -> Options | Usage:
     )
 
 
+def _retain_options(namespace: argparse.Namespace, words: str) -> Options | Usage:
+    """``retain <check|serve|tick>`` — the Retainer's front door.
+
+    ``--host``/``--port`` are the shared ones ``api`` already uses; a third pair
+    spelled differently for the same idea is how a reader learns to check which
+    verb they are in before trusting a flag name.
+    """
+    parts = words.split()
+    if not parts:
+        return Usage(f"{PROGRAM} retain: needs a subcommand ({', '.join(RETAIN_SUBCOMMANDS)})\n")
+    subcommand, *rest = parts
+    if subcommand not in RETAIN_SUBCOMMANDS:
+        return Usage(
+            f"{PROGRAM} retain: unknown subcommand {subcommand!r}; "
+            f"expected one of {', '.join(RETAIN_SUBCOMMANDS)}\n"
+        )
+    if rest:
+        return Usage(
+            f"{PROGRAM} retain {subcommand}: takes no arguments; name a retainer with "
+            "--retainer and a registry with --registry\n"
+        )
+    return Options(
+        command=Command.RETAIN,
+        cwd=Path(namespace.cwd),
+        retain=RetainOptions(
+            subcommand=subcommand,
+            home=Path(namespace.cwd),
+            registry=Path(namespace.registry) if namespace.registry else None,
+            channel=Channel(namespace.channel),
+            retainer=namespace.retainer,
+            host=namespace.host,
+            port=namespace.port,
+            as_json=namespace.output_format == OutputFormat.JSON.value,
+        ),
+    )
+
+
 def _mcp_login_options(namespace: argparse.Namespace, words: str) -> Options | Usage:
     """``mcp login <server>`` — run the attended OAuth flow for one configured server.
 
@@ -1594,6 +1665,8 @@ async def dispatch(
         return _repo(options, streams)
     if options.command is Command.SCAN:
         return _scan(options, streams)
+    if options.command is Command.RETAIN:
+        return await _retain(options, env, streams)
     if options.command is Command.MCP:
         return await _mcp_login(options, env, streams)
 
@@ -1715,6 +1788,29 @@ def _scan(options: Options, streams: Streams) -> int:
         streams.err(f"{PROGRAM}: internal error: scan without options\n")
         return EXIT_ERROR
     code, out, err = run_scan(scan)
+    if err:
+        streams.err(err)
+    if out:
+        streams.out(out)
+    return code
+
+
+async def _retain(options: Options, env: Mapping[str, str], streams: Streams) -> int:
+    """``retain``: read the registry, or serve on it.
+
+    Before the first-run wizard, like ``repo`` and ``scan``: a daemon's working
+    directory is not a workspace to set up, and `retain check` in particular is a
+    question about a config file that must not answer by writing another one.
+
+    ``home`` is the *workspace* root rather than ``Paths.home``, because a
+    deployment's registry and its stores belong to the checkout an operator
+    deployed, not to a user profile shared with every other Ronin on the box.
+    """
+    retain = options.retain
+    if retain is None:  # pragma: no cover - parse always supplies one for this command
+        streams.err(f"{PROGRAM}: internal error: retain without options\n")
+        return EXIT_ERROR
+    code, out, err = await run_retain(retain, environ=env)
     if err:
         streams.err(err)
     if out:
