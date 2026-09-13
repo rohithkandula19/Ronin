@@ -296,6 +296,7 @@ class Agent:
         tools: Sequence[Tool] = (),
         rules: Sequence[Rule] = (),
         allow_tools: frozenset[str] | None = None,
+        restricted: bool = False,
     ) -> Agent:
         """Load the workspace at ``path`` and assemble a runtime for it.
 
@@ -313,6 +314,12 @@ class Agent:
         later because the policy engine is built here: an agent's approval authority
         cannot change under a turn that is already running.
 
+        ``restricted`` is the locked-down profile: no shell, no web tools, settings
+        files ignored, and file tools confined to the workspace as they always are. It
+        is built by *withholding dependencies* from the registry rather than by
+        disabling tools, so there is nothing to re-enable and no tool that exists and
+        always errors.
+
         ``rules`` and ``allow_tools`` are the same argument in the other direction:
         an authority the caller compiled, rather than one read from the workspace.
         ``rules`` are appended to the settings ruleset; ``allow_tools`` restricts
@@ -322,7 +329,7 @@ class Agent:
         """
         paths = Paths.discover(path, home=home)
         flags: dict[str, object] = {} if mode is None else {"mode": mode.value}
-        loaded = load_workspace(paths, flags=flags, environ=environ)
+        loaded = load_workspace(paths, flags=flags, environ=environ, restricted=restricted)
         resolved = router if router is not None else load_router(paths, environ=environ)
         runtime = await build_runtime(
             loaded,
@@ -334,6 +341,7 @@ class Agent:
             extra_tools=tools,
             extra_rules=rules,
             allow_tools=allow_tools,
+            restricted=restricted,
         )
         if loaded.mode is Mode.PLAN:
             runtime = plan_runtime(runtime)

@@ -183,6 +183,7 @@ def load_workspace(
     which: Callable[[str], str | None] = shutil.which,
     platform: str = sys.platform,
     repo_map_budget: int = DEFAULT_BUDGET_TOKENS,
+    restricted: bool = False,
 ) -> Loaded:
     """Read everything one run needs off disk. Never raises for a workspace's sake.
 
@@ -204,6 +205,11 @@ def load_workspace(
         # while the loader read another.
         cwd=paths.workspace_root,
         flags=flags,
+        # A checked-in settings file cannot loosen a restricted session, because a
+        # restricted session does not read one. The privilege ladder already stops a
+        # repo raising `yolo` or `mode`; this is the stronger promise the profile is
+        # for — nothing on disk in the workspace has any say at all.
+        ignore_files=restricted,
     )
     notes: list[Note] = list(notes_from_settings(settings))
 
@@ -230,14 +236,25 @@ def load_workspace(
     if agents_note is not None:
         notes.append(agents_note)
 
-    hooks, hooks_note = _load_hooks(paths)
+    # The three workspace surfaces that grant *execution*, and the three a restricted
+    # session therefore does not read. Withholding the shell tool is not a promise a
+    # session can keep while it still loads these: a hook is a subprocess spawned on a
+    # tool event, an `.ronin/mcp.json` entry is a process spawned at startup whose
+    # tools are then published, and a plugin contributes both. A checked-in
+    # `mcp.json` naming `/bin/sh` put a shell back into a session that had just
+    # printed "shell and web tools are not published".
+    #
+    # Memory, agents, commands and skills are read either way: each is *prompt*
+    # content, and a prompt cannot exceed the registry it is handed. Only capability
+    # is withheld.
+    hooks, hooks_note = (HookConfig(), None) if restricted else _load_hooks(paths)
     if hooks_note is not None:
         notes.append(hooks_note)
 
     verify, verify_notes = _load_verify(paths, memory)
     notes.extend(verify_notes)
 
-    servers, mcp_note = _load_mcp(paths, environ=environ)
+    servers, mcp_note = ((), None) if restricted else _load_mcp(paths, environ=environ)
     if mcp_note is not None:
         notes.append(mcp_note)
 
@@ -248,7 +265,7 @@ def load_workspace(
     # Installed plugins are the lowest tier of every surface. Loaded before skills so
     # their `skills/` join the discovery precedence as an even lower tier than the
     # built-in role workflows; merged into the rest just below.
-    surfaces, plugin_notes = _load_plugins(paths, environ)
+    surfaces, plugin_notes = (PluginSurfaces(), []) if restricted else _load_plugins(paths, environ)
     notes.extend(plugin_notes)
 
     skill_extra = (
@@ -658,6 +675,7 @@ async def build_runtime(
     extra_tools: Sequence[Tool] = (),
     extra_rules: Sequence[Rule] = (),
     allow_tools: frozenset[str] | None = None,
+    restricted: bool = False,
 ) -> Runtime:
     """Turn a :class:`~ronin.cli.spine.Loaded` into live, wired objects.
 
@@ -726,12 +744,21 @@ async def build_runtime(
     )
 
     ctx = ToolContext(root=paths.workspace_root)
+    # `restricted` withholds the dependency rather than disabling the tool, which is
+    # what `build_registry` was built for: a session with no shell has no `bash`, and
+    # a model told about no `bash` does not try to use one. Nothing to re-enable,
+    # nothing to get wrong at call time, and no second code path where a tool exists
+    # and always errors.
     shell_session = (
-        shell
-        if shell is not None
-        else ShellSession(shell=PersistentShell(cwd=paths.workspace_root, env=ctx.env))
+        None
+        if restricted
+        else (
+            shell
+            if shell is not None
+            else ShellSession(shell=PersistentShell(cwd=paths.workspace_root, env=ctx.env))
+        )
     )
-    if shell is None:
+    if shell is None and shell_session is not None:
         # Only close what we opened. A caller who injected a shell owns its lifetime,
         # and closing someone else's shell kills their background jobs.
         closers.append(shell_session.close)
@@ -748,16 +775,29 @@ async def build_runtime(
     # call teaches the model to keep trying it, and `build_registry` is built around
     # exactly this — every group is opt-in by supplying its dependency.
     searcher, search_note = searcher_from_env(ctx.env)
-    if search_note is not None:
+    if search_note is not None and not restricted:
         notes.append(search_note)
     base_tools = build_registry(
         ctx,
         shell=shell_session,
-        fetch=pinned_fetcher(),
-        extract=extractor_for(router),
-        search=searcher,
+        fetch=None if restricted else pinned_fetcher(),
+        extract=None if restricted else extractor_for(router),
+        search=None if restricted else searcher,
         clock=time.monotonic,
     )
+    if restricted:
+        notes.append(
+            Note(
+                subject="restricted",
+                detail=(
+                    "shell and web tools are not published; settings files, hooks, "
+                    "mcp servers and plugins are not read; and the mode cannot be "
+                    f"raised. File tools stay confined to {paths.workspace_root}. "
+                    "Published: "
+                    f"{', '.join(sorted(tool.spec().name for tool in base_tools.tools()))}"
+                ),
+            )
+        )
     session = build_session(
         router,
         ctx,

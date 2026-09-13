@@ -119,6 +119,20 @@ EXIT_USAGE = EXIT_ERROR
 #: files in someone's repository without asking is a first run they do not trust.
 WIZARD_QUESTION = "set up .ronin/ for this workspace? [Y/n] "
 
+#: Turns on the locked-down profile without a flag, for a wrapper script or a CI job
+#: that must not be able to forget it.
+RESTRICTED_ENV = "RONIN_RESTRICTED"
+
+#: What counts as "yes" in an environment variable. Deliberately narrow: `0`, `false`
+#: and an empty value all mean no, so `RONIN_RESTRICTED=0` does not silently lock a
+#: session down because the string was non-empty.
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
+def _truthy(value: str) -> bool:
+    return value.strip().lower() in _TRUTHY
+
+
 TUI_QUIT_NOTE = "press ctrl+c to leave."
 
 NO_TUI = (
@@ -173,6 +187,26 @@ class Command(StrEnum):
     API = "api"
     PLUGIN = "plugin"
     REPO = "repo"
+
+
+#: The words that may lead a command line. ``run`` and ``version`` are absent on
+#: purpose: neither is typed, they are what a bare prompt and ``--version`` become.
+#: Named once because two places need to know — :func:`parse`, to peel the verb off
+#: the front, and :func:`main`, to insert the ``RONIN_RESTRICTED`` flag *after* it.
+#: When the set lived only inside `parse`, `main` prepended the flag and pushed the
+#: verb to position 1, where `parse` no longer looked for it: `RONIN_RESTRICTED=1
+#: ronin mcp-serve` silently started a chat session with "mcp-serve" as its prompt.
+SUBCOMMANDS: frozenset[str] = frozenset(
+    command.value for command in Command if command not in (Command.RUN, Command.VERSION)
+)
+
+#: The commands ``--restricted`` actually changes: each one either opens an agent in
+#: the workspace or reports on it. Everywhere else the flag is refused rather than
+#: accepted and ignored — a security flag that does nothing on some verbs, silently,
+#: is worse than one that does not exist, because the user believes it worked.
+RESTRICTABLE: frozenset[Command] = frozenset(
+    {Command.RUN, Command.DOCTOR, Command.MCP_SERVE, Command.ACP, Command.API}
+)
 
 
 class ExportFormat(StrEnum):
@@ -243,6 +277,11 @@ class Options:
     mode: Mode | None = None
     yolo: bool = False
     sandbox: bool = False
+    #: The locked-down profile: no shell, no web tools, no settings files, and a mode
+    #: that cannot be raised. A flag and an environment variable rather than a
+    #: setting, because a profile a workspace can switch off is not one you can hand
+    #: to an auditor.
+    restricted: bool = False
     cwd: Path = field(default_factory=lambda: Path("."))
     #: ``None`` for no resume; ``""`` for ``--resume`` with no id (the latest here).
     resume: str | None = None
@@ -458,6 +497,14 @@ def build_parser() -> _Parser:
     )
     parser.add_argument(
         "--yolo", action="store_true", help="stop asking; the unconditional deny list still applies"
+    )
+    parser.add_argument(
+        "--restricted",
+        action="store_true",
+        help=(
+            "locked down: no shell, no web tools, settings files ignored, mode cannot "
+            "be raised (also RONIN_RESTRICTED=1)"
+        ),
     )
     parser.add_argument(
         "--sandbox", action="store_true", help="run commands in a sandbox when one is available"
@@ -705,25 +752,76 @@ def build_parser() -> _Parser:
     return parser
 
 
+def _restriction_refused(namespace: argparse.Namespace, command: Command) -> Usage | None:
+    """Why ``--restricted`` cannot be honoured as asked, or ``None`` if it can.
+
+    Two refusals, both for the same reason: the value of the profile is that its name
+    is the last word on what the session can do, and a ``--restricted`` that is half
+    honoured leaves the user believing the other half.
+
+    The first is a contradiction on one command line. Only a *loosening* is refused --
+    ``--restricted --mode plan`` asks for less than restricted mode already gives,
+    which is the asymmetry the settings privilege ladder already uses: tightening is
+    always allowed. ``Mode`` ranks itself, so this consults that ladder rather than
+    holding a second opinion about which mode is stricter.
+
+    The second is a verb the flag does not reach. ``ronin export --restricted`` writes
+    a transcript either way; accepting the flag there teaches that it is decorative.
+    """
+    if command not in RESTRICTABLE:
+        reachable = ", ".join(
+            sorted(verb.value for verb in RESTRICTABLE if verb is not Command.RUN)
+        )
+        return Usage(
+            f"{PROGRAM}: error: --restricted does nothing for `{command.value}`, which "
+            f"opens no session in this workspace. It applies to a bare prompt and to "
+            f"{reachable}."
+        )
+    loosens = bool(namespace.mode) and Mode(namespace.mode).rank > Mode.ASK.rank
+    raised = [
+        name
+        for name, asked in (
+            ("--yolo", bool(namespace.yolo)),
+            (f"--mode {namespace.mode}", loosens),
+        )
+        if asked
+    ]
+    if raised:
+        return Usage(
+            f"{PROGRAM}: error: --restricted and {', '.join(raised)} ask for opposite "
+            "things — restricted mode exists so the answer is no. Drop one of them."
+        )
+    return None
+
+
+def restricted_argv(argv: Sequence[str], environ: Mapping[str, str]) -> list[str]:
+    """``argv`` with ``--restricted`` inserted if the environment asked for it.
+
+    ``RONIN_RESTRICTED`` becomes the flag rather than a second code path: :func:`parse`
+    is documented pure and takes no environment, and translating here keeps the two
+    spellings exactly equivalent — including the refusal when the same command line
+    also asks for ``--yolo``, which a separate check would have had to remember.
+
+    The flag goes **after** the verb, never before it. :func:`parse` reads the
+    subcommand off the *front* of argv, so a flag prepended to ``mcp-serve`` left
+    ``parse`` looking at ``--restricted`` with the verb one place further along, where
+    it was swallowed as bare prompt words: ``RONIN_RESTRICTED=1 ronin mcp-serve``
+    opened a chat session and asked the model to do "mcp-serve". A bare prompt has no
+    verb to step over, so the flag leads.
+    """
+    arguments = list(argv)
+    value = environ.get(RESTRICTED_ENV)
+    if value is None or not _truthy(value):
+        return arguments
+    at = 1 if arguments and arguments[0] in SUBCOMMANDS else 0
+    return [*arguments[:at], "--restricted", *arguments[at:]]
+
+
 def parse(argv: Sequence[str]) -> Options | Usage:
     """argv to options, or to the usage text that explains why not. Pure."""
     tokens = list(argv)
     command = Command.RUN
-    if tokens and tokens[0] in {
-        Command.DOCTOR.value,
-        Command.EXPORT.value,
-        Command.SESSIONS.value,
-        Command.EVAL.value,
-        Command.DUEL.value,
-        Command.HARVEST.value,
-        Command.TELEMETRY.value,
-        Command.MCP_SERVE.value,
-        Command.MCP.value,
-        Command.ACP.value,
-        Command.API.value,
-        Command.PLUGIN.value,
-        Command.REPO.value,
-    }:
+    if tokens and tokens[0] in SUBCOMMANDS:
         command = Command(tokens.pop(0))
 
     parser = build_parser()
@@ -738,6 +836,19 @@ def parse(argv: Sequence[str]) -> Options | Usage:
         return Options(command=Command.VERSION)
 
     words = " ".join(namespace.words).strip()
+
+    # Before the per-command builders, not inside the ``run`` branch below. Every one
+    # of those builders returns, so a check placed after them ran for exactly one verb:
+    # `--restricted --yolo mcp-serve` was accepted with the contradiction intact, and
+    # `mcp-serve --restricted` built its options without the flag and served an
+    # unrestricted session. Whether the flag is honoured is a property of the verb, and
+    # this is the one place that knows the verb before the options exist.
+    restricted = bool(namespace.restricted)
+    if restricted:
+        refusal = _restriction_refused(namespace, command)
+        if refusal is not None:
+            return refusal
+
     if command is Command.EXPORT:
         return _export_options(namespace, words)
     if command in (Command.EVAL, Command.DUEL):
@@ -788,6 +899,7 @@ def parse(argv: Sequence[str]) -> Options | Usage:
         headless=headless,
         output_format=chosen,
         mode=Mode(namespace.mode) if namespace.mode else None,
+        restricted=restricted,
         yolo=bool(namespace.yolo),
         sandbox=bool(namespace.sandbox),
         cwd=Path(namespace.cwd),
@@ -862,6 +974,7 @@ def _mcp_serve_options(namespace: argparse.Namespace, words: str) -> Options | U
     return Options(
         command=Command.MCP_SERVE,
         mode=Mode(namespace.mode) if namespace.mode else None,
+        restricted=bool(namespace.restricted),
         yolo=bool(namespace.yolo),
         sandbox=bool(namespace.sandbox),
         cwd=Path(namespace.cwd),
@@ -897,6 +1010,7 @@ def _acp_options(namespace: argparse.Namespace, words: str) -> Options | Usage:
     return Options(
         command=Command.ACP,
         mode=Mode(namespace.mode) if namespace.mode else None,
+        restricted=bool(namespace.restricted),
         cwd=Path(namespace.cwd),
         record=bool(namespace.record),
         connect_mcp=bool(namespace.connect_mcp),
@@ -922,6 +1036,7 @@ def _api_options(namespace: argparse.Namespace, words: str) -> Options | Usage:
     return Options(
         command=Command.API,
         mode=Mode(namespace.mode) if namespace.mode else None,
+        restricted=bool(namespace.restricted),
         cwd=Path(namespace.cwd),
         record=bool(namespace.record),
         connect_mcp=bool(namespace.connect_mcp),
@@ -1286,7 +1401,7 @@ async def dispatch(
 
     if options.command is Command.DOCTOR:
         report = await run_doctor(
-            load_workspace(paths, flags=options.flags, environ=env),
+            load_workspace(paths, flags=options.flags, environ=env, restricted=options.restricted),
             router=_router_or_none(paths, env),
             environ=env,
             detection=detect(env=env, probe=real_probe),
@@ -1501,6 +1616,7 @@ async def _acp(
             record=options.record,
             connect_mcp=options.connect_mcp,
             asker=None,
+            restricted=options.restricted,
         )
 
     server = AcpServer(open_agent=open_agent, version=_version())
@@ -1541,6 +1657,7 @@ async def _api(options: Options, paths: Paths, env: Mapping[str, str], streams: 
             record=options.record,
             connect_mcp=options.connect_mcp,
             asker=None,
+            restricted=options.restricted,
         )
 
     streams.err(
@@ -1807,6 +1924,7 @@ async def _open_agent(
             record=options.record,
             connect_mcp=options.connect_mcp,
             asker=asker,
+            restricted=options.restricted,
         )
     except (OSError, ValueError) as exc:
         streams.err(f"{PROGRAM}: could not start a session: {exc}\n")
@@ -2592,6 +2710,7 @@ def provider_failure_message(exc: ProviderError) -> str:
 def main(argv: Sequence[str] | None = None) -> int:
     """``ronin``'s entry point. Returns the exit code; never calls ``sys.exit``."""
     arguments = sys.argv[1:] if argv is None else list(argv)
+    arguments = restricted_argv(arguments, os.environ)
     parsed = parse(arguments)
     streams = Streams.standard()
     if isinstance(parsed, Usage):

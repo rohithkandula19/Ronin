@@ -178,15 +178,26 @@ class Layer:
     rules: tuple[Rule, ...] = ()
     scalars: Mapping[str, Any] = field(default_factory=dict)
     errors: tuple[LayerError, ...] = ()
+    ignored: bool = False
+    """Whether the layer was deliberately not read, as opposed to not being there.
+
+    The two look identical in a report that only knows "absent", and they are not the
+    same fact: under ``--restricted`` the file is sitting on disk where the user can
+    see it, and a report that calls it absent is one they stop believing the moment
+    they run ``ls``. Somebody auditing a locked-down session needs to read this line
+    and learn that a settings file exists and did not apply.
+    """
 
     def describe(self) -> str:
         where = str(self.path) if self.path is not None else "(no file)"
         if self.errors:
             problems = "; ".join(error.message for error in self.errors)
             return f"{self.name:8} {where}  PROBLEM: {problems}"
+        if self.ignored:
+            return f"{self.name:8} {where}  (ignored — restricted mode reads no settings files)"
         if not self.present:
             return f"{self.name:8} {where}  (absent)"
-        scalars = ", ".join(f"{key}={value!r}" for key, value in sorted(self.scalars.items()))
+        scalars = ", ".join(f"{key}={_spell(value)}" for key, value in sorted(self.scalars.items()))
         detail = f"{len(self.rules)} rule(s)"
         return f"{self.name:8} {where}  {detail}{'  ' + scalars if scalars else ''}"
 
@@ -238,7 +249,7 @@ class Settings:
         lines = [layer.describe() for layer in self.layers]
         lines.append("")
         for key in SCALAR_KEYS:
-            lines.append(f"{key} = {getattr(self, key)!r}  (from {self.source_of(key)})")
+            lines.append(f"{key} = {_spell(getattr(self, key))}  (from {self.source_of(key)})")
         if self.errors:
             lines.append("")
             lines.extend(f"PROBLEM: {error}" for error in self.errors)
@@ -251,6 +262,7 @@ def load_settings(
     cwd: Path,
     flags: Mapping[str, Any] | None = None,
     builtin: Sequence[Rule] | None = None,
+    ignore_files: bool = False,
 ) -> Settings:
     """Resolve every layer into one :class:`Settings`.
 
@@ -258,12 +270,27 @@ def load_settings(
     process, so a test can describe a machine without touching the developer's real
     ``~/.ronin`` — and so two sessions in different directories cannot leak config into
     each other.
+
+    ``ignore_files`` drops every file layer, leaving the builtins and whatever was
+    typed on the command line. It is what ``--restricted`` is made of, and it is a
+    parameter rather than a setting for the reason the restriction exists: a profile
+    you can hand to an auditor is not one the workspace can edit. The layers are still
+    *listed* in the result, marked ignored rather than absent, because a report that
+    silently omits a file the user can see on disk is a report they stop believing.
     """
     base_rules = tuple(builtin) if builtin is not None else builtin_rules()
     layers: list[Layer] = [Layer(name="builtin", path=None, present=True, rules=base_rules)]
-    layers.append(_file_layer("user", home / USER_SETTINGS))
-    layers.append(_file_layer("project", cwd / PROJECT_SETTINGS))
-    layers.append(_file_layer("local", cwd / LOCAL_SETTINGS))
+    files = (
+        ("user", home / USER_SETTINGS),
+        ("project", cwd / PROJECT_SETTINGS),
+        ("local", cwd / LOCAL_SETTINGS),
+    )
+    for name, path in files:
+        layers.append(
+            Layer(name=name, path=path, present=False, ignored=True)
+            if ignore_files
+            else _file_layer(name, path)
+        )
     layers.append(_mapping_layer("flags", None, flags or {}))
 
     rules: list[Rule] = []
