@@ -31,7 +31,15 @@ from ronin.core.types import Mode, ToolEnd
 from ronin.safety.settings import PROJECT_SETTINGS
 
 SECRET = "AWS_SECRET_ACCESS_KEY=hunter2"
-PRIVATE_KEY = "-----BEGIN PRIVATE KEY-----"
+#: Stands in for a private key's contents. Not a PEM header: the repository's own
+#: secret scanner (`packages/cli` `test_cov_secrets`) matches that shape anywhere in
+#: the tree and cannot tell a fixture from a real leak — which is the right call, and
+#: allowlisting test files is exactly how a real key would slip past it one day.
+#:
+#: Nothing is lost. `key_material_read` classifies by *filename* (`certs/tls.key`),
+#: never by content, so what is inside the file is irrelevant to the refusal. The
+#: sentinel only has to be findable in a result to prove the bytes came back.
+PRIVATE_KEY = "KEY-MATERIAL-SENTINEL-MUST-NOT-LEAK"
 
 
 def workspace(root: Path, rules: list[dict[str, Any]] | None = None) -> Path:
@@ -39,7 +47,7 @@ def workspace(root: Path, rules: list[dict[str, Any]] | None = None) -> Path:
     (root / PROJECT_SETTINGS).write_text(json.dumps({"rules": rules or []}), encoding="utf-8")
     (root / ".env").write_text(SECRET + "\n", encoding="utf-8")
     (root / "certs").mkdir(exist_ok=True)
-    (root / "certs" / "tls.key").write_text(PRIVATE_KEY + "\nzzz\n", encoding="utf-8")
+    (root / "certs" / "tls.key").write_text(PRIVATE_KEY + "\n", encoding="utf-8")
     (root / "README.md").write_text("ordinary prose\n", encoding="utf-8")
     return root
 

@@ -43,9 +43,11 @@ def repo(root: Path) -> Path:
     (root / ".env").write_text("OPENAI_API_KEY=sk-real\n", encoding="utf-8")
     (root / ".git" / "config").write_text("[core]\n", encoding="utf-8")
     (root / "config" / "prod.yaml").write_text("db: prod\n", encoding="utf-8")
-    (root / "deploy" / "id_rsa").write_text(
-        "-----BEGIN OPENSSH PRIVATE KEY-----\n", encoding="utf-8"
-    )
+    # Not a PEM header — the repository's own secret scanner matches that shape
+    # anywhere in the tree and cannot tell a fixture from a real leak, which is the
+    # right call. `key_material_read` classifies by filename, so contents never
+    # mattered here.
+    (root / "deploy" / "id_rsa").write_text("KEY-MATERIAL-SENTINEL\n", encoding="utf-8")
     (root / "src" / "app.py").write_text("x = 1\n", encoding="utf-8")
     (root / "notes.txt").symlink_to(".env")
     (root / "harmless.txt").symlink_to("config/prod.yaml")
