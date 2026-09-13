@@ -195,7 +195,7 @@ def summarizer_for(router: Router, *, max_tokens: int = SUMMARY_MAX_TOKENS) -> S
     configured still runs.
     """
     spec = router.spec_for(ModelRole.FAST)
-    client = LoopClient(router.for_compaction(), model=spec.model, max_tokens=max_tokens)
+    client = LoopClient(router.for_compaction(), model=spec.model, max_tokens=max_tokens, spec=spec)
 
     async def summarize(prompt: str) -> str:
         parts: list[str] = []
@@ -244,7 +244,10 @@ def extractor_for(router: Router, *, max_tokens: int = EXTRACT_MAX_TOKENS) -> Ex
         if client is None:
             spec = router.spec_for(ModelRole.FAST)
             client = LoopClient(
-                router.client_for(ModelRole.FAST), model=spec.model, max_tokens=max_tokens
+                router.client_for(ModelRole.FAST),
+                model=spec.model,
+                max_tokens=max_tokens,
+                spec=spec,
             )
         prompt = (
             f"Answer this question about the page below, using only what the page says:\n\n"
