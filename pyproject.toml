@@ -262,6 +262,7 @@ module = [
     "test_retainer_ledger",
     "test_retainer_model",
     "test_retainer_orders",
+    "test_retainer_outbound",
     "test_retainer_posts",
     "test_retainer_registry",
     "test_retainer_routines",
