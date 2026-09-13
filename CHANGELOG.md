@@ -37,6 +37,23 @@ All notable changes to this project will be documented here. Format follows [Kee
   without the `tui` extra, and `--no-tui`.
 
 ### Added
+- **`ronin mcp list` — the other strict hand-edited config had no way to be read either
+  (`cli/mcp_auth.py`).** `ronin.mcp.config`'s own docstring says a config error "must be
+  loud at load time or it is invisible forever", because a typo produces a server that
+  silently contributes no tools and, from inside a running session, that is
+  indistinguishable from a model choosing not to use them. The only way to make it loud was
+  to start a session and read a note. Exit 2 for a config that cannot be read — which is
+  deliberately not the 0 an empty config gets, since "could not look" and "nothing there"
+  are different answers.
+  It reports the **effective** gate, not the declared one, and names the difference where
+  there is one. An undeclared server is gated because undeclared means unknown; a
+  `DESTRUCTIVE` server is gated whatever `requires_approval` says. The config keeps the
+  waiver either way, so reading the file suggests it took effect — and staying quiet about
+  that is how somebody comes to believe it. `--output-format json` carries declared and
+  effective separately, for the same reason the dataclass does.
+  v1's `mcp trust` / `mcp untrust` are deliberately **not** ported: v2 replaced a mutable
+  trust list with a declarative fail-closed model in the config, and bringing the verbs
+  across would be importing the weaker design.
 - **`ronin retain check | serve | tick` — the Retainer plane had no front door
   (`cli/retain_cmd.py`).** Every piece existed and none of it was reachable. The
   registry parser had positional error messages (`registry.retainers[2].orders.grants[1]`)

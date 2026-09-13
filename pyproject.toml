@@ -287,6 +287,7 @@ module = [
     "test_ronin_cli_integration",
     "test_ronin_cli_interactive",
     "test_ronin_cli_main",
+    "test_ronin_cli_mcp_list",
     "test_ronin_cli_mcp_login",
     "test_ronin_cli_read_dedup",
     "test_ronin_cli_read_fidelity",

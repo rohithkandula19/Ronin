@@ -102,7 +102,7 @@ from .doctor import run_doctor
 from .gate import live_todos
 from .harvest import HarvestOptions, run_harvest
 from .mcp_auth import SUBCOMMANDS as MCP_SUBCOMMANDS
-from .mcp_auth import McpLoginOptions, run_mcp_login
+from .mcp_auth import McpListOptions, McpLoginOptions, run_mcp_list, run_mcp_login
 from .repo import SUBCOMMANDS as REPO_SUBCOMMANDS
 from .repo import RepoOptions, run_repo
 from .retain_cmd import SUBCOMMANDS as RETAIN_SUBCOMMANDS
@@ -350,6 +350,8 @@ class Options:
     retain: RetainOptions | None = None
     #: Present for ``mcp login`` only; ``None`` everywhere else, same fail-loud rule.
     mcp_login: McpLoginOptions | None = None
+    #: Present for ``mcp list`` only. Same rule again.
+    mcp_list: McpListOptions | None = None
 
     @property
     def flags(self) -> dict[str, object]:
@@ -495,6 +497,12 @@ def build_parser() -> _Parser:
             "webhook\n"
             "                             receiver, or fire the routines that are "
             "due once\n"
+            "  mcp list | login SERVER    report the MCP servers .ronin/mcp.json "
+            "declares —\n"
+            "                             transport, target, and the gate each one "
+            "actually gets —\n"
+            "                             or run the attended OAuth flow for one of "
+            "them\n"
             "  scan [--history|--staged]  sweep for leaked credentials and report "
             "file:line +\n"
             "                             kind, never the value. Exits 1 when it finds "
@@ -1032,7 +1040,7 @@ def parse(argv: Sequence[str]) -> Options | Usage:
     if command is Command.MCP_SERVE:
         return _mcp_serve_options(namespace, words)
     if command is Command.MCP:
-        return _mcp_login_options(namespace, words)
+        return _mcp_options(namespace, words)
     if command is Command.ACP:
         return _acp_options(namespace, words)
     if command is Command.API:
@@ -1587,12 +1595,11 @@ def _retain_options(namespace: argparse.Namespace, words: str) -> Options | Usag
     )
 
 
-def _mcp_login_options(namespace: argparse.Namespace, words: str) -> Options | Usage:
-    """``mcp login <server>`` — run the attended OAuth flow for one configured server.
+def _mcp_options(namespace: argparse.Namespace, words: str) -> Options | Usage:
+    """``mcp list`` / ``mcp login <server>`` — read ``.ronin/mcp.json``, or log in to it.
 
-    A subcommand group (only ``login`` for now) rather than a top-level verb, so it reads
-    ``ronin mcp login docs`` and leaves room for ``logout``/``status`` later without minting
-    a new verb each time.
+    A subcommand group rather than top-level verbs, so these read ``ronin mcp login docs``
+    and leave room for ``logout``/``status`` later without minting a new verb each time.
     """
     parts = words.split()
     if not parts:
@@ -1602,6 +1609,19 @@ def _mcp_login_options(namespace: argparse.Namespace, words: str) -> Options | U
         return Usage(
             f"{PROGRAM} mcp: unknown subcommand {subcommand!r}; "
             f"expected one of {', '.join(MCP_SUBCOMMANDS)}\n"
+        )
+    if subcommand == "list":
+        if rest:
+            return Usage(
+                f"{PROGRAM} mcp list: takes no arguments; it reports every server in the config\n"
+            )
+        return Options(
+            command=Command.MCP,
+            cwd=Path(namespace.cwd),
+            mcp_list=McpListOptions(
+                root=Path(namespace.cwd),
+                as_json=namespace.output_format == OutputFormat.JSON.value,
+            ),
         )
     if not rest:
         return Usage(f"{PROGRAM} mcp login: needs a server name from .ronin/mcp.json\n")
@@ -1668,7 +1688,7 @@ async def dispatch(
     if options.command is Command.RETAIN:
         return await _retain(options, env, streams)
     if options.command is Command.MCP:
-        return await _mcp_login(options, env, streams)
+        return await _mcp(options, env, streams)
 
     if options.command is Command.DOCTOR:
         report = await run_doctor(
@@ -1818,14 +1838,22 @@ async def _retain(options: Options, env: Mapping[str, str], streams: Streams) ->
     return code
 
 
-async def _mcp_login(options: Options, env: Mapping[str, str], streams: Streams) -> int:
-    """``mcp login``: run the attended OAuth flow for one server. Interactive, offline-safe.
+async def _mcp(options: Options, env: Mapping[str, str], streams: Streams) -> int:
+    """``mcp list`` / ``mcp login``: read the server config, or authorize against it.
 
-    Before the first-run wizard in :func:`dispatch`, like ``repo``: authorizing a server is a
-    self-contained action against ``.ronin/mcp.json`` and must not trigger a wizard that
-    writes into the repo as a side effect. The real driver opens a browser and writes the OS
-    keyring; both are inside the injected driver, so this executor stays a thin edge.
+    Before the first-run wizard in :func:`dispatch`, like ``repo``: both are
+    self-contained actions against ``.ronin/mcp.json`` and must not trigger a wizard that
+    writes into the repo as a side effect. The real login driver opens a browser and writes
+    the OS keyring; both are inside the injected driver, so this executor stays a thin edge.
     """
+    if options.mcp_list is not None:
+        code, out, err = run_mcp_list(options.mcp_list, environ=env)
+        if err:
+            streams.err(err)
+        if out:
+            streams.out(out)
+        return code
+
     login = options.mcp_login
     if login is None:  # pragma: no cover - parse always supplies one for this command
         streams.err(f"{PROGRAM}: internal error: mcp login without options\n")
