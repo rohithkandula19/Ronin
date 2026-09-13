@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import difflib
 import os
 import sys
 import threading
@@ -783,6 +784,50 @@ def build_parser() -> _Parser:
     return parser
 
 
+#: How close a word has to be to a verb before it is treated as a typo of it.
+#: ``difflib``'s ratio, so 0.75 admits one wrong letter in four — `sesions` for
+#: `sessions`, `doctro` for `doctor` — and rejects a word that merely rhymes.
+TYPO_CUTOFF = 0.75
+
+#: How many bare words a line may have before it is taken at face value as a prompt.
+#: A mistyped verb comes with nothing or with one argument; a real request does not
+#: fit in three words. The cap is what keeps this from second-guessing a prompt whose
+#: first word happens to resemble a verb.
+TYPO_MAX_WORDS = 3
+
+
+def _typo_refused(words: Sequence[str]) -> Usage | None:
+    """A mistyped verb, caught before it is charged for as a prompt.
+
+    A bare positional prompt is deliberate — ``ronin fix the failing test`` is the
+    shape people want — and the cost of that is that ``ronin sesions`` was not a
+    usage error. It was a *request*: the model was billed to think about the word
+    "sesions", and under ``auto_edit`` it could answer with an edit and a shell
+    command. A typo should not be able to start work.
+
+    Deliberately narrow, because the alternative failure is worse. Only a short line
+    is examined, and only when its first word is close enough to a verb to be a
+    slip of the fingers. ``ronin fix the parser`` is four words and runs; ``ronin
+    please`` resembles nothing and runs. When this does fire it names the verb it
+    thinks you meant and the two ways to say you meant the prompt.
+    """
+    if not words or len(words) > TYPO_MAX_WORDS:
+        return None
+    first = words[0]
+    if first in SUBCOMMANDS:
+        return None
+    near = difflib.get_close_matches(first, sorted(SUBCOMMANDS), n=1, cutoff=TYPO_CUTOFF)
+    if not near:
+        return None
+    typed = " ".join(words)
+    return Usage(
+        f"{PROGRAM}: error: {first!r} is not a command — did you mean {near[0]!r}?\n"
+        f"  If you did mean it as a prompt, say so: {PROGRAM} -p {typed!r}\n"
+        f"  A bare word that close to a command is refused rather than sent to the "
+        f"model, because a typo should not start work.\n"
+    )
+
+
 def _restriction_refused(namespace: argparse.Namespace, command: Command) -> Usage | None:
     """Why ``--restricted`` cannot be honoured as asked, or ``None`` if it can.
 
@@ -867,6 +912,13 @@ def parse(argv: Sequence[str]) -> Options | Usage:
         return Options(command=Command.VERSION)
 
     words = " ".join(namespace.words).strip()
+
+    # Only for a bare prompt. After a verb the words are that verb's arguments, and
+    # `repo explian` is already refused by the verb's own subcommand list.
+    if command is Command.RUN and namespace.print_prompt is None:
+        typo = _typo_refused(tuple(namespace.words))
+        if typo is not None:
+            return typo
 
     # Before the per-command builders, not inside the ``run`` branch below. Every one
     # of those builders returns, so a check placed after them ran for exactly one verb:
