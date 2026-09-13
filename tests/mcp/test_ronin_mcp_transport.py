@@ -433,20 +433,31 @@ async def test_stdin_from_dev_null_is_refused_rather_than_hanging(tmp_path: Path
     with (
         Path("/dev/null").open("rb") as null,
         io.BytesIO() as out,
-        pytest.raises(TransportClosed, match="cannot be waited on"),
+        # The refusal, not its wording. Which guard catches this is a kernel
+        # detail — see the regular-file case below — and both messages name fd 0
+        # and what belongs on it, which is the part a user acts on.
+        pytest.raises(TransportClosed, match="fd 0"),
     ):
         await stdio_streams(stdin=null, stdout=out)
 
 
 async def test_stdin_from_a_regular_file_is_refused_too(tmp_path: Path) -> None:
-    """Redirecting stdin from a file is the other obvious way to script one, and a
-    regular file cannot be polled either."""
+    """Redirecting stdin from a file is the other obvious way to script one.
+
+    Refused on both platforms, by *different* guards, because the two kernels
+    disagree about whether a regular file is pollable: Linux epoll says no, so the
+    selector probe catches it up front; macOS kqueue says yes, so the probe passes
+    and ``connect_read_pipe`` refuses it instead with "Pipe transport is for
+    pipes/sockets only". Matching either sentence would pin a kernel behaviour, so
+    this matches what both messages promise the reader — fd 0, and what belongs on
+    it.
+    """
     script = tmp_path / "requests.jsonl"
     script.write_text("{}\n", encoding="utf-8")
     with (
         script.open("rb") as handle,
         io.BytesIO() as out,
-        pytest.raises(TransportClosed, match="cannot be waited on"),
+        pytest.raises(TransportClosed, match="fd 0"),
     ):
         await stdio_streams(stdin=handle, stdout=out)
 
