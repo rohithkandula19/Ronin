@@ -91,6 +91,57 @@ SCALAR_KEYS: Mapping[str, str] = {
 RULES_KEY = "rules"
 
 
+#: Layers that come out of the repository the agent was pointed at, rather than from
+#: the person running it. A repo is a thing you clone, and cloning it must not be the
+#: same act as trusting it.
+REPO_LAYERS: frozenset[str] = frozenset({"project", "local"})
+
+#: The scalars that decide how much the safety layer asks, each ordered
+#: most-restrictive first. A :data:`REPO_LAYERS` file may move one of these *down*
+#: the ladder — stricter than it found it — and never up.
+#:
+#: This is the one place layering is not "last wins", and the asymmetry is the point.
+#: ``.ronin/settings.json`` is a file committed to a repository, so under plain
+#: last-wins a repo containing ``{"yolo": true, "mode": "full"}`` switched off every
+#: prompt *and* the whole unconditional deny list — ``rm -rf /`` included — for anyone
+#: who opened it, outranking that person's own ``~/.ronin/settings.json``, with no
+#: warning. ``cli/wire.py`` already states the principle for Retainer authority: "a
+#: rule written into ``.ronin/settings.json`` is a rule the agent running in that
+#: workspace could edit". It was simply never extended to these four.
+#:
+#: Rules are unaffected: a rules list only ever appends, and a rule cannot widen what
+#: the deny list refuses. It is the scalars that were dangerous.
+PRIVILEGE_LADDERS: Mapping[str, tuple[Any, ...]] = {
+    "yolo": (False, True),
+    "sandbox": (True, False),
+    "mode": (Mode.PLAN, Mode.ASK, Mode.AUTO_EDIT, Mode.FULL),
+    "default_decision": (Decision.DENY, Decision.ASK, Decision.ALLOW),
+}
+
+
+def _permissiveness(key: str, value: Any) -> int:
+    """Where ``value`` sits on its ladder, or ``-1`` for a value not on one."""
+    ladder = PRIVILEGE_LADDERS.get(key, ())
+    return ladder.index(value) if value in ladder else -1
+
+
+def _spell(value: Any) -> str:
+    """A value as it is written in the file, not as Python repr()s it.
+
+    ``Mode`` and ``Decision`` are ``StrEnum``, so repr gives ``<Mode.FULL: 'full'>``
+    — which is not what anyone typed, and a message that does not quote the file
+    back is a message people have to translate before they can act on it.
+    """
+    return f"{value!s}" if isinstance(value, (Mode, Decision)) else f"{value!r}"
+
+
+def escalates(key: str, value: Any, current: Any) -> bool:
+    """Whether setting ``key`` to ``value`` loosens it compared with ``current``."""
+    if key not in PRIVILEGE_LADDERS:
+        return False
+    return _permissiveness(key, value) > _permissiveness(key, current)
+
+
 @dataclass(frozen=True, slots=True)
 class LayerError:
     """A problem in one layer, named loudly enough to fix."""
@@ -98,6 +149,15 @@ class LayerError:
     layer: str
     path: Path | None
     message: str
+    skipped: bool = True
+    """Whether the whole layer was dropped, or only the one thing named.
+
+    A malformed layer is skipped entirely, so its rules stop applying and saying so
+    is the useful half of the message. A refused privilege escalation is narrower —
+    that one scalar did not take effect and everything else in the file still does.
+    Reporting both the same way would tell a user their rules were gone when they
+    were not, which is the kind of wrong that gets a config deleted.
+    """
 
     def __str__(self) -> str:
         where = str(self.path) if self.path is not None else f"--{self.layer}"
@@ -206,14 +266,34 @@ def load_settings(
     scalars: dict[str, Any] = {}
     sources: dict[str, str] = {}
     errors: list[LayerError] = []
+    defaults = Settings(workspace_root=cwd, home=home)
     for layer in layers:
         rules.extend(layer.rules)
         errors.extend(layer.errors)
         for key, value in layer.scalars.items():
+            if layer.name in REPO_LAYERS:
+                current = scalars.get(key, getattr(defaults, key, None))
+                if escalates(key, value, current):
+                    # Reported rather than dropped: a silently ignored key is a
+                    # permission the user thinks they granted, and a silently
+                    # *honoured* one here was a permission they never did.
+                    errors.append(
+                        LayerError(
+                            layer=layer.name,
+                            path=layer.path,
+                            message=(
+                                f"refused {key} = {_spell(value)}: a file in the "
+                                f"repository cannot loosen {key} past {_spell(current)}, "
+                                "which came from a layer you control. Set it in your "
+                                f"own ~/{USER_SETTINGS} or pass the flag, if you mean it"
+                            ),
+                            skipped=False,
+                        )
+                    )
+                    continue
             scalars[key] = value
             sources[key] = layer.name
 
-    defaults = Settings(workspace_root=cwd, home=home)
     return Settings(
         workspace_root=cwd,
         home=home,
