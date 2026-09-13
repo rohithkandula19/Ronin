@@ -37,6 +37,29 @@ All notable changes to this project will be documented here. Format follows [Kee
   without the `tui` extra, and `--no-tui`.
 
 ### Added
+- **`ronin repo complexity` — the signal `repo health` could not carry
+  (`repo/complexity.py`).** Cyclomatic complexity per function, worst first. `health`
+  states as an invariant that every signal comes from the scan with no second read of the
+  tree, and `RepoScan` keeps signatures rather than bodies, so this is its own subcommand
+  rather than a fifth health signal — and it skips building the import graph entirely,
+  because the graph says nothing about how many ways there are through a function.
+  **Two counting bugs in v1's version are fixed, both confirmed against the shipped code
+  first and both pinned by tests.** v1 counted `with` as a decision point, so
+  `with open(p) as f: return f.read()` scored 2 where the same logic without a context
+  manager scored 1 — a `with` binds and unbinds, it does not choose, and counting it
+  inflates every function that touches a file, a lock or a transaction. And v1 walked each
+  function with `ast.walk`, which descends into nested `def`s: a factory whose inner
+  function had one `if` scored 2 despite containing no branch, the inner function was
+  reported at 2 as well, and the reader was sent to simplify a function that was already
+  as simple as a function gets. Neither bug crashes anything; both quietly make the
+  ranking wrong, which is the kind that survives.
+  `_as_json` gained a sequence case while wiring it up — `complexity` returns a ranked
+  list rather than one report object, and the single-object version raised
+  `Object of type Complexity is not JSON serializable` the first time it was asked.
+  v1's `dev review` / `dev commit` / `dev pr` are deliberately **not** ported: v2 does
+  those agentically through the `review`, `eng-review`, `design-review` and `ship` role
+  skills, and the verbs would be procedural re-implementations of work the agent already
+  does with tools.
 - **`ronin mcp list` — the other strict hand-edited config had no way to be read either
   (`cli/mcp_auth.py`).** `ronin.mcp.config`'s own docstring says a config error "must be
   loud at load time or it is invisible forever", because a typo produces a server that
