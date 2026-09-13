@@ -17,6 +17,7 @@ import pytest
 from ronin.core.types import Mode
 from ronin.safety.policy import AnyUse, CommandRegex, Decision, Exact, PathGlob, Rule
 from ronin.safety.settings import (
+    _MATCH_KEYS,
     LOCAL_SETTINGS,
     PROJECT_SETTINGS,
     USER_SETTINGS,
@@ -308,3 +309,72 @@ def test_a_project_deny_rule_reaches_the_ruleset_with_its_provenance(home: Path,
     assert isinstance(rule, Rule)
     assert "never touch production" in rule.describe()
     assert "from project" in rule.describe()
+
+
+# --------------------------------------------------------------------------- #
+# A match object that reads none of its own keys
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "match",
+    [
+        {"command": "^pytest"},
+        {"path": "src/*"},
+        {"exact": {"argument": "command", "value": "ls"}},
+        {"pattern": "^pytest"},
+        {"kind": "tool", "pattern": "^pytest"},
+        {"kind": "regex", "pattern": "^pytest", "argument": "command"},
+    ],
+)
+def test_a_match_object_that_reads_none_of_its_keys_is_refused(match: dict[str, Any]) -> None:
+    """The dangerous half of the two documented spellings blended together.
+
+    `kind` defaults to `tool`, and `tool` means `AnyUse` — the broadest matcher
+    there is. So a `match` whose keys are all ignored did not fail, it silently
+    *widened*: `{"tool": "bash", "decision": "allow", "match": {"command":
+    "^pytest"}}` parsed as allow-every-bash-command. A permission rule that fails
+    open is worse than one that will not load.
+    """
+    with pytest.raises(ValueError, match="does not read"):
+        parse_rule({"tool": "bash", "decision": "allow", "match": match}, source="project")
+
+
+def test_the_refusal_names_the_spelling_that_works() -> None:
+    """A refusal that only says "no" gets worked around by deleting the match."""
+    with pytest.raises(ValueError) as caught:
+        parse_rule(
+            {"tool": "bash", "decision": "allow", "match": {"command": "^pytest"}},
+            source="project",
+        )
+    message = str(caught.value)
+    assert "'command' at the top level" in message
+    assert "explicit 'kind'" in message
+    assert "every" in message, "it has to say what the silent reading would have been"
+
+
+def test_the_key_table_and_the_builder_agree_on_which_kinds_exist() -> None:
+    """`_MATCH_KEYS` gates which keys are legal and `_build_matcher` builds them.
+
+    A kind in the table with no branch would fall through to the bug message; a
+    branch with no table entry is unreachable. Either way the two have to be
+    edited together, so the agreement is pinned rather than remembered.
+    """
+    for kind in _MATCH_KEYS:
+        match: dict[str, Any] = {"kind": kind}
+        if kind in {"regex", "path"}:
+            match["pattern"] = "x"
+        if kind == "exact":
+            match |= {"argument": "command", "value": "x"}
+        built = parse_rule({"decision": "allow", "match": match}, source="project")
+        assert built.matcher is not None
+
+
+def test_a_legitimate_match_still_parses_after_the_narrowing() -> None:
+    """The narrowing must not cost the precise spelling it exists to protect."""
+    rule = parse_rule(
+        {"tool": "bash", "decision": "allow", "match": {"kind": "regex", "pattern": "^pytest"}},
+        source="project",
+    )
+    assert rule.matcher == CommandRegex("^pytest")
+    assert rule.specificity == (2, 1), "still the narrow rule, not a tool-wide one"

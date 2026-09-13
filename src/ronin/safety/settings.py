@@ -385,6 +385,36 @@ def _coerce(key: str, value: object) -> object:
 #: JSON shorthand: a rule may name its matcher inline instead of nesting ``match``.
 _SHORTHAND: Mapping[str, str] = {"command": "regex", "path": "path", "exact": "exact"}
 
+#: Which keys each match kind actually reads.
+#:
+#: The point is the refusal, not the documentation. ``kind`` defaults to ``tool``
+#: and ``tool`` means :class:`~ronin.safety.policy.AnyUse` — the *broadest*
+#: matcher there is — so a ``match`` object whose keys are all ignored does not
+#: fail, it silently widens. ``{"tool": "bash", "decision": "allow", "match":
+#: {"command": "^pytest"}}`` is a plausible blend of the two documented spellings
+#: and used to parse as *allow every bash command*. A permission rule that fails
+#: open is worse than one that will not load.
+_MATCH_KEYS: Mapping[str, frozenset[str]] = {
+    "tool": frozenset({"kind"}),
+    "exact": frozenset({"kind", "argument", "value"}),
+    "path": frozenset({"kind", "pattern", "argument"}),
+    "regex": frozenset({"kind", "pattern"}),
+}
+
+
+def _stray_keys_message(kind: str, stray: Sequence[str], match: Mapping[str, Any]) -> str:
+    """Why the rule was refused, in terms of the fix rather than the parser."""
+    listed = ", ".join(repr(key) for key in stray)
+    shorthand = [key for key in stray if key in _SHORTHAND]
+    if shorthand and "kind" not in match:
+        key = shorthand[0]
+        return (
+            f"a 'match' with no 'kind' means kind 'tool', which matches *every* use "
+            f"of the tool — it does not read {listed}. Write {key!r} at the top level "
+            f"beside 'tool' and 'decision', or give 'match' an explicit 'kind'"
+        )
+    return f"a 'match' of kind {kind!r} does not read {listed}"
+
 
 def parse_rule(entry: object, *, source: str) -> Rule:
     """One rule from its JSON form. Raises ``ValueError`` with a fixable message.
@@ -444,6 +474,15 @@ def _as_mapping(value: object) -> Mapping[str, Any]:
 
 def _build_matcher(match: Mapping[str, Any]) -> Matcher:
     kind = match.get("kind", "tool")
+    # Kind first, then stray keys: an unknown kind makes "which keys are legal"
+    # unanswerable, and reporting the stray key instead would name the wrong fix.
+    allowed = _MATCH_KEYS.get(kind) if isinstance(kind, str) else None
+    if allowed is None:
+        legal = ", ".join(_MATCH_KEYS)
+        raise ValueError(f"unknown match kind {kind!r}; expected one of {legal}")
+    stray = sorted(set(match) - allowed)
+    if stray:
+        raise ValueError(_stray_keys_message(kind, stray, match))
     if kind == "tool":
         return AnyUse()
     if kind == "exact":
@@ -466,8 +505,10 @@ def _build_matcher(match: Mapping[str, Any]) -> Matcher:
             return CommandRegex(pattern=pattern)
         except Exception as exc:  # re.error, and anything a future re raises
             raise ValueError(f"'pattern' is not a valid regex: {exc}") from None
-    legal = "tool, exact, path, regex"
-    raise ValueError(f"unknown match kind {kind!r}; expected one of {legal}")
+    # Unreachable while `_MATCH_KEYS` and the branches above agree about the
+    # kinds. If a kind is ever added to the table and not built here, say so
+    # instead of falling off the end and returning None.
+    raise ValueError(f"match kind {kind!r} is known but not built — this is a bug")
 
 
 __all__ = [
