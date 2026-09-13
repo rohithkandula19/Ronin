@@ -2394,6 +2394,13 @@ def _sessions_by_cost(directory: Path, wanted: SessionsOptions, *, streams: Stre
 #: rather than to go debugging their endpoint.
 _RATE_LIMIT_MARKERS = ("429", "rate limit", "rate_limit", "too many requests")
 
+#: What a config failure looks like. `load_config` and `parse_config` raise the same
+#: `ProviderError` the transport does, so without this a malformed `models.toml` was
+#: reported as "the model could not be reached, after retries and failover" — with a
+#: remedy telling the user to check their endpoint and key. Nothing was reached and
+#: nothing was retried; the file never parsed.
+_CONFIG_MARKERS = ("provider config", "[models] section")
+
 
 def cost_report(agent: Agent) -> str:
     """``/cost``: the session's spend, broken down when the ledger can break it down.
@@ -2471,6 +2478,15 @@ def provider_failure_message(exc: ProviderError) -> str:
     who = f" [{exc.provider}]" if exc.provider else ""
     detail = str(exc).strip() or "the provider gave no detail"
     lowered = detail.lower()
+    if any(marker in lowered for marker in _CONFIG_MARKERS):
+        # Checked first: a config error can carry a filename with "429" in it, and
+        # every other branch here describes a request that was actually attempted.
+        return (
+            "the provider config could not be read, so no request was made.\n"
+            f"  {detail}\n"
+            "  fix the file and run again. `ronin doctor` parses it and names the "
+            "line.\n"
+        )
     if any(marker in lowered for marker in _RATE_LIMIT_MARKERS):
         wait = f" It asked to wait {exc.retry_after}." if exc.retry_after else ""
         return (
