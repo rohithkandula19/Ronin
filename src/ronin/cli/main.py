@@ -41,7 +41,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequenc
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
-from typing import TextIO
+from typing import Any, TextIO
 
 from ..agents.hooks import MATCH_ALL
 from ..context.compaction import context_breakdown
@@ -509,20 +509,28 @@ def build_parser() -> _Parser:
     )
     parser.add_argument(
         "--max-turns",
-        type=int,
+        type=_positive(int, "int"),
         default=DEFAULT_MAX_ITERATIONS,
         metavar="N",
         help="iterations one turn may take",
     )
     parser.add_argument(
-        "--max-tokens", type=int, default=None, metavar="N", help="token ceiling for the session"
+        "--max-tokens",
+        type=_positive(int, "int"),
+        default=None,
+        metavar="N",
+        help="token ceiling for the session",
     )
     parser.add_argument(
-        "--max-usd", type=float, default=None, metavar="USD", help="dollar ceiling for the session"
+        "--max-usd",
+        type=_positive(float, "float"),
+        default=None,
+        metavar="USD",
+        help="dollar ceiling for the session",
     )
     parser.add_argument(
         "--max-seconds",
-        type=float,
+        type=_positive(float, "float"),
         default=None,
         metavar="S",
         help="wall-clock ceiling for the session",
@@ -1107,6 +1115,38 @@ def _telemetry_options(namespace: argparse.Namespace, words: str) -> Options | U
             limit=max(0, int(namespace.limit or 0)),
         ),
     )
+
+
+def _positive(kind: Callable[[str], Any], label: str) -> Callable[[str], Any]:
+    """An argparse type for a ceiling: the right kind, and greater than zero.
+
+    Validated here so the refusal comes out in argparse's own voice, before anything
+    is built. Without it the two halves failed in two different wrong ways:
+    ``--max-tokens 0`` reached ``Budget``, whose ``__post_init__`` raised a
+    ``ValueError`` that nothing caught — a raw Python traceback, for a typo on the
+    command line. ``--max-turns 0`` was not a ``Budget`` field at all, so it passed
+    every check and simply ran no iterations: exit 1, empty stdout, and not one word
+    about why.
+
+    The message keeps argparse's own phrasing for a wrong *type* so `--max-usd abc`
+    reads exactly as it always did, and adds a sentence for a wrong *value*, because
+    "0 is invalid" without "omit the flag for no ceiling" leaves the reader guessing
+    at what to type instead.
+    """
+
+    def parse_one(text: str) -> Any:
+        try:
+            value = kind(text)
+        except ValueError:
+            raise argparse.ArgumentTypeError(f"invalid {label} value: {text!r}") from None
+        if value <= 0:
+            raise argparse.ArgumentTypeError(
+                f"must be greater than zero, got {text!r} — a ceiling of zero or less "
+                "stops the run before it starts; omit the flag for no ceiling"
+            )
+        return value
+
+    return parse_one
 
 
 def _budget(namespace: argparse.Namespace) -> Budget | None:

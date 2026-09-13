@@ -1141,3 +1141,43 @@ async def test_a_cwd_that_is_not_a_directory_is_refused(tmp_path: Path) -> None:
     assert code != 0
     assert "is not a directory" in capture.stderr
     assert not missing.exists(), "a refused --cwd must not be created on the way out"
+
+
+# --------------------------------------------------------------------------- #
+# a ceiling of zero is a typo, not a configuration
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("flag", ["--max-turns", "--max-tokens", "--max-usd", "--max-seconds"])
+@pytest.mark.parametrize("value", ["0", "-1"])
+def test_a_ceiling_of_zero_or_less_is_refused_with_a_reason(flag: str, value: str) -> None:
+    """The two halves used to fail in two different wrong ways.
+
+    `--max-tokens 0` reached `Budget`, whose `__post_init__` raised a `ValueError`
+    that nothing caught — a raw Python traceback, for a typo on the command line.
+    `--max-turns 0` was not a `Budget` field at all, so it passed every check and ran
+    no iterations: exit 1, empty stdout, and not one word about why.
+    """
+    message = usage([flag, value, "-p", "hi"]).message
+    assert "must be greater than zero" in message
+    assert flag in message
+    assert "omit the flag for no ceiling" in message, "say what to type instead"
+    assert "Traceback" not in message
+
+
+@pytest.mark.parametrize(("flag", "value"), [("--max-turns", "abc"), ("--max-usd", "abc")])
+def test_a_ceiling_of_the_wrong_type_keeps_argparses_own_wording(flag: str, value: str) -> None:
+    """The value check is layered on top of the type check, not in place of it — a
+    user who mistyped a number should read the same sentence they always have."""
+    message = usage([flag, value, "-p", "hi"]).message
+    assert "invalid" in message and "value" in message
+    assert "greater than zero" not in message
+
+
+def test_a_real_ceiling_still_parses() -> None:
+    """The control: refusing zero must not refuse one."""
+    parsed = options(["--max-turns", "3", "--max-tokens", "5000", "--max-usd", "1.5", "-p", "hi"])
+    assert parsed.max_iterations == 3
+    assert parsed.budget is not None
+    assert parsed.budget.max_tokens == 5000
+    assert parsed.budget.max_usd == 1.5
