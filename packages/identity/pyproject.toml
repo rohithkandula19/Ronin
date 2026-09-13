@@ -3,7 +3,7 @@ name = "ronin-identity"
 version = "0.1.0"
 description = "Ronin Identity: users, organizations, memberships, and fail-closed RBAC with org isolation."
 requires-python = ">=3.11"
-dependencies = ["pydantic>=2.5"]
+dependencies = ["pydantic>=2.13.5"]
 
 [project.optional-dependencies]
 dev = ["pytest>=9.1.1"]

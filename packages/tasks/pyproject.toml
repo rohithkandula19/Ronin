@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Ronin AI OS tasks: state machine + in-process scheduler with human approval steps."
 requires-python = ">=3.11"
 dependencies = [
-  "pydantic>=2.5",
+  "pydantic>=2.13.5",
 ]
 
 [project.optional-dependencies]

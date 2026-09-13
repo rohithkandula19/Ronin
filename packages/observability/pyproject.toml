@@ -3,7 +3,7 @@ name = "ronin-observability"
 version = "0.1.0"
 description = "Ronin Observability: in-memory structured logging with redaction, metrics, tracing, SLO error budgets, and health aggregation."
 requires-python = ">=3.11"
-dependencies = ["pydantic>=2.5"]
+dependencies = ["pydantic>=2.13.5"]
 
 [project.optional-dependencies]
 dev = ["pytest>=9.1.1"]
