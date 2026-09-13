@@ -1,16 +1,17 @@
 """Release versioning, validation, and artifact checks for Ronin packages."""
+
 from __future__ import annotations
 
 import argparse
 import re
 import tomllib
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
-
+from typing import Any
 
 _PEP440_VERSION = r"\d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?"
-_SEMVER_RE = re.compile(rf"^(\d+)\.(\d+)\.(\d+)(?:(?:a|b|rc)\d+)?$")
+_SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:(?:a|b|rc)\d+)?$")
 _TAG_RE = re.compile(r"^v(\d+\.\d+\.\d+)(?:-(a|b|rc)\.(\d+))?$")
 _VERSION_PATTERNS = [
     re.compile(rf'(__version__\s*=\s*["\'])({_PEP440_VERSION})(["\'])'),
@@ -109,7 +110,8 @@ def find_version_files(root: Path | str) -> list[Path]:
     repo = Path(root).resolve()
     files: list[Path] = []
     for path in repo.rglob("__init__.py"):
-        if any(part in {".venv", "venv", "node_modules", "__pycache__", ".git"} for part in path.parts):
+        skip = {".venv", "venv", "node_modules", "__pycache__", ".git"}
+        if any(part in skip for part in path.parts):
             continue
         try:
             if "__version__" in path.read_text(encoding="utf-8", errors="ignore"):
@@ -159,7 +161,7 @@ def release_packages(root: Path | str) -> tuple[ReleasePackage, ...]:
     return tuple(packages)
 
 
-def _project_metadata(path: Path) -> dict:
+def _project_metadata(path: Path) -> dict[str, Any]:
     try:
         raw = tomllib.loads(path.read_text(encoding="utf-8"))
         project = raw["project"]
@@ -185,7 +187,9 @@ def release_validation_errors(root: Path | str, tag: str) -> list[str]:
             continue
         actual = current_version([path])
         if actual != expected:
-            errors.append(f"{path.relative_to(repo)} declares {actual or 'no version'}, expected {expected}")
+            errors.append(
+                f"{path.relative_to(repo)} declares {actual or 'no version'}, expected {expected}"
+            )
 
     cli_file = repo / "packages/cli/pyproject.toml"
     try:
@@ -215,7 +219,7 @@ def set_internal_dependency_versions(text: str, version: str) -> tuple[str, int]
     """Rewrite the CLI's exact internal-distribution pins. Pure."""
     replacement_count = 0
     for distribution in CLI_INTERNAL_DISTRIBUTIONS:
-        pattern = re.compile(rf'({re.escape(distribution)}==){_PEP440_VERSION}')
+        pattern = re.compile(rf"({re.escape(distribution)}==){_PEP440_VERSION}")
         text, count = pattern.subn(rf"\g<1>{version}", text)
         replacement_count += count
     return text, replacement_count
@@ -248,7 +252,8 @@ def prepare_release(root: Path | str, version: str) -> tuple[Path, ...]:
     updated, replacements = set_internal_dependency_versions(updates[cli_file], target)
     if replacements != len(CLI_INTERNAL_DISTRIBUTIONS):
         raise ValueError(
-            f"expected {len(CLI_INTERNAL_DISTRIBUTIONS)} internal dependency pins in {cli_file}, found {replacements}"
+            f"expected {len(CLI_INTERNAL_DISTRIBUTIONS)} internal dependency pins in "
+            f"{cli_file}, found {replacements}"
         )
     updates[cli_file] = updated
 
@@ -293,7 +298,11 @@ def _main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--tag", help="Release tag, for example v1.2.3-rc.1.")
     parser.add_argument("--prepare", help="Version to write before validation.")
     parser.add_argument("--artifact-dir", help="Validate release artifacts in this directory.")
-    parser.add_argument("--print-package-dirs", action="store_true", help="Print package directories for a release build.")
+    parser.add_argument(
+        "--print-package-dirs",
+        action="store_true",
+        help="Print package directories for a release build.",
+    )
     args = parser.parse_args(argv)
 
     try:

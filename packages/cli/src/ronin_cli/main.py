@@ -6803,57 +6803,12 @@ def deadcode(
                           f"[bold]{d.name}[/bold]{tag}")
 
 
-# ---------- release (bump + changelog + tag) ----------
-
-@dev_app.command()
-def release(
-    kind: str = typer.Argument("patch", help="major | minor | patch."),
-    tag: bool = typer.Option(False, "--tag", help="Create a git tag for the new version."),
-    write_changelog: bool = typer.Option(True, "--changelog/--no-changelog", help="Prepend a CHANGELOG section."),
-    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
-) -> None:
-    """Prepare a synchronized Ronin release and optionally create its git tag."""
-    from .release import bump_version, current_version, prepare_release, release_version_files, validate_release
-
-    files = list(release_version_files(root))
-    cur = current_version(files)
-    if not cur:
-        console.print("[yellow]couldn't find the Ronin release version.[/yellow]")
-        raise typer.Exit(1)
-    try:
-        new = bump_version(cur, kind)
-    except ValueError as e:
-        console.print(f"[red]{e}[/red]")
-        raise typer.Exit(2)
-    console.print(f"[#7aa2f7]🚀 release[/#7aa2f7] [bold]{cur} → {new}[/bold]")
-    try:
-        changed = prepare_release(root, new)
-        validate_release(root, f"v{new}")
-    except ValueError as e:
-        console.print(f"[red]{e}[/red]")
-        raise typer.Exit(2)
-    console.print(f"  [green]✓[/green] synchronized {len(changed)} release version source(s)")
-
-    if write_changelog:
-        from .changelog import render_changelog
-        from .git_helper import _git
-        since = _git(root, "describe", "--tags", "--abbrev=0").stdout.strip() or None
-        rng = f"{since}..HEAD" if since else "HEAD"
-        log = _git(root, "log", rng, "--pretty=%s", "--no-merges").stdout
-        subjects = [ln for ln in log.splitlines() if ln.strip()]
-        if subjects:
-            section = render_changelog(subjects, version=new)
-            cl = Path(root) / "CHANGELOG.md"
-            existing = cl.read_text(encoding="utf-8") if cl.is_file() else "# Changelog\n"
-            head, _, rest = existing.partition("\n")
-            cl.write_text(f"{head}\n\n{section}\n{rest.lstrip()}", encoding="utf-8")
-            console.print(f"  [green]✓[/green] CHANGELOG updated ({len(subjects)} commit(s))")
-    if tag:
-        from .git_helper import _git
-        r = _git(root, "tag", f"v{new}")
-        console.print(f"  [green]✓ tagged v{new}[/green]" if r.returncode == 0
-                      else f"[yellow]couldn't tag: {r.stderr.strip()[:80]}[/yellow]")
-    console.print("[dim]review the changes, then commit + push (and the tag).[/dim]")
+# ---------- release ----------
+#
+# `dev release` lived here and was a second entry point onto the same version
+# maths that `scripts/release.sh` already drove directly. The module moved to
+# `scripts/release_manifest.py` — release tooling is build tooling, not part of
+# the shipped CLI — and one release path is the point of moving it.
 
 
 # ---------- docstring (find + write missing docstrings) ----------

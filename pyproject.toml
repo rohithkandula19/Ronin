@@ -254,6 +254,7 @@ module = [
     "test_providers_capability",
     "test_providers_demo",
     "test_registry",
+    "test_release_manifest",
     "test_repo_analyze",
     "test_resilience",
     "test_retainer_adapters_github",

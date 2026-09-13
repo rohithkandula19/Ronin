@@ -119,7 +119,7 @@ if [[ "$DRY_RUN" == "yes" ]]; then
   ok "[dry] would update package versions and exact CLI dependency pins"
   ok "[dry] would validate tag/version and artifact manifest in GitHub Actions"
 else
-  uv run --frozen python -m ronin_cli.release --root "$REPO_ROOT" --prepare "$TAG" --tag "$TAG" \
+  uv run --frozen python scripts/release_manifest.py --root "$REPO_ROOT" --prepare "$TAG" --tag "$TAG" \
     || die "release manifest validation failed"
   ok "synchronized release versions and internal dependency pins"
 fi
