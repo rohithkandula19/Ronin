@@ -1215,6 +1215,14 @@ async def dispatch(
     if options.command is Command.SESSIONS:
         return _sessions(options, streams=streams)
 
+    # Checked before `discover`, which resolves a path without requiring it to
+    # exist — so a typo'd `--cwd` used to become the workspace root, and the first
+    # run then built `.ronin/` and a RONIN.md inside it. A directory that does not
+    # exist is a mistake in the command line, not a workspace to create.
+    if not options.cwd.is_dir():
+        streams.err(f"{PROGRAM}: --cwd {options.cwd} is not a directory\n")
+        return EXIT_USAGE
+
     paths = Paths.discover(options.cwd)
     if options.command in (Command.EVAL, Command.DUEL):
         return await _bench(options, paths, env, streams)
@@ -1617,6 +1625,7 @@ async def _first_run(
     *,
     detection: Detection | None = None,
     smoke: Callable[[], Awaitable[bool]] | None = None,
+    requested: bool = False,
 ) -> None:
     """Show the plan, ask, apply it, then get the user to a working model.
 
@@ -1635,6 +1644,26 @@ async def _first_run(
     """
     plan = plan_first_run(paths)
     if not plan.empty:
+        if requested:
+            # `/init` is the request. Asking again would be asking a question whose
+            # answer has already been given — and in the TUI the injected `ask`
+            # returns "", which the check below reads as yes, so the confirmation
+            # was never a confirmation anyway.
+            for path in apply_plan(plan):
+                streams.out(f"wrote {path}\n")
+            return
+        if not streams.isatty:
+            # `[Y/n]` reads EOF as the empty string, which is the default *yes* —
+            # so `ronin doctor < /dev/null`, a CI step or a cron line wrote
+            # RONIN.md and .ronin/settings.json into the tree with nobody ever
+            # answering. A question nobody can be asked is not consent.
+            streams.err(
+                "first run in this workspace, and nothing is attached to answer "
+                f"the setup question — nothing written. Run {PROGRAM} from a "
+                "terminal to set it up, or `ronin doctor` to see the defaults "
+                "in use.\n"
+            )
+            return
         streams.out("first run in this workspace.\n")
         streams.out(plan.render())
         answer = streams.ask(WIZARD_QUESTION).strip().lower()
@@ -2088,7 +2117,7 @@ async def _slash(line: str, agent: Agent, streams: Streams) -> Slash:
     elif name == "init":
         # /init scaffolds the workspace; a running session already has a model, so it
         # does not re-detect or write a models.toml — that is the fresh-install path.
-        await _first_run(agent.loaded.paths, streams)
+        await _first_run(agent.loaded.paths, streams, requested=True)
     else:  # pragma: no cover - every declared command above is wired
         streams.err(
             f"/{name} is a real command but is not wired into this line session. "

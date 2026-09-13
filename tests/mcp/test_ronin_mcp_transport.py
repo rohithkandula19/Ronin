@@ -12,6 +12,7 @@ import contextlib
 import io
 import json
 import os
+from pathlib import Path
 from typing import IO
 
 import pytest
@@ -418,6 +419,45 @@ async def test_stdin_without_a_descriptor_is_refused_by_name() -> None:
     """The alternative is a server that starts and then answers nothing, forever."""
     with pytest.raises(TransportClosed, match="no file descriptor"):
         await stdio_streams(stdin=io.BytesIO(b""), stdout=io.BytesIO())
+
+
+async def test_stdin_from_dev_null_is_refused_rather_than_hanging(tmp_path: Path) -> None:
+    """`ronin mcp-serve < /dev/null &` is how a daemon gets launched.
+
+    `connect_read_pipe` is not the guard it looks like: handed /dev/null it
+    *succeeds*, and the epoll failure then arrives inside a loop callback as an
+    unhandled PermissionError — a raw double traceback the caller cannot catch, and
+    a server that waits forever for a request that can never come. Asked up front,
+    the same question is a catchable refusal.
+    """
+    with (
+        Path("/dev/null").open("rb") as null,
+        io.BytesIO() as out,
+        pytest.raises(TransportClosed, match="cannot be waited on"),
+    ):
+        await stdio_streams(stdin=null, stdout=out)
+
+
+async def test_stdin_from_a_regular_file_is_refused_too(tmp_path: Path) -> None:
+    """Redirecting stdin from a file is the other obvious way to script one, and a
+    regular file cannot be polled either."""
+    script = tmp_path / "requests.jsonl"
+    script.write_text("{}\n", encoding="utf-8")
+    with (
+        script.open("rb") as handle,
+        io.BytesIO() as out,
+        pytest.raises(TransportClosed, match="cannot be waited on"),
+    ):
+        await stdio_streams(stdin=handle, stdout=out)
+
+
+async def test_a_real_pipe_is_still_accepted() -> None:
+    """The control. A guard that refused everything would also stop the server the
+    protocol is actually spoken over."""
+    read_fd, write_fd = os.pipe()
+    with os.fdopen(read_fd, "rb") as source, os.fdopen(write_fd, "wb") as sink:
+        pair = await stdio_streams(stdin=source, stdout=sink)
+        assert pair.reader is not None
 
 
 def test_a_text_stream_with_no_binary_buffer_is_refused_by_name() -> None:

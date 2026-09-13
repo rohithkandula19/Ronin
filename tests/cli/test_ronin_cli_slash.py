@@ -354,13 +354,21 @@ async def test_hooks_reports_the_configured_hooks(tmp_path: Path) -> None:
     assert ".ronin/hooks.json" in capture.stdout or ":" in capture.stdout
 
 
-async def test_init_writes_the_workspace_files_after_asking(tmp_path: Path) -> None:
+async def test_init_writes_the_workspace_files_without_asking_again(tmp_path: Path) -> None:
     """`/init` is the first-run wizard, reachable on purpose rather than only on a first
-    run — someone who skipped it with `--no-wizard` has no other way back to it."""
-    capture = Captured(answers=["y"])
+    run — someone who skipped it with `--no-wizard` has no other way back to it.
+
+    It does not ask, because typing `/init` *is* the answer. It used to, and the
+    question was theatre: in the TUI the injected `ask` returns "", which the wizard
+    reads as yes, so the scaffold was written on a confirmation the user never saw.
+    A prompt whose answer is predetermined is worse than no prompt, because it looks
+    like a decision point.
+    """
+    capture = Captured()
     await run("/init", agent_for(tmp_path), capture)
-    assert capture.questions, "it wrote without asking"
+    assert capture.questions == [], "typing /init already answered it"
     assert "wrote" in capture.stdout or "nothing needed writing" in capture.stdout
+    assert (tmp_path / "RONIN.md").is_file()
 
 
 async def test_an_unknown_command_is_a_typo_not_a_missing_feature(tmp_path: Path) -> None:
