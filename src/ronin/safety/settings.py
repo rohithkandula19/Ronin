@@ -52,6 +52,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..context.compaction import (
+    DEFAULT_MAX_RETAINED_CHARS,
+    DEFAULT_MAX_RETAINED_PATHS,
+)
 from ..core.types import Mode
 from .injection import MIN_TAINT_SPAN
 from .policy import (
@@ -203,11 +207,11 @@ class Settings:
     #: and is load-bearing — see ``CompactionPolicy.max_retained_paths``. Settable
     #: because compaction *reports* bounding them as the remedy when retained results
     #: alone exceed the trigger, and advice the user cannot act on is not advice.
-    max_retained_paths: int | None = None
-    max_retained_chars: int | None = None
+    max_retained_paths: int | None = DEFAULT_MAX_RETAINED_PATHS
+    max_retained_chars: int | None = DEFAULT_MAX_RETAINED_CHARS
     #: Let compaction surrender older retained file context by itself rather than
     #: reporting that it cannot fit. Off by default: see ``CompactionPolicy``.
-    compaction_escalate: bool = False
+    compaction_escalate: bool = True
     rules: tuple[Rule, ...] = ()
     layers: tuple[Layer, ...] = ()
     errors: tuple[LayerError, ...] = ()

@@ -312,7 +312,15 @@ async def _folded(tmp_path: Path, *, grep_the_same_path: bool) -> tuple[Path, li
     messages += [Message(role=Role.USER, content_blocks=(Text("now edit a.py"),))]
 
     result = await compact(
-        messages, policy=CompactionPolicy(context_window=4000), summarizer=summarize
+        messages,
+        # Retention unbounded: this test is about whether a *grep* costs a read its
+        # place in the fold, and the shipped path ceiling would evict the target
+        # behind the test's own filler files, making the control pass for the wrong
+        # reason. The ceilings have their own tests.
+        policy=CompactionPolicy(
+            context_window=4000, max_retained_paths=None, max_retained_chars=None
+        ),
+        summarizer=summarize,
     )
     assert result.compacted
     return target, list(result.messages)
