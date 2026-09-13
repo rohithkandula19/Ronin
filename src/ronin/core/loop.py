@@ -457,12 +457,25 @@ async def run_turn(
                 yield ToolEnd(tool_use_id=use.id, name=use.name, result=pairs[-1][1])
                 continue
 
+            # A diff when one can be built, the call and its arguments otherwise.
+            # One value either way: what the event carries, what the policy is asked
+            # with and what the human reads are the same string by construction, and
+            # that is the property the gate rests on.
+            rendered = (preview(use) if preview is not None else None) or _render(use)
+
+            # The **event** is what `requires_approval` gates, not the consult. Those
+            # were one branch, and the consequence was that `read`, `grep`, `glob` and
+            # `ls` — every tool that inherits `requires_approval = False` — never
+            # reached the policy engine at all. Not the user's deny rules, not the
+            # *unconditional* deny list, not the taint floor. A settings file saying
+            # `{"tool": "read", "decision": "deny", "path": "**/.env"}` parsed, matched
+            # and resolved to DENY, and the secret was still returned; so was key
+            # material, which `docs/SUBSYSTEMS.md` promises is refused "both ways".
+            #
+            # Consulting always costs nothing for the ordinary case: `PolicyEngine`
+            # relaxes an unconfigured read-only tool to ALLOW without asking anyone —
+            # a branch that only makes sense if reads were always meant to arrive here.
             if spec.requires_approval:
-                # A diff when one can be built, the call and its arguments otherwise.
-                # One value either way: what the event carries, what the policy is
-                # asked with and what the human reads are the same string by
-                # construction, and that is the property the gate rests on.
-                rendered = (preview(use) if preview is not None else None) or _render(use)
                 yield ApprovalRequest(
                     tool_use_id=use.id,
                     name=use.name,
@@ -470,12 +483,12 @@ async def run_turn(
                     rendered=rendered,
                     reason=spec.danger_level.name.lower(),
                 )
-                decision = await policy.approve(spec, use, rendered=rendered)
-                if not decision.approved:
-                    detail = decision.reason or "the user declined this action"
-                    pairs.append((use, ToolResult(ok=False, error=f"DENIED: {detail}")))
-                    yield ToolEnd(tool_use_id=use.id, name=use.name, result=pairs[-1][1])
-                    continue
+            decision = await policy.approve(spec, use, rendered=rendered)
+            if not decision.approved:
+                detail = decision.reason or "the user declined this action"
+                pairs.append((use, ToolResult(ok=False, error=f"DENIED: {detail}")))
+                yield ToolEnd(tool_use_id=use.id, name=use.name, result=pairs[-1][1])
+                continue
 
             approved.append((use, spec))
 

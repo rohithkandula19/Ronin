@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 from gate_harness import (
+    APPROVED,
     BASH,
     COPIED_SPAN,
     FETCHED_PAGE,
@@ -727,7 +728,10 @@ async def test_the_loop_sees_a_well_formed_transcript_when_a_hook_blocks_a_call(
     process = ScriptedHookProcess({"guard": blocked("migrations/ is off limits")})
     inner = RecordingRegistry()
     taint = TaintTracker()
-    policy = engine(taint)
+    # Approving, because the subject here is the *hook*. The policy is consulted for
+    # every call now, so the default declining asker would refuse the write before a
+    # hook ever ran and this would assert on the wrong refusal.
+    policy = engine(taint, asker=RecordingAsker(answer=APPROVED))
     gate = gated(
         inner,
         policy,

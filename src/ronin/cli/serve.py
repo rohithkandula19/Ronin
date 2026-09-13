@@ -152,15 +152,18 @@ class ExposedTool(Tool):
             name=self._spec.name,
             arguments=args,
         )
-        if self._spec.requires_approval:
-            decision = await self._policy.approve(
-                self._spec, use, rendered=render_call(self._spec.name, args)
-            )
-            if not decision.approved:
-                # The same `DENIED:` shape `core.loop` produces, so a refusal reads the
-                # same whether it reached the model through a turn or over the wire.
-                detail = decision.reason or "the policy declined this action"
-                return ToolResult(ok=False, error=f"DENIED: {detail}")
+        # Unconditional, exactly as in `core.loop`: `requires_approval` says whether a
+        # *human* is shown the call, not whether the policy is asked about it. Gating
+        # the consult on it meant a published `read` over MCP ignored every deny rule
+        # and the unconditional deny list — and over stdio there is no human to notice.
+        decision = await self._policy.approve(
+            self._spec, use, rendered=render_call(self._spec.name, args)
+        )
+        if not decision.approved:
+            # The same `DENIED:` shape `core.loop` produces, so a refusal reads the
+            # same whether it reached the model through a turn or over the wire.
+            detail = decision.reason or "the policy declined this action"
+            return ToolResult(ok=False, error=f"DENIED: {detail}")
         return await self._registry.execute(use)
 
 

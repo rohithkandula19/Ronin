@@ -45,15 +45,21 @@ from ronin.safety.policy import Answer, Outcome, PolicyEngine, builtin_ruleset
 # --------------------------------------------------------------------------- #
 
 READ = ToolSpec(name="read", description="Read a file from disk.")
+# `requires_approval` matters here, and these two used to omit it. The real `write`
+# and `edit` (tools/files.py) both declare it, and while the loop gated the *policy
+# consult* on that flag a double that left it False quietly skipped the engine — so a
+# test could assert a hook blocked a call while the policy was never asked at all.
 WRITE = ToolSpec(
     name="write",
     description="Write a file to disk.",
     danger_level=DangerLevel.MUTATING,
+    requires_approval=True,
 )
 EDIT = ToolSpec(
     name="edit",
     description="Replace a string in a file.",
     danger_level=DangerLevel.MUTATING,
+    requires_approval=True,
 )
 BASH = ToolSpec(
     name="bash",
@@ -77,6 +83,10 @@ OK = HookCompletion(exit_code=0)
 
 #: The refusal :class:`RecordingAsker` gives unless a test scripts something else.
 DECLINED = Answer(outcome=Outcome.NO, feedback="not this time")
+#: For tests whose subject is something *after* the approval — a hook, the taint
+#: floor, the shape of the transcript. Without it they read as testing that subject
+#: while actually only proving the asker said no.
+APPROVED = Answer(outcome=Outcome.YES_ONCE)
 
 
 def use(name: str, *, call_id: str = "call_1", **arguments: Any) -> ToolUse:
