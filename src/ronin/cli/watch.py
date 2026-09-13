@@ -25,8 +25,8 @@ second thread per client.
 **A token is not optional.** This stream carries the contents of a session: file
 paths, source, diffs, the output of every command. That is a different exposure from
 ``cli/http_api.py``, which answers prompts a caller supplies. So there is no way to
-serve it without a token — :func:`serve_watch` mints one when the caller does not
-supply one, and a request without it gets ``401`` before a single event is written.
+serve it without a token: :func:`build_watch_server` refuses to bind without one, and
+a request that does not carry it gets ``401`` before a single event is written.
 The comparison is :func:`hmac.compare_digest`, because a token checked with ``==``
 leaks its prefix to anyone who can time the reply.
 
@@ -41,9 +41,8 @@ from __future__ import annotations
 import hmac
 import json
 import secrets
-import threading
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from collections.abc import Mapping
+from dataclasses import dataclass
 from email.message import Message
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -64,7 +63,6 @@ __all__ = [
     "build_watch_server",
     "headers_of",
     "mint_token",
-    "serve_watch",
     "since_from",
     "sse_comment",
     "sse_frame",
@@ -185,32 +183,13 @@ def authorized(token: str, headers: Mapping[str, str], query: Mapping[str, list[
     return hmac.compare_digest(offered, token)
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class WatchServer:
     """The bits a handler needs, kept off the handler class so it stays testable."""
 
     hub: EventHub
     token: str
     keepalive: float = KEEPALIVE_SECONDS
-    log: Callable[[str], None] | None = None
-    #: Live connections, for the banner and for a test that wants to know when a
-    #: watcher has actually attached rather than guessing with a sleep.
-    watchers: int = 0
-    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
-
-    def joined(self) -> int:
-        with self._lock:
-            self.watchers += 1
-            return self.watchers
-
-    def left(self) -> int:
-        with self._lock:
-            self.watchers -= 1
-            return self.watchers
-
-    def note(self, line: str) -> None:
-        if self.log is not None:
-            self.log(line)
 
 
 class _WatchHTTPServer(ThreadingHTTPServer):
@@ -258,8 +237,12 @@ class WatchHandler(BaseHTTPRequestHandler):
     do_PATCH = do_POST
 
     def log_message(self, format: str, *args: Any) -> None:
-        """Stdlib logs every request to stderr, which here is the session's own output."""
-        self._watch().note((format % args) + "\n")
+        """Silenced, and that is the whole point of overriding it.
+
+        Stdlib writes an access line per request to ``sys.stderr``. Here stderr is the
+        session's own output, so the default would interleave ``"GET /events HTTP/1.1"
+        200`` into the middle of a turn every time a watcher reconnected.
+        """
 
     def _watch(self) -> WatchServer:
         server = self.server
@@ -284,7 +267,6 @@ class WatchHandler(BaseHTTPRequestHandler):
         self.send_header("Connection", "close")
         self.end_headers()
         subscription = watch.hub.subscribe(since=since)
-        watch.joined()
         try:
             self._write(f"retry: {RETRY_MS}\n\n")
             for delivery in subscription.blocking(timeout=watch.keepalive):
@@ -295,11 +277,9 @@ class WatchHandler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, TimeoutError, OSError):
             # The watcher went away. That is the normal end of a watch — a closed tab,
             # a phone that locked — and it must not reach the session as anything at
-            # all. The hub has already forgotten the cursor; there is nothing to clean
-            # up and nobody to tell.
+            # all. The hub holds no per-subscriber state to clean up, and there is
+            # nobody left to tell.
             pass
-        finally:
-            watch.left()
 
     def _write(self, text: str) -> None:
         self.wfile.write(text.encode("utf-8"))
@@ -321,7 +301,6 @@ def build_watch_server(
     hub: EventHub,
     token: str,
     keepalive: float = KEEPALIVE_SECONDS,
-    log: Callable[[str], None] | None = None,
 ) -> _WatchHTTPServer:
     """Bind a watch server. Port ``0`` takes an ephemeral one off ``server_address``.
 
@@ -331,42 +310,5 @@ def build_watch_server(
     """
     if not token:
         raise ValueError("a watch server needs a token; the stream carries session contents")
-    watch = WatchServer(hub=hub, token=token, keepalive=keepalive, log=log)
+    watch = WatchServer(hub=hub, token=token, keepalive=keepalive)
     return _WatchHTTPServer(address, WatchHandler, watch=watch)
-
-
-def serve_watch(
-    hub: EventHub,
-    *,
-    host: str = "127.0.0.1",
-    port: int = 0,
-    token: str = "",
-    keepalive: float = KEEPALIVE_SECONDS,
-    announce: Callable[[str], None] | None = None,
-    serve: bool = True,
-) -> _WatchHTTPServer:
-    """Serve ``hub`` over SSE, announce the URL, and (by default) block on it.
-
-    Loopback by default. Binding off-box is an explicit ``host`` from the operator,
-    exactly as ``cli/http_api.py`` treats it — but unlike that endpoint there is no
-    tokenless mode to fall back to, so an exposed port is a port that still needs the
-    secret printed on the operator's own terminal.
-
-    ``serve=False`` binds and returns without entering the loop, which is how a test
-    drives the whole HTTP path over a real socket without needing to interrupt a
-    blocking call.
-    """
-    secret = token or mint_token()
-    server = build_watch_server((host, port), hub=hub, token=secret, keepalive=keepalive)
-    if announce is not None:
-        where = bound_address(server.server_address)
-        announce(
-            f"ronin watch: http://{where}{WATCH_PATH}?token={secret}\n"
-            f"  read-only; the token is this session's and is not written to disk\n"
-        )
-    if serve:
-        try:
-            server.serve_forever()
-        finally:
-            server.server_close()
-    return server
