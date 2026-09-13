@@ -68,12 +68,17 @@ from ronin.agents.hooks import (  # noqa: E402
     HookOutcome,
     event_payload,
 )
+from ronin.cli.main import RESTRICTABLE, RESTRICTED_ENV  # noqa: E402
 from ronin.cli.main import Command as CliCommand  # noqa: E402
 from ronin.cli.spine import (  # noqa: E402
     CACHE_SUBDIR,
     COMMANDS_SUBDIR,
     HOOKS_FILENAME,
     RONIN_DIRNAME,
+)
+from ronin.context.compaction import (  # noqa: E402
+    DEFAULT_MAX_RETAINED_CHARS,
+    DEFAULT_MAX_RETAINED_PATHS,
 )
 from ronin.core.types import DangerLevel, Mode, ToolSpec  # noqa: E402
 from ronin.mcp.config import MCP_CONFIG_RELATIVE_PATH  # noqa: E402
@@ -401,14 +406,53 @@ def render_config() -> str:
         "A `count_or_null` key takes a positive integer, or `null` for no limit. "
         "`max_retained_paths` and `max_retained_chars` bound what compaction keeps "
         "in full when it folds the middle of a long session: the most recent tool "
-        "result per file path. Both default to no limit, which is what makes a file "
-        "edited early still readable hundreds of turns later — the cost is that a "
-        "session touching more files than the window can hold stays above the "
-        "compaction trigger and says so. Bounding either one trades that guarantee "
-        "for fitting. `compaction_escalate` lets compaction make that trade by "
-        "itself when the fold still would not fit the window, naming every path it "
-        "gives up; it is off by default, because an over-budget transcript is a "
-        "reported problem and a dropped file is a silent one.",
+        f"result per file path. They default to `{DEFAULT_MAX_RETAINED_PATHS}` paths "
+        f"and `{DEFAULT_MAX_RETAINED_CHARS}` characters each; `null` restores the "
+        "unbounded behaviour, which is what makes a file edited early still readable "
+        "hundreds of turns later — the cost is that a session touching more files "
+        "than the window can hold stays above the compaction trigger and says so. "
+        "`compaction_escalate` lets compaction surrender the oldest retained paths "
+        "when the fold still would not fit the window, naming every path it gives "
+        "up; it is **on** by default. Nothing is ever dropped silently: a path cut "
+        "by a ceiling is reported through the same list as one surrendered by "
+        "escalation.",
+        "",
+        "## restricted mode",
+        "",
+        "`--restricted` (or `" + RESTRICTED_ENV + "=1`) is the locked-down profile: "
+        "no shell tool, no web tools, and a mode that cannot be raised. It is a flag "
+        "and an environment variable rather than a settings key on purpose — a "
+        "profile a workspace can switch off is not one you can hand to an auditor.",
+        "",
+        "Nothing in the workspace that grants *execution* is read: not the settings "
+        "files above, not `.ronin/hooks.json`, not the MCP servers in "
+        f"`{MCP_CONFIG_RELATIVE_PATH}`, and not installed plugins, which contribute "
+        "both. Withholding the shell tool while still reading these would not be a "
+        "promise — an MCP server entry names a process to spawn whose tools are then "
+        "published, and its command can simply be a shell. What *is* still read is "
+        "prompt content: memory, subagents, commands and skills, because a prompt "
+        "cannot exceed the tool registry it is handed.",
+        "",
+        "The settings layers are still listed by `python -m ronin doctor`, marked "
+        "*ignored* rather than absent, because a report that omits a file you can see "
+        "on disk is a report you stop believing.",
+        "",
+        "It is built by withholding dependencies from the tool registry rather than "
+        "by disabling tools, so there is no tool that exists and always errors, and "
+        "nothing to switch back on. File tools stay published and stay confined to "
+        "the workspace root, as they always are.",
+        "",
+        "Combining it with `--yolo` or a mode above `ask` is refused rather than "
+        "silently resolved either way. Asking for *less* — `--mode plan` — is "
+        "allowed, the same asymmetry the layer rules use. It applies to a bare "
+        "prompt and to "
+        + ", ".join(
+            f"`{verb.value}`"
+            for verb in sorted(RESTRICTABLE, key=lambda command: command.value)
+            if verb is not CliCommand.RUN
+        )
+        + "; any other verb refuses the flag rather than accepting one that would do "
+        "nothing.",
         "",
         "## a rule",
         "",

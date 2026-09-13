@@ -28,6 +28,7 @@ names, per the SSE spec, because MCP puts more than one message on a stream.
 from __future__ import annotations
 
 import asyncio
+import selectors
 import sys
 from collections import deque
 from collections.abc import AsyncIterator, Iterable, Mapping, Sequence
@@ -258,6 +259,7 @@ async def stdio_streams(
             "carry an MCP session. This process's stdin has been replaced by an "
             "in-memory object; serve on injected streams instead."
         ) from exc
+    _require_pollable(source.fileno())
     loop = asyncio.get_running_loop()
     reader = asyncio.StreamReader(limit=limit)
     try:
@@ -270,6 +272,39 @@ async def stdio_streams(
             "platform whose event loop cannot poll a pipe."
         ) from exc
     return StreamPair(reader=reader, writer=FileWriter(sink))
+
+
+def _require_pollable(fd: int) -> None:
+    """Refuse a descriptor the event loop cannot wait on, before it tries.
+
+    ``connect_read_pipe`` is not the guard it looks like. Handed ``/dev/null`` or a
+    regular file it *succeeds*, and the failure arrives later, inside a loop
+    callback, as an unhandled ``PermissionError`` from ``epoll``. The caller sees a
+    raw double traceback it cannot catch and a server that then waits forever for a
+    request that can never arrive.
+
+    That is not an exotic case: ``ronin mcp-serve < /dev/null &`` is how a daemon
+    gets launched, and redirecting stdin from a file is how anyone would script one.
+
+    Registering the descriptor with a selector asks exactly the question the loop is
+    about to ask — a pipe, a socket and a terminal register; ``/dev/null`` and a
+    regular file raise ``EPERM`` — and asking it here turns an asynchronous hang
+    into a synchronous, catchable refusal that names the fix.
+    """
+    selector = selectors.DefaultSelector()
+    try:
+        selector.register(fd, selectors.EVENT_READ)
+    except (OSError, ValueError) as exc:
+        raise TransportClosed(
+            f"stdin cannot be waited on ({type(exc).__name__}: {exc}). An MCP stdio "
+            "server needs a pipe, a socket or a terminal on fd 0 — /dev/null and a "
+            "regular file cannot be polled, so the server would start and then never "
+            "answer. Connect a real pipe, or serve on injected streams."
+        ) from exc
+    else:
+        selector.unregister(fd)
+    finally:
+        selector.close()
 
 
 def _binary(stream: object, name: str) -> IO[bytes]:

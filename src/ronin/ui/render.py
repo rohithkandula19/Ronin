@@ -70,6 +70,44 @@ _CONTROLS: Final = frozenset(
 ) - {"\n", "\t"}
 _CONTROL_TABLE: Final = str.maketrans(dict.fromkeys(_CONTROLS))
 
+#: Characters that are invisible but change how the visible ones are *read*. The C0
+#: and C1 ranges above stop at U+009F and every one of these is past it — which is
+#: exactly how a test that exhaustively covered "control characters" passed while a
+#: shell command could still be shown to a human backwards.
+#:
+#: Two families, one effect. **Bidi controls** reorder a line, so `rm -rf ~ #\u202e...`
+#: renders with the comment first and the destructive half tucked behind it, and the
+#: reader approves what they read rather than what runs. **Invisible spacing** and
+#: **tag characters** make two different strings render identically, so a diff can
+#: show one identifier while containing another, or carry a whole hidden message.
+#:
+#: U+200C and U+200D are deliberately absent. Zero-width non-joiner and joiner are
+#: required to render Persian, Hindi and emoji sequences correctly, they cannot
+#: reorder anything, and an identifier containing one is a syntax error in every
+#: language this program edits. Marking them would corrupt legitimate text to defend
+#: against nothing.
+_INVISIBLE: Final = frozenset(
+    chr(code)
+    for code in (
+        0x061C,  # ARABIC LETTER MARK
+        0x180E,  # MONGOLIAN VOWEL SEPARATOR
+        0x200B,  # ZERO WIDTH SPACE
+        0x200E,  # LEFT-TO-RIGHT MARK
+        0x200F,  # RIGHT-TO-LEFT MARK
+        *range(0x202A, 0x202F),  # LRE RLE PDF LRO RLO
+        *range(0x2060, 0x2065),  # WORD JOINER, invisible times/separator/plus
+        *range(0x2066, 0x206A),  # LRI RLI FSI PDI
+        0xFEFF,  # ZERO WIDTH NO-BREAK SPACE / BOM
+        *range(0xE0000, 0xE0080),  # tag characters
+    )
+)
+
+#: Rendered, not deleted. Deleting makes the doctored string and the honest one look
+#: identical on screen, which is the attack succeeding quietly; showing `<U+202E>`
+#: leaves the text readable, inert, and the attempt visible — the same choice
+#: :func:`strip_controls` already makes for an escape sequence's payload.
+_INVISIBLE_TABLE: Final = str.maketrans({char: f"<U+{ord(char):04X}>" for char in _INVISIBLE})
+
 
 def strip_controls(text: str) -> str:
     """Remove terminal control characters from text we did not write.
@@ -82,6 +120,14 @@ def strip_controls(text: str) -> str:
     already on screen. The last of those is the one that matters here: this program
     asks people to approve commands by reading them, and output that can paint over
     the prompt undermines the only check the user has.
+
+    Painting over the prompt is not the only way to break reading it. A bidi control
+    reorders the line instead: ``rm -rf ~ #\u202e...`` shows the comment first and hides
+    the destructive half behind it, so the user approves a command they never saw.
+    Those characters live past U+009F, outside the ranges below, which is how an
+    exhaustive control-character test passed while this went through untouched. They
+    are rendered as ``<U+202E>`` rather than removed, because removing them would
+    leave the doctored line looking exactly like an honest one.
 
     The escape *character* goes and the rest of the payload stays, so
     ``hello \\x1b]0;PWNED\\x07 world`` renders as ``hello ]0;PWNED world``: inert, and
@@ -96,7 +142,7 @@ def strip_controls(text: str) -> str:
     is a compiler's colour codes in tool output, which is already truncated to a
     summary line.
     """
-    return text.translate(_CONTROL_TABLE)
+    return text.translate(_CONTROL_TABLE).translate(_INVISIBLE_TABLE)
 
 
 def escape_markup(text: str) -> str:

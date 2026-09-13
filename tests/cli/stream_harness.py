@@ -636,6 +636,9 @@ def build_runtime(
     git: Callable[..., Any] | None = None,
     transcript: Transcript | None = None,
     context_window: int = 4_000,
+    retained_paths: int | None = None,
+    retained_chars: int | None = None,
+    escalate_to_fit: bool = False,
     default_decision: Decision = Decision.ALLOW,
     asker: Asker | None = None,
     session_tools: RealToolRegistry | None = None,
@@ -682,7 +685,20 @@ def build_runtime(
         taint=TaintTracker(),
         hooks=HookRunner(config=HookConfig()),
         checkpoints=store,
-        compaction=CompactionPolicy(context_window=context_window),
+        # Both ceilings off and no escalation by default, which is *not* the shipped
+        # configuration:
+        # these harness sessions are deliberately tiny-windowed and touch dozens of
+        # scripted files, so the shipped ceiling would evict a test's own subject
+        # behind its filler, and the char ceiling would clamp the padded bodies these
+        # tests assert survive in full — either way an assertion passes or fails for
+        # a reason the test never mentions, and escalation would surrender a path a
+        # test is about. A test about any of the three passes it.
+        compaction=CompactionPolicy(
+            context_window=context_window,
+            max_retained_paths=retained_paths,
+            max_retained_chars=retained_chars,
+            escalate_to_fit=escalate_to_fit,
+        ),
         system=system,
         transcript=transcript,
     )

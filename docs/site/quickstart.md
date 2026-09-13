@@ -274,7 +274,49 @@ python -m ronin api --host 127.0.0.1 --port 8080   # /v1/chat/completions + /v1/
 Each request runs a full turn and comes back in the provider-native response shape.
 Streaming (SSE) is a named non-goal for now, not a half-built one.
 
-## 10. what to configure next
+## 10. watch a running session from somewhere else
+
+A turn is an event stream with one consumer — the terminal you started it in. `--watch`
+gives it more:
+
+```sh
+python -m ronin --watch "refactor the parser"
+python -m ronin --watch-port 8900 "refactor the parser"   # a port your tunnel forwards
+```
+
+It prints one URL with a freshly minted token on it:
+
+```
+watch: http://127.0.0.1:52411/events?token=…
+  read-only, loopback only — forward the port to reach it from elsewhere
+```
+
+That URL is a **server-sent events** stream: every event the session emits, as JSON, in
+the same shape `--output-format stream-json` writes. `curl` it, or open it with three
+lines of JavaScript:
+
+```js
+const stream = new EventSource(url)
+stream.onmessage = (frame) => console.log(JSON.parse(frame.data))
+```
+
+Four things worth knowing before you point a phone at it:
+
+* **Read-only.** Nothing here accepts a prompt, an approval or a steer. A watcher can
+  see the session; it cannot touch it. Approving an edit from a device the session has
+  never met is a bigger decision than a transport, and it is not answered by accident
+  here.
+* **Loopback, always.** The stream carries file paths, source, diffs and the output of
+  every command, in plaintext. Reach it from another machine with `ssh -L 8900:localhost:8900`
+  or a mesh VPN — something that encrypts — rather than by binding it to your LAN.
+* **The token is required and is not written to disk.** It lives for the session. Set
+  `RONIN_WATCH_TOKEN` if a wrapper script needs a stable one.
+* **A watcher can never slow the session down.** Events go into a bounded ring; a
+  watcher that stops reading falls behind and is told, on its next event, exactly how
+  many it missed. A tab left open on a train does not stall your terminal, and a
+  reconnect resumes where it left off — the browser sends `Last-Event-ID` by itself.
+
+## 11. what to configure next
 
 * `.ronin/settings.json` — permission rules and modes: [config.md](config.md)
 * `.ronin/hooks.json` — shell commands on lifecycle events, and the exit-code-2 block:
