@@ -37,15 +37,18 @@ import argparse
 import asyncio
 import os
 import sys
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
+import threading
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
-from typing import TextIO
+from typing import Any, TextIO
 
 from ..agents.hooks import MATCH_ALL
 from ..context.compaction import context_breakdown
 from ..context.fileindex import FileIndex
+from ..core.fanout import EventHub
 from ..core.types import (
     ApprovalRequest,
     Budget,
@@ -78,6 +81,7 @@ from ..ui.headless import (
     ApprovalTracker,
     OutputFormat,
     exit_code_for,
+    failed_before_start,
     run_headless,
 )
 from ..ui.reduce import ViewState, reduce_event, summarize_arguments, summarize_result
@@ -105,6 +109,13 @@ from .status import context_share, current_branch
 from .stream import DEFAULT_MAX_ITERATIONS, CompactionPairingError
 from .telemetry_cmd import TelemetryOptions, Verb
 from .telemetry_cmd import run as run_telemetry
+from .watch import (
+    TOKEN_ENV,
+    WATCH_PATH,
+    bound_address,
+    build_watch_server,
+    mint_token,
+)
 from .wire import load_workspace
 from .wizard import apply_plan, plan_config, plan_first_run, run_smoke, write_config
 
@@ -117,6 +128,20 @@ EXIT_USAGE = EXIT_ERROR
 #: What the wizard is asked before it writes anything. A first run that creates
 #: files in someone's repository without asking is a first run they do not trust.
 WIZARD_QUESTION = "set up .ronin/ for this workspace? [Y/n] "
+
+#: Turns on the locked-down profile without a flag, for a wrapper script or a CI job
+#: that must not be able to forget it.
+RESTRICTED_ENV = "RONIN_RESTRICTED"
+
+#: What counts as "yes" in an environment variable. Deliberately narrow: `0`, `false`
+#: and an empty value all mean no, so `RONIN_RESTRICTED=0` does not silently lock a
+#: session down because the string was non-empty.
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
+def _truthy(value: str) -> bool:
+    return value.strip().lower() in _TRUTHY
+
 
 TUI_QUIT_NOTE = "press ctrl+c to leave."
 
@@ -172,6 +197,26 @@ class Command(StrEnum):
     API = "api"
     PLUGIN = "plugin"
     REPO = "repo"
+
+
+#: The words that may lead a command line. ``run`` and ``version`` are absent on
+#: purpose: neither is typed, they are what a bare prompt and ``--version`` become.
+#: Named once because two places need to know — :func:`parse`, to peel the verb off
+#: the front, and :func:`main`, to insert the ``RONIN_RESTRICTED`` flag *after* it.
+#: When the set lived only inside `parse`, `main` prepended the flag and pushed the
+#: verb to position 1, where `parse` no longer looked for it: `RONIN_RESTRICTED=1
+#: ronin mcp-serve` silently started a chat session with "mcp-serve" as its prompt.
+SUBCOMMANDS: frozenset[str] = frozenset(
+    command.value for command in Command if command not in (Command.RUN, Command.VERSION)
+)
+
+#: The commands ``--restricted`` actually changes: each one either opens an agent in
+#: the workspace or reports on it. Everywhere else the flag is refused rather than
+#: accepted and ignored — a security flag that does nothing on some verbs, silently,
+#: is worse than one that does not exist, because the user believes it worked.
+RESTRICTABLE: frozenset[Command] = frozenset(
+    {Command.RUN, Command.DOCTOR, Command.MCP_SERVE, Command.ACP, Command.API}
+)
 
 
 class ExportFormat(StrEnum):
@@ -242,6 +287,15 @@ class Options:
     mode: Mode | None = None
     yolo: bool = False
     sandbox: bool = False
+    #: The locked-down profile: no shell, no web tools, no settings files, and a mode
+    #: that cannot be raised. A flag and an environment variable rather than a
+    #: setting, because a profile a workspace can switch off is not one you can hand
+    #: to an auditor.
+    restricted: bool = False
+    #: ``None`` for no watch stream; a port to serve one on, ``0`` for an ephemeral
+    #: one. A port rather than a bool because "let me watch this" and "on the port my
+    #: tunnel already forwards" are the same request asked twice otherwise.
+    watch_port: int | None = None
     cwd: Path = field(default_factory=lambda: Path("."))
     #: ``None`` for no resume; ``""`` for ``--resume`` with no id (the latest here).
     resume: str | None = None
@@ -459,6 +513,31 @@ def build_parser() -> _Parser:
         "--yolo", action="store_true", help="stop asking; the unconditional deny list still applies"
     )
     parser.add_argument(
+        "--restricted",
+        action="store_true",
+        help=(
+            "locked down: no shell, no web tools, settings files ignored, mode cannot "
+            "be raised (also RONIN_RESTRICTED=1)"
+        ),
+    )
+    # Two flags rather than one `--watch [PORT]`, and the reason is the shape of the
+    # command line this lives on. Ronin takes its prompt as bare words, so an optional
+    # argument swallowed the first one: `ronin --watch fix the test` died with
+    # "invalid int value: 'fix'" — on the most natural way anyone would type it.
+    parser.add_argument(
+        "--watch",
+        action="store_true",
+        help="stream this session's events over SSE on loopback, for a second screen",
+    )
+    parser.add_argument(
+        "--watch-port",
+        dest="watch_port",
+        type=int,
+        default=None,
+        metavar="PORT",
+        help="the port --watch serves on (default: any free one); implies --watch",
+    )
+    parser.add_argument(
         "--sandbox", action="store_true", help="run commands in a sandbox when one is available"
     )
     parser.add_argument(
@@ -508,20 +587,28 @@ def build_parser() -> _Parser:
     )
     parser.add_argument(
         "--max-turns",
-        type=int,
+        type=_positive(int, "int"),
         default=DEFAULT_MAX_ITERATIONS,
         metavar="N",
         help="iterations one turn may take",
     )
     parser.add_argument(
-        "--max-tokens", type=int, default=None, metavar="N", help="token ceiling for the session"
+        "--max-tokens",
+        type=_positive(int, "int"),
+        default=None,
+        metavar="N",
+        help="token ceiling for the session",
     )
     parser.add_argument(
-        "--max-usd", type=float, default=None, metavar="USD", help="dollar ceiling for the session"
+        "--max-usd",
+        type=_positive(float, "float"),
+        default=None,
+        metavar="USD",
+        help="dollar ceiling for the session",
     )
     parser.add_argument(
         "--max-seconds",
-        type=float,
+        type=_positive(float, "float"),
         default=None,
         metavar="S",
         help="wall-clock ceiling for the session",
@@ -696,25 +783,76 @@ def build_parser() -> _Parser:
     return parser
 
 
+def _restriction_refused(namespace: argparse.Namespace, command: Command) -> Usage | None:
+    """Why ``--restricted`` cannot be honoured as asked, or ``None`` if it can.
+
+    Two refusals, both for the same reason: the value of the profile is that its name
+    is the last word on what the session can do, and a ``--restricted`` that is half
+    honoured leaves the user believing the other half.
+
+    The first is a contradiction on one command line. Only a *loosening* is refused --
+    ``--restricted --mode plan`` asks for less than restricted mode already gives,
+    which is the asymmetry the settings privilege ladder already uses: tightening is
+    always allowed. ``Mode`` ranks itself, so this consults that ladder rather than
+    holding a second opinion about which mode is stricter.
+
+    The second is a verb the flag does not reach. ``ronin export --restricted`` writes
+    a transcript either way; accepting the flag there teaches that it is decorative.
+    """
+    if command not in RESTRICTABLE:
+        reachable = ", ".join(
+            sorted(verb.value for verb in RESTRICTABLE if verb is not Command.RUN)
+        )
+        return Usage(
+            f"{PROGRAM}: error: --restricted does nothing for `{command.value}`, which "
+            f"opens no session in this workspace. It applies to a bare prompt and to "
+            f"{reachable}."
+        )
+    loosens = bool(namespace.mode) and Mode(namespace.mode).rank > Mode.ASK.rank
+    raised = [
+        name
+        for name, asked in (
+            ("--yolo", bool(namespace.yolo)),
+            (f"--mode {namespace.mode}", loosens),
+        )
+        if asked
+    ]
+    if raised:
+        return Usage(
+            f"{PROGRAM}: error: --restricted and {', '.join(raised)} ask for opposite "
+            "things — restricted mode exists so the answer is no. Drop one of them."
+        )
+    return None
+
+
+def restricted_argv(argv: Sequence[str], environ: Mapping[str, str]) -> list[str]:
+    """``argv`` with ``--restricted`` inserted if the environment asked for it.
+
+    ``RONIN_RESTRICTED`` becomes the flag rather than a second code path: :func:`parse`
+    is documented pure and takes no environment, and translating here keeps the two
+    spellings exactly equivalent — including the refusal when the same command line
+    also asks for ``--yolo``, which a separate check would have had to remember.
+
+    The flag goes **after** the verb, never before it. :func:`parse` reads the
+    subcommand off the *front* of argv, so a flag prepended to ``mcp-serve`` left
+    ``parse`` looking at ``--restricted`` with the verb one place further along, where
+    it was swallowed as bare prompt words: ``RONIN_RESTRICTED=1 ronin mcp-serve``
+    opened a chat session and asked the model to do "mcp-serve". A bare prompt has no
+    verb to step over, so the flag leads.
+    """
+    arguments = list(argv)
+    value = environ.get(RESTRICTED_ENV)
+    if value is None or not _truthy(value):
+        return arguments
+    at = 1 if arguments and arguments[0] in SUBCOMMANDS else 0
+    return [*arguments[:at], "--restricted", *arguments[at:]]
+
+
 def parse(argv: Sequence[str]) -> Options | Usage:
     """argv to options, or to the usage text that explains why not. Pure."""
     tokens = list(argv)
     command = Command.RUN
-    if tokens and tokens[0] in {
-        Command.DOCTOR.value,
-        Command.EXPORT.value,
-        Command.SESSIONS.value,
-        Command.EVAL.value,
-        Command.DUEL.value,
-        Command.HARVEST.value,
-        Command.TELEMETRY.value,
-        Command.MCP_SERVE.value,
-        Command.MCP.value,
-        Command.ACP.value,
-        Command.API.value,
-        Command.PLUGIN.value,
-        Command.REPO.value,
-    }:
+    if tokens and tokens[0] in SUBCOMMANDS:
         command = Command(tokens.pop(0))
 
     parser = build_parser()
@@ -729,6 +867,19 @@ def parse(argv: Sequence[str]) -> Options | Usage:
         return Options(command=Command.VERSION)
 
     words = " ".join(namespace.words).strip()
+
+    # Before the per-command builders, not inside the ``run`` branch below. Every one
+    # of those builders returns, so a check placed after them ran for exactly one verb:
+    # `--restricted --yolo mcp-serve` was accepted with the contradiction intact, and
+    # `mcp-serve --restricted` built its options without the flag and served an
+    # unrestricted session. Whether the flag is honoured is a property of the verb, and
+    # this is the one place that knows the verb before the options exist.
+    restricted = bool(namespace.restricted)
+    if restricted:
+        refusal = _restriction_refused(namespace, command)
+        if refusal is not None:
+            return refusal
+
     if command is Command.EXPORT:
         return _export_options(namespace, words)
     if command in (Command.EVAL, Command.DUEL):
@@ -773,12 +924,25 @@ def parse(argv: Sequence[str]) -> Options | Usage:
             )
         resume = ""
 
+    watch_port = namespace.watch_port
+    if watch_port is not None and not 0 <= watch_port <= 65535:
+        return Usage(
+            f"{PROGRAM}: error: --watch-port takes a port between 0 and 65535 (0 asks "
+            "for any free one)"
+        )
+    # Naming a port is asking for the stream; requiring both flags would only ever
+    # produce a run where the user typed a port and got no watcher.
+    if watch_port is None and namespace.watch:
+        watch_port = 0
+
     return Options(
         command=command,
         prompt=prompt,
         headless=headless,
         output_format=chosen,
         mode=Mode(namespace.mode) if namespace.mode else None,
+        restricted=restricted,
+        watch_port=watch_port,
         yolo=bool(namespace.yolo),
         sandbox=bool(namespace.sandbox),
         cwd=Path(namespace.cwd),
@@ -853,6 +1017,7 @@ def _mcp_serve_options(namespace: argparse.Namespace, words: str) -> Options | U
     return Options(
         command=Command.MCP_SERVE,
         mode=Mode(namespace.mode) if namespace.mode else None,
+        restricted=bool(namespace.restricted),
         yolo=bool(namespace.yolo),
         sandbox=bool(namespace.sandbox),
         cwd=Path(namespace.cwd),
@@ -888,6 +1053,7 @@ def _acp_options(namespace: argparse.Namespace, words: str) -> Options | Usage:
     return Options(
         command=Command.ACP,
         mode=Mode(namespace.mode) if namespace.mode else None,
+        restricted=bool(namespace.restricted),
         cwd=Path(namespace.cwd),
         record=bool(namespace.record),
         connect_mcp=bool(namespace.connect_mcp),
@@ -913,6 +1079,7 @@ def _api_options(namespace: argparse.Namespace, words: str) -> Options | Usage:
     return Options(
         command=Command.API,
         mode=Mode(namespace.mode) if namespace.mode else None,
+        restricted=bool(namespace.restricted),
         cwd=Path(namespace.cwd),
         record=bool(namespace.record),
         connect_mcp=bool(namespace.connect_mcp),
@@ -1108,6 +1275,38 @@ def _telemetry_options(namespace: argparse.Namespace, words: str) -> Options | U
     )
 
 
+def _positive(kind: Callable[[str], Any], label: str) -> Callable[[str], Any]:
+    """An argparse type for a ceiling: the right kind, and greater than zero.
+
+    Validated here so the refusal comes out in argparse's own voice, before anything
+    is built. Without it the two halves failed in two different wrong ways:
+    ``--max-tokens 0`` reached ``Budget``, whose ``__post_init__`` raised a
+    ``ValueError`` that nothing caught — a raw Python traceback, for a typo on the
+    command line. ``--max-turns 0`` was not a ``Budget`` field at all, so it passed
+    every check and simply ran no iterations: exit 1, empty stdout, and not one word
+    about why.
+
+    The message keeps argparse's own phrasing for a wrong *type* so `--max-usd abc`
+    reads exactly as it always did, and adds a sentence for a wrong *value*, because
+    "0 is invalid" without "omit the flag for no ceiling" leaves the reader guessing
+    at what to type instead.
+    """
+
+    def parse_one(text: str) -> Any:
+        try:
+            value = kind(text)
+        except ValueError:
+            raise argparse.ArgumentTypeError(f"invalid {label} value: {text!r}") from None
+        if value <= 0:
+            raise argparse.ArgumentTypeError(
+                f"must be greater than zero, got {text!r} — a ceiling of zero or less "
+                "stops the run before it starts; omit the flag for no ceiling"
+            )
+        return value
+
+    return parse_one
+
+
 def _budget(namespace: argparse.Namespace) -> Budget | None:
     """A budget only when a ceiling was actually asked for.
 
@@ -1215,6 +1414,14 @@ async def dispatch(
     if options.command is Command.SESSIONS:
         return _sessions(options, streams=streams)
 
+    # Checked before `discover`, which resolves a path without requiring it to
+    # exist — so a typo'd `--cwd` used to become the workspace root, and the first
+    # run then built `.ronin/` and a RONIN.md inside it. A directory that does not
+    # exist is a mistake in the command line, not a workspace to create.
+    if not options.cwd.is_dir():
+        streams.err(f"{PROGRAM}: --cwd {options.cwd} is not a directory\n")
+        return EXIT_USAGE
+
     paths = Paths.discover(options.cwd)
     if options.command in (Command.EVAL, Command.DUEL):
         return await _bench(options, paths, env, streams)
@@ -1237,7 +1444,7 @@ async def dispatch(
 
     if options.command is Command.DOCTOR:
         report = await run_doctor(
-            load_workspace(paths, flags=options.flags, environ=env),
+            load_workspace(paths, flags=options.flags, environ=env, restricted=options.restricted),
             router=_router_or_none(paths, env),
             environ=env,
             detection=detect(env=env, probe=real_probe),
@@ -1277,9 +1484,10 @@ async def dispatch(
             return resumed.exit_code
         for note in agent.loaded.notes:
             streams.err(note.line() + "\n")
-        if options.headless:
-            return await _headless(options, agent, streams)
-        return await _interactive(options, agent, streams, handoff)
+        with _watching(options, agent, env, streams):
+            if options.headless:
+                return await _headless(options, agent, streams)
+            return await _interactive(options, agent, streams, handoff)
     finally:
         if owns:
             await agent.aclose()
@@ -1452,6 +1660,7 @@ async def _acp(
             record=options.record,
             connect_mcp=options.connect_mcp,
             asker=None,
+            restricted=options.restricted,
         )
 
     server = AcpServer(open_agent=open_agent, version=_version())
@@ -1492,6 +1701,7 @@ async def _api(options: Options, paths: Paths, env: Mapping[str, str], streams: 
             record=options.record,
             connect_mcp=options.connect_mcp,
             asker=None,
+            restricted=options.restricted,
         )
 
     streams.err(
@@ -1617,6 +1827,7 @@ async def _first_run(
     *,
     detection: Detection | None = None,
     smoke: Callable[[], Awaitable[bool]] | None = None,
+    requested: bool = False,
 ) -> None:
     """Show the plan, ask, apply it, then get the user to a working model.
 
@@ -1635,6 +1846,26 @@ async def _first_run(
     """
     plan = plan_first_run(paths)
     if not plan.empty:
+        if requested:
+            # `/init` is the request. Asking again would be asking a question whose
+            # answer has already been given — and in the TUI the injected `ask`
+            # returns "", which the check below reads as yes, so the confirmation
+            # was never a confirmation anyway.
+            for path in apply_plan(plan):
+                streams.out(f"wrote {path}\n")
+            return
+        if not streams.isatty:
+            # `[Y/n]` reads EOF as the empty string, which is the default *yes* —
+            # so `ronin doctor < /dev/null`, a CI step or a cron line wrote
+            # RONIN.md and .ronin/settings.json into the tree with nobody ever
+            # answering. A question nobody can be asked is not consent.
+            streams.err(
+                "first run in this workspace, and nothing is attached to answer "
+                f"the setup question — nothing written. Run {PROGRAM} from a "
+                "terminal to set it up, or `ronin doctor` to see the defaults "
+                "in use.\n"
+            )
+            return
         streams.out("first run in this workspace.\n")
         streams.out(plan.render())
         answer = streams.ask(WIZARD_QUESTION).strip().lower()
@@ -1737,6 +1968,7 @@ async def _open_agent(
             record=options.record,
             connect_mcp=options.connect_mcp,
             asker=asker,
+            restricted=options.restricted,
         )
     except (OSError, ValueError) as exc:
         streams.err(f"{PROGRAM}: could not start a session: {exc}\n")
@@ -1780,14 +2012,102 @@ def _resume(
     return found
 
 
+async def _reported(
+    events: AsyncIterator[Event], failures: list[ProviderError]
+) -> AsyncIterator[Event]:
+    """``events``, with a transport failure turned into an ``Error`` event.
+
+    A provider failure is *raised*, not emitted, so it used to propagate straight
+    through ``run_headless``: ``--output-format json`` wrote **zero bytes** and
+    ``stream-json`` stopped after ``turn_start`` with no ``result`` and no closing
+    event. A consumer that asked for a machine-readable stream got an unterminated
+    one, or nothing at all, and had to parse English off stderr to learn why.
+
+    Converted here rather than inside ``run_headless`` because ``ui`` may import only
+    ``core`` and ``ui`` — it cannot name ``ProviderError``, and that restriction is
+    what keeps every surface testable with no model and no network. This module is
+    where knowing about providers is allowed.
+
+    The exception is captured rather than re-raised: an ``Error`` in the state is
+    already what ``exit_code_for`` counts and what the ``result`` record reports, so
+    the status and the JSON both come out right, and the caller still writes the
+    human sentence to stderr. stdout is the machine's channel, stderr is the
+    person's, and a failure belongs on both.
+    """
+    try:
+        async for event in events:
+            yield event
+    except ProviderError as exc:
+        failures.append(exc)
+        yield Error(message=str(exc) or exc.__class__.__name__, kind="provider")
+
+
+@contextmanager
+def _watching(
+    options: Options, agent: Agent, env: Mapping[str, str], streams: Streams
+) -> Iterator[None]:
+    """Serve this session's events over SSE for as long as it runs, if asked.
+
+    Started *after* the agent assembled: a URL printed before the workspace loaded is
+    one the user reaches for while the session is busy failing to start.
+
+    Loopback, always. The stream is plaintext HTTP carrying source, diffs and command
+    output, and binding it to a LAN interface would be handing that to the network in
+    exchange for saving a tunnel. ``ssh -L`` or a mesh VPN is the supported way to
+    reach it from a phone, and it is the one that encrypts.
+
+    A port that will not bind is a note, not a failure. The session is the thing the
+    user asked for; the watch stream is an extra, and killing the run because 8900 was
+    taken would be the tail wagging the dog.
+    """
+    if options.watch_port is None:
+        yield
+        return
+    hub = EventHub()
+    try:
+        server = build_watch_server(
+            ("127.0.0.1", options.watch_port),
+            hub=hub,
+            token=env.get(TOKEN_ENV) or mint_token(),
+        )
+    except OSError as exc:
+        streams.err(f"note: watch — could not bind port {options.watch_port}: {exc}\n")
+        yield
+        return
+    thread = threading.Thread(target=server.serve_forever, name="ronin-watch", daemon=True)
+    thread.start()
+    streams.err(
+        f"watch: http://{bound_address(server.server_address)}{WATCH_PATH}"
+        f"?token={server.watch.token}\n"
+        "  read-only, loopback only — forward the port to reach it from elsewhere\n"
+    )
+    streams.flush()
+    agent.watched(hub)
+    try:
+        yield
+    finally:
+        agent.watched(None)
+        # Close before shutdown, in that order: closing ends every watcher's stream at
+        # the last event of the session, so a watcher sees the session finish rather
+        # than the socket vanish under it.
+        hub.close()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
 async def _headless(options: Options, agent: Agent, streams: Streams) -> int:
     """``ronin -p``. The exit code is ``run_headless``'s, unchanged."""
+    failures: list[ProviderError] = []
     result = await run_headless(
-        agent.stream(
-            options.prompt,
-            budget=options.budget,
-            max_iterations=options.max_iterations,
-            verify=options.verify,
+        _reported(
+            agent.stream(
+                options.prompt,
+                budget=options.budget,
+                max_iterations=options.max_iterations,
+                verify=options.verify,
+            ),
+            failures,
         ),
         output_format=options.output_format,
         write=streams.out,
@@ -1796,6 +2116,8 @@ async def _headless(options: Options, agent: Agent, streams: Streams) -> int:
     )
     for note in agent.conversation.notes:
         streams.err(f"note: {note}\n")
+    for failure in failures:
+        streams.err(provider_failure_message(failure))
     return result.exit_code
 
 
@@ -2088,7 +2410,7 @@ async def _slash(line: str, agent: Agent, streams: Streams) -> Slash:
     elif name == "init":
         # /init scaffolds the workspace; a running session already has a model, so it
         # does not re-detect or write a models.toml — that is the fresh-install path.
-        await _first_run(agent.loaded.paths, streams)
+        await _first_run(agent.loaded.paths, streams, requested=True)
     else:  # pragma: no cover - every declared command above is wired
         streams.err(
             f"/{name} is a real command but is not wired into this line session. "
@@ -2365,6 +2687,13 @@ def _sessions_by_cost(directory: Path, wanted: SessionsOptions, *, streams: Stre
 #: rather than to go debugging their endpoint.
 _RATE_LIMIT_MARKERS = ("429", "rate limit", "rate_limit", "too many requests")
 
+#: What a config failure looks like. `load_config` and `parse_config` raise the same
+#: `ProviderError` the transport does, so without this a malformed `models.toml` was
+#: reported as "the model could not be reached, after retries and failover" — with a
+#: remedy telling the user to check their endpoint and key. Nothing was reached and
+#: nothing was retried; the file never parsed.
+_CONFIG_MARKERS = ("provider config", "[models] section")
+
 
 def cost_report(agent: Agent) -> str:
     """``/cost``: the session's spend, broken down when the ledger can break it down.
@@ -2442,6 +2771,15 @@ def provider_failure_message(exc: ProviderError) -> str:
     who = f" [{exc.provider}]" if exc.provider else ""
     detail = str(exc).strip() or "the provider gave no detail"
     lowered = detail.lower()
+    if any(marker in lowered for marker in _CONFIG_MARKERS):
+        # Checked first: a config error can carry a filename with "429" in it, and
+        # every other branch here describes a request that was actually attempted.
+        return (
+            "the provider config could not be read, so no request was made.\n"
+            f"  {detail}\n"
+            "  fix the file and run again. `ronin doctor` parses it and names the "
+            "line.\n"
+        )
     if any(marker in lowered for marker in _RATE_LIMIT_MARKERS):
         wait = f" It asked to wait {exc.retry_after}." if exc.retry_after else ""
         return (
@@ -2470,6 +2808,7 @@ def provider_failure_message(exc: ProviderError) -> str:
 def main(argv: Sequence[str] | None = None) -> int:
     """``ronin``'s entry point. Returns the exit code; never calls ``sys.exit``."""
     arguments = sys.argv[1:] if argv is None else list(argv)
+    arguments = restricted_argv(arguments, os.environ)
     parsed = parse(arguments)
     streams = Streams.standard()
     if isinstance(parsed, Usage):
@@ -2500,6 +2839,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         # Retries and failover raise once exhausted. Reaching the user as a stack trace is
         # the worst version of the worst moment, and it lands hardest on the flaky local
         # endpoints Ronin is aimed at.
+        #
+        # A failure *before* the stream opens — an unreadable models.toml, a model the
+        # router cannot build — lands here rather than in `_reported`, and a caller who
+        # asked for JSON must still get JSON. Without this, `--output-format json`
+        # wrote zero bytes for the whole class of config errors and the only account
+        # of what happened was English on stderr.
+        if parsed.output_format in (OutputFormat.JSON, OutputFormat.STREAM_JSON):
+            streams.out(failed_before_start(str(exc) or exc.__class__.__name__))
+            streams.flush()
         streams.err(provider_failure_message(exc))
         return EXIT_ERROR
 

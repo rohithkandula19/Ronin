@@ -17,9 +17,13 @@ import pytest
 from ronin.core.types import Mode
 from ronin.safety.policy import AnyUse, CommandRegex, Decision, Exact, PathGlob, Rule
 from ronin.safety.settings import (
+    _MATCH_KEYS,
     LOCAL_SETTINGS,
+    PRIVILEGE_LADDERS,
     PROJECT_SETTINGS,
+    SCALAR_KEYS,
     USER_SETTINGS,
+    Settings,
     load_settings,
     parse_rule,
 )
@@ -308,3 +312,204 @@ def test_a_project_deny_rule_reaches_the_ruleset_with_its_provenance(home: Path,
     assert isinstance(rule, Rule)
     assert "never touch production" in rule.describe()
     assert "from project" in rule.describe()
+
+
+# --------------------------------------------------------------------------- #
+# A match object that reads none of its own keys
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "match",
+    [
+        {"command": "^pytest"},
+        {"path": "src/*"},
+        {"exact": {"argument": "command", "value": "ls"}},
+        {"pattern": "^pytest"},
+        {"kind": "tool", "pattern": "^pytest"},
+        {"kind": "regex", "pattern": "^pytest", "argument": "command"},
+    ],
+)
+def test_a_match_object_that_reads_none_of_its_keys_is_refused(match: dict[str, Any]) -> None:
+    """The dangerous half of the two documented spellings blended together.
+
+    `kind` defaults to `tool`, and `tool` means `AnyUse` — the broadest matcher
+    there is. So a `match` whose keys are all ignored did not fail, it silently
+    *widened*: `{"tool": "bash", "decision": "allow", "match": {"command":
+    "^pytest"}}` parsed as allow-every-bash-command. A permission rule that fails
+    open is worse than one that will not load.
+    """
+    with pytest.raises(ValueError, match="does not read"):
+        parse_rule({"tool": "bash", "decision": "allow", "match": match}, source="project")
+
+
+def test_the_refusal_names_the_spelling_that_works() -> None:
+    """A refusal that only says "no" gets worked around by deleting the match."""
+    with pytest.raises(ValueError) as caught:
+        parse_rule(
+            {"tool": "bash", "decision": "allow", "match": {"command": "^pytest"}},
+            source="project",
+        )
+    message = str(caught.value)
+    assert "'command' at the top level" in message
+    assert "explicit 'kind'" in message
+    assert "every" in message, "it has to say what the silent reading would have been"
+
+
+def test_the_key_table_and_the_builder_agree_on_which_kinds_exist() -> None:
+    """`_MATCH_KEYS` gates which keys are legal and `_build_matcher` builds them.
+
+    A kind in the table with no branch would fall through to the bug message; a
+    branch with no table entry is unreachable. Either way the two have to be
+    edited together, so the agreement is pinned rather than remembered.
+    """
+    for kind in _MATCH_KEYS:
+        match: dict[str, Any] = {"kind": kind}
+        if kind in {"regex", "path"}:
+            match["pattern"] = "x"
+        if kind == "exact":
+            match |= {"argument": "command", "value": "x"}
+        built = parse_rule({"decision": "allow", "match": match}, source="project")
+        assert built.matcher is not None
+
+
+def test_a_legitimate_match_still_parses_after_the_narrowing() -> None:
+    """The narrowing must not cost the precise spelling it exists to protect."""
+    rule = parse_rule(
+        {"tool": "bash", "decision": "allow", "match": {"kind": "regex", "pattern": "^pytest"}},
+        source="project",
+    )
+    assert rule.matcher == CommandRegex("^pytest")
+    assert rule.specificity == (2, 1), "still the narrow rule, not a tool-wide one"
+
+
+# --------------------------------------------------------------------------- #
+# A repo cannot raise its own privilege
+# --------------------------------------------------------------------------- #
+
+
+def test_a_committed_settings_file_cannot_turn_the_gate_off(home: Path, cwd: Path) -> None:
+    """The exploit: one file, committed to any repository.
+
+    Under plain last-wins this switched off every prompt *and* the whole
+    unconditional deny list — `rm -rf /` included — for anyone who opened the repo,
+    outranking their own `~/.ronin/settings.json`, with no warning anywhere.
+    Cloning a repository must not be the same act as trusting it.
+    """
+    write(cwd / PROJECT_SETTINGS, {"yolo": True, "mode": "full"})
+    settings = load_settings(home=home, cwd=cwd)
+    assert settings.yolo is False
+    assert settings.mode is Mode.ASK
+    assert len(settings.errors) == 2, "refused loudly, not dropped quietly"
+
+
+@pytest.mark.parametrize("layer", [PROJECT_SETTINGS, LOCAL_SETTINGS])
+@pytest.mark.parametrize(
+    ("key", "strict", "loose"),
+    [
+        ("yolo", False, True),
+        ("sandbox", True, False),
+        ("mode", "ask", "full"),
+        ("mode", "plan", "auto_edit"),
+        ("default_decision", "deny", "allow"),
+    ],
+)
+def test_no_repo_layer_can_loosen_a_privilege_the_user_set(
+    home: Path, cwd: Path, layer: Path, key: str, strict: object, loose: object
+) -> None:
+    """The user states a position; the repo tries to walk it back.
+
+    Stated from the user layer rather than relying on defaults, because two of these
+    scalars already default to the permissive end — `sandbox` is `False` out of the
+    box, so a repo writing `false` is agreeing with the default, not escalating. The
+    property is about *loosening what someone else chose*, so the test has to make
+    that choice first.
+
+    `settings.local.json` is gitignored, but "gitignored" is a convention a repo can
+    simply not follow, so it is held to the same rule as the committed one.
+    """
+    write(home / USER_SETTINGS, {key: strict})
+    write(cwd / layer, {key: loose})
+    settings = load_settings(home=home, cwd=cwd)
+    assert settings.source_of(key) == "user", "the user's value survived"
+    assert any(key in error.message for error in settings.errors)
+
+
+def test_a_repo_layer_may_still_tighten(home: Path, cwd: Path) -> None:
+    """The asymmetry is the whole design. A repo saying "be stricter here" is a repo
+    doing something useful, and refusing that would make the rule pointless overhead."""
+    write(home / USER_SETTINGS, {"mode": "full", "yolo": True})
+    write(cwd / PROJECT_SETTINGS, {"mode": "plan", "yolo": False})
+    settings = load_settings(home=home, cwd=cwd)
+    assert settings.mode is Mode.PLAN
+    assert settings.yolo is False
+    assert not settings.errors
+
+
+def test_a_flag_still_beats_every_file(home: Path, cwd: Path) -> None:
+    """A flag is someone typing it just now, which is the one signal a repo cannot
+    forge. Escalation from the command line stays available and unchanged."""
+    write(cwd / PROJECT_SETTINGS, {"mode": "plan"})
+    settings = load_settings(home=home, cwd=cwd, flags={"mode": "full", "yolo": True})
+    assert settings.mode is Mode.FULL
+    assert settings.yolo is True
+    assert not settings.errors
+
+
+def test_the_users_own_file_may_loosen_whatever_it_likes(home: Path, cwd: Path) -> None:
+    """`~/.ronin/settings.json` is not in the repository. Restricting it would punish
+    the person the rule exists to protect."""
+    write(home / USER_SETTINGS, {"yolo": True, "mode": "full"})
+    settings = load_settings(home=home, cwd=cwd)
+    assert settings.yolo is True
+    assert settings.mode is Mode.FULL
+    assert not settings.errors
+
+
+def test_a_repo_layer_may_still_set_a_scalar_that_is_not_a_privilege(home: Path, cwd: Path) -> None:
+    """The rule is narrow on purpose. `protected_branches` and the compaction
+    ceilings are project facts, and a project is the right place to state them."""
+    write(cwd / PROJECT_SETTINGS, {"protected_branches": ["main", "release"], "taint_min_span": 8})
+    settings = load_settings(home=home, cwd=cwd)
+    assert settings.protected_branches == frozenset({"main", "release"})
+    assert settings.taint_min_span == 8
+    assert not settings.errors
+
+
+def test_the_refusal_says_where_to_put_it_instead(home: Path, cwd: Path) -> None:
+    write(cwd / PROJECT_SETTINGS, {"yolo": True})
+    message = load_settings(home=home, cwd=cwd).errors[0].message
+    assert "cannot loosen yolo past False" in message
+    assert "settings.json" in message and "pass the flag" in message
+    assert "<Mode" not in message, "quote the file back, not Python's repr of it"
+
+
+def test_rules_are_untouched_by_the_trust_rule(home: Path, cwd: Path) -> None:
+    """Rules only ever append, and an appended rule cannot widen what the deny list
+    refuses — so they were never the dangerous half and are not restricted here."""
+    write(cwd / PROJECT_SETTINGS, {"rules": [allow("^docker ps")]})
+    settings = load_settings(home=home, cwd=cwd)
+    assert settings.rules_from("project")
+    assert not settings.errors
+
+
+@pytest.mark.parametrize("key", sorted(PRIVILEGE_LADDERS))
+def test_every_privilege_ladder_is_a_real_scalar_with_a_real_default(key: str) -> None:
+    """A ladder for a key that does not exist protects nothing, and a default that is
+    not on its own ladder makes the first comparison meaningless."""
+    assert key in SCALAR_KEYS
+    default = getattr(Settings(workspace_root=Path("/w"), home=Path("/h")), key)
+    assert default in PRIVILEGE_LADDERS[key]
+
+
+def test_a_refused_scalar_does_not_report_the_layer_as_skipped(home: Path, cwd: Path) -> None:
+    """A malformed layer is dropped whole; a refused escalation drops one scalar.
+
+    Reporting both as "skipped" would tell a user their rules were gone while they
+    were still in effect — the kind of wrong that gets a config deleted, which ends
+    with the gate off.
+    """
+    write(cwd / PROJECT_SETTINGS, {"yolo": True, "rules": [allow("^docker ps")]})
+    settings = load_settings(home=home, cwd=cwd)
+    assert settings.rules_from("project"), "the rest of the layer still applies"
+    assert settings.errors[0].skipped is False

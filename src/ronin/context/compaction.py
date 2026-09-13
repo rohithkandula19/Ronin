@@ -42,7 +42,7 @@ import math
 from collections.abc import Awaitable, Callable, Container, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from ..core.types import (
     Message,
@@ -133,6 +133,16 @@ PATH_ARGUMENT_KEYS: tuple[str, ...] = (
 )
 
 
+#: Ceiling on one retained tool result. Roughly a thousand tokens: enough to read
+#: what a file holds, and small enough that a full retained set is a fraction of the
+#: window rather than most of it.
+DEFAULT_MAX_RETAINED_CHARS: Final = 4_000
+
+#: How many paths keep a verbatim result. Twenty covers the working set of an
+#: ordinary session; past that, the oldest are surrendered and named.
+DEFAULT_MAX_RETAINED_PATHS: Final = 20
+
+
 @dataclass(frozen=True, slots=True)
 class CompactionPolicy:
     """When to compact and what is untouchable when it happens."""
@@ -143,24 +153,34 @@ class CompactionPolicy:
     #: Keep the most recent tool result per unique file path, in full.
     retain_tool_results_per_path: bool = True
     #: Ceiling on one retained result, in characters; ``None`` for no ceiling.
-    #: Defaults to no ceiling because the point of retention is *full* text; a
-    #: caller whose files are enormous can bound it and get a marked truncation.
-    max_retained_chars: int | None = None
+    #:
+    #: Bounded by default. Retention re-emits the latest result per path through
+    #: *every* fold, so one oversized result is not paid for once — it is paid for
+    #: on every turn for the rest of the session, and the per-tool ceiling above it
+    #: is 60_000 characters. :data:`DEFAULT_MAX_RETAINED_CHARS` is an excerpt large
+    #: enough to answer "what is in this file" and small enough that twenty of them
+    #: are not the context window. A clamped result is marked, never silently cut.
+    max_retained_chars: int | None = DEFAULT_MAX_RETAINED_CHARS
     #: Ceiling on how many paths are retained at all; ``None`` for no ceiling.
-    #: Unbounded by default, and that default is load-bearing: it is what makes a
-    #: file edited in turn 3 still answerable in turn 200. Setting it keeps the
-    #: most recently touched paths and **gives that guarantee up** — a session
-    #: that touches more unique files than the window can hold their results is
-    #: the case where compaction alone cannot get under the trigger, and the
-    #: caller has to choose which property to keep.
-    max_retained_paths: int | None = None
+    #:
+    #: This was unbounded, and that was a deliberate trade: it is what made a file
+    #: edited in turn 3 still readable in turn 200. It is now bounded, which gives
+    #: that guarantee up in its absolute form and keeps it in a weaker one — the
+    #: most recently touched :data:`DEFAULT_MAX_RETAINED_PATHS` paths stay readable,
+    #: and a path that falls out is **named** in
+    #: :attr:`CompactionResult.surrendered_paths` rather than vanishing. "Lost, and
+    #: you were told which" is a different thing from "lost".
+    max_retained_paths: int | None = DEFAULT_MAX_RETAINED_PATHS
     #: Whether compaction may surrender older retained paths on its own when the
-    #: folded transcript still would not fit the window. Off by default, and that
-    #: default is the same decision as the unbounded ceilings above: an over-budget
-    #: transcript is a *reported* problem the caller can act on, while a dropped file
-    #: is a silent, permanent loss. Turn it on for long unattended runs, where fitting
-    #: matters more than remembering and nobody is reading the notes.
-    escalate_to_fit: bool = False
+    #: folded transcript still would not fit the window.
+    #:
+    #: On by default. The argument for leaving it off was that a dropped file is a
+    #: silent, permanent loss — and that argument no longer holds, because the drop
+    #: is not silent: every surrendered path is returned by name and the CLI prints
+    #: them. What is left is the real choice between a session that keeps every file
+    #: and does not fit, and one that fits and says which files it let go of. A
+    #: transcript that cannot fit its own window does not run at all.
+    escalate_to_fit: bool = True
 
     def __post_init__(self) -> None:
         if self.context_window <= 0:
@@ -694,7 +714,9 @@ async def compact(
     ]
 
     summary, error = await _summarize(foldable, summarizer)
-    retained = _retained_couples(foldable, policy) if policy.retain_tool_results_per_path else []
+    retained, cut_by_ceiling = (
+        _retained_couples(foldable, policy) if policy.retain_tool_results_per_path else ([], ())
+    )
     retained, surrendered = _fit_retention(
         retained,
         policy=policy,
@@ -757,7 +779,10 @@ async def compact(
         summarizer_error=error,
         missing_sections=missing_sections(summary),
         dropped_blocks=repaired,
-        surrendered_paths=surrendered,
+        # Both ways a path can be lost, reported through one field: the static
+        # ceiling and the fit-to-window escalation. A caller asking "what did
+        # this fold give up" wants one answer, not two half-answers.
+        surrendered_paths=(*cut_by_ceiling, *surrendered),
         trigger_tokens=policy.trigger_tokens,
     )
 
@@ -937,11 +962,17 @@ def _provisional_tokens(
 
 def _retained_couples(
     messages: Sequence[Message], policy: CompactionPolicy
-) -> list[tuple[str, tuple[Message, Message]]]:
+) -> tuple[list[tuple[str, tuple[Message, Message]]], tuple[str, ...]]:
     """One synthesized call/result couple per unique path, in first-call order.
 
     Synthesized rather than reused: the original assistant message usually carries
     several calls, and keeping it whole to save one result orphans the others.
+
+    Returns the couples *and the paths the ceiling cut*. Reporting them is not a
+    nicety: ``max_retained_paths`` used to drop the oldest silently, so only paths
+    lost to :func:`_fit_retention` were ever named and a path lost to the static
+    ceiling simply stopped existing. "Lost, and you were told which" is the whole
+    difference between a ceiling and a leak.
     """
     latest = latest_tool_result_per_path(messages)
     order: dict[str, int] = {}
@@ -953,9 +984,11 @@ def _retained_couples(
             if path is not None and path in latest:
                 order[path] = index
     selected = sorted(latest, key=lambda p: order.get(p, 0))
+    cut: tuple[str, ...] = ()
     if policy.max_retained_paths is not None and len(selected) > policy.max_retained_paths:
         # Keep the most recently touched. See the field's docstring for what this
         # costs: an early-turn file can fall out of the retained set entirely.
+        cut = tuple(selected[: -policy.max_retained_paths])
         selected = selected[-policy.max_retained_paths :]
     couples: list[tuple[str, tuple[Message, Message]]] = []
     for path in selected:
@@ -993,7 +1026,7 @@ def _retained_couples(
                 ),
             )
         )
-    return couples
+    return couples, cut
 
 
 def repair_pairing(messages: Sequence[Message]) -> tuple[list[Message], int]:

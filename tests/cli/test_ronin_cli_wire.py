@@ -102,8 +102,9 @@ def test_a_workspace_with_every_config_source_loads_them_all_with_provenance(
     loaded = load_workspace(full_workspace(tmp_path))
 
     assert loaded.mode is Mode.AUTO_EDIT
-    assert loaded.settings.source_of("mode") == "project"
+    assert loaded.settings.source_of("mode") == "user"
     assert loaded.settings.source_of("protected_branches") == "user"
+    assert loaded.settings.source_of("max_retained_paths") == "project"
     assert loaded.settings.source_of("taint_min_span") == "local"
     assert loaded.memory.paths() == ("RONIN.md",)
     assert "pkg/thing.py" in loaded.repo_map.paths

@@ -369,19 +369,26 @@ def test_a_scalar_setting_of_the_wrong_type_is_refused_with_its_range(
 
 def test_every_legal_scalar_loads_and_reports_where_it_came_from(tmp_path: Path) -> None:
     """The control for all eight refusals above, and the provenance check: a user
-    debugging a surprising decision needs to know which file set the value."""
+    debugging a surprising decision needs to know which file set the value.
+
+    Written to the *user* layer rather than the project one. `mode: auto_edit` is a
+    loosening, and a repo file is not allowed to loosen — that is
+    `PRIVILEGE_LADDERS`, tested on its own. Here the question is only whether each
+    scalar parses, so the value is put in a file whose trust is not in doubt.
+    """
+    home = tmp_path / "home"
     write_settings(
-        tmp_path,
+        home,
         '{"yolo": false, "sandbox": true, "taint_min_span": 8, "mode": "auto_edit",'
         ' "default_decision": "deny", "protected_branches": ["main", "release"]}',
     )
-    loaded = load_settings(cwd=tmp_path, home=tmp_path / "nohome")
+    loaded = load_settings(cwd=tmp_path, home=home)
     assert not loaded.errors, [str(error) for error in loaded.errors]
     assert loaded.taint_min_span == 8
     assert loaded.mode is Mode.AUTO_EDIT
     assert loaded.default_decision is Decision.DENY
     assert loaded.protected_branches == frozenset({"main", "release"})
-    assert loaded.source_of("taint_min_span") == "project"
+    assert loaded.source_of("taint_min_span") == "user"
 
 
 # --------------------------------------------------------------------------- #

@@ -74,6 +74,7 @@ class DenyCode(StrEnum):
     SECRET_WRITE = "secret_write"
     KEY_MATERIAL_READ = "key_material_read"
     OUTSIDE_WORKSPACE = "outside_workspace"
+    UNRESOLVABLE_TARGET = "unresolvable_target"
     FORK_BOMB = "fork_bomb"
 
 
@@ -194,6 +195,19 @@ DENY_REASONS: Mapping[DenyCode, DenyReason] = {
             "keep writes inside the workspace, or under /tmp if the file is genuinely temporary"
         ),
     ),
+    DenyCode.UNRESOLVABLE_TARGET: DenyReason(
+        why=(
+            "the file this would write is named by a command substitution or a "
+            "variable, so what it actually points at is decided when the command "
+            "runs and cannot be checked before it does — confinement to the "
+            "workspace is a claim nobody can make about it"
+        ),
+        alternative=(
+            "write the literal path you mean, relative to the workspace — e.g. "
+            "`> build/out.txt`. If the path genuinely has to be computed, compute "
+            "it, show it, and then write to it as a literal in the next command"
+        ),
+    ),
     DenyCode.FORK_BOMB: DenyReason(
         why="it exhausts the process table, which takes the whole machine down with it",
         alternative="if you are load-testing, bound the concurrency and target one process",
@@ -281,6 +295,26 @@ def _no_checkpoint() -> bool:
     inside a policy check is a hidden I/O dependency that makes tests need a repo.
     """
     return False
+
+
+#: What makes a word's value unknowable until the command runs: a command
+#: substitution in either spelling, or a parameter expansion. ``$HOME`` and
+#: ``${HOME}`` are absent on purpose — :meth:`Denylist.expand` resolves those two
+#: before this is consulted, which is why ``> $HOME/.bashrc`` was already denied
+#: while ``> $FOO`` was not.
+_DYNAMIC = re.compile(r"\$\(|`|\$\{|\$[A-Za-z_]")
+
+
+def is_dynamic(word: str) -> bool:
+    """Whether ``word`` names a file that only exists once the shell expands it.
+
+    Deliberately answered on the *expanded* word, so the two spellings of ``$HOME``
+    stay resolvable and everything else is treated as unknown. A conservative
+    "unknown" is the only safe reading for a write target: the alternative is what
+    this replaced, where an unresolvable path was read as a literal filename and
+    therefore looked like it sat inside the workspace.
+    """
+    return bool(_DYNAMIC.search(word))
 
 
 @dataclass(frozen=True, slots=True)
@@ -566,6 +600,19 @@ class Denylist:
     def _path_hits(
         self, word: str, base: Path, *, write: bool, subject: str = ""
     ) -> Iterator[DenyHit]:
+        if write and is_dynamic(self.expand(word)):
+            # A write target built at runtime cannot be confined, because there is
+            # nothing yet to confine. Treating it as a literal filename is what made
+            # `curl -o $(echo /home/dev/.bashrc) …` resolve to *allow* while the same
+            # command with the path spelled out was denied: `normpath` kept the
+            # substitution as a path component, so the result sat inside the workspace
+            # textually and `path.name` became `.bashrc)`, missing every name test.
+            yield DenyHit(
+                code=DenyCode.UNRESOLVABLE_TARGET,
+                subject=subject or word,
+                detail=f"`{word}` is decided when the command runs",
+            )
+            return
         path = self.resolve(word, base)
         if str(path).startswith("/dev/"):
             # Devices are not files with a workspace: the block-device rule and the

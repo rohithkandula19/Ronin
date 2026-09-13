@@ -69,7 +69,6 @@ from .providers.accounting import Ledger
 from .providers.bridge import LoopClient
 from .providers.router import Role as ModelRole
 from .providers.router import Router
-from .providers.types import Usage
 from .tools.base import ToolContext
 from .tools.registry import ToolRegistry
 from .tools.task import SubagentRunner, SubagentType
@@ -202,6 +201,7 @@ class SubagentSession:
             self.router.for_subagent() if role is ModelRole.FAST else self.router.client_for(role),
             model=spec.model,
             repo_map=self.repo_map,
+            spec=spec,
         )
         budget = Budget(max_tokens=self.budget_tokens)
         state = AgentState(
@@ -284,7 +284,10 @@ class SubagentSession:
             request_id=f"subagent-{len(self.runs)}-{run.kind}",
             role=role,
             spec=self.router.spec_for(role),
-            usage=Usage(input_tokens=run.spent_tokens, cost_usd=run.spent_usd),
+            # The child's real breakdown, for the same reason the main turn uses
+            # the client's total: a Usage rebuilt from a Budget has every token in
+            # `input_tokens` and no cache counts at all.
+            usage=client.usage,
             reported=run.spent_tokens > 0,
             prefix_fingerprint=fingerprint,
         )
@@ -373,10 +376,16 @@ class Session:
             request_id=request_id,
             role=ModelRole.MAIN,
             spec=self.router.spec_for(ModelRole.MAIN),
-            usage=Usage(
-                input_tokens=final.budget.spent_tokens,
-                cost_usd=final.budget.spent_usd,
-            ),
+            # The client's own measurements, not a Usage rebuilt from the Budget.
+            # The Budget keeps one token number and cannot say which were input,
+            # output or served from cache, so reconstructing from it put every
+            # token in `input_tokens` — which is why `/cost` reported `cache 0%`
+            # for every session and priced output at the input rate.
+            #
+            # Taken rather than read: this writes one row per turn, and the client
+            # is long-lived, so the running total would bill each turn for every
+            # turn before it.
+            usage=self.main.take_usage(),
             reported=final.budget.spent_tokens > 0,
             prefix_fingerprint=fingerprint,
         )
@@ -430,6 +439,7 @@ def build_session(
         model=main_spec.model,
         repo_map=repo_map,
         max_tokens=max_tokens,
+        spec=main_spec,
     )
     return Session(registry=full, subagents=subagents, main=main, router=router)
 

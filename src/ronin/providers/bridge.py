@@ -27,8 +27,10 @@ from collections.abc import AsyncIterator, Sequence
 
 from ..core import protocols as core
 from ..core.types import Message, ToolSpec
+from .accounting import price
 from .assembly import CacheStats, StablePrefix, assemble
 from .base import ModelClient
+from .router import ModelSpec
 from .types import (
     Completed,
     FinishReason,
@@ -36,6 +38,7 @@ from .types import (
     StreamReset,
     TextDelta,
     ThinkingDelta,
+    Usage,
 )
 
 
@@ -68,6 +71,7 @@ class LoopClient:
         max_tokens: int = 4096,
         temperature: float | None = None,
         thinking_budget: int = 0,
+        spec: ModelSpec | None = None,
     ) -> None:
         self._inner = inner
         self._model = model
@@ -75,10 +79,33 @@ class LoopClient:
         self._max_tokens = max_tokens
         self._temperature = temperature
         self._thinking_budget = thinking_budget
+        #: The priced model, so a turn's cost is computed once, here, from the same
+        #: table the ledger uses. ``None`` keeps the provider's own number and is
+        #: what the tests that do not care about money pass.
+        self._spec = spec
         self.cache_stats = CacheStats()
+        #: Every ``Usage`` this client has seen, summed. The loop's ``Budget`` keeps
+        #: one token total and cannot say which were input, output, or served from
+        #: cache — so the ledger used to rebuild a synthetic ``Usage`` from it, which
+        #: is why ``/cost`` reported ``cache 0%`` forever and billed output at the
+        #: input rate. The real breakdown passes through here; keeping it costs one
+        #: addition per turn.
+        self.usage = Usage()
         #: The last request built, for logging and for the demo's output. Kept
         #: rather than recomputed so what is reported is what was actually sent.
         self.last_request: ModelRequest | None = None
+
+    def take_usage(self) -> Usage:
+        """The usage since the last take, and reset.
+
+        Take-and-reset rather than a running total, because the caller records one
+        ledger row per turn: handing back the cumulative figure would bill turn two
+        for turn one as well. A subagent's client is built per run and discarded, so
+        there the distinction does not arise — this exists for the long-lived main
+        client.
+        """
+        taken, self.usage = self.usage, Usage()
+        return taken
 
     def with_model(self, inner: ModelClient, *, model: str) -> LoopClient:
         """This sampling configuration, pointed at a different provider client.
@@ -147,11 +174,19 @@ class LoopClient:
                 yield core.ResetChunk(delta.reason)
             elif isinstance(delta, Completed):
                 self.cache_stats.record(delta.usage, fingerprint=fingerprint)
+                self.usage = self.usage + delta.usage
                 yield core.FinalMessage(
                     message=delta.message,
                     input_tokens=delta.usage.input_tokens + delta.usage.cache_read_tokens,
                     output_tokens=delta.usage.output_tokens,
-                    cost_usd=delta.usage.cost_usd,
+                    # Priced here rather than passed through. No adapter sets
+                    # `Usage.cost_usd` — they parse token counts — so forwarding it
+                    # meant `Budget.spent_usd` stayed 0.0 for the life of every
+                    # session: the status line read $0.0000 and `--max-usd` could
+                    # never fire. `price` prefers the provider's own number when
+                    # there is one and falls back to the config table, which is
+                    # exactly what the ledger already did one layer further out.
+                    cost_usd=price(delta.usage, self._spec) if self._spec else delta.usage.cost_usd,
                     # `finish` and `notes` used to stop here. That made this
                     # translation lossy in a second direction the docstring above
                     # did not claim: a shim that exhausted its repair budget set

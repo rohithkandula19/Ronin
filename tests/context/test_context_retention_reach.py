@@ -1,21 +1,20 @@
 """The compaction escape valve, and whether a user can actually reach it.
 
-Compaction folds the middle and keeps the most recent tool result per file path in
-full. Retention is deliberately unbounded: it is what makes "what did we edit in
-turn 3" answerable in turn 200. The cost is that a session touching more unique
-files than the window can hold lands *above* the trigger even after folding, and
-``CompactionResult.still_over_trigger`` says so.
+Compaction folds the middle and keeps the most recent tool result per file path.
+Retention used to be unbounded: it is what made "what did we edit in turn 3"
+answerable in turn 200. The cost was that a session touching more unique files than
+the window can hold landed *above* the trigger even after folding, and that one
+oversized result was re-sent through every later fold for the rest of the session.
 
-The note it produced told the user to "bound max_retained_paths". That name appeared
-nowhere else in the tree outside this module — no settings key, no flag, no command.
-The remedy was unreachable, which is the bug these tests close.
+Both ceilings now have defaults and escalation is on, so the unbounded behaviour is
+a configuration rather than the shipped one. **Every test here therefore states its
+policy explicitly.** Relying on the defaults would make these tests assertions about
+what the defaults happen to be, and they are about the mechanism: what the ceilings
+do, what escalation surrenders, and that nothing is dropped without being named.
 
-Two mechanisms, and the split between them is the point:
-
-* the ceilings are **settable**, so the printed advice is actionable;
-* escalation — compaction surrendering older paths by itself — is **opt-in**,
-  because an over-budget transcript is a reported problem the caller can act on
-  while a dropped file is a silent, permanent loss.
+The reachability point the module was written for still stands: the ceilings are
+settable from ``settings.json``, so the advice the over-budget note prints is
+something a user can act on.
 
 Everything here is offline: a scripted transcript and a fixed summarizer.
 """
@@ -28,7 +27,12 @@ from pathlib import Path
 import pytest
 from context_harness import fake_summarizer, scripted_session, transcript_text
 
-from ronin.context.compaction import CompactionPolicy, compact
+from ronin.context.compaction import (
+    DEFAULT_MAX_RETAINED_CHARS,
+    DEFAULT_MAX_RETAINED_PATHS,
+    CompactionPolicy,
+    compact,
+)
 from ronin.safety.settings import PROJECT_SETTINGS, load_settings
 
 # A window small enough that 200 unique retained paths cannot possibly fit.
@@ -40,10 +44,23 @@ def _turn(path: str) -> int:
     return int("".join(char for char in path if char.isdigit()) or 0)
 
 
+#: The pre-ceiling behaviour, stated rather than inherited. Every test that wants to
+#: observe "keep everything" has to ask for it now, because it is no longer default.
+UNBOUNDED: dict[str, object] = {
+    "max_retained_paths": None,
+    "max_retained_chars": None,
+    "escalate_to_fit": False,
+}
+
+
 async def _fold(**policy_kwargs: object) -> object:
+    """Fold a 200-turn session. Unbounded unless the caller says otherwise."""
     return await compact(
         scripted_session(200, marked_turn=3, marked_path="src/turn3.py"),
-        policy=CompactionPolicy(context_window=TIGHT, **policy_kwargs),  # type: ignore[arg-type]
+        policy=CompactionPolicy(
+            context_window=TIGHT,
+            **{**UNBOUNDED, **policy_kwargs},  # type: ignore[arg-type]
+        ),
         summarizer=fake_summarizer,
     )
 
@@ -117,7 +134,11 @@ async def test_escalation_surrenders_nothing_when_everything_already_fits() -> N
     # drop a path just because it was allowed to.
     result = await compact(
         scripted_session(30),
-        policy=CompactionPolicy(context_window=200_000, escalate_to_fit=True),
+        # The path ceiling off, so `surrendered_paths` can only be escalation's
+        # doing — the static ceiling reports through the same field.
+        policy=CompactionPolicy(
+            context_window=200_000, escalate_to_fit=True, max_retained_paths=None
+        ),
         summarizer=fake_summarizer,
     )
     assert result.surrendered_paths == ()
@@ -132,7 +153,7 @@ async def test_a_floor_that_alone_exceeds_the_window_surrenders_nothing() -> Non
     """
     result = await compact(
         scripted_session(200),
-        policy=CompactionPolicy(context_window=60, escalate_to_fit=True),
+        policy=CompactionPolicy(context_window=60, escalate_to_fit=True, max_retained_paths=None),
         summarizer=fake_summarizer,
     )
     assert result.surrendered_paths == ()
@@ -157,11 +178,19 @@ def test_the_retention_ceilings_can_be_set_from_a_settings_file(tmp_path: Path) 
     assert settings.healthy  # type: ignore[attr-defined]
 
 
-def test_the_ceilings_default_to_no_ceiling(tmp_path: Path) -> None:
+def test_the_settings_defaults_match_the_policy_defaults(tmp_path: Path) -> None:
+    """Two places state these, and a silent disagreement between them would mean a
+    session behaves one way from a settings file and another from the policy
+    dataclass — with nothing to indicate which one is in force."""
     settings = _settings(tmp_path, {})
-    assert settings.max_retained_paths is None  # type: ignore[attr-defined]
-    assert settings.max_retained_chars is None  # type: ignore[attr-defined]
-    assert settings.compaction_escalate is False  # type: ignore[attr-defined]
+    assert settings.max_retained_paths == DEFAULT_MAX_RETAINED_PATHS  # type: ignore[attr-defined]
+    assert settings.max_retained_chars == DEFAULT_MAX_RETAINED_CHARS  # type: ignore[attr-defined]
+    assert settings.compaction_escalate is True  # type: ignore[attr-defined]
+
+    policy = CompactionPolicy(context_window=TIGHT)
+    assert policy.max_retained_paths == settings.max_retained_paths  # type: ignore[attr-defined]
+    assert policy.max_retained_chars == settings.max_retained_chars  # type: ignore[attr-defined]
+    assert policy.escalate_to_fit is settings.compaction_escalate  # type: ignore[attr-defined]
 
 
 def test_null_is_accepted_as_no_ceiling_rather_than_rejected(tmp_path: Path) -> None:
