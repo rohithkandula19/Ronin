@@ -297,6 +297,9 @@ class Options:
     #: one. A port rather than a bool because "let me watch this" and "on the port my
     #: tunnel already forwards" are the same request asked twice otherwise.
     watch_port: int | None = None
+    #: The operator's trust tier for a `plugin add`, which is what decides whether the
+    #: consent summary is shown. Never the bundle's own claim about itself.
+    plugin_trust: str = "community"
     cwd: Path = field(default_factory=lambda: Path("."))
     #: ``None`` for no resume; ``""`` for ``--resume`` with no id (the latest here).
     resume: str | None = None
@@ -537,6 +540,13 @@ def build_parser() -> _Parser:
         default=None,
         metavar="PORT",
         help="the port --watch serves on (default: any free one); implies --watch",
+    )
+    parser.add_argument(
+        "--trust",
+        dest="plugin_trust",
+        choices=["community", "trusted", "official"],
+        default="community",
+        help="your trust tier for a `plugin add` source; only you can raise it",
     )
     parser.add_argument(
         "--sandbox", action="store_true", help="run commands in a sandbox when one is available"
@@ -1168,6 +1178,7 @@ def _plugin_options(namespace: argparse.Namespace, words: str) -> Options | Usag
         cwd=Path(namespace.cwd),
         plugin_verb=verb,
         plugin_source=argument,
+        plugin_trust=str(namespace.plugin_trust),
         wizard=False,
     )
 
@@ -1774,9 +1785,14 @@ async def _api(options: Options, paths: Paths, env: Mapping[str, str], streams: 
 def _plugin(options: Options, paths: Paths, streams: Streams) -> int:
     """``plugin add <path>`` / ``plugin list`` — install and inspect installed plugins.
 
-    ``add`` shows a community bundle's consent summary — the shell hooks and tools it
-    wants — and installs only if the human agrees, because a plugin's hooks run
-    ``/bin/sh``. ``official``/``trusted`` bundles skip the prompt.
+    ``add`` shows the consent summary — the shell hooks and tools a bundle wants — and
+    installs only if the human agrees, because a plugin's hooks run ``/bin/sh``.
+
+    Which tier applies is **yours**, from ``--trust``, defaulting to ``community``. It
+    used to come out of the bundle's own ``plugin.json``, so a stranger's plugin could
+    declare itself ``official`` and be installed with the summary never shown. The
+    manifest's claim is still displayed, labelled as a claim, because seeing that a
+    bundle calls itself official is useful — believing it is not.
     """
     from ..ext.plugins import PluginConsent, PluginError, install, load_installed
 
@@ -1786,7 +1802,8 @@ def _plugin(options: Options, paths: Paths, streams: Streams) -> int:
             streams.out("no plugins installed. `ronin plugin add <path>` installs one.\n")
         for plugin in plugins:
             streams.out(
-                f"{plugin.name}  [{plugin.trust}]  {plugin.description or plugin.directory}\n"
+                f"{plugin.name}  [claims: {plugin.trust}]  "
+                f"{plugin.description or plugin.directory}\n"
             )
         for note in notes:
             streams.err(f"note: {note}\n")
@@ -1798,12 +1815,18 @@ def _plugin(options: Options, paths: Paths, streams: Streams) -> int:
         return answer in ("y", "yes")
 
     try:
-        plugin = install(Path(options.plugin_source), paths.home, approve=approve)
+        plugin = install(
+            Path(options.plugin_source),
+            paths.home,
+            approve=approve,
+            trust=options.plugin_trust,
+        )
     except (PluginError, OSError) as exc:
         streams.err(f"{PROGRAM}: cannot add plugin: {exc}\n")
         return EXIT_ERROR
     streams.out(
-        f"installed {plugin.name} [{plugin.trust}] to {paths.home / '.ronin' / 'plugins'}\n"
+        f"installed {plugin.name} at your {options.plugin_trust} tier "
+        f"(it claims {plugin.trust}) to {paths.home / '.ronin' / 'plugins'}\n"
     )
     return EXIT_OK
 
