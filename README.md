@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-v1.0.0-blue)](CHANGELOG.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-12159%20passing-brightgreen.svg)](#-whats-under-the-hood)
+[![Tests](https://img.shields.io/badge/tests-11826%20passing-brightgreen.svg)](#-whats-under-the-hood)
 [![Providers](https://img.shields.io/badge/providers-Claude%20·%20Gemini%20·%20Cerebras%20·%20Groq%20·%20OpenRouter%20·%20Ollama%20·%20OpenAI-d4a373)](#-supported-providers)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
@@ -78,7 +78,7 @@ Deploying the backend live? See [`docs/beta/deploy-backend.md`](docs/beta/deploy
 
 ## 🎬 Demo
 
-Usage dashboard → gamified profile → the 31-game arcade, in one shot:
+Usage dashboard, explain-a-module, and an objective eval — in one shot:
 
 ![ronin demo](assets/ronin-demo.gif)
 
@@ -100,7 +100,7 @@ Regenerate the walkthrough anytime with [`vhs`](https://github.com/charmbracelet
 
 **One front door:** type **`ronin`** and you get a single agent that reads, writes, and runs code (every edit and shell command gated behind a diff preview and your approval, reads run freely), generates images/video/speech, and queries your connected data, all in one conversation, in plain language. It's **provider-agnostic**: the same agent runs on Claude or on free open models.
 
-It's also a **reference implementation for building agents the right way**. The CLI is a thin wrapper over seven core, independently-usable packages — `agent-patterns`, `eval-suite`, `memory`, `hardening`, `mcp-servers`, `relay`, and `cli` — part of a 23-package workspace (the other 16 are platform packages: identity, vault, billing, observability, and so on), backed by **4,238 passing tests** across the packages and demo/API apps regression suite. (`ronin code` is the focused coding agent; `ronin chat` is the talk/media surface, both available when you want a single-purpose mode.)
+It's also a **reference implementation for building agents the right way**. The CLI is a thin wrapper over seven core, independently-usable packages — `agent-patterns`, `eval-suite`, `memory`, `hardening`, `mcp-servers`, `relay`, and `cli` — part of a 15-package workspace (the other 8 are platform packages: identity, vault, billing, observability, and so on), backed by **4,238 passing tests** across the packages and demo/API apps regression suite. (`ronin code` is the focused coding agent; `ronin chat` is the talk/media surface, both available when you want a single-purpose mode.)
 
 ## Mission Control: verified issue-to-PR work
 
@@ -564,26 +564,6 @@ ronin eval --model gpt-oss-120b                                  # objective sco
 ronin util image "a red panda hacking at night, neon, flat vector"    # free, no API key
 ```
 
-## 🎮 `ronin play` · the arcade
-
-A break room built into the terminal — packaged as an **optional extra** so the
-core agent stays lean: `pip install 'ronin-cli[arcade]'` (without it, `ronin play`
-prints a one-line install hint). **`ronin play`** opens a picker menu (arrow keys,
-teal highlight); **`ronin play <game>`** jumps straight in. **31 games, all free**, in four flavours:
-
-- **⚡ Real-time, arrow-key controls** — full-screen, in-place render via a shared raw-mode engine (`games/_realtime.py`): 🐍 Snake (start-on-keypress, no cheap deaths) · 🔢 2048 · 🟦 Tetris (7-bag, ghost piece, line-clear scoring) · 💣 Minesweeper · ⭕ Tic-Tac-Toe (unbeatable minimax) · 🔴 Connect Four · 🧠 Memory Match.
-- **🃏 Classics with real depth**: Blackjack (betting / double / 3:2) · Pandle (Wordle with a live on-screen keyboard) · Hangman · Rock-Paper-Scissors · Pig · Simon · Word Scramble · Sudoku (unique-solution generator) · Mastermind · Battleship (hunt/target AI) · Reversi · Typing Test · Number Guess.
-- **🐼 ronin-flavoured** — coder games no other arcade ships: 🐛 Bug Hunt (spot the planted bug) · 📈 Big-O Guess · 🧩 Regex Golf.
-- **🔮 AI-powered — and, true to ronin, provider-neutral**: they run on **whatever backend you've configured** (Cerebras / Groq / Gemini / Claude / Ollama), routed through ronin's *own* model layer — not a hardcoded vendor SDK. 🔮 **Mind Reader** (think of anything; the panda guesses it in 20 questions) · 🗺️ **AI Adventure** (a living text dungeon, the panda is your DM) · 🎓 **AI Trivia** (endless generated questions). No model configured? They show a friendly nudge and the non-AI games still play fully offline.
-
-```bash
-ronin play                 # the arcade menu
-ronin play tetris          # jump straight into a game
-ronin play mindreader      # the AI reads your mind (runs on your configured model)
-```
-
-Every game keeps its rules in **pure, unit-tested functions** split from the terminal I/O, and the whole roster is smoke-driven in CI. The selection menu is a reusable Claude-Code-style picker (`picker.py`) — the same widget is ready to back an `ask_user` clarifying-question tool for the agent.
-
 ## ronin util ui · the web dashboard
 
 `ronin util ui` serves a local web dashboard for the agent. It is a SINGLE
@@ -723,7 +703,6 @@ database_url = "postgres://readonly_user:...@host:5432/db"   # a read-only role
 | **`ronin code [task]`** | **Coding agent: streaming, plan tracker, project memory, 40 slash commands.** |
 | **`ronin acp --root .`** | **Local, read-only ACP bridge for editor-agent sessions over stdio.** |
 | `ronin chat` | Talk/media REPL with short-term memory. |
-| **`ronin play [game]`** | **The arcade: 31 free terminal games — real-time (Snake / Tetris / 2048 / …), classics, ronin-flavoured (Bug Hunt / Big-O / Regex Golf), and provider-neutral AI games (Mind Reader / AI Adventure / AI Trivia).** |
 | `ronin init [--demo]` | Create a config file (interactive or demo). |
 | **`ronin eval [--model X]`** | **Score agent quality on objective tasks, works on any provider (no LLM judge).** |
 | **`ronin dev explain <path>`** | **Explain a codebase: prose + Mermaid diagram + optional voice.** |
@@ -790,7 +769,7 @@ ronin is MIT-licensed and meant to be picked up by other people. A few notes if 
 
 ## 🧱 What's under the hood
 
-`ronin` is the user-facing wrapper. The substance lives in **seven core packages you can also use independently** (part of a 23-package workspace), this is the engineering core:
+`ronin` is the user-facing wrapper. The substance lives in **seven core packages you can also use independently** (part of a 15-package workspace), this is the engineering core:
 
 | Package | What it does |
 |---|---|
@@ -799,10 +778,10 @@ ronin is MIT-licensed and meant to be picked up by other people. A few notes if 
 | `memory` | Short-term summaries, long-term pluggable vector memory, and user preferences |
 | `hardening` | Prompt-injection scanning, faithfulness/grounding, tool allowlists, approval gates, output validation, token budgets, and tracing |
 | `mcp-servers` | Read-only Postgres, Stripe, Linear, Slack, Notion, Tavily, and GitHub templates |
-| `cli` | The `ronin` binary: coding agent, mission control, MCP client, web tools, subagents, evaluation, media, and the **31-game arcade** (`ronin play`) |
+| `cli` | The `ronin1` binary: coding agent, mission control, MCP client, web tools, subagents, evaluation, media |
 | `deployment-templates` | Docker Compose, Modal, Vercel, and Railway |
 
-**12,159 tests** across packages and the demo/API apps passed in the current regression suite. A `FakeProvider` makes them deterministic, offline, and free: no API calls in CI.
+**11,826 tests** across packages and the demo/API apps passed in the current regression suite. A `FakeProvider` makes them deterministic, offline, and free: no API calls in CI.
 
 ## Use the modules without the CLI
 

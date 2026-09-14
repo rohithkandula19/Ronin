@@ -1,29 +1,26 @@
 """The agent's front-door prompt must state ronin's own features accurately.
 
-Regression guard for the "does ronin have games?" bug: a free model with no
-self-knowledge answered that ronin has no games, when `ronin play` ships a
-31-game arcade. The UNIFIED_SYSTEM prompt now carries those facts; these tests
-keep them present and in sync with the real game registry.
+This began as a regression guard for the "does ronin have games?" bug — a model
+with no self-knowledge denied that ronin had an arcade while `ronin play`
+shipped one. The arcade has since been removed, and so have the two tests that
+pinned its game count: a prompt that advertises a command which no longer exists
+is the same bug pointing the other way.
+
+What remains is the rule those tests were an instance of: the prompt states what
+this program actually is, and a claim in it is checkable.
 """
 from __future__ import annotations
 
-import re
-
 from ronin_cli.code_mode import UNIFIED_SYSTEM
-from ronin_arcade.games import GAMES
 
 
-def test_unified_prompt_knows_about_the_arcade():
-    assert "ronin play" in UNIFIED_SYSTEM
-    assert "games" in UNIFIED_SYSTEM.lower()
-
-
-def test_unified_prompt_game_count_matches_registry():
-    # The number stated in the prompt must equal the real number of games, so
-    # adding/removing a game without updating the prompt fails CI.
-    m = re.search(r"arcade of (\d+) free terminal\s+games", UNIFIED_SYSTEM)
-    assert m, "prompt should state the arcade game count"
-    assert int(m.group(1)) == len(GAMES) == 31
+def test_the_prompt_no_longer_advertises_the_removed_arcade():
+    """The other half of the original bug. A prompt naming a command that was
+    deleted sends the user to a command that does not exist, which is worse than
+    the denial this file was written to prevent — the model sounds certain."""
+    low = UNIFIED_SYSTEM.lower()
+    assert "ronin play" not in low
+    assert "arcade" not in low
 
 
 def test_unified_prompt_states_provider_agnostic_free_first():

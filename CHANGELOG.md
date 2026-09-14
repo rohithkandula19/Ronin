@@ -5,6 +5,36 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Changed
+- **The arcade is gone (`packages/arcade`, 44 modules, 31 games).** It was reachable from
+  exactly one place — v1's `main.py` — so it could not survive `packages/cli`, and the two
+  ways to keep it both cost more than it was worth: rewriting 56 Rich call sites against
+  stdlib, or v2 taking a Rich dependency and breaking the zero-dependency promise the
+  clean-install gate now enforces. Removed on the owner's explicit instruction.
+  The deletion is not just the directory. `ronin1 play`, `util profile` and `util xp` are
+  removed, along with the best-effort XP hook in `dev commit`; the `arcade` extra and its
+  workspace source are out of `packages/cli/pyproject.toml`; `generate_readme_stats.py` no
+  longer computes a game count; and the README's pitch line, arcade section, command-table
+  row and package description are gone.
+  **The v1 system prompt claimed the arcade too**, and that was the half most worth
+  catching: `UNIFIED_SYSTEM` told the model "YES, ronin has games: `ronin play` opens a
+  built-in arcade of 31 free terminal games". `test_self_knowledge.py` existed to stop the
+  model *denying* the arcade; left alone it would have kept the opposite bug — a confident
+  model sending users to a command that no longer exists. The claim is removed and the
+  test now pins its absence.
+  `COVERED_SURFACES` lost `games_registry` and `gamify`, and the `>= 13` floor beneath it
+  became `>= 11`: a floor that can only ever be raised turns every deliberate deletion into
+  a failing test.
+- **Seven packages with no importers are gone**: `identity`, `jobs`, `observability`,
+  `platform`, `support`, `tasks`, `research` — 51 modules. Each was verified to have zero
+  importers anywhere in the repository before deletion (the `ronin_research` matches that
+  looked like imports were MCP tool-name strings in `ronin_cli.mcp_server`, not imports),
+  and none was in `RELEASE_PACKAGE_DIRS`. Nothing that runs today lost a capability.
+  They were the "Ronin AI OS" control-plane layers, and `docs/beta/` and three reports in
+  `docs/audits/` describe them — several with VERIFIED labels. Those documents now carry a
+  note saying the packages were removed and why. The runbooks are kept as design intent
+  rather than rewritten: they always described an undeployed control plane, and silently
+  deleting the record would be worse than marking it superseded.
+  `packages/` is 23 directories down to 15.
 - **One command, not two: `ronin2` is gone (`pyproject.toml`).** There were two names
   for one program, and the second one read like a second product — which is how it was
   read. `ronin` and `ronin2` resolved to the same `ronin.cli.main:main`; nothing behind
