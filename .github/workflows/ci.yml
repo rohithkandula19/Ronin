@@ -36,11 +36,12 @@ jobs:
         run: uv sync --all-packages --all-groups --python ${{ matrix.python }}
 
       # Full workspace gate: every package + app + training, not a hand-picked
-      # subset. Previously CI ran only 10 of 23 package/app paths, so 400+ tests
-      # in identity (fail-closed RBAC), vault (cross-industry isolation),
-      # billing, observability, etc. could regress green and only surface at the
-      # release tag. `pytest packages apps training` mirrors the Makefile and
-      # collects the full suite.
+      # subset. CI once ran only 10 of 23 package/app paths, so hundreds of tests
+      # could regress green and surface only at the release tag. Two of the
+      # packages this comment used to cite as examples have since been deleted,
+      # which is the rule proving itself from the other side: a hand-picked list
+      # goes stale, and the gate has to be "everything" for that not to matter.
+      # `pytest packages apps training tests` mirrors the Makefile.
       - name: Test (Python — full workspace)
         run: uv run --python ${{ matrix.python }} pytest packages apps training tests -q
 
