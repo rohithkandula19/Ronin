@@ -260,3 +260,42 @@ def test_the_retry_notice_clears_when_the_next_turn_starts() -> None:
 
 if __name__ == "__main__":  # pragma: no cover
     pytest.main([__file__])
+
+
+def test_a_config_that_will_not_parse_is_not_reported_as_a_network_failure() -> None:
+    """`load_config` raises the same `ProviderError` the transport does, so a
+    malformed `models.toml` came out as "the model could not be reached, after
+    retries and failover" — with a remedy pointing at the endpoint, the model name
+    and the key. Nothing was reached and nothing was retried; the file never parsed,
+    and every word of that sent the reader away from the one line that mattered.
+    """
+    message = provider_failure_message(
+        ProviderError(
+            "provider config /w/.ronin/models.toml is not valid TOML: "
+            "Expected '=' after a key in a key/value pair (at line 1, column 6)"
+        )
+    )
+    assert "no request was made" in message
+    assert "could not be reached" not in message
+    assert "retries and failover" not in message
+    assert "check the endpoint" not in message
+    assert "line 1, column 6" in message, "the parser's own position survives"
+    assert "doctor" in message
+
+
+def test_a_config_with_no_models_section_reads_the_same_way() -> None:
+    """It parses as TOML and still cannot produce a model, which is the same class
+    of problem and the same fix: the file, not the network."""
+    message = provider_failure_message(ProviderError("provider config has no [models] section"))
+    assert "no request was made" in message
+    assert "could not be reached" not in message
+
+
+def test_a_config_error_is_classified_before_a_rate_limit() -> None:
+    """Order matters: a path can contain "429", and every other branch describes a
+    request that was actually attempted."""
+    message = provider_failure_message(
+        ProviderError("provider config /tmp/run-429/models.toml is not valid TOML: bad")
+    )
+    assert "no request was made" in message
+    assert "rate limited" not in message

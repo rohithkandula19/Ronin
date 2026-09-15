@@ -26,6 +26,7 @@ from wire_harness import (
     write,
 )
 
+from ronin.cli.detect import Detection
 from ronin.cli.doctor import (
     GITIGNORE_PATCH,
     Check,
@@ -401,3 +402,64 @@ async def test_a_live_runtime_supplies_its_own_router_and_checkpoint_store(
     assert checkpoints is not None
     assert str(runtime.checkpoints.git_dir) in checkpoints.detail
     assert report.exit_code() == 0
+
+
+async def test_a_models_toml_that_cannot_be_parsed_is_a_failure_not_an_ok(
+    tmp_path: Path,
+) -> None:
+    """The check stat'd the file and never read it, so an unparseable `models.toml`
+    reported OK while every actual run died on it — a clean bill of health from the
+    one check whose whole job is that file.
+
+    `load_config` is the function a real run calls, so doctor and the run agree by
+    construction instead of through a second parser kept in step by hand.
+    """
+    paths = full_workspace(tmp_path)
+    write(tmp_path, ".gitignore", GOOD)
+    write(tmp_path, ".ronin/models.toml", "this is not = valid toml [[[\n")
+    loaded = load_workspace(paths, which=which_for("docs-server"))
+
+    report = await run_doctor(
+        loaded,
+        router=fake_router(),
+        environ={},
+        which=which_for("docs-server"),
+        checkpoints=fake_checkpoint_store(tmp_path),
+        # The config check only runs when detection did: it is part of the
+        # "can this machine reach a model at all" group.
+        detection=Detection(ripgrep=True),
+    )
+
+    names = [check.name for check in report.checks]
+    config = next((c for c in report.checks if c.name == "config"), None)
+    assert config is not None, names
+    assert config.status is CheckStatus.FAIL
+    assert "not valid TOML" in config.detail, "the parser's own message, with the line"
+    assert config.remedy, "a failing check without a remedy is a dead end"
+    assert report.exit_code() != 0
+
+
+async def test_a_models_toml_that_parses_is_still_ok(tmp_path: Path) -> None:
+    """The control. Parsing it must not make the check harder to pass than it was."""
+    paths = full_workspace(tmp_path)
+    write(tmp_path, ".gitignore", GOOD)
+    write(
+        tmp_path,
+        ".ronin/models.toml",
+        '[models.main]\nprovider = "anthropic"\nmodel = "claude-x"\n\n[roles]\nmain = "main"\n',
+    )
+    loaded = load_workspace(paths, which=which_for("docs-server"))
+
+    report = await run_doctor(
+        loaded,
+        router=fake_router(),
+        environ={},
+        which=which_for("docs-server"),
+        checkpoints=fake_checkpoint_store(tmp_path),
+        detection=Detection(ripgrep=True),
+    )
+
+    names = [check.name for check in report.checks]
+    config = next((c for c in report.checks if c.name == "config"), None)
+    assert config is not None, names
+    assert config.status is CheckStatus.OK

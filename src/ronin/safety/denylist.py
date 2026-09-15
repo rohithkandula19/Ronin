@@ -74,6 +74,7 @@ class DenyCode(StrEnum):
     SECRET_WRITE = "secret_write"
     KEY_MATERIAL_READ = "key_material_read"
     OUTSIDE_WORKSPACE = "outside_workspace"
+    UNRESOLVABLE_TARGET = "unresolvable_target"
     FORK_BOMB = "fork_bomb"
 
 
@@ -194,6 +195,19 @@ DENY_REASONS: Mapping[DenyCode, DenyReason] = {
             "keep writes inside the workspace, or under /tmp if the file is genuinely temporary"
         ),
     ),
+    DenyCode.UNRESOLVABLE_TARGET: DenyReason(
+        why=(
+            "the file this would write is named by a command substitution or a "
+            "variable, so what it actually points at is decided when the command "
+            "runs and cannot be checked before it does — confinement to the "
+            "workspace is a claim nobody can make about it"
+        ),
+        alternative=(
+            "write the literal path you mean, relative to the workspace — e.g. "
+            "`> build/out.txt`. If the path genuinely has to be computed, compute "
+            "it, show it, and then write to it as a literal in the next command"
+        ),
+    ),
     DenyCode.FORK_BOMB: DenyReason(
         why="it exhausts the process table, which takes the whole machine down with it",
         alternative="if you are load-testing, bound the concurrency and target one process",
@@ -281,6 +295,79 @@ def _no_checkpoint() -> bool:
     inside a policy check is a hidden I/O dependency that makes tests need a repo.
     """
     return False
+
+
+#: What makes a word's value unknowable until the command runs: a command
+#: substitution in either spelling, or a parameter expansion. ``$HOME`` and
+#: ``${HOME}`` are absent on purpose — :meth:`Denylist.expand` resolves those two
+#: before this is consulted, which is why ``> $HOME/.bashrc`` was already denied
+#: while ``> $FOO`` was not.
+_DYNAMIC = re.compile(r"\$\(|`|\$\{|\$[A-Za-z_]")
+
+
+def is_dynamic(word: str) -> bool:
+    """Whether ``word`` names a file that only exists once the shell expands it.
+
+    Deliberately answered on the *expanded* word, so the two spellings of ``$HOME``
+    stay resolvable and everything else is treated as unknown. A conservative
+    "unknown" is the only safe reading for a write target: the alternative is what
+    this replaced, where an unresolvable path was read as a literal filename and
+    therefore looked like it sat inside the workspace.
+    """
+    return bool(_DYNAMIC.search(word))
+
+
+def link_target(word: str, base: Path) -> str | None:
+    """Where ``word`` really lands, when a symlink makes that a different file.
+
+    ``None`` when no link is involved and the path already names its own target —
+    the overwhelmingly common case, and the one that must stay free.
+
+    A link **anywhere** in the path counts, not only at the end. ``docs -> .git``
+    makes ``docs/config`` a name for ``.git/config`` while ``docs/config`` is not
+    itself a link, and that is the shape with the worst ending: a write there lands
+    on git's config, which runs commands on the next git invocation.
+
+    This is the **file-tool argument** lane, and it is the one place in this module
+    that touches the filesystem. :meth:`Denylist.resolve` is symlink-blind on purpose
+    because it analyses bash *command text*: the path may not exist yet, and reading
+    the disk to judge a command that has not run would be answering a different
+    question. A file tool's ``path=`` argument is not that — the tool is about to open
+    exactly this path, ``ToolContext.resolve`` is about to follow exactly this link,
+    and so the check has to look where the tool will look.
+
+    Not looking is what let a checked-in ``docs -> .git`` (or ``notes.txt -> .env``)
+    be judged as ``docs``: a deny rule on ``.git/**`` did not match, the unconditional
+    ``.env`` rule did not fire, confinement passed because the target is *inside* the
+    tree, and the write landed on ``.git/config``. Under ``auto_edit`` no human saw
+    any of it.
+
+    Returned relative to ``base`` when it lands inside it, because that is the
+    spelling rules are written in. A target outside the tree comes back absolute;
+    confinement refuses those separately, and a rule may still want to name one.
+    """
+    try:
+        # The root is resolved first, and that is not a detail. On macOS the workspace
+        # is routinely reached through a link of its own — `/tmp` is `/private/tmp`,
+        # and a pytest tmp_path is `/var/folders/...` behind `/private/var/folders/...`
+        # — so comparing a resolved path against an unresolved root reports *every*
+        # path as relocated, and every deny rule would start matching things it never
+        # named. Resolving both sides is what keeps this about the link the user made.
+        root = base.resolve()
+        raw = Path(word)
+        candidate = Path(os.path.normpath(str(raw if raw.is_absolute() else root / raw)))
+        real = candidate.resolve()
+    except (OSError, ValueError, RuntimeError):
+        # A broken link, a loop, a path too long, a name the platform refuses. None of
+        # those is a symlink pointing at something protected, and a safety check that
+        # raises is a session that dies on a malformed filename.
+        return None
+    if real == candidate:
+        return None
+    try:
+        return str(real.relative_to(root))
+    except ValueError:
+        return str(real)
 
 
 @dataclass(frozen=True, slots=True)
@@ -551,11 +638,14 @@ class Denylist:
         promises never to make. So it is symlink-blind **by design** — ``rm -rf ./link``
         is judged by the literal ``./link``, not by where the link points.
 
-        That is a limitation of the command-text heuristic, not of Ronin's write
-        confinement. The file tools resolve their paths through ``ToolContext.resolve``
-        (the tools layer), which *does* follow symlinks and refuses any target outside the
-        workspace — so a ``write``/``edit`` cannot escape the tree through a symlink even
-        in the cases this text check would not flag.
+        That is a limitation of the command-text heuristic. The *argument* lane does not
+        share it: :func:`link_target` resolves a file tool's ``path=`` and the checks run
+        against both spellings.
+
+        This docstring used to say the gap was covered by ``ToolContext.resolve``
+        refusing targets outside the workspace. That is true and beside the point — an
+        in-tree link to an in-tree protected file passes confinement by definition, and
+        that is the case that mattered.
         """
         expanded = self.expand(word)
         path = Path(expanded)
@@ -566,6 +656,19 @@ class Denylist:
     def _path_hits(
         self, word: str, base: Path, *, write: bool, subject: str = ""
     ) -> Iterator[DenyHit]:
+        if write and is_dynamic(self.expand(word)):
+            # A write target built at runtime cannot be confined, because there is
+            # nothing yet to confine. Treating it as a literal filename is what made
+            # `curl -o $(echo /home/dev/.bashrc) …` resolve to *allow* while the same
+            # command with the path spelled out was denied: `normpath` kept the
+            # substitution as a path component, so the result sat inside the workspace
+            # textually and `path.name` became `.bashrc)`, missing every name test.
+            yield DenyHit(
+                code=DenyCode.UNRESOLVABLE_TARGET,
+                subject=subject or word,
+                detail=f"`{word}` is decided when the command runs",
+            )
+            return
         path = self.resolve(word, base)
         if str(path).startswith("/dev/"):
             # Devices are not files with a workspace: the block-device rule and the

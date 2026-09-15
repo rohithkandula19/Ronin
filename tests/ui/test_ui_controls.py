@@ -44,7 +44,15 @@ from ronin.core.types import (
     TurnState,
 )
 from ronin.ui.headless import OutputFormat, run_headless
-from ronin.ui.render import ANSI, MARKUP, NO_COLOUR_MARKUP, PLAIN, Styles, strip_controls
+from ronin.ui.render import (
+    ANSI,
+    MARKUP,
+    NO_COLOUR_MARKUP,
+    PLAIN,
+    Styles,
+    render_approval,
+    strip_controls,
+)
 
 #: The three attacks named in `strip_controls`, in one string.
 HOSTILE = "hello \x1b]0;PWNED\x07 \x1b[2J \x1b]52;c;cHduZWQ=\x07 world"
@@ -250,6 +258,108 @@ def test_the_stripper_is_reachable_from_the_package_root() -> None:
     from ronin.ui import strip_controls as exported
 
     assert exported is strip_controls
+
+
+# --------------------------------------------------------------------------- #
+# the characters that reorder what is left
+# --------------------------------------------------------------------------- #
+#
+# The loop above is exhaustive over C0, DEL and C1 — and stops at U+009F. Every
+# character below is past that, which is how a test that called itself exhaustive
+# passed while an approval prompt could be shown to a human backwards.
+#
+# The harm is different from an escape sequence's. Nothing is painted over; the line
+# is *reordered*, so `rm -rf ~ #<RLO>...` shows the comment first and the destructive
+# half behind it, and the person approves what they read rather than what runs. The
+# same family makes two different strings render identically, so a diff can show one
+# identifier while containing another.
+
+RLO = chr(0x202E)  # RIGHT-TO-LEFT OVERRIDE
+LRI = chr(0x2066)  # LEFT-TO-RIGHT ISOLATE
+PDI = chr(0x2069)  # POP DIRECTIONAL ISOLATE
+ZWSP = chr(0x200B)  # ZERO WIDTH SPACE
+ZWJ = chr(0x200D)  # ZERO WIDTH JOINER — kept on purpose, see below
+
+#: Everything that must be made visible, as (codepoint, why it is here).
+REORDERING = (
+    0x061C,
+    0x180E,
+    0x200B,
+    0x200E,
+    0x200F,
+    *range(0x202A, 0x202F),
+    *range(0x2060, 0x2065),
+    *range(0x2066, 0x206A),
+    0xFEFF,
+    0xE0001,
+    0xE0041,
+    0xE007F,
+)
+
+
+@pytest.mark.parametrize("code", REORDERING)
+def test_every_invisible_character_is_made_visible(code: int) -> None:
+    """Rendered, not deleted — deleting leaves the doctored line looking honest."""
+    assert strip_controls(f"a{chr(code)}b") == f"a<U+{code:04X}>b"
+
+
+def test_a_reordered_command_reads_in_execution_order_once_rendered() -> None:
+    """The attack, end to end: what the reader sees now matches what the shell runs."""
+    doctored = f"rm -rf ~ #{RLO}{LRI} ecaps ksid kcehc #{PDI}"
+    shown = strip_controls(doctored)
+    assert "rm -rf ~" in shown
+    assert RLO not in shown and LRI not in shown and PDI not in shown
+    assert "<U+202E>" in shown
+
+
+def test_an_invisible_character_in_an_identifier_is_visible() -> None:
+    """`from o<ZWSP>s import system` renders identically to the honest line otherwise."""
+    assert strip_controls(f"from o{ZWSP}s import system") == "from o<U+200B>s import system"
+
+
+def test_the_zero_width_joiner_survives_because_scripts_and_emoji_need_it() -> None:
+    """The deliberate exception, pinned so it is not "fixed" by someone tidying up.
+
+    ZWNJ and ZWJ are required to render Persian, Hindi and emoji sequences, they
+    cannot reorder anything, and an identifier containing one is a syntax error in
+    every language this program edits. Marking them would corrupt legitimate text to
+    defend against nothing.
+    """
+    assert strip_controls(f"a{ZWJ}b") == f"a{ZWJ}b"
+    assert strip_controls(f"a{chr(0x200C)}b") == f"a{chr(0x200C)}b"
+
+
+def test_ordinary_text_is_untouched() -> None:
+    """The cost of the rule has to stay zero for the text people actually read."""
+    source = "def main() -> None:\n\treturn 1  # ok\n"
+    assert strip_controls(source) == source
+
+
+def test_the_two_families_compose() -> None:
+    """An escape sequence and a bidi control in one string, each handled its own way."""
+    shown = strip_controls(f"hi \x1b]0;X\x07 {RLO}there")
+    # The escape character goes and its payload stays inert; the bidi control is named.
+    assert shown == "hi ]0;X <U+202E>there"
+
+
+def test_an_approval_prompt_carries_none_of_them_through() -> None:
+    """The seam that matters: every renderer reaches the terminal through this.
+
+    Asserted on `render_approval` rather than on `strip_controls` because the bug was
+    never in the stripper alone — it was that the stripper's idea of "control
+    character" stopped before the characters that could reorder an approval.
+    """
+    doctored = f"rm -rf ~ #{RLO}{LRI} ecaps ksid kcehc #{PDI}"
+    request = ApprovalRequest(
+        tool_use_id="t1",
+        name="bash",
+        danger_level=DangerLevel.DESTRUCTIVE,
+        rendered=doctored,
+        reason="destructive",
+    )
+    shown = render_approval(request)
+    assert not any(char in shown for char in (RLO, LRI, PDI))
+    assert "<U+202E>" in shown
 
 
 if __name__ == "__main__":  # pragma: no cover - convenience for a manual look

@@ -530,7 +530,13 @@ def test_default_context_resolves_the_root(tmp_path: Path) -> None:
 async def test_a_parent_turn_is_billed_to_the_main_role(tmp_path: Path) -> None:
     """Found by the demo: the ledger only ever saw subagents, so the per-role split
     — the thing that makes a routing mistake visible — showed one row on a session
-    where the main model had plainly just run."""
+    where the main model had plainly just run.
+
+    The turn is driven through the real client rather than synthesised from a
+    Budget. A Budget carries one token number and cannot say which were input,
+    output or served from cache, so a Usage rebuilt from it billed every token at
+    the input rate and reported no cache activity at all.
+    """
     from ronin.core.types import Budget as CoreBudget
 
     ledger = Ledger(tmp_path / "usage.db", clock=lambda: 1000.0)
@@ -546,15 +552,43 @@ async def test_a_parent_turn_is_billed_to_the_main_role(tmp_path: Path) -> None:
     )
 
     await session.subagents.run("q", EXPLORE)
+    async for _ in session.main.stream(system="s", messages=[], tools=[]):
+        pass
     session.record_turn(
-        session.state("x").__class__(budget=CoreBudget(spent_tokens=900, spent_usd=0.03)),
+        session.state("x").__class__(budget=CoreBudget(spent_tokens=150, spent_usd=0.001)),
         request_id="turn-1",
     )
 
     breakdown = ledger.role_totals("s1")
     assert set(breakdown) == {ModelRole.MAIN, ModelRole.FAST}
-    assert breakdown[ModelRole.MAIN].input_tokens == 900
-    assert breakdown[ModelRole.MAIN].cost_usd == 0.03
+    main = breakdown[ModelRole.MAIN]
+    assert main.input_tokens == 100
+    assert main.output_tokens == 50, "output is no longer folded into input"
+    assert main.cost_usd == 0.001
+
+
+async def test_a_second_turn_is_not_billed_for_the_first(tmp_path: Path) -> None:
+    """The client outlives the turn, so its running total would bill turn two for
+    turn one as well. `take_usage` is take-and-reset for exactly this."""
+    ledger = Ledger(tmp_path / "usage.db", clock=lambda: 1000.0)
+    ctx = context(tmp_path)
+    session = build_session(
+        router_with(
+            {"small": ScriptedModel([says("a")]), "big": ScriptedModel([says("a"), says("b")])}
+        ),
+        ctx,
+        base_tools=build_registry(ctx),
+        ledger=ledger,
+        session_id="s1",
+    )
+    for turn in ("turn-1", "turn-2"):
+        async for _ in session.main.stream(system="s", messages=[], tools=[]):
+            pass
+        session.record_turn(session.state("x"), request_id=turn)
+
+    totals = ledger.role_totals("s1")[ModelRole.MAIN]
+    assert totals.requests == 2
+    assert totals.input_tokens == 200, "100 per turn, not 100 then 200"
 
 
 async def test_recording_a_turn_without_a_ledger_is_a_no_op(tmp_path: Path) -> None:

@@ -312,7 +312,25 @@ async def _folded(tmp_path: Path, *, grep_the_same_path: bool) -> tuple[Path, li
     messages += [Message(role=Role.USER, content_blocks=(Text("now edit a.py"),))]
 
     result = await compact(
-        messages, policy=CompactionPolicy(context_window=4000), summarizer=summarize
+        messages,
+        # Retention unbounded *and* escalation off: this test is about whether a
+        # *grep* costs a read its place in the fold, and either mechanism would evict
+        # the target for an unrelated reason — the ceiling behind the test's own
+        # filler files, escalation because the transcript did not fit.
+        #
+        # Escalation is the one that bites without looking like it. Whether the fold
+        # fits depends on the length of the paths in it, so this passed on Linux
+        # (`/tmp/pytest-of-root/...`) and failed on macOS
+        # (`/private/var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/...`) — a
+        # platform split that is really a string-length split. Reproducible anywhere
+        # with `--basetemp` set to a long path.
+        policy=CompactionPolicy(
+            context_window=4000,
+            max_retained_paths=None,
+            max_retained_chars=None,
+            escalate_to_fit=False,
+        ),
+        summarizer=summarize,
     )
     assert result.compacted
     return target, list(result.messages)

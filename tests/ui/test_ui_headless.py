@@ -41,10 +41,14 @@ from ronin.ui.headless import (
     RESULT_TYPE,
     SCHEMA,
     HeadlessPolicy,
+    HeadlessResult,
     OutputFormat,
     event_to_json,
     exit_code_for,
+    failed_before_start,
+    result_record,
     run_headless,
+    to_line,
 )
 from ronin.ui.reduce import ViewState, reduce_all
 
@@ -341,3 +345,43 @@ def test_verify_result_serializes_did_not_run_distinctly_from_failed() -> None:
     # The distinction a script must be able to make without guessing.
     assert skipped["ran"] is False and skipped["passed"] is False
     assert failed["ran"] is True and failed["checks_failed"] == 2
+
+
+# --------------------------------------------------------------------------- #
+# A failure before the stream opens is still JSON
+# --------------------------------------------------------------------------- #
+
+
+def test_a_run_that_never_started_still_produces_one_result_record() -> None:
+    """An unreadable `models.toml` or a model the router cannot build fails while
+    the agent is still being assembled, so there is no stream to fold the error
+    into — and a caller who asked for JSON used to get **zero bytes**, with the only
+    account of what happened in English on stderr.
+
+    The record has the same shape as any other run's, so a consumer parses one thing
+    whether the run failed at assembly, mid-stream, or not at all.
+    """
+    line = failed_before_start("provider config /w/models.toml is not valid TOML: bad")
+    record = json.loads(line)
+
+    assert record["type"] == RESULT_TYPE
+    assert record["exit_code"] == 1
+    assert record["errors"] == [
+        {
+            "message": "provider config /w/models.toml is not valid TOML: bad",
+            "kind": "provider",
+            "recoverable": False,
+        }
+    ]
+    assert record["text"] == ""
+    assert record["turns"] == 0, "nothing ran"
+
+
+def test_the_failed_record_carries_every_key_the_schema_promises() -> None:
+    """A consumer switching on `type == "result"` reads the same fields either way;
+    a short record on the failure path is a second shape to handle."""
+    ran = json.loads(
+        to_line(result_record(HeadlessResult(exit_code=0, text="", state=ViewState())))
+    )
+    failed = json.loads(failed_before_start("boom"))
+    assert set(failed) == set(ran)

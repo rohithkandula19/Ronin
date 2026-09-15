@@ -166,12 +166,16 @@ def full_workspace(root: Path) -> Paths:
     write(root, "pkg/thing.py", "def widen(value: int) -> int:\n    return value + 1\n")
     write(root, "pkg/other.py", "from pkg.thing import widen\n\nWIDE = widen(1)\n")
     write(root, "pyproject.toml", '[tool.pytest.ini_options]\naddopts = "-q"\n')
+    # `mode` is a privilege scalar, so it lives in the *user* layer: a repo file may
+    # tighten one but never loosen it, and `auto_edit` is a loosening. The project
+    # layer still contributes a scalar of its own, so provenance stays checkable
+    # across all three files.
     write(
         paths.home,
         ".ronin/settings.json",
-        json.dumps({"protected_branches": ["release"]}) + "\n",
+        json.dumps({"protected_branches": ["release"], "mode": "auto_edit"}) + "\n",
     )
-    write(root, ".ronin/settings.json", json.dumps({"mode": "auto_edit"}) + "\n")
+    write(root, ".ronin/settings.json", json.dumps({"max_retained_paths": 12}) + "\n")
     write(root, ".ronin/settings.local.json", json.dumps({"taint_min_span": 32}) + "\n")
     write(
         root,
