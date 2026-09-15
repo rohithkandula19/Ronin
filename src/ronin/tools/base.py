@@ -69,7 +69,14 @@ class ToolContext:
     #: Environment for subprocesses. Injected so a test can run with a clean one.
     env: Mapping[str, str] = field(default_factory=lambda: dict(os.environ))
     #: The model's own scratchpad, owned by ``todo_write`` and read by the UI.
-    todos: tuple[Any, ...] = ()
+    #:
+    #: A **list**, mutated in place through :meth:`set_todos`, for the same reason
+    #: ``read_files`` is a set and ``last_read_bytes`` a dict: the streaming path hands
+    #: every tool a shallow ``replace()`` copy of this context, so a field the tool
+    #: *rebinds* is written to the copy and thrown away, while a container it mutates is
+    #: shared. This was a tuple, and the live loop passes ``on_output`` for every call —
+    #: so every ``todo_write`` landed on a throwaway and the checklist was always empty.
+    todos: list[Any] = field(default_factory=list)
     #: Where a long-running tool may post output *while it runs*, so the interface can
     #: show a test suite or a build as it happens rather than only once it exits. Bound
     #: per call by the registry, so a chunk is always attributable to one tool use.
@@ -128,6 +135,15 @@ class ToolContext:
 
     def has_been_read(self, path: Path) -> bool:
         return str(path) in self.read_files
+
+    def set_todos(self, todos: Sequence[Any]) -> None:
+        """Replace the plan, in place so a shallow copy of this context still shares it.
+
+        ``self.todos = list(todos)`` would rebind the attribute, which on the streaming
+        path means rebinding it on a copy nobody reads. The slice assignment is the
+        whole point of the method existing rather than the tool assigning the field.
+        """
+        self.todos[:] = list(todos)
 
 
 def _resolve_without_requiring_existence(path: Path) -> Path:

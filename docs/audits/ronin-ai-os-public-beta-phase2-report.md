@@ -5,6 +5,14 @@ Continues the public-beta program by building the remaining **locally-
 achievable** platform layers. Honesty labels per the program scheme. Evidence =
 code that ran here.
 
+> **Superseded in part.** The platform packages itemised below — among them
+> `ronin-identity`, `ronin-jobs`, `ronin-observability`, `ronin-platform`,
+> `ronin-support`, `ronin-tasks` and `ronin-research` — were later removed from
+> the repository. This report is a dated record of what was built and tested at
+> the time, and it is accurate as that; it is not a description of the tree as it
+> stands. The packages were deleted because each had zero importers.
+
+
 ## What this phase adds (VERIFIED locally)
 
 Six new self-contained, tested packages — evolving the platform, not rewriting

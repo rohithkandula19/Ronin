@@ -65,7 +65,7 @@ in the virtualenv of the project it is editing.
 **pipx is the decision, not yet the path.** `install.sh` today clones the repo, runs `uv
 sync --all-packages`, and drops `ronin`/`ro` shims in `~/.local/bin` pointing at the
 workspace venv — which works, and means every user has a git checkout they did not ask
-for. The file itself says `pipx install ronin-cli` is the intended end state. `ronin2`
+for. The file itself says `pipx install ronin-cli` is the intended end state. `ronin`
 now has an entry point, so `pipx install ronin` is a one-line install the moment the
 distribution is published.
 
@@ -172,5 +172,5 @@ than an `ImportError` traceback. The test: if a dependency would appear in a sta
 *between* "the model asked for a tool" and "the tool ran", it is the wrong dependency.
 
 The evidence that this is affordable: `pyproject.toml` declares **zero hard
-dependencies**. Every capability is an extra, and `pip install ronin2` gives a working
+dependencies**. Every capability is an extra, and `pip install ronin` gives a working
 agent rather than a broken one waiting for its extras.

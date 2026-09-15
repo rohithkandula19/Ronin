@@ -42,7 +42,7 @@ from ronin.safety.policy import (
     glob_to_regex,
     most_restrictive,
 )
-from ronin.safety.sandbox import BubblewrapSandbox, NoSandbox
+from ronin.safety.sandbox import SANDBOX_AUTO_APPROVES, BubblewrapSandbox, NoSandbox
 
 # --------------------------------------------------------------------------- #
 # Protocol conformance
@@ -127,11 +127,43 @@ def test_a_regex_allow_rule_is_never_matched_against_a_whole_compound_command() 
 
 
 def test_a_matcher_sees_the_resolved_command_when_narrowed_to_a_segment() -> None:
+    """An absolute path and a wrapper must not stop `^git status` from matching.
+
+    The example used to carry `GIT_PAGER=cat`, which now names a second program and so
+    is a second segment to match; that is a different claim, pinned on its own below.
+    A plain assignment keeps this test about the thing it is named for.
+    """
     rules = RuleSet(
         rules=(Rule(tool="bash", matcher=CommandRegex(r"^git status"), decision=Decision.ALLOW),)
     )
-    verdict = engine(rules=rules).evaluate(BASH, use("env GIT_PAGER=cat /usr/bin/git status"))
+    verdict = engine(rules=rules).evaluate(BASH, use("env FOO=1 /usr/bin/git status"))
     assert verdict.decision is Decision.ALLOW
+
+
+def test_a_pager_named_in_the_environment_is_a_second_command_to_allow() -> None:
+    """The accepted cost of reading git's config values, pinned so it stays visible.
+
+    `GIT_PAGER=cat git status` runs two programs, and an allowlist requires every one of
+    them to match — so a rule written for `git status` alone no longer covers it. That is
+    the price of catching `GIT_PAGER='rm -rf /etc'`, which is the same shape with a
+    different word in it, and a rule that judged by shape would miss the single-word
+    dangerous cases.
+
+    A rule that names both is still allowed, which is the escape hatch for anyone whose
+    allowlist this tightens.
+    """
+    narrow = RuleSet(
+        rules=(Rule(tool="bash", matcher=CommandRegex(r"^git status"), decision=Decision.ALLOW),)
+    )
+    command = use("env GIT_PAGER=cat /usr/bin/git status")
+    assert engine(rules=narrow).evaluate(BASH, command).decision is not Decision.ALLOW
+
+    both = RuleSet(
+        rules=(
+            Rule(tool="bash", matcher=CommandRegex(r"^(git status|cat)$"), decision=Decision.ALLOW),
+        )
+    )
+    assert engine(rules=both).evaluate(BASH, command).decision is Decision.ALLOW
 
 
 # --------------------------------------------------------------------------- #
@@ -215,6 +247,57 @@ def test_the_winning_rule_is_reported_for_provenance() -> None:
     assert resolution.rule is REGEX_ALLOW
     assert resolution.source == "user"
     assert "outranked 1 other rule" in resolution.explain()
+
+
+def test_explain_names_the_rules_that_lost_not_the_one_that_won() -> None:
+    """The count was asserted; the identity was not, and only one of them holds it up.
+
+    ``losers`` is ``[r for r in self.matched if r is not self.rule]``. Flip that to
+    ``is`` and it becomes the winner instead of the others -- but the list is still one
+    element long, so "outranked 1 other rule" still reads true and the existing test
+    still passes. The explanation would then name the rule that *won* as the one that
+    was outranked, which is exactly backwards for the only reader it has: someone
+    working out why a call was refused.
+    """
+    resolution = RuleSet(rules=(TOOL_DENY, REGEX_ALLOW)).resolve(target("git status"))
+
+    text = resolution.explain()
+
+    assert resolution.rule is REGEX_ALLOW
+    assert TOOL_DENY.describe() in text, "the rule that lost is the one to name"
+    assert text.count(REGEX_ALLOW.describe()) == 1, (
+        "the winner is named once, as the decision -- never again in the outranked list"
+    )
+
+
+def test_explain_says_nothing_about_outranking_when_one_rule_matched() -> None:
+    """`if losers:` forced on prints "outranked 0 other rule(s):" and a dangling colon.
+
+    Every existing case has a contest, so the no-contest branch was never rendered.
+    """
+    resolution = RuleSet(rules=(REGEX_ALLOW,)).resolve(target("git status"))
+
+    text = resolution.explain()
+
+    assert resolution.rule is REGEX_ALLOW
+    assert "outranked" not in text
+
+
+def test_the_subject_is_the_command_that_ran_not_the_tool_that_ran_it() -> None:
+    """What the refusal and the audit entry actually name.
+
+    ``subject = target.command_text or target.tool`` -- the fallback exists for tools
+    with no command at all. Narrow that ``or`` to ``and`` and every bash subject
+    collapses to the string "bash", so the audit log records `deny bash` where it
+    should record `deny rm -rf /`. Nothing read ``subject`` for a command target, so
+    the whole distinction was unpinned.
+    """
+    command = RuleSet(rules=(TOOL_DENY,)).resolve(target("rm -rf /"))
+    bare = RuleSet(rules=(TOOL_DENY,)).resolve(target(tool="bash"))
+
+    assert command.subject == "rm -rf /"
+    assert "rm -rf /" in command.explain()
+    assert bare.subject == "bash"  # the fallback, for a call carrying no command text
 
 
 def test_the_later_of_two_identical_rules_is_the_one_reported() -> None:
@@ -460,6 +543,47 @@ def test_relaxes_answers_only_the_modes_half_not_the_deny_lists() -> None:
     assert policy.evaluate(BASH, use("rm -rf /")).decision is Decision.DENY
 
 
+def test_plan_mode_denies_a_tool_at_exactly_the_mutating_level() -> None:
+    """The boundary plan mode is named after, and the one case that never ran.
+
+    The condition is ``spec.danger_level >= DangerLevel.MUTATING``. The test below
+    exercises it with ``BASH``, which is ``DESTRUCTIVE`` -- and ``DESTRUCTIVE >
+    MUTATING`` holds either way, so narrowing that ``>=`` to ``>`` leaves the whole
+    suite green while plan mode quietly stops denying the level it is defined by.
+
+    ``write`` is ``MUTATING`` exactly. If plan mode lets it through, "plan mode is
+    read-only" is false for the most ordinary mutation there is.
+    """
+    policy = engine(mode=Mode.PLAN)
+    write = ToolUse(id="c", name="write", arguments={"path": "src/app.py", "content": "x"})
+
+    verdict = policy.evaluate(WRITE, write)
+
+    assert WRITE.danger_level is DangerLevel.MUTATING  # the boundary, not above it
+    assert verdict.decision is Decision.DENY
+    assert "plan mode is read-only" in verdict.reason
+
+
+def test_a_mutating_tool_has_its_paths_checked_as_writes() -> None:
+    """The same threshold again, deciding read-vs-write against the deny list.
+
+    ``writes = spec.danger_level >= DangerLevel.MUTATING`` is what tells
+    ``check_path`` whether this call is a write. Narrow it to ``>`` and a ``MUTATING``
+    tool's paths are vetted as *reads*, so every write-only rule stops firing for it --
+    `.env`, and anything resolving outside the workspace. The tool that most obviously
+    writes would be the one checked as if it did not.
+    """
+    policy = engine()
+    dotenv = ToolUse(id="c", name="write", arguments={"path": ".env", "content": "K=v"})
+
+    verdict = policy.evaluate(WRITE, dotenv)
+
+    assert verdict.decision is Decision.DENY
+    assert any("secret" in line.lower() or "denylist" in line.lower() for line in verdict.trace), (
+        f"the write was not vetted as a write; trace was {verdict.trace}"
+    )
+
+
 def test_plan_mode_denies_anything_that_mutates_and_says_why() -> None:
     policy = engine(mode=Mode.PLAN)
     verdict = policy.evaluate(BASH, use("git commit -m x"))
@@ -530,6 +654,14 @@ async def test_a_non_isolating_sandbox_changes_nothing() -> None:
         (Budget(max_tokens=100, spent_tokens=100), "token_budget"),
         (Budget(max_usd=1.0, spent_usd=1.5), "cost_budget"),
         (Budget(max_wall_seconds=30, elapsed_seconds=31), "wall_budget"),
+        # All three ceilings are `>=`, and only the token one was pinned at the
+        # boundary. Landing exactly on a limit has to stop the run, or "max" means
+        # "max plus one call" — and the two that were tested only from above could
+        # drift to `>` with nothing failing.
+        (Budget(max_usd=1.0, spent_usd=0.99), None),
+        (Budget(max_usd=1.0, spent_usd=1.0), "cost_budget"),
+        (Budget(max_wall_seconds=30, elapsed_seconds=29), None),
+        (Budget(max_wall_seconds=30, elapsed_seconds=30), "wall_budget"),
     ],
 )
 def test_check_budget_names_the_ceiling_that_was_hit(budget: Budget, expected: str | None) -> None:
@@ -544,6 +676,27 @@ async def test_a_cancelled_session_refuses_without_asking() -> None:
     assert decision.approved is False
     assert "cancelled" in decision.reason
     assert asker_of(policy).asked is False
+
+
+async def test_resume_releases_the_cancel_latch_including_the_blanket_refusal() -> None:
+    # `cancel` gates two things: `cancelled()`, which the loop polls, and the blanket
+    # refusal in `approve`. Both have to come back, or the turn after an interrupt runs
+    # but cannot approve anything.
+    policy = engine(Answer(outcome=Outcome.YES_ONCE))
+    policy.cancel()
+    policy.resume()
+
+    assert policy.cancelled() is False
+    decision = await policy.approve(BASH, use("./deploy.sh"), rendered="./deploy.sh")
+    assert decision.approved is True
+    assert asker_of(policy).asked is True
+
+
+def test_resume_is_idempotent_and_safe_with_no_cancel_outstanding() -> None:
+    policy = engine(Answer(outcome=Outcome.YES_ONCE))
+    policy.resume()
+    policy.resume()
+    assert policy.cancelled() is False
 
 
 async def test_the_default_asker_refuses_when_no_human_is_attached() -> None:
@@ -562,6 +715,42 @@ async def test_an_approval_request_is_never_blank() -> None:
         spec, ToolUse(id="c", name="deploy", arguments={"env": "prod"}), rendered=""
     )
     assert asker_of(policy).requests[0].rendered == "deploy(env='prod')"
+
+
+async def test_an_auto_approval_under_an_isolating_sandbox_is_still_audited() -> None:
+    """The one approval no human sees is the one the log most has to carry.
+
+    ``sandbox.py`` states the trade outright: the engine "hands this to the model *and
+    the log* verbatim, so the trade -- no prompts *because* no reach -- is on the
+    record rather than implicit." Tests asserted the wording of
+    ``SANDBOX_AUTO_APPROVES`` and never that it reaches the record, so deleting the
+    ``_record`` call on that branch leaves the whole suite green: the call is approved,
+    the asker is never consulted, and the audit trail simply has nothing in it.
+
+    That is the worst entry to lose. Every other approval either prompted a person or
+    was allowed by a rule someone can read; this one happened because the sandbox
+    claimed isolation, and the audit log is the only place that claim is written down.
+    """
+
+    class Isolating:
+        name = "docker"
+        isolates = True
+
+        def describe(self) -> str:
+            return "docker"
+
+    policy = engine(sandbox=Isolating())
+    # `./deploy.sh` is the ASK case -- see the audit test below. Under isolation it
+    # is approved with no asker involved at all.
+    decision = await policy.approve(BASH, use("./deploy.sh"), rendered="./deploy.sh")
+
+    assert decision.approved is True
+    assert asker_of(policy).requests == []  # nobody was asked
+    assert len(policy.audit) == 1, "an auto-approval left no trace in the audit log"
+    entry = policy.audit[0]
+    assert entry.approved is True
+    assert entry.decision is Decision.ASK  # what it *would* have been without the box
+    assert entry.reason == SANDBOX_AUTO_APPROVES
 
 
 async def test_the_audit_log_records_every_decision_with_its_trace() -> None:

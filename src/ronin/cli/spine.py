@@ -48,6 +48,7 @@ from ..context.filestate import FileStateTracker
 from ..context.memory import Memory, find_repo_root
 from ..context.repomap import RepoMap
 from ..core.protocols import ToolRegistry
+from ..core.steering import Steering
 from ..core.types import Mode
 from ..ext.skills import SkillSet
 from ..mcp.config import MCP_CONFIG_RELATIVE_PATH, McpServerConfig
@@ -353,6 +354,13 @@ class Runtime:
 
     ``policy`` is the same object the loop is handed, so the audit trail a UI shows
     and the decisions the loop acted on cannot diverge.
+
+    ``steering`` is the same arrangement for mid-turn corrections: the UI pushes into
+    it, :meth:`~ronin.cli.stream.Conversation._turn` hands its ``drain`` to the loop.
+    It lives here rather than being threaded through ``stream``/``run_prompt`` because
+    it is session-scoped exactly like ``policy`` — the channel outlives any one turn,
+    which is the whole point of it (a message typed as a turn ends is still delivered,
+    to the next one).
     """
 
     loaded: Loaded
@@ -367,6 +375,7 @@ class Runtime:
     system: str
     transcript: Transcript | None = None
     closers: tuple[Closer, ...] = ()
+    steering: Steering = field(default_factory=Steering)
 
     async def aclose(self) -> None:
         """Release everything this run opened, in reverse order, best effort.
@@ -403,8 +412,15 @@ def notes_from_settings(settings: Settings) -> tuple[Note, ...]:
         Note(
             subject=f"settings layer {error.layer!r}",
             detail=(
-                f"{error.message} — the layer was skipped, so its rules are not in "
-                f"effect ({error.path if error.path is not None else 'no path'})"
+                f"{error.message} — "
+                + (
+                    "the layer was skipped, so its rules are not in effect"
+                    if error.skipped
+                    # A refused escalation drops one scalar, not the file. Saying
+                    # "skipped" here would report rules as gone while they still apply.
+                    else "the rest of the layer still applies"
+                )
+                + f" ({error.path if error.path is not None else 'no path'})"
             ),
         )
         for error in settings.errors

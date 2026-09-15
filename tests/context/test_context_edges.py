@@ -352,7 +352,7 @@ def test_a_recorded_file_can_be_looked_up_and_forgotten(tmp_path: Path) -> None:
     tracker = FileStateTracker()
     tracker.record_read(path)
     assert tracker.recorded(path) is not None
-    tracker.forget(path)
+    tracker.retain_only(())
     assert tracker.recorded(path) is None
 
 

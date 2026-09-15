@@ -1,4 +1,4 @@
-"""``ronin2 mcp-serve``: what gets published, what runs it, and who may approve.
+"""``ronin mcp-serve``: what gets published, what runs it, and who may approve.
 
 The claim this file exists to check is the one the MCP server could not make for
 itself: *another program can launch Ronin and drive it.* Everything below builds a

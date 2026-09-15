@@ -7,13 +7,14 @@ import pytest
 from ronin.core.types import Mode
 from ronin.ui.reduce import (
     APPROVAL_KEYS,
-    DENIED_BY_HUMAN,
     DOUBLE_ESCAPE_WINDOW_SECONDS,
     MODE_CYCLE,
+    REASON_KEY,
     REMEMBER_KEY,
     EscapeAction,
     EscapeState,
     decision_for,
+    deny_with,
     mode_label,
     next_mode,
     press_escape,
@@ -148,9 +149,59 @@ def test_only_two_keys_can_approve_and_they_are_named() -> None:
     assert APPROVAL_KEYS["escape"] is False, "escape must never be an approval"
 
 
-def test_a_denial_says_why_so_the_model_can_act_on_it() -> None:
-    """A refusal with no words reads to the model as a malfunction, and it retries."""
-    denied = decision_for("n")
+def test_the_reason_key_is_not_an_answer_on_its_own() -> None:
+    """It opens a line to type in; it decides nothing.
+
+    Kept out of :data:`APPROVAL_KEYS` deliberately, so ``decision_for`` keeps returning
+    ``None`` for it and the request stays standing. If it resolved here it would be a
+    second denial key wearing a confusing name, and the human would lose the chance to
+    back out of a keystroke they took back.
+    """
+    assert REASON_KEY not in APPROVAL_KEYS
+    assert decision_for(REASON_KEY) is None
+
+
+def test_the_reason_key_does_not_collide_with_an_answering_key() -> None:
+    """A letter that both denies instantly and opens a prompt cannot do either well."""
+    assert REASON_KEY not in set(APPROVAL_KEYS)
+    assert REASON_KEY != REMEMBER_KEY
+
+
+@pytest.mark.parametrize(
+    ("typed", "expected"),
+    [
+        ("use staging", "use staging"),
+        ("  use staging  ", "use staging"),
+        ("", ""),
+        ("   ", ""),
+        ("\n\t", ""),
+    ],
+)
+def test_deny_with_carries_the_words_and_leaves_blank_blank(typed: str, expected: str) -> None:
+    """Whitespace is trimmed; emptiness is preserved rather than papered over.
+
+    A blank reason must stay blank so the engine's own no-reason wording fires.
+    A placeholder here would render, through ``PolicyEngine._denial``, as "the user
+    declined and said: the user declined this action" — doubled back on itself.
+    """
+    decision = deny_with(typed)
+    assert decision.approved is False
+    assert decision.reason == expected
+    assert not decision.remember, "a denial has nothing to remember"
+
+
+@pytest.mark.parametrize("key", ["n", "escape"])
+def test_a_bare_denial_carries_no_words_of_its_own(key: str) -> None:
+    """The engine owns every word of a denial, so this layer supplies none.
+
+    ``reason`` travels to the policy engine as ``Answer.feedback``, which the engine
+    reproduces as *the human's own words*. A placeholder here was quoted back as though
+    the human had typed it — and took the branch that says "Take that as a correction,
+    not a dead end", inviting the retry a bare ``n`` exists to stop. What the model is
+    actually told is asserted at the policy layer, in ``tests/safety``.
+    """
+    denied = decision_for(key)
     assert denied is not None
-    assert denied.reason == DENIED_BY_HUMAN
+    assert denied.approved is False
+    assert denied.reason == ""
     assert not denied.remember, "a denial has nothing to remember"

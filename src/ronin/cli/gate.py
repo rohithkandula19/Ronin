@@ -80,12 +80,13 @@ from ..context.budget import ClampMode, OutputBudget, clamp
 from ..context.compaction import paths_with_visible_read
 from ..context.filestate import WHOLE_FILE, FileStateTracker, FileStatus, ReadWindow
 from ..core.protocols import StreamingToolRegistry, ToolRegistry
-from ..core.types import Message, ToolResult, ToolSpec, ToolUse
+from ..core.types import Message, Todo, ToolResult, ToolSpec, ToolUse
 from ..mcp.tools import is_namespaced
 from ..safety.injection import CLOSE_MARKER, OPEN_MARKER, TaintTracker, wrap_and_scan
 from ..safety.policy import PolicyEngine
 from ..tools.base import ToolError, optional_int
-from ..tools.files import IMAGE_SUFFIXES
+from ..tools.files import IMAGE_SUFFIXES, preview
+from ..ui.render import render_diff
 
 # --------------------------------------------------------------------------- #
 # Which tools mean what
@@ -143,10 +144,14 @@ def resolve_path(path: str) -> Path:
 
     Mirrors what ``ronin.tools.base.ToolContext.resolve`` produces (minus the
     root-escape refusal, which is the tool layer's job) so a record the gate writes
-    for a ``read`` keys the same way as the check it does before an ``edit``. A
-    caller with a real context should inject :attr:`GatedRegistry.resolve` instead;
-    the failure this default guards against is only the easy half — ``a.py`` and
-    ``./a.py`` hashing to two different records, and the guard silently not guarding.
+    for a ``read`` keys the same way as the check it does before an ``edit``. The
+    failure it guards against is ``a.py`` and ``./a.py`` hashing to two different
+    records, and the guard silently not guarding.
+
+    Rarely reached in practice: :func:`gated` adopts the inner registry's own
+    ``ctx.resolve`` when there is one, so this stands in only for a registry with no
+    context — which is the case that cannot mis-key against a resolver it does not
+    have. Callers do not need to inject anything.
     """
     return Path(os.path.normpath(Path(path).expanduser().absolute())).resolve()
 
@@ -895,10 +900,11 @@ class GatedRegistry:
 
         ``None`` is always a safe answer: it means the caller re-reads, which is the
         previous behaviour. That is what makes the key comparison below safe rather
-        than load-bearing — the tool layer resolves paths through ``ToolContext``
-        while the gate resolves through :func:`resolve_path`, and if those two ever
-        disagree the bytes are simply not used. A wrong digest is a silent bad edit; a
-        missed handoff is one extra read.
+        than load-bearing. :func:`gated` now hands the gate the inner registry's own
+        ``ToolContext.resolve``, so the two keys agree by construction wherever there
+        is a context to adopt — but a caller may still pass its own ``resolve``, and
+        if the two ever disagree the bytes are simply not used. A wrong digest is a
+        silent bad edit; a missed handoff is one extra read.
         """
         ctx = getattr(self.inner, "ctx", None)
         take = getattr(ctx, "take_read_bytes", None)
@@ -977,10 +983,11 @@ def gated(
     """Wrap ``inner`` so every call goes through the gate. The one constructor.
 
     ``resolve`` defaults to the inner registry's own ``ToolContext.resolve`` when it
-    has one, which is what :func:`resolve_path` has always told callers to do. The
-    two must agree: the tool serves the file *its* resolver names and the gate tracks
-    the file *its* resolver names, so a divergence means the guard is watching a
-    different file than the model is reading — silently, and for the whole session.
+    has one, and falls back to :func:`resolve_path` only for a registry that carries
+    no context. The two must agree: the tool serves the file *its* resolver names and
+    the gate tracks the file *its* resolver names, so a divergence means the guard is
+    watching a different file than the model is reading — silently, and for the whole
+    session.
     """
     if resolve is None:
         ctx = getattr(inner, "ctx", None)
@@ -1089,6 +1096,85 @@ def _repair_fence(text: str, source: str) -> str:
     return text
 
 
+def live_preview(registry: object) -> Callable[[ToolUse], str | None]:
+    """A callable that renders what an edit *would do*, for the approval prompt.
+
+    The README has said for a long time that every edit is gated behind a diff
+    preview. It was not: the human was shown `edit({"new_string": …, "old_string": …})`
+    as a JSON blob, and `render_diff` -- written, tested and complete -- had no caller
+    outside the demo. This is the join, and it lives in `cli` because that is the only
+    layer allowed to know both `tools` and `ui`.
+
+    Reaches the live `ToolContext` the same two-`getattr` way as :func:`live_todos`,
+    and for the same reason: a registry without one must degrade to the old JSON line
+    rather than break approval entirely.
+    """
+
+    def render(use: ToolUse) -> str | None:
+        inner = getattr(registry, "inner", registry)
+        ctx = getattr(inner, "ctx", None)
+        resolve = getattr(ctx, "resolve", None)
+        if resolve is None:
+            return None
+        pair = preview(use.name, use.arguments, resolve=resolve)
+        if pair is None:
+            return None
+        before, after = pair
+        # Plain, not coloured. `render_approval` puts `rendered` through
+        # `styles.text`, which strips control characters so approval text cannot paint
+        # over the prompt a human is reading -- so colour added here would be removed
+        # there, and passing it would only imply a highlighting that does not survive.
+        return render_diff(before, after, path=str(use.arguments.get("path", "")))
+
+    return render
+
+
+def live_todos(registry: object) -> tuple[Todo, ...]:
+    """The model's current plan, read off the live tool context. Empty if unreachable.
+
+    ``todo_write`` writes into ``ToolContext.todos``, which the gated registry wraps —
+    so the plan is two hops away and both are optional by design: a registry assembled
+    without a context, or a future one that does not expose it, must degrade to "no
+    plan" rather than break the status pane. ``getattr`` twice rather than an assertion,
+    for the same reason :class:`GatedRegistry` reaches for its inner context that way.
+
+    Filtered to real ``Todo`` values because the context types the slot as
+    ``list[Any]``: it belongs to whatever tool owns the plan, and a caller should see
+    only what it can actually use.
+
+    Lives here rather than in ``cli.main`` because two callers need it and ``main``
+    imports ``stream``, so ``stream`` cannot import back. :class:`GatedRegistry` is the
+    thing with an ``inner``, which makes this its neighbour.
+    """
+    inner = getattr(registry, "inner", registry)
+    ctx = getattr(inner, "ctx", None)
+    todos = getattr(ctx, "todos", ())
+    return tuple(todo for todo in todos if isinstance(todo, Todo))
+
+
+def seed_todos(registry: object, todos: Sequence[Todo]) -> bool:
+    """Put a resumed plan into the live tool context. ``False`` if there was nowhere.
+
+    The counterpart to :func:`live_todos`, and the reason it exists is resume: the plan
+    comes back inside the ``AgentState``, but the place it is *read* from is the tool
+    context, which belongs to a freshly assembled runtime and starts empty. Without this
+    a resumed session shows an empty checklist and the model's next ``todo_write``
+    restarts from nothing, having been told nothing was in progress.
+
+    Goes through ``set_todos`` rather than assigning the attribute, which matters: the
+    loop hands every tool a shallow copy of the context, so a *rebound* list is written
+    to a throwaway while a list mutated in place is shared. Assigning here would look
+    correct and change nothing the tools can see.
+    """
+    inner = getattr(registry, "inner", registry)
+    ctx = getattr(inner, "ctx", None)
+    setter = getattr(ctx, "set_todos", None)
+    if setter is None:
+        return False
+    setter(list(todos))
+    return True
+
+
 __all__ = [
     "FENCE_REPAIR_NOTE",
     "HOOK_CONTEXT_HEADER",
@@ -1102,6 +1188,8 @@ __all__ = [
     "GateStage",
     "GatedRegistry",
     "gated",
+    "live_todos",
     "resolve_path",
+    "seed_todos",
     "untrusted_source",
 ]

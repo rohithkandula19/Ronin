@@ -148,7 +148,10 @@ class TodoWriteTool(Tool):
 
     async def run(self, args: Mapping[str, Any], ctx: ToolContext) -> ToolResult:
         todos = parse_todos(args.get("todos"))
-        ctx.todos = todos
+        # In place, not assigned: see `ToolContext.set_todos`. The live loop hands every
+        # tool a shallow copy of the context, so rebinding the field writes to a
+        # throwaway and the UI never sees the plan.
+        ctx.set_todos(todos)
         return ToolResult(ok=True, content=render_todos(todos))
 
 

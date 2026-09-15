@@ -71,7 +71,7 @@ from ..core.types import (
     ToolUse,
 )
 from .command import Hazard, Segment, Severity, hazards, parse_command
-from .denylist import DenyHit, Denylist
+from .denylist import DenyHit, Denylist, link_target
 from .injection import TaintHit, TaintTracker
 from .sandbox import SANDBOX_AUTO_APPROVES, Sandbox
 
@@ -141,6 +141,14 @@ class MatchTarget:
     arguments: Mapping[str, Any]
     segment: Segment | None = None
     command_field: str = COMMAND_ARGUMENT
+    link_targets: tuple[str, ...] = ()
+    """Where this call's path arguments actually land, when a symlink moves them.
+
+    Matched *in addition to* the literal spelling, never instead of it, so a rule
+    fires if either name is denied. That is the same "most restrictive wins" the
+    ruleset uses everywhere else, and it is the only safe direction: a link is a
+    second name for a file, and a rule about the file has to cover both.
+    """
 
     @property
     def command_text(self) -> str:
@@ -167,6 +175,7 @@ class MatchTarget:
                 out.append(value)
             elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
                 out.extend(item for item in value if isinstance(item, str))
+        out.extend(self.link_targets)
         return tuple(out)
 
 
@@ -298,6 +307,11 @@ def glob_to_regex(pattern: str) -> str:
 #: Layer name for rules compiled into the binary rather than read from a file.
 BUILTIN_SOURCE = "builtin"
 
+#: Provenance for the unattended narrowings. Named separately from
+#: :data:`BUILTIN_SOURCE` so an operator reading an audit trail can tell "this is
+#: how Ronin ships" from "this applied because nobody was watching".
+UNATTENDED_SOURCE = "unattended"
+
 
 @dataclass(frozen=True, slots=True)
 class Rule:
@@ -428,10 +442,29 @@ class Outcome(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class Answer:
-    """A human's reply: an outcome, plus the words that make a ``no`` useful."""
+    """A reply to an approval: an outcome, plus why — from whichever source there was.
+
+    Two fields because there are two genuinely different kinds of ``no`` and the engine
+    has to be able to tell them apart:
+
+    ``feedback`` is **the human's own words**, and nothing else. The engine reproduces it
+    verbatim and tells the model to treat it as a correction to work from, which is only
+    defensible if a person actually said it.
+
+    ``detail`` is the other kind: a refusal that is a *fact about the session* rather
+    than a decision — nobody was attached to ask, the typed answer could not be read.
+    Nobody said anything, so there is nothing to quote and nothing to work from.
+
+    Keeping both in one field is how the engine came to tell the model "the user declined
+    and said: no human is attached to approve this" — a sentence that contradicts itself,
+    on the default asker's path — and then invited it to adjust the plan and continue.
+    Setting both is allowed and ``feedback`` wins: a person who spoke outranks a
+    description of the session.
+    """
 
     outcome: Outcome
     feedback: str = ""
+    detail: str = ""
 
     def __post_init__(self) -> None:
         if not isinstance(self.outcome, Outcome):
@@ -451,22 +484,28 @@ class Asker(Protocol):
         ...
 
 
+#: Why a refusal happened when there was nobody to decide. A statement of fact with no
+#: advice attached: :meth:`PolicyEngine._denial` owns what the model should do about it,
+#: exactly as it does for a human's own words. Shared so that "nobody was asked" and
+#: "nobody answered" read as one situation rather than two different problems.
+NO_HUMAN_ATTACHED = "no human is attached to this session, so there was nobody to ask"
+
+
 @dataclass(frozen=True, slots=True)
 class UnattendedAsker:
     """The safe default when nobody is watching: always ``no``, and says why.
 
     Mirrors ``core.types.DENY_UNATTENDED``. A headless run that auto-approved would be
     the single worst default in the system, so the default asker refuses.
+
+    The wording travels as ``detail`` and not ``feedback``, because no human said it.
+    Through ``feedback`` the engine rendered it as "the user declined and said: no human
+    is attached to approve this" — which is self-contradicting, and on *this* path, the
+    one every unattended run takes.
     """
 
     async def ask(self, request: ApprovalRequest) -> Answer:
-        return Answer(
-            outcome=Outcome.NO,
-            feedback=(
-                "no human is attached to approve this, so it was refused. Either do "
-                "this a different way, or tell the user what to run themselves."
-            ),
-        )
+        return Answer(outcome=Outcome.NO, detail=NO_HUMAN_ATTACHED)
 
 
 # --------------------------------------------------------------------------- #
@@ -741,6 +780,105 @@ def builtin_ruleset() -> RuleSet:
     return RuleSet(rules=builtin_rules(), default=Decision.ASK)
 
 
+#: Commands the builtin allowlist lets through that nobody should be able to run
+#: with no human present, paired with why.
+#:
+#: :data:`DEV_BINARIES` is calibrated for somebody at a terminal: ``npm``, ``make``,
+#: ``cargo`` and ``terraform`` are development tools, and allowing them saves a
+#: prompt on every test run. That trade is right when a person is watching and
+#: wrong at 3am — ``npm publish`` ships a package to a public registry, ``npm
+#: unpublish --force`` permanently removes one, and ``terraform destroy`` is
+#: exactly what it says. All of those resolve to *allow* today.
+#:
+#: **These are not new prohibitions, they are narrowings of an existing
+#: allowance**, and each pattern names a subcommand rather than a binary, so
+#: ``npm test``, ``make lint``, ``cargo build``, ``terraform plan`` and ``kubectl
+#: get`` keep their allowance. That precision is the whole design: a rule broad
+#: enough to cover the binary would also cover the test run, and an unattended
+#: agent that has to ask before running tests is an agent nobody deploys.
+#:
+#: Only transitions are listed, and the suite pins that: ``docker push``, ``twine
+#: upload``, ``gh pr merge``, ``git push``, ``flit publish``, ``./gradlew publish``
+#: and the cloud CLIs already resolve to *ask* because their binaries are not in
+#: :data:`DEV_BINARIES`, so naming them here would suggest this table is doing
+#: work it is not. Add an entry when a binary joins that list, not before.
+#:
+#: The last entry is the one exception to naming a subcommand: ``make``, ``just``
+#: and ``task`` targets are freeform, so all it can do is read the target's name.
+#: It deliberately over-asks — ``make publish-docs-check`` costs one escalation —
+#: because the alternative is missing ``make publish-prod``.
+UNATTENDED_ASK: tuple[tuple[str, str], ...] = (
+    (
+        r"^(npm|yarn|pnpm|bun|deno)\s+(publish|unpublish)\b",
+        "publishes or withdraws a package on a public registry",
+    ),
+    (
+        r"^(cargo|poetry|uv|hatch)\s+publish\b",
+        "publishes a package on a public registry",
+    ),
+    (r"^gem\s+push\b", "publishes a gem on a public registry"),
+    (r"^dotnet\s+nuget\s+push\b", "publishes a package on a public registry"),
+    (
+        r"^(?:bundle\s+exec\s+)?rake\s+release\b",
+        "the bundler release task tags and pushes a gem",
+    ),
+    (r"^mvn\b.*\bdeploy\b", "the deploy phase publishes to a remote repository"),
+    (r"^gradle\b.*\bpublish", "publishes to a remote repository"),
+    (
+        r"^terraform\s+(apply|destroy|import|taint)\b",
+        "changes real infrastructure, and destroy is not recoverable from here",
+    ),
+    (
+        r"^terraform\s+state\s+(rm|mv|push)\b",
+        "rewrites the state file the rest of the world is described by",
+    ),
+    (
+        r"^kubectl\s+(apply|delete|patch|replace|scale|drain|cordon)\b",
+        "changes a live cluster",
+    ),
+    (
+        r"^helm\s+(install|upgrade|uninstall|rollback)\b",
+        "changes a live cluster",
+    ),
+    (
+        r"^(make|just|task)\s+\S*(deploy|release|publish|push)\b",
+        "the target name says it leaves this machine",
+    ),
+)
+
+
+def unattended_rules() -> tuple[Rule, ...]:
+    """Narrowings of the builtin allowlist for a run with nobody attached.
+
+    A function, not a constant, for the reason :func:`builtin_rules` is one: a
+    mutable global that softens policy in place is a security hole with a short
+    fuse.
+
+    **How these win, and why it is not obvious.** Rule precedence is *specificity
+    first*: :meth:`RuleSet.resolve` keeps the most specific matches and only then
+    takes the most restrictive among them. The builtin dev-binary allowance is a
+    :class:`CommandRegex`, so it has specificity ``(2, 1)`` — and so do these.
+    They therefore *tie* with it and win on restrictiveness, which is exactly
+    what is wanted. A broader rule would have lost outright, quietly, the same
+    way a tool-wide deny loses to a narrow allow.
+
+    Every one is ``unwaivable``, following ``git push``: a Retainer answering one
+    escalation must not be able to write down "yes, publish to npm from now on".
+    The human can still say yes to the call in front of them.
+    """
+    return tuple(
+        Rule(
+            tool="bash",
+            matcher=CommandRegex(pattern),
+            decision=Decision.ASK,
+            source=UNATTENDED_SOURCE,
+            reason=reason,
+            unwaivable=True,
+        )
+        for pattern, reason in UNATTENDED_ASK
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Verdicts
 # --------------------------------------------------------------------------- #
@@ -878,6 +1016,23 @@ class PolicyEngine:
     def cancel(self) -> None:
         """Ask the loop to stop. Idempotent, and never un-set from inside a turn."""
         self._cancelled = True
+
+    def resume(self) -> None:
+        """Release an interrupt so the *next* turn can run. Idempotent.
+
+        ``cancel`` latches on purpose: it is polled at every await point inside one
+        turn, and a flag that flickered would let a turn the user stopped stagger on.
+        But nothing released the latch, so a single ``esc`` ended the *session* rather
+        than the turn — every later prompt hit :meth:`cancelled` at the top of
+        iteration 0 and came straight back as ``interrupted``, with no way out short
+        of restarting.
+
+        The turn boundary is the only place that can tell "stop this" from "stop
+        everything", so that is where this is called from and the only place it may be
+        called from: see :meth:`ronin.cli.stream.Conversation._turn`. Calling it from
+        inside a turn would defeat the latch.
+        """
+        self._cancelled = False
 
     def set_mode(self, mode: Mode) -> None:
         """Change the permission mode mid-session — what the TUI's mode key calls.
@@ -1026,7 +1181,10 @@ class PolicyEngine:
         answer back to ``ask``. Exact is safe here precisely because it is exact: it
         approves one byte-for-byte string and generalises to nothing.
         """
-        whole = rules.resolve(MatchTarget(tool=spec.name, arguments=use.arguments))
+        links = self._link_targets(use)
+        whole = rules.resolve(
+            MatchTarget(tool=spec.name, arguments=use.arguments, link_targets=links)
+        )
         if not segments:
             return (whole,)
         per_segment = [
@@ -1064,6 +1222,27 @@ class PolicyEngine:
         """Whether a segment runs anything. ``FOO=bar`` on its own does not."""
         return bool(segment.binary) or any(r.names_a_file for r in segment.redirects)
 
+    def _link_targets(self, use: ToolUse) -> tuple[str, ...]:
+        """Every path argument's real destination, when a symlink makes it a different one.
+
+        Empty without a denylist, because that is where the workspace root lives — and
+        a resolution relative to the wrong root is worse than none. Empty for the
+        ordinary call too: nothing here touches the disk unless an argument names a
+        path, and `link_target` returns ``None`` for anything that is not a link.
+        """
+        if self.denylist is None:
+            return ()
+        base = self.denylist.workspace_root
+        found: list[str] = []
+        for key, value in sorted(use.arguments.items()):
+            if key not in PATH_ARGUMENTS:
+                continue
+            for path in _as_paths(value):
+                target = link_target(str(path), base)
+                if target is not None and target not in found:
+                    found.append(target)
+        return tuple(found)
+
     def _deny_hits(
         self, spec: ToolSpec, use: ToolUse, segments: Sequence[Segment]
     ) -> tuple[DenyHit, ...]:
@@ -1079,6 +1258,13 @@ class PolicyEngine:
                 continue
             for path in _as_paths(value):
                 hits.extend(self.denylist.check_path(path, write=writes))
+        # And again by where those paths actually land. The unconditional list is
+        # about *files* — `.env`, a private key, `.git/` — and a symlink is a second
+        # name for one. Checking only the name the model typed meant `notes.txt`
+        # pointing at `.env` was judged as `notes.txt`, and `docs -> .git` put a
+        # write on `.git/config`: arbitrary code on the next git invocation.
+        for target in self._link_targets(use):
+            hits.extend(self.denylist.check_path(target, write=writes))
         return tuple(hits)
 
     def _relax(self, decision: Decision, spec: ToolSpec) -> Decision:
@@ -1188,7 +1374,7 @@ class PolicyEngine:
         self, spec: ToolSpec, use: ToolUse, verdict: Verdict, answer: Answer
     ) -> ApprovalDecision:
         if not answer.approves:
-            reason = self._denial(answer.feedback)
+            reason = self._denial(answer.feedback, answer.detail)
             self._record(spec, use, verdict, approved=False, outcome=answer.outcome, reason=reason)
             return ApprovalDecision(approved=False, reason=reason)
 
@@ -1250,18 +1436,38 @@ class PolicyEngine:
             reason="approved by the user",
         )
 
-    def _denial(self, feedback: str) -> str:
-        """Turn a human's "no" into something the model can act on.
+    def _denial(self, feedback: str, detail: str = "") -> str:
+        """Turn a "no" into something the model can act on, without inventing a speaker.
 
-        The feedback is reproduced verbatim and first. This is the whole reason
-        "no with feedback" is one of the four outcomes: a refusal the model can read as
-        a redirection ("use the staging database") keeps the turn alive, and a bare
-        "denied" makes it retry the same call with different quoting.
+        Three cases, and the difference between them is what the model should do next:
+
+        A human who gave words is reproduced verbatim and first. This is the whole
+        reason "no with feedback" is one of the four outcomes: a refusal the model can
+        read as a redirection ("use the staging database") keeps the turn alive, and a
+        bare "denied" makes it retry the same call with different quoting.
+
+        A refusal with no human behind it — nobody attached, an unreadable answer — is
+        stated as what it is. It must *not* be phrased as something the user said, and it
+        must not invite the model to adjust and carry on: there is no decision to work
+        from, and retrying cannot produce one.
+
+        A human who declined and said nothing gets the third wording, which is neither.
+
+        ``detail`` carries the fact and this method owns the advice, exactly as it does
+        for a human's words — so a caller supplying a detail never has to guess what
+        sentence the model should read after it.
         """
         if feedback.strip():
             return (
                 f"the user declined and said: {feedback.strip()}\n"
                 "Take that as a correction, not a dead end: adjust the plan and continue."
+            )
+        if detail.strip():
+            return (
+                f"this was refused without any decision from the user: {detail.strip()}.\n"
+                "Do not retry it and do not treat it as a correction — nobody chose "
+                "this. Do the task another way, or tell the user what they need to run "
+                "themselves."
             )
         return (
             "the user declined this action and gave no reason. Do not retry it. "
@@ -1306,9 +1512,12 @@ __all__ = [
     "DEV_BINARIES",
     "HAZARD_FLOOR",
     "MATCHER_KINDS",
+    "NO_HUMAN_ATTACHED",
     "PATH_ARGUMENTS",
     "READ_ONLY_BINARIES",
     "SAFE_GIT_SUBCOMMANDS",
+    "UNATTENDED_ASK",
+    "UNATTENDED_SOURCE",
     "Answer",
     "AnyUse",
     "Asker",
@@ -1330,4 +1539,5 @@ __all__ = [
     "builtin_ruleset",
     "glob_to_regex",
     "most_restrictive",
+    "unattended_rules",
 ]

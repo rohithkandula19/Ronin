@@ -70,6 +70,44 @@ _CONTROLS: Final = frozenset(
 ) - {"\n", "\t"}
 _CONTROL_TABLE: Final = str.maketrans(dict.fromkeys(_CONTROLS))
 
+#: Characters that are invisible but change how the visible ones are *read*. The C0
+#: and C1 ranges above stop at U+009F and every one of these is past it — which is
+#: exactly how a test that exhaustively covered "control characters" passed while a
+#: shell command could still be shown to a human backwards.
+#:
+#: Two families, one effect. **Bidi controls** reorder a line, so `rm -rf ~ #\u202e...`
+#: renders with the comment first and the destructive half tucked behind it, and the
+#: reader approves what they read rather than what runs. **Invisible spacing** and
+#: **tag characters** make two different strings render identically, so a diff can
+#: show one identifier while containing another, or carry a whole hidden message.
+#:
+#: U+200C and U+200D are deliberately absent. Zero-width non-joiner and joiner are
+#: required to render Persian, Hindi and emoji sequences correctly, they cannot
+#: reorder anything, and an identifier containing one is a syntax error in every
+#: language this program edits. Marking them would corrupt legitimate text to defend
+#: against nothing.
+_INVISIBLE: Final = frozenset(
+    chr(code)
+    for code in (
+        0x061C,  # ARABIC LETTER MARK
+        0x180E,  # MONGOLIAN VOWEL SEPARATOR
+        0x200B,  # ZERO WIDTH SPACE
+        0x200E,  # LEFT-TO-RIGHT MARK
+        0x200F,  # RIGHT-TO-LEFT MARK
+        *range(0x202A, 0x202F),  # LRE RLE PDF LRO RLO
+        *range(0x2060, 0x2065),  # WORD JOINER, invisible times/separator/plus
+        *range(0x2066, 0x206A),  # LRI RLI FSI PDI
+        0xFEFF,  # ZERO WIDTH NO-BREAK SPACE / BOM
+        *range(0xE0000, 0xE0080),  # tag characters
+    )
+)
+
+#: Rendered, not deleted. Deleting makes the doctored string and the honest one look
+#: identical on screen, which is the attack succeeding quietly; showing `<U+202E>`
+#: leaves the text readable, inert, and the attempt visible — the same choice
+#: :func:`strip_controls` already makes for an escape sequence's payload.
+_INVISIBLE_TABLE: Final = str.maketrans({char: f"<U+{ord(char):04X}>" for char in _INVISIBLE})
+
 
 def strip_controls(text: str) -> str:
     """Remove terminal control characters from text we did not write.
@@ -82,6 +120,14 @@ def strip_controls(text: str) -> str:
     already on screen. The last of those is the one that matters here: this program
     asks people to approve commands by reading them, and output that can paint over
     the prompt undermines the only check the user has.
+
+    Painting over the prompt is not the only way to break reading it. A bidi control
+    reorders the line instead: ``rm -rf ~ #\u202e...`` shows the comment first and hides
+    the destructive half behind it, so the user approves a command they never saw.
+    Those characters live past U+009F, outside the ranges below, which is how an
+    exhaustive control-character test passed while this went through untouched. They
+    are rendered as ``<U+202E>`` rather than removed, because removing them would
+    leave the doctored line looking exactly like an honest one.
 
     The escape *character* goes and the rest of the payload stays, so
     ``hello \\x1b]0;PWNED\\x07 world`` renders as ``hello ]0;PWNED world``: inert, and
@@ -96,7 +142,7 @@ def strip_controls(text: str) -> str:
     is a compiler's colour codes in tool output, which is already truncated to a
     summary line.
     """
-    return text.translate(_CONTROL_TABLE)
+    return text.translate(_CONTROL_TABLE).translate(_INVISIBLE_TABLE)
 
 
 def escape_markup(text: str) -> str:
@@ -304,11 +350,19 @@ CONTEXT_WARN_FRACTION = 0.75
 #: Appended to the context percentage once past the warning line.
 CONTEXT_WARN_MARK = " ⚠"
 
-#: What the queued-message line says. Names the timing, because "queued" alone does not
-#: tell the user whether to wait or to interrupt.
-QUEUED_ONE = "queued — runs when this turn ends (esc to interrupt now)"
-QUEUED_MANY = "{n} queued — they run in order when this turn ends (esc to interrupt now)"
+#: What the pending-message line says. Names the timing, because "queued" alone does not
+#: tell the user whether to wait or to interrupt — and the timing changed: a mid-turn
+#: message now joins the running conversation at the loop's next step rather than waiting
+#: for the whole turn to finish, so the line has to stop promising the old behaviour.
+QUEUED_ONE = "steering — goes in at the agent's next step (esc to stop now and send it)"
+QUEUED_MANY = "{n} steering — they go in, in order, at the agent's next step (esc to stop now)"
 QUEUED_INDENT = "  | "
+
+#: The ``@file`` picker. The header names both keys, because a list of paths with no
+#: stated way to take one is a list you retype by hand.
+MENTION_HEADER = "tab inserts the path · up/down chooses"
+MENTION_SELECTED = "  > "
+MENTION_UNSELECTED = "    "
 
 #: How long in-flight work must go quiet before the activity line shows a clock. Below
 #: this every ordinary tool would flash a number; above it, the number appearing is the
@@ -542,11 +596,15 @@ def render_status_for(state: ViewState, *, styles: Styles = PLAIN) -> str:
 # --------------------------------------------------------------------------- #
 
 DANGER_MARKER = "⚠"
-APPROVAL_PROMPT = "approve? [y]es / [n]o / [a]lways"
+APPROVAL_PROMPT = "approve? [y]es / [n]o / [a]lways / [s]ay why"
 #: Says the human is looking at less than the whole thing. Kept loud because the
 #: alternative — a quietly clipped command — is how someone approves a `rm` they
 #: never saw.
 APPROVAL_TRUNCATION = "the text above is incomplete; do not approve unless you accept all of it"
+#: Shown in place of :data:`APPROVAL_PROMPT` while the human types a reason. Names the
+#: way out, because a prompt with no stated escape is how someone force-quits the
+#: session rather than backing out of one keystroke.
+REASON_PROMPT = "why not? enter sends it back to the model — esc keeps the request open"
 
 
 def render_approval(
@@ -554,6 +612,7 @@ def render_approval(
     *,
     styles: Styles = PLAIN,
     max_lines: int = APPROVAL_MAX_LINES,
+    collecting: bool = False,
 ) -> str:
     """Render exactly what the human is deciding on.
 
@@ -562,6 +621,11 @@ def render_approval(
     accident — that is the whole point of the field: what is shown is what will
     run. The only transformation permitted is truncation, and it announces itself
     twice (a line-count marker plus :data:`APPROVAL_TRUNCATION`).
+
+    ``collecting`` swaps the key list for :data:`REASON_PROMPT` while a reason is
+    being typed. The request itself stays on screen throughout: someone explaining
+    why they are refusing a command needs to still be able to read the command, and
+    re-rendering without it would be the one moment the body is missing.
     """
     head = styles.wrap(
         "danger",
@@ -576,7 +640,12 @@ def render_approval(
         body = truncate_lines(body, max_lines, what="approval text", styles=styles)
         body = f"{body}\n{styles.wrap('danger', APPROVAL_TRUNCATION)}"
     parts.append(body)
-    parts.append(styles.wrap("meta", APPROVAL_PROMPT))
+    # Escaped, not just wrapped. The key hints are spelled `[y]es / [n]o`, and a host
+    # that parses console markup reads `[y]` as a tag and eats it — so the line a human
+    # relies on to know which key approves rendered as "approve? es / o / lways". Every
+    # other string here goes through `styles.text`; this one did not.
+    prompt = REASON_PROMPT if collecting else APPROVAL_PROMPT
+    parts.append(styles.wrap("meta", styles.text(prompt)))
     return "\n".join(parts)
 
 
@@ -612,6 +681,29 @@ def render_tool_line(line: ToolLine, *, styles: Styles = PLAIN) -> str:
     if line.ok is None:
         return styles.wrap("tool_running", safe)
     return styles.wrap("tool_ok" if line.ok else "tool_error", safe)
+
+
+def render_completion(state: ViewState, *, styles: Styles = PLAIN) -> str:
+    """The ``@file`` paths on offer, selected one marked. ``""`` when none are.
+
+    Shown above the input rather than as a floating overlay: an overlay has to know how
+    wide the terminal is and where the cursor sits, and getting either wrong puts the
+    list on top of what the user is reading. A docked region cannot cover anything.
+
+    Paths are escaped like every other in-band string here — a repo is allowed to
+    contain a file with a bracket in its name, and that must render as its name rather
+    than as markup.
+    """
+    if not state.completion.open:
+        return ""
+    lines = [styles.wrap("meta", styles.text(MENTION_HEADER))]
+    for position, path in enumerate(state.completion.candidates):
+        chosen = position == state.completion.selected
+        marker = MENTION_SELECTED if chosen else MENTION_UNSELECTED
+        lines.append(
+            styles.wrap("tool_running" if chosen else "meta", styles.text(f"{marker}{path}"))
+        )
+    return "\n".join(lines)
 
 
 def render_tool_output(line: ToolLine, *, styles: Styles = PLAIN) -> str:
@@ -679,7 +771,10 @@ def render_queued(state: ViewState, *, styles: Styles = PLAIN) -> str:
     if not state.queued:
         return ""
     head = QUEUED_ONE if len(state.queued) == 1 else QUEUED_MANY.format(n=len(state.queued))
-    lines = [styles.wrap("meta", head)]
+    # Escaped like every other in-band string here. Nothing in the copy needs it today,
+    # but the approval prompt taught this the expensive way: `[y]es` in an unescaped
+    # constant renders as `es`, and the bug is invisible to anyone reading the source.
+    lines = [styles.wrap("meta", styles.text(head))]
     lines += [styles.wrap("meta", styles.text(f"{QUEUED_INDENT}{item}")) for item in state.queued]
     return "\n".join(lines)
 
@@ -729,6 +824,8 @@ class Panels:
     notices: str = ""
     #: Messages typed mid-turn and waiting their turn. Empty when nothing is queued.
     queued: str = ""
+    #: The ``@file`` picker. Empty unless a mention is being typed.
+    completion: str = ""
 
 
 def render_panels(
@@ -753,6 +850,7 @@ def render_panels(
         activity=render_activity(state, styles=styles),
         notices=render_notices(state, styles=styles),
         queued=render_queued(state, styles=styles),
+        completion=render_completion(state, styles=styles),
     )
 
 
@@ -776,6 +874,7 @@ __all__ = [
     "QUEUED_INDENT",
     "QUEUED_MANY",
     "QUEUED_ONE",
+    "REASON_PROMPT",
     "STATUS_SEPARATOR",
     "TODO_GLYPHS",
     "TOKENS",
@@ -786,6 +885,7 @@ __all__ = [
     "escape_markup",
     "render_activity",
     "render_approval",
+    "render_completion",
     "render_diff",
     "render_errors",
     "render_notices",

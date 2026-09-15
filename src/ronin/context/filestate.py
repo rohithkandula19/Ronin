@@ -260,10 +260,6 @@ class FileStateTracker:
             del self._records[path]
         return dropped
 
-    def forget(self, path: Path) -> None:
-        """Drop a record — for a file the session deliberately replaced wholesale."""
-        self._records.pop(str(path), None)
-
     def recorded(self, path: Path) -> ReadRecord | None:
         return self._records.get(str(path))
 
@@ -299,14 +295,6 @@ class FileStateTracker:
         """Verdicts for ``paths``, or for everything read so far. Sorted by path."""
         targets = sorted(str(p) for p in paths) if paths is not None else self.known_paths()
         return tuple(self.check(Path(p)) for p in targets)
-
-    def changed_since_read(self) -> tuple[str, ...]:
-        """Paths whose content moved under us — the set worth showing a user."""
-        return tuple(
-            check.path
-            for check in self.check_all()
-            if check.status in (FileStatus.CHANGED, FileStatus.DELETED)
-        )
 
     def _verdict(
         self,

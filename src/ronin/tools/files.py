@@ -22,7 +22,7 @@ has not is guessing.
 from __future__ import annotations
 
 import base64
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -65,6 +65,15 @@ KNOWN_BINARY_SUFFIXES: Mapping[str, str] = {
 def _read_text(path: Path) -> str:
     """Read a file as text, or raise a :class:`ToolError` explaining why not."""
     return _read_bytes_and_text(path)[1]
+
+
+#: Passed to every write. ``newline=None`` — the default — translates ``"\n"`` to
+#: ``os.linesep`` on the way out, so on Windows a file that legitimately contains
+#: ``"\r\n"`` (which ``_read_text`` decodes faithfully, byte for byte) is written back
+#: as ``"\r\r\n"``. One ``edit`` doubles every carriage return in the file. ``""``
+#: means "write the string exactly as it is", which is the only correct answer when
+#: the string came from reading that same file.
+KEEP_LINE_ENDINGS = ""
 
 
 def _read_bytes_and_text(path: Path) -> tuple[bytes, str]:
@@ -212,6 +221,15 @@ class ReadTool(Tool):
         ctx.mark_read(path, raw)
 
         if text == "":
+            # A description of the file, not a copy of it — so it must not be
+            # allowed to stand in for one. Recorded complete, the dedup answers the
+            # next read with "the whole file is already in this conversation above,
+            # scroll back for the contents" — 282 characters spent to avoid
+            # re-sending 40, pointing at a message that has no contents to find.
+            # Marking it incomplete costs one cheap re-read and keeps the answer
+            # true. The digest is still recorded, so the write guard is unaffected:
+            # ``complete`` gates only the dedup.
+            ctx.mark_read(path, raw, complete=False)
             return ToolResult(
                 ok=True,
                 content=f"{path.name} exists but is empty (0 bytes).",
@@ -315,7 +333,7 @@ class WriteTool(Tool):
 
         path.parent.mkdir(parents=True, exist_ok=True)
         existed = path.exists()
-        path.write_text(content, encoding="utf-8")
+        path.write_text(content, encoding="utf-8", newline=KEEP_LINE_ENDINGS)
         # A write is also a read: the model now knows exactly what is in the file,
         # so a follow-up edit or write should not be blocked by the guard.
         ctx.mark_read(path)
@@ -428,7 +446,7 @@ class EditTool(Tool):
         updated, replacements = apply_edit(
             text, old, new, replace_all=replace_all, path_label=str(path)
         )
-        path.write_text(updated, encoding="utf-8")
+        path.write_text(updated, encoding="utf-8", newline=KEEP_LINE_ENDINGS)
         ctx.mark_read(path)
         return ToolResult(
             ok=True,
@@ -521,10 +539,70 @@ class MultiEditTool(Tool):
                 ) from exc
             total += replacements
 
-        path.write_text(buffer, encoding="utf-8")
+        path.write_text(buffer, encoding="utf-8", newline=KEEP_LINE_ENDINGS)
         ctx.mark_read(path)
         return ToolResult(
             ok=True,
             content=f"edited {path} ({len(raw_edits)} edits, {total} replacements)",
             artifacts=(str(path),),
         )
+
+
+# --------------------------------------------------------------------------- #
+# What an edit would do, before it does it
+# --------------------------------------------------------------------------- #
+
+#: Tools whose effect on a file can be shown as a diff before it is approved.
+PREVIEWABLE: frozenset[str] = frozenset({"write", "edit", "multi_edit"})
+
+
+def preview(
+    name: str, args: Mapping[str, Any], *, resolve: Callable[[str], Path]
+) -> tuple[str, str] | None:
+    """``(before, after)`` for an edit-shaped call, or ``None`` if it cannot be shown.
+
+    Built on the same :func:`apply_edit` the tools run, deliberately: a preview
+    computed by a second implementation is a preview that can drift, and a human who
+    approves diff A while diff B lands has been shown a lie rather than a summary.
+
+    Every failure is ``None`` rather than an exception. A call that cannot be previewed
+    is usually one that will fail anyway — a missing file, an ``old_string`` that does
+    not match, a binary blob — and it should fail in the tool, with the message the
+    model needs, instead of taking down the approval prompt on the way there.
+    """
+    if name not in PREVIEWABLE:
+        return None
+    try:
+        path = resolve(require_str(args, "path"))
+        if name == "write":
+            before = _read_text(path) if path.is_file() else ""
+            return before, require_str(args, "content")
+        before = _read_text(path)
+        if name == "edit":
+            after, _count = apply_edit(
+                before,
+                require_str(args, "old_string"),
+                require_str(args, "new_string"),
+                replace_all=optional_bool(args, "replace_all"),
+                path_label=str(path),
+            )
+            return before, after
+        edits = args.get("edits")
+        if not isinstance(edits, Sequence) or isinstance(edits, str) or not edits:
+            return None
+        buffer = before
+        for entry in edits:
+            if not isinstance(entry, Mapping):
+                return None
+            # Each edit sees the previous one's result, exactly as `multi_edit` runs
+            # them. Previewing them independently would show a diff that never happens.
+            buffer, _count = apply_edit(
+                buffer,
+                require_str(entry, "old_string"),
+                require_str(entry, "new_string"),
+                replace_all=optional_bool(entry, "replace_all"),
+                path_label=str(path),
+            )
+        return before, buffer
+    except (ToolError, OSError, ValueError):
+        return None

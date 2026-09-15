@@ -139,7 +139,7 @@ pytest.importorskip("textual", reason="the interactive TUI needs the 'tui' extra
 
 
 async def test_a_slash_command_in_the_tui_runs_instead_of_reaching_the_model() -> None:
-    from textual.widgets import Input, Static
+    from textual.widgets import Static, TextArea
 
     from ronin.ui.app import NOTICES_ID, Session, _build_app
 
@@ -159,10 +159,10 @@ async def test_a_slash_command_in_the_tui_runs_instead_of_reaching_the_model() -
     )
     async with app.run_test() as pilot:
         await pilot.pause()
-        prompt = app.query_one("#prompt-input", Input)
+        prompt = app.query_one("#prompt-input", TextArea)
         prompt.focus()
         await pilot.pause()
-        prompt.value = "/help"
+        prompt.text = "/help"
         await pilot.press("enter")
         await pilot.pause()
         await pilot.pause()
@@ -173,7 +173,7 @@ async def test_a_slash_command_in_the_tui_runs_instead_of_reaching_the_model() -
 
 
 async def test_ordinary_prose_still_goes_to_the_model() -> None:
-    from textual.widgets import Input
+    from textual.widgets import TextArea
 
     from ronin.ui.app import Session, _build_app
 
@@ -187,10 +187,10 @@ async def test_ordinary_prose_still_goes_to_the_model() -> None:
     app = _build_app(Session(events=stream(()), on_submit=submitted.append, on_command=on_command))
     async with app.run_test() as pilot:
         await pilot.pause()
-        prompt = app.query_one("#prompt-input", Input)
+        prompt = app.query_one("#prompt-input", TextArea)
         prompt.focus()
         await pilot.pause()
-        prompt.value = "fix the failing test"
+        prompt.text = "fix the failing test"
         await pilot.press("enter")
         await pilot.pause()
         assert submitted == ["fix the failing test"]
@@ -199,7 +199,7 @@ async def test_ordinary_prose_still_goes_to_the_model() -> None:
 
 async def test_without_a_command_handler_a_slash_line_is_just_text() -> None:
     """The demo and replay paths set no handler; nothing may silently swallow input."""
-    from textual.widgets import Input
+    from textual.widgets import TextArea
 
     from ronin.ui.app import Session, _build_app
 
@@ -207,10 +207,10 @@ async def test_without_a_command_handler_a_slash_line_is_just_text() -> None:
     app = _build_app(Session(events=stream(()), on_submit=submitted.append))
     async with app.run_test() as pilot:
         await pilot.pause()
-        line = app.query_one("#prompt-input", Input)
+        line = app.query_one("#prompt-input", TextArea)
         line.focus()
         await pilot.pause()
-        line.value = "/help"
+        line.text = "/help"
         await pilot.press("enter")
         await pilot.pause()
         assert submitted == ["/help"]

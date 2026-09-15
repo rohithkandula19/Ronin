@@ -829,7 +829,9 @@ async def test_doctor_reports_the_workspace_without_starting_a_session(
 
 
 async def test_the_first_run_wizard_asks_before_writing_anything(tmp_path: Path) -> None:
-    capture = Captured(answers=["y\n"])
+    # `isatty=True` because scripting an answer is simulating a human at a terminal,
+    # and the wizard now declines to write when there is nobody to ask.
+    capture = Captured(answers=["y\n"], isatty=True)
     agent = agent_for(tmp_path, [h.say("ready")])
 
     await run(["-p", "hello", "--cwd", str(tmp_path)], agent, capture)
@@ -843,7 +845,7 @@ async def test_the_first_run_wizard_asks_before_writing_anything(tmp_path: Path)
 async def test_a_declined_wizard_writes_nothing_and_the_session_still_runs(
     tmp_path: Path,
 ) -> None:
-    capture = Captured(answers=["n\n"])
+    capture = Captured(answers=["n\n"], isatty=True)
     agent = agent_for(tmp_path, [h.say("ready anyway")])
 
     code = await run(["-p", "hello", "--cwd", str(tmp_path)], agent, capture)
@@ -949,9 +951,9 @@ def test_main_with_no_model_configuration_returns_one(tmp_path: Path) -> None:
 
 
 def test_every_declared_entry_point_resolves_to_a_callable() -> None:
-    """`ronin` and `ronin2` must both name something importable.
+    """`ronin` must name something importable.
 
-    A typo in either string is invisible until somebody installs the wheel — `uv run`
+    A typo in the string is invisible until somebody installs the wheel — `uv run`
     and `python -m ronin` both work regardless, so the whole local development loop
     passes while the published artifact has a broken command. Resolved here the same
     way importlib.metadata resolves it at install time.
@@ -963,7 +965,7 @@ def test_every_declared_entry_point_resolves_to_a_callable() -> None:
     config = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
     scripts = config["project"]["scripts"]
 
-    assert {"ronin", "ronin2"} <= set(scripts), "both console scripts must stay declared"
+    assert "ronin" in scripts, "the console script must stay declared"
     for name, target in scripts.items():
         module_path, _, attribute = target.partition(":")
         resolved = getattr(import_module(module_path), attribute)
@@ -971,8 +973,28 @@ def test_every_declared_entry_point_resolves_to_a_callable() -> None:
         assert resolved is main, f"{name} must point at the same main() tested above"
 
 
+def test_this_tree_declares_exactly_one_console_script() -> None:
+    """One program, one word for it.
+
+    `ronin2` shipped alongside `ronin` for as long as v1 held the short name, and then
+    outlived the reason: the two resolved to the same `main`, so the only thing the
+    second name carried was the impression that there were two Ronins to choose
+    between. That impression is what this asserts against — not a packaging fault, a
+    naming one, which is why the check is on the *count* rather than on any spelling.
+
+    A future alias is a decision to make deliberately, not one to make by adding a line
+    to `[project.scripts]` and noticing later.
+    """
+    import tomllib
+
+    root = Path(__file__).resolve().parents[2]
+    config = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert set(config["project"]["scripts"]) == {"ronin"}
+
+
 def test_no_two_distributions_in_this_workspace_claim_one_command_name() -> None:
-    """The invariant behind the `ronin` / `ronin1` / `ronin2` naming, as a gate.
+    """The invariant behind the `ronin` / `ronin1` naming, as a gate.
 
     Console scripts are not namespaced. When two installed distributions declare the same
     name, whichever was installed second overwrites the other's launcher — silently, with
@@ -1104,3 +1126,78 @@ def test_without_a_handoff_the_textual_session_cannot_approve_anything(tmp_path:
     else chose, must not be handed an answer path this function invented."""
     session = _app_session(options(["fix it"]), agent_for(tmp_path, []), None)
     assert session.on_attach is None
+
+
+async def test_the_wizard_writes_nothing_when_nobody_is_there_to_answer(
+    tmp_path: Path,
+) -> None:
+    """`[Y/n]` reads EOF as the empty string, which was the default *yes* — so a CI
+    step, a cron line or `ronin doctor < /dev/null` wrote RONIN.md and
+    .ronin/settings.json into the tree with nobody ever answering. A question nobody
+    can be asked is not consent.
+    """
+    capture = Captured()  # isatty is False: no terminal
+    agent = agent_for(tmp_path, [h.say("ready")])
+
+    code = await run(["-p", "hello", "--cwd", str(tmp_path)], agent, capture)
+
+    assert code == 0, "the session still runs; the wizard is a convenience, not a gate"
+    assert capture.questions == [], "it must not ask a question it cannot hear"
+    assert not (tmp_path / "RONIN.md").exists()
+    assert not (tmp_path / ".ronin").exists()
+    assert "nothing written" in capture.stderr
+
+
+async def test_a_cwd_that_is_not_a_directory_is_refused(tmp_path: Path) -> None:
+    """`Paths.discover` resolves a path without requiring it to exist, so a typo'd
+    --cwd became the workspace root and the first run then built a project tree
+    inside it — at the filesystem root, if that is what was typed."""
+    missing = tmp_path / "nope" / "deeper"
+    agent = agent_for(tmp_path, [h.say("ready")])
+    capture = Captured(isatty=True)
+
+    code = await run(["-p", "hello", "--cwd", str(missing)], agent, capture)
+
+    assert code != 0
+    assert "is not a directory" in capture.stderr
+    assert not missing.exists(), "a refused --cwd must not be created on the way out"
+
+
+# --------------------------------------------------------------------------- #
+# a ceiling of zero is a typo, not a configuration
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("flag", ["--max-turns", "--max-tokens", "--max-usd", "--max-seconds"])
+@pytest.mark.parametrize("value", ["0", "-1"])
+def test_a_ceiling_of_zero_or_less_is_refused_with_a_reason(flag: str, value: str) -> None:
+    """The two halves used to fail in two different wrong ways.
+
+    `--max-tokens 0` reached `Budget`, whose `__post_init__` raised a `ValueError`
+    that nothing caught — a raw Python traceback, for a typo on the command line.
+    `--max-turns 0` was not a `Budget` field at all, so it passed every check and ran
+    no iterations: exit 1, empty stdout, and not one word about why.
+    """
+    message = usage([flag, value, "-p", "hi"]).message
+    assert "must be greater than zero" in message
+    assert flag in message
+    assert "omit the flag for no ceiling" in message, "say what to type instead"
+    assert "Traceback" not in message
+
+
+@pytest.mark.parametrize(("flag", "value"), [("--max-turns", "abc"), ("--max-usd", "abc")])
+def test_a_ceiling_of_the_wrong_type_keeps_argparses_own_wording(flag: str, value: str) -> None:
+    """The value check is layered on top of the type check, not in place of it — a
+    user who mistyped a number should read the same sentence they always have."""
+    message = usage([flag, value, "-p", "hi"]).message
+    assert "invalid" in message and "value" in message
+    assert "greater than zero" not in message
+
+
+def test_a_real_ceiling_still_parses() -> None:
+    """The control: refusing zero must not refuse one."""
+    parsed = options(["--max-turns", "3", "--max-tokens", "5000", "--max-usd", "1.5", "-p", "hi"])
+    assert parsed.max_iterations == 3
+    assert parsed.budget is not None
+    assert parsed.budget.max_tokens == 5000
+    assert parsed.budget.max_usd == 1.5
