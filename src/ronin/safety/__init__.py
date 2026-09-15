@@ -5,12 +5,15 @@ A gate that prompts on ``ls -la`` gets switched off inside a day, and a switched
 protects nothing at all. So the allowlist is broad on purpose, the refusals explain
 themselves, and "no" carries feedback the model can act on instead of ending the turn.
 
-Seven modules, in dependency order:
+Eight modules, in dependency order:
 
 * :mod:`~ronin.safety.command` — parses a command line into segments and resolves each
   segment's real binary. Everything else is built on it, because a regex over a raw
   string cannot answer "what will this actually run": ``echo safe; rm -rf /`` says
   ``echo`` at the front and deletes the filesystem at the back.
+* :mod:`~ronin.safety.credentials` — where a leaked key is, never what it is. Pure and
+  stdlib-only; the tree walk and the ``git`` calls that feed it are ``ronin.cli.scan``'s,
+  which is what keeps every match decision testable with a string.
 * :mod:`~ronin.safety.denylist` — the short list of actions no approval can authorize,
   each with why it is unconditional and what to do instead. Only ``--yolo`` removes it.
 * :mod:`~ronin.safety.injection` — all tool output is data; content is flagged, never
@@ -35,13 +38,20 @@ what lets the whole package be tested offline with no repo, no terminal and no b
 
 Known gaps, named rather than papered over:
 
-* The deny list's path classification uses ``normpath``, not ``resolve``, so it does not
-  follow a **symlink**: ``rm -rf ./link`` is judged by the literal ``./link``, not by where
-  the link points. This is deliberate, not a hole in the write boundary — the deny list
-  analyses bash *command text* and must never touch the disk (see :meth:`Denylist.resolve`).
-  The actual file-write confinement is ``ToolContext.resolve`` in the tools layer, which
-  *does* resolve symlinks and refuses any target outside the workspace, so ``read``/
-  ``write``/``edit`` cannot escape the tree through a symlink.
+* The deny list's **command-text** path classification uses ``normpath``, not ``resolve``,
+  so it does not follow a **symlink**: ``rm -rf ./link`` is judged by the literal
+  ``./link``, not by where the link points. That is deliberate — the deny list analyses
+  a command that has not run, where the path may not exist yet and reading the disk
+  would answer a question about a different moment (see :meth:`Denylist.resolve`).
+
+  A file tool's ``path=`` argument is a different lane and is **not** symlink-blind:
+  :func:`~ronin.safety.denylist.link_target` resolves it, and both the rules and the
+  unconditional list are checked against the literal spelling *and* the target. This
+  paragraph used to claim ``ToolContext.resolve`` covered the gap, and it does not:
+  confinement refuses a target outside the workspace, which says nothing about an
+  in-tree link to an in-tree protected path. ``docs -> .git`` made ``docs/config`` a
+  name for ``.git/config``, every rule saw ``docs/config``, and under ``auto_edit``
+  the write landed with no human in the path.
 * Taint tracking is substring matching over fetched spans: it catches a copied span and
   misses a paraphrase. The tradeoff is argued in :mod:`~ronin.safety.injection`.
 * Variables other than ``$HOME`` are not expanded, so ``rm -rf "$TARGET"`` is judged on
@@ -70,6 +80,12 @@ from .command import (
     parse_command,
     resolve_binary,
     worst_severity,
+)
+from .credentials import (
+    Finding,
+    find_secrets,
+    find_secrets_in_diff,
+    mask,
 )
 from .denylist import (
     DENY_REASONS,
@@ -195,6 +211,7 @@ __all__ = [
     "Denylist",
     "DockerSandbox",
     "Exact",
+    "Finding",
     "Hazard",
     "HazardCode",
     "InjectionFinding",
@@ -229,10 +246,13 @@ __all__ = [
     "builtin_ruleset",
     "check_url",
     "detect",
+    "find_secrets",
+    "find_secrets_in_diff",
     "glob_to_regex",
     "hazards",
     "host_reason",
     "load_settings",
+    "mask",
     "most_restrictive",
     "parse_address",
     "parse_command",

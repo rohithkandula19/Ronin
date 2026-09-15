@@ -10,10 +10,12 @@ on stderr with a non-zero code.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
+from typing import Never
 
 from ronin.cli.main import Command, Options, Usage, parse
-from ronin.cli.repo import RepoOptions, run_repo
+from ronin.cli.repo import SKIP_DIRS, SUBCOMMANDS, RepoOptions, _default_sources, run_repo
 from ronin.repo import scan_repo
 
 
@@ -136,3 +138,132 @@ def test_run_unknown_subcommand_is_rejected(tmp_path: Path) -> None:
 
     code, _, err = run_repo(RepoOptions(subcommand="bogus", root=tmp_path), scan=_never)  # type: ignore[arg-type]
     assert code == 2 and "unknown subcommand" in err
+
+
+# --------------------------------------------------------------------------- #
+# complexity — the subcommand that does not use the scan
+# --------------------------------------------------------------------------- #
+#
+# Injected through `sources` rather than `scan`, on purpose. `health` states as an
+# invariant that every signal comes from the scan with no second read of the tree, and
+# `RepoScan` keeps signatures rather than bodies — so measuring paths through a function
+# had to be either a new field on every signature the token-budgeted map also carries, or
+# its own subcommand. It is its own subcommand.
+
+BRANCHY = """
+def tangled(a, b, c):
+    if a:
+        for item in b:
+            if item and c:
+                pass
+    try:
+        pass
+    except ValueError:
+        pass
+    except KeyError:
+        pass
+    return [x for x in b if x if x > 1]
+"""
+
+PLAIN = "def calm():\n    return 1\n"
+
+
+def _sources(files: dict[str, str]) -> Callable[[Path], list[tuple[str, str]]]:
+    def read(_root: Path) -> list[tuple[str, str]]:
+        return list(files.items())
+
+    return read
+
+
+def _complexity(files: dict[str, str], **options: object) -> tuple[int, str, str]:
+    return run_repo(
+        RepoOptions(subcommand="complexity", root=Path("."), **options),  # type: ignore[arg-type]
+        sources=_sources(files),
+    )
+
+
+def test_complexity_ranks_the_worst_functions() -> None:
+    code, out, err = _complexity({"tangled.py": BRANCHY, "calm.py": PLAIN})
+    assert (code, err) == (0, "")
+    assert "tangled.py:2" in out
+    assert "calm" not in out, "below the threshold, so not worth a line"
+
+
+def test_complexity_never_builds_the_import_graph() -> None:
+    """The scan is the slow part of every other subcommand and this one does not read
+    it. A `scan` that raises is how that is asserted rather than assumed."""
+
+    def explode(_root: Path) -> Never:
+        raise AssertionError("complexity must not scan the repo")
+
+    code, _out, _err = run_repo(
+        RepoOptions(subcommand="complexity", root=Path(".")),
+        scan=explode,
+        sources=_sources({"tangled.py": BRANCHY}),
+    )
+    assert code == 0
+
+
+def test_a_clean_tree_says_so_rather_than_printing_an_empty_listing() -> None:
+    code, out, _err = _complexity({"calm.py": PLAIN})
+    assert code == 0
+    assert "no function scores" in out
+
+
+def test_complexity_carries_the_rating_next_to_the_number() -> None:
+    """The word is what most readers act on; the number is what they argue about."""
+    _code, out, _err = _complexity({"t.py": BRANCHY})
+    assert "high" in out
+
+
+def test_top_limits_the_listing() -> None:
+    many = {f"m{index}.py": BRANCHY for index in range(6)}
+    _code, out, _err = _complexity(many, top=2)
+    assert out.count("tangled") == 2
+
+
+def test_complexity_as_json_is_a_list_of_records() -> None:
+    _code, out, _err = _complexity({"t.py": BRANCHY}, as_json=True)
+    payload = json.loads(out)
+    assert [record["name"] for record in payload] == ["tangled"]
+    assert payload[0]["score"] >= 10
+    assert payload[0]["path"] == "t.py"
+
+
+def test_complexity_is_in_the_subcommand_list() -> None:
+    """So the typo message and `--help` both know about it."""
+    assert "complexity" in SUBCOMMANDS
+
+
+def test_complexity_parses_from_argv(tmp_path: Path) -> None:
+    options = parse(["repo", "complexity", "--cwd", str(tmp_path)])
+    assert isinstance(options, Options)
+    assert options.command is Command.REPO
+    assert options.repo is not None and options.repo.subcommand == "complexity"
+
+
+def test_the_real_walk_reads_python_and_prunes_the_usual_directories(tmp_path: Path) -> None:
+    """The one piece of `complexity` that touches a filesystem.
+
+    `.venv` is in the list because a complexity report about somebody else's dependency
+    is a report about somebody else's repository — and it would dominate the ranking.
+    """
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "mod.py").write_text(PLAIN, encoding="utf-8")
+    (tmp_path / "notes.md").write_text("# not python\n", encoding="utf-8")
+    (tmp_path / ".venv" / "lib").mkdir(parents=True)
+    (tmp_path / ".venv" / "lib" / "dep.py").write_text(BRANCHY, encoding="utf-8")
+
+    found = dict(_default_sources(tmp_path))
+    assert set(found) == {str(Path("pkg/mod.py"))}
+    assert ".venv" in SKIP_DIRS
+
+
+def test_a_file_the_walk_cannot_decode_is_skipped_rather_than_raised(tmp_path: Path) -> None:
+    """Advisory, not a gate: one undecodable file must not deny the reader the rest."""
+    (tmp_path / "good.py").write_text(PLAIN, encoding="utf-8")
+    (tmp_path / "bad.py").write_bytes(b"\xff\xfe\x00 not utf-8 \x80")
+
+    found = dict(_default_sources(tmp_path))
+    assert "good.py" in found
+    assert "bad.py" not in found

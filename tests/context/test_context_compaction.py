@@ -485,9 +485,22 @@ async def test_a_200_turn_session_can_still_answer_what_we_edited_in_turn_3() ->
     Turn 3 wrote ``src/turn3.py`` and nothing touched it again. Per-path retention
     is what keeps the path *and its content* readable 197 turns later; a summary of
     a diff is not a diff, and this is the assertion that proves the difference.
+
+    This is now the **unbounded** configuration rather than the default one. The
+    ceilings ship set, because retention re-sends every kept result through every
+    later fold and one oversized result is then paid for on every turn for the rest
+    of the session. Turning them off buys this guarantee back, and this test is what
+    proves the guarantee is still there to buy.
     """
     messages = scripted_session(200, marked_turn=3, marked_path="src/turn3.py")
-    policy = CompactionPolicy(context_window=4000)
+    # Unbounded retention, stated rather than inherited: this test is about the
+    # guarantee that setting ceilings gives up, so it has to ask for it.
+    policy = CompactionPolicy(
+        context_window=4000,
+        max_retained_paths=None,
+        max_retained_chars=None,
+        escalate_to_fit=False,
+    )
     compactions = 0
     for _ in range(12):
         result = await maybe_compact(messages, policy=policy, summarizer=fake_summarizer)
@@ -511,6 +524,49 @@ async def test_a_200_turn_session_can_still_answer_what_we_edited_in_turn_3() ->
     assert unpaired_tool_uses(messages) == ()
 
 
+async def test_a_path_is_either_kept_or_named_never_quietly_gone() -> None:
+    """The contract that replaces unconditional recall.
+
+    With ceilings set, an early file can fall out of the retained set — that is what
+    was bought and it is a real loss. What must not happen is losing it *silently*:
+    every surrendered path is returned by name, so "we no longer have turn 3's file"
+    is a thing the session can say rather than a thing it discovers by being wrong.
+    """
+    messages = scripted_session(200, marked_turn=3, marked_path="src/turn3.py")
+    result = await compact(
+        messages, policy=CompactionPolicy(context_window=4000), summarizer=fake_summarizer
+    )
+
+    assert result.compacted
+    accounted = set(result.retained_paths) | set(result.surrendered_paths)
+    assert "src/turn3.py" in accounted, "the path vanished without being reported"
+    if "src/turn3.py" not in result.retained_paths:
+        assert "src/turn3.py" in result.surrendered_paths
+
+
+async def test_the_shipped_ceilings_get_a_heavy_session_under_the_trigger() -> None:
+    """The reason the defaults changed. Unbounded, a 200-file session folds and is
+    still over the trigger — every fold after it re-sends the whole retained set."""
+    heavy = scripted_session(200)
+    unbounded = await compact(
+        heavy,
+        policy=CompactionPolicy(
+            context_window=4000,
+            max_retained_paths=None,
+            max_retained_chars=None,
+            escalate_to_fit=False,
+        ),
+        summarizer=fake_summarizer,
+    )
+    shipped = await compact(
+        heavy, policy=CompactionPolicy(context_window=4000), summarizer=fake_summarizer
+    )
+
+    assert unbounded.still_over_trigger, "the old default could not get under the trigger"
+    assert not shipped.still_over_trigger
+    assert shipped.token_estimate_after < unbounded.token_estimate_after
+
+
 async def test_repeated_compaction_is_stable_rather_than_growing() -> None:
     """Folding a folded transcript must not re-expand it."""
     messages = list(scripted_session(120))
@@ -522,10 +578,18 @@ async def test_repeated_compaction_is_stable_rather_than_growing() -> None:
 
 
 async def test_a_session_touching_more_files_than_fit_reports_it_rather_than_looping() -> None:
-    """The one case compaction cannot fix: retention alone exceeds the trigger."""
+    """The one case compaction cannot fix: retention alone exceeds the trigger.
+
+    Reachable only with the ceilings off now, which is the point of having them on.
+    """
     result = await compact(
         scripted_session(200),
-        policy=CompactionPolicy(context_window=4000),
+        policy=CompactionPolicy(
+            context_window=4000,
+            max_retained_paths=None,
+            max_retained_chars=None,
+            escalate_to_fit=False,
+        ),
         summarizer=fake_summarizer,
     )
     assert result.compacted

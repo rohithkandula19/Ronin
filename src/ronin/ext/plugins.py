@@ -445,7 +445,12 @@ ConsentAsker = Callable[[PluginConsent], bool]
 
 
 def install(
-    source: Path, home: Path, *, replace: bool = True, approve: ConsentAsker | None = None
+    source: Path,
+    home: Path,
+    *,
+    replace: bool = True,
+    approve: ConsentAsker | None = None,
+    trust: str = DEFAULT_TRUST,
 ) -> Plugin:
     """Copy the plugin at ``source`` into ``home/.ronin/plugins/<name>`` and return it.
 
@@ -455,13 +460,20 @@ def install(
     the *installed* copy is loaded and returned so its ``directory`` points where the
     plugin now lives.
 
-    ``approve`` is the trust gate. When the plugin :func:`needs_consent` (a community
-    bundle) and an ``approve`` callback is given, it is shown the
-    :class:`PluginConsent` — the shell hooks and tools it wants — **before anything is
-    copied**, and a ``False`` return aborts the install with nothing written. ``None``
-    (the default) does not gate: a programmatic caller owns that decision, and the
-    interactive ``ronin plugin add`` always passes a real prompt. An ``official`` or
-    ``trusted`` plugin is never gated — that is what the tier buys.
+    ``approve`` is the trust gate. When the install :func:`needs_consent` and an
+    ``approve`` callback is given, it is shown the :class:`PluginConsent` — the shell
+    hooks and tools it wants — **before anything is copied**, and a ``False`` return
+    aborts the install with nothing written. ``None`` (the default) does not gate: a
+    programmatic caller owns that decision, and the interactive ``ronin plugin add``
+    always passes a real prompt.
+
+    ``trust`` is the **operator's** tier for this source, and it is what the gate
+    consults — not ``plugin.trust``, which is a string out of the bundle's own
+    ``plugin.json``. Letting the bundle name its own tier meant a stranger's plugin
+    could write ``"trust": "official"`` and be copied into ``~/.ronin/plugins`` with
+    the consent summary never shown — the summary that lists the ``sh -c`` hook
+    commands it will run on every tool call. The default is ``community``: a bundle is
+    a stranger's until somebody outside it says otherwise.
 
     A git URL is out of scope: an offline install cannot clone. The shape is built for
     the caller who can, though — clone to a temporary directory, then call this with
@@ -472,14 +484,10 @@ def install(
     :class:`PluginError` instead, for a caller that wants to refuse rather than clobber.
     """
     plugin = load_plugin(source)
-    if (
-        approve is not None
-        and needs_consent(plugin.trust)
-        and not approve(inspect_for_consent(plugin))
-    ):
-        raise PluginError(
-            f"install of community plugin {plugin.name!r} was declined; nothing was written"
-        )
+    # `trust`, not `plugin.trust`. The bundle does not get a vote on whether it is
+    # inspected; the manifest's own claim is kept only as something to display.
+    if approve is not None and needs_consent(trust) and not approve(inspect_for_consent(plugin)):
+        raise PluginError(f"install of plugin {plugin.name!r} was declined; nothing was written")
     destination = home / PLUGINS_SUBDIR / plugin.name
     if destination.exists():
         if not replace:

@@ -182,7 +182,7 @@ Three rules carry the weight:
 
 The server side exposes read/grep/glob/edit/bash plus one high-level
 `ronin_task(prompt)` that runs a full nested agent loop and returns the summary. It is
-launched by `ronin2 mcp-serve`, which is `cli/serve.py` — the whole of that module is
+launched by `ronin mcp-serve`, which is `cli/serve.py` — the whole of that module is
 consequences of one fact, that **over stdio there is no human**, because stdin carries the
 frames:
 
@@ -244,7 +244,7 @@ would slip past it.
 
 The agentic loop now has four ways in besides the terminal, and every one of them reuses a
 part rather than re-implementing it. `ronin acp` (Zed, JetBrains, any Agent Client Protocol
-editor) and `ronin2 mcp-serve` speak JSON-RPC over the *same* `mcp.transport` framing, and
+editor) and `ronin mcp-serve` speak JSON-RPC over the *same* `mcp.transport` framing, and
 both refuse the stdout writer that would corrupt the wire at parse time, because over stdio
 the protocol *is* stdin and stdout. `ronin api` puts an OpenAI-shaped `/v1/chat/completions`
 and an Anthropic-shaped `/v1/messages` in front of the loop on the standard-library
@@ -356,9 +356,10 @@ restore moves the *tree* instead, putting files back to a commit the records kno
 nothing about, so every digest is forgotten (`forget_file_state`) and the next edit is
 told to read first.
 
-**Decided since.** The v2 CLI *does* take over the `ronin` console script — `ronin` and
-`ronin2` both point here, and v1's entry point is renamed `ronin1` (explicitly, not
-removed, so an existing user still has something to type). Console scripts are not
-namespaced, so the two-letter `ro` alias is gone and a test asserts no two distributions
-in this workspace claim one command, because the next collision would be silent — whichever
-distribution installed second wins.
+**Decided since.** The v2 CLI *does* take over the `ronin` console script, and it is the
+only one this tree declares: the `ronin2` alias that shipped alongside it is gone, because
+two words for one program read as two programs. v1's entry point is renamed `ronin1`
+(explicitly, not removed, so an existing user still has something to type) and the
+two-letter `ro` alias is gone with it. Console scripts are not namespaced, so a test
+asserts no two distributions in this workspace claim one command — the next collision
+would be silent, whichever distribution installed second winning.

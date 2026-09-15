@@ -62,8 +62,15 @@ async def test_no_keys_and_no_ripgrep_report_the_exact_fix_strings(tmp_path: Pat
 
 async def test_a_provisioned_machine_is_clean(tmp_path: Path) -> None:
     paths = workspace(tmp_path)
-    # A models.toml on disk is what makes the config check resolve.
-    write(tmp_path, ".ronin/models.toml", "# present\n")
+    # A *loadable* models.toml. This used to be `# present\n` — valid TOML with no
+    # [models] section, so it satisfied "the file is there" and nothing else. The
+    # check now parses what it finds, and a file that parses to no models is a file
+    # every run would die on, so the fixture has to be one that actually works.
+    write(
+        tmp_path,
+        ".ronin/models.toml",
+        '[models.main]\nprovider = "anthropic"\nmodel = "claude-x"\n\n[roles]\nmain = "main"\n',
+    )
     loaded = load_workspace(paths)
 
     report = await run_doctor(

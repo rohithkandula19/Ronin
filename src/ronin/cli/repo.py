@@ -1,20 +1,29 @@
 """``ronin repo`` — repository intelligence at the command line.
 
-One verb, four subcommands, all read-only and offline: ``map`` (the shape of the tree),
-``health`` (static signals), ``explain <path>`` (one file and its graph neighbours), and
-``deadcode`` (import-graph leaves). The heavy lifting is in :mod:`ronin.repo`; this module
+One verb, five subcommands, all read-only and offline: ``map`` (the shape of the tree),
+``health`` (static signals), ``explain <path>`` (one file and its graph neighbours),
+``deadcode`` (import-graph leaves), and ``complexity`` (the functions with the most paths
+through them). The heavy lifting is in :mod:`ronin.repo`; this module
 is the thin edge — parse a :class:`RepoOptions`, run the scan once, and render either
 human text or ``--output-format json``.
 
+``complexity`` is the one that reads files a second time, and deliberately so.
+:func:`~ronin.repo.analyze.health` states as an invariant that every signal comes from the
+scan with no second read, and :class:`~ronin.context.repomap.RepoScan` keeps signatures
+rather than bodies — so measuring paths through a function had to be either a new field on
+every signature the token-budgeted map also carries, or its own subcommand. It is its own
+subcommand, and the invariant stays true.
+
 The scanner is an injected seam (``scan`` on :func:`run_repo`) so the render paths and the
 error paths (an unknown ``explain`` target, a subcommand typo) are testable without a real
-tree, exactly as :mod:`ronin.cli.detect` keeps its probes injectable.
+tree, exactly as :mod:`ronin.cli.detect` keeps its probes injectable. ``sources`` is the
+same seam for ``complexity``.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 from typing import Any
@@ -29,11 +38,39 @@ from ronin.repo import (
     scan_repo,
 )
 from ronin.repo.analyze import DEFAULT_TOP_MODULES
+from ronin.repo.complexity import DEFAULT_THRESHOLD, Complexity, rank
 
 #: The subcommands ``ronin repo`` accepts, in help order.
-SUBCOMMANDS: tuple[str, ...] = ("map", "health", "explain", "deadcode")
+SUBCOMMANDS: tuple[str, ...] = ("map", "health", "explain", "deadcode", "complexity")
+
+#: Directories ``complexity`` never descends into. It walks the tree itself rather than
+#: reading the scan, so it needs its own list; these are the same names every other walk
+#: in this repository prunes.
+SKIP_DIRS: frozenset[str] = frozenset(
+    {
+        ".git",
+        ".hg",
+        ".svn",
+        ".venv",
+        "venv",
+        "env",
+        "node_modules",
+        "__pycache__",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".ronin",
+        "dist",
+        "build",
+        "target",
+        ".tox",
+        "vendor",
+        "site-packages",
+    }
+)
 
 Scanner = Callable[[Path], RepoScan]
+Sources = Callable[[Path], list[tuple[str, str]]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,12 +88,49 @@ def _default_scan(root: Path) -> RepoScan:
     return scan_repo(root)
 
 
+def _default_sources(root: Path) -> list[tuple[str, str]]:
+    """Every Python file under ``root``, as ``(relative path, text)``.
+
+    Unreadable files are skipped rather than raised on: a complexity report is advisory,
+    and one permission error should not deny the reader the other nine hundred files.
+    """
+    resolved = root.resolve()
+    out: list[tuple[str, str]] = []
+    for path in sorted(resolved.rglob("*.py")):
+        if any(part in SKIP_DIRS for part in path.parts) or not path.is_file():
+            continue
+        try:
+            out.append((str(path.relative_to(resolved)), path.read_text(encoding="utf-8")))
+        except (OSError, UnicodeDecodeError):
+            continue
+    return out
+
+
+def _plain(obj: Any) -> Any:
+    """A dataclass, or a sequence of them, as something ``json`` will encode.
+
+    The sequence case is not hypothetical tidiness: ``complexity`` returns a ranked list
+    rather than one report object, and the single-object version raised
+    ``Object of type Complexity is not JSON serializable`` the first time it was asked
+    for JSON.
+    """
+    if is_dataclass(obj) and not isinstance(obj, type):
+        return asdict(obj)
+    if isinstance(obj, (list, tuple)):
+        return [_plain(item) for item in obj]
+    return obj
+
+
 def _as_json(obj: Any) -> str:
-    payload = asdict(obj) if is_dataclass(obj) and not isinstance(obj, type) else obj
-    return json.dumps(payload, indent=2) + "\n"
+    return json.dumps(_plain(obj), indent=2) + "\n"
 
 
-def run_repo(options: RepoOptions, *, scan: Scanner = _default_scan) -> tuple[int, str, str]:
+def run_repo(
+    options: RepoOptions,
+    *,
+    scan: Scanner = _default_scan,
+    sources: Sources = _default_sources,
+) -> tuple[int, str, str]:
     """Run one ``repo`` subcommand. Returns ``(exit_code, stdout, stderr)``.
 
     Read-only: it scans and renders, never writes. The only failure that is the user's
@@ -65,6 +139,14 @@ def run_repo(options: RepoOptions, *, scan: Scanner = _default_scan) -> tuple[in
     """
     if options.subcommand not in SUBCOMMANDS:
         return 2, "", f"ronin repo: unknown subcommand {options.subcommand!r}\n"
+
+    # Before `scan`, because it does not need one: the import graph says nothing about
+    # how many ways there are through a function, and building it would be the slowest
+    # part of a command that does not read it.
+    if options.subcommand == "complexity":
+        ranked = rank(sources(options.root), limit=options.top)
+        body = _as_json(list(ranked)) if options.as_json else _render_complexity(ranked, options)
+        return 0, body, ""
 
     scanned = scan(options.root)
 
@@ -135,6 +217,31 @@ def _render_health(r: Any) -> str:
     for signal in r.signals:
         where = f" {signal.path}" if signal.path else ""
         lines.append(f"  [{signal.severity}] {signal.kind}{where}: {signal.detail}")
+    return "\n".join(lines) + "\n"
+
+
+def _render_complexity(ranked: Sequence[Complexity], options: RepoOptions) -> str:
+    if not ranked:
+        return (
+            f"repo complexity — {options.root}\n"
+            f"  no function scores {DEFAULT_THRESHOLD} or above — nothing here is hard "
+            "to follow by this measure\n"
+        )
+    lines = [
+        f"repo complexity — {options.root}",
+        f"  {len(ranked)} function(s) at or above {DEFAULT_THRESHOLD}, worst first",
+        "",
+    ]
+    width = max(len(f"{item.path}:{item.line}") for item in ranked)
+    lines.extend(
+        f"  {item.score:>3}  {item.rating:<10}  {f'{item.path}:{item.line}':<{width}}  {item.name}"
+        for item in ranked
+    )
+    lines.append("")
+    lines.append(
+        "  cyclomatic complexity: the number of independent paths through a function. "
+        "Each one is a case to test and a state to hold while reading."
+    )
     return "\n".join(lines) + "\n"
 
 

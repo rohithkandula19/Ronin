@@ -43,8 +43,17 @@ from ronin.providers import (
     Capabilities,
     LoopClient,
     MLXClient,
+    ModelSpec,
     MoonshotClient,
     ShimClient,
+)
+from ronin.providers.types import (
+    Completed,
+    FinishReason,
+    ModelDelta,
+    ModelRequest,
+    TextDelta,
+    Usage,
 )
 
 TOOLS = (
@@ -306,3 +315,96 @@ async def test_a_non_caching_model_gets_no_cache_marker_through_the_bridge() -> 
     req = bridge.last_request
     assert req is not None
     assert req.cache_marker == -1
+
+
+# --------------------------------------------------------------------------- #
+# What a turn cost
+# --------------------------------------------------------------------------- #
+
+PRICED = ModelSpec(name="m", provider="anthropic", model="m", price_in=3.0, price_out=15.0)
+
+BILLABLE_CAPS = Capabilities(
+    native_tools=True,
+    parallel_tools=True,
+    prompt_cache=False,
+    thinking=False,
+    max_context=200_000,
+    vision=False,
+)
+
+
+class BillableModel:
+    """One turn whose usage carries token counts and no cost, like every adapter."""
+
+    def __init__(self, usage: Usage) -> None:
+        self.usage = usage
+
+    def capabilities(self) -> Capabilities:
+        return BILLABLE_CAPS
+
+    async def stream(self, req: ModelRequest) -> AsyncIterator[ModelDelta]:
+        yield TextDelta("hi")
+        yield Completed(
+            message=Message(role=Role.ASSISTANT, content_blocks=(Text("hi"),)),
+            finish=FinishReason.STOP,
+            usage=self.usage,
+        )
+
+
+async def final_of(client: LoopClient) -> core.FinalMessage:
+    chunks = await drain(client.stream(system="s", messages=(), tools=()))
+    final = next(c for c in chunks if isinstance(c, core.FinalMessage))
+    return final
+
+
+async def test_a_turn_is_priced_from_the_config_table() -> None:
+    """No adapter sets `Usage.cost_usd` — they parse token counts — so forwarding it
+    left `Budget.spent_usd` at 0.0 for the life of every session. The status line
+    read $0.0000 and `--max-usd` could never fire, whatever the session actually
+    spent. One million in and one million out at $3/$15 is $18.
+    """
+    million = Usage(input_tokens=1_000_000, output_tokens=1_000_000)
+    priced = await final_of(LoopClient(BillableModel(million), model="m", spec=PRICED))
+    assert priced.cost_usd == 18.0
+
+
+async def test_without_a_spec_the_providers_own_number_still_passes_through() -> None:
+    """`spec` is optional so every existing call site keeps working, and a provider
+    that does report a cost is not second-guessed."""
+    reported = Usage(input_tokens=10, output_tokens=10, cost_usd=0.25)
+    assert (await final_of(LoopClient(BillableModel(reported), model="m"))).cost_usd == 0.25
+
+
+async def test_the_providers_own_number_beats_the_table() -> None:
+    """A bill from the provider is ground truth; the table is an estimate of it."""
+    both = Usage(input_tokens=1_000_000, output_tokens=1_000_000, cost_usd=0.25)
+    priced = await final_of(LoopClient(BillableModel(both), model="m", spec=PRICED))
+    assert priced.cost_usd == 0.25
+
+
+async def test_the_real_breakdown_survives_for_the_ledger() -> None:
+    """A `Usage` rebuilt from a `Budget` put every token in `input_tokens`, which is
+    why `/cost` reported `cache 0%` on every session and billed output at the input
+    rate. The breakdown has to reach the ledger intact."""
+    detailed = Usage(
+        input_tokens=100, output_tokens=50, cache_read_tokens=900, cache_write_tokens=7
+    )
+    client = LoopClient(BillableModel(detailed), model="m", spec=PRICED)
+    await final_of(client)
+    assert client.usage == detailed
+
+
+async def test_usage_is_taken_once_not_read_repeatedly() -> None:
+    """The client outlives the turn and the caller writes one ledger row per turn,
+    so a running total would bill turn two for turn one as well."""
+    client = LoopClient(BillableModel(Usage(input_tokens=100)), model="m", spec=PRICED)
+    await final_of(client)
+    assert client.take_usage().input_tokens == 100
+    assert client.take_usage().input_tokens == 0, "the second take sees a fresh turn"
+
+
+async def test_usage_accumulates_across_calls_until_it_is_taken() -> None:
+    client = LoopClient(BillableModel(Usage(input_tokens=100)), model="m", spec=PRICED)
+    await final_of(client)
+    await final_of(client)
+    assert client.take_usage().input_tokens == 200

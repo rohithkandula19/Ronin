@@ -21,7 +21,7 @@ not assumed. Treat them as a starting point and edit in place.
 Three layers merge, least to most specific: built-in defaults, then
 `~/.ronin/settings.json` (you, everywhere), then `./.ronin/settings.json` (this project,
 committed), then `./.ronin/settings.local.json` (you, here, uncommitted). Later layers
-win, and `ronin2 doctor` prints which file each effective rule came from — a permission
+win, and `ronin doctor` prints which file each effective rule came from — a permission
 you cannot trace is a permission you cannot revoke.
 
 **Unknown keys are errors, not ignored.** A silently dropped typo is a permission you

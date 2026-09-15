@@ -12,23 +12,25 @@ requires-python = ">=3.11"
 dependencies = []
 
 [project.scripts]
-# Both names, and both point here. `ronin2` was the only one for as long as taking the
-# short name would have been a silent swap: v1 (`packages/cli`, ~300 modules) declared
-# `ronin`, and two distributions declaring one console script means whichever was
-# installed second wins, quietly.
+# One name. `ronin` is the program; there is no second spelling of it.
 #
-# That is now decided rather than deferred. v1's entry point is renamed to `ronin1` in
-# `packages/cli/pyproject.toml` — an explicit name, not a removal, so an existing user
-# has something to type — and `ronin` means this tree. `ronin2` stays as well: it is what
-# the docs, the eval harness and anyone who already installed it invoke, and breaking a
-# name to tidy up a name is a poor trade.
+# There were two for a while, for a reason that has now expired. v1 (`packages/cli`,
+# ~300 modules) declared `ronin`, and two distributions declaring one console script
+# means whichever was installed second silently wins — so this tree shipped as `ronin2`
+# rather than contest the word. v1's entry point was later renamed to `ronin1` and
+# `ronin` came here, with `ronin2` kept alongside it so nothing that already typed it
+# broke.
+#
+# Keeping it past that point was the mistake. `ronin` and `ronin2` are the same program
+# reached by two words, and the second one reads like a second product — which is
+# exactly how it was read. Docs, CI and the eval harness now say `ronin`, and the alias
+# is gone rather than left to imply a choice that does not exist.
 #
 # `main` rather than an app object because `ronin.cli.main.main` returns an int and never
 # calls `sys.exit` — see its module docstring. The console-script wrapper turns the
 # return value into the process status, so the exit codes (0 done, 1 error, 2 an approval
 # was refused) survive the packaging layer unchanged.
 ronin = "ronin.cli.main:main"
-ronin2 = "ronin.cli.main:main"
 
 [project.optional-dependencies]
 # The interactive app. Textual brings Rich transitively, so this is one tree, not
@@ -50,7 +52,7 @@ oauth = ["keyring>=25"]
 # Without this the root is a "virtual" project: uv sync prints "Skipping installation of
 # entry points (`project.scripts`) because this project is not packaged", `uv build
 # --all-packages` emits a wheel for every workspace member and none for the root, and so
-# the `ronin2` console script declared above existed in no venv anywhere. `pipx install
+# the console script declared above existed in no venv anywhere. `pipx install
 # ronin` — the install path docs/STACK.md names as the end state — had no distribution
 # to install either.
 #
@@ -72,7 +74,7 @@ packages = ["src/ronin"]
 
 [tool.uv]
 # Build and install the root project itself, not just its dependencies — this is the
-# half of the fix that makes `ronin2` appear in the workspace venv.
+# half of the fix that makes `ronin` appear in the workspace venv.
 package = true
 
 [tool.uv.workspace]
@@ -83,21 +85,13 @@ members = [
     "packages/mcp-servers",
     "packages/hardening",
     "packages/cli",
-    "packages/arcade",
     "packages/dialect",
     "packages/relay",
     "packages/industry-sdk",
     "packages/vault",
     "packages/artifacts",
-    "packages/research",
-    "packages/tasks",
-    "packages/platform",
     "packages/persistence",
-    "packages/identity",
     "packages/storage",
-    "packages/jobs",
-    "packages/observability",
-    "packages/support",
     "apps/demo",
     "apps/api",
     "training",
@@ -166,6 +160,7 @@ files = [
     "tests/persistence",
     "tests/providers",
     "tests/repo",
+    "tests/retainer",
     "tests/safety",
     "tests/scripts",
     "tests/telemetry",
@@ -176,7 +171,7 @@ files = [
 strict = true
 warn_unreachable = true
 explicit_package_bases = true
-mypy_path = "src:scripts:tests/agents:tests/cli:tests/context:tests/core:tests/evalsuite:tests/ext:tests/mcp:tests/obs:tests/persistence:tests/providers:tests/repo:tests/safety:tests/scripts:tests/telemetry:tests/tools:tests/ui:tests/verify"
+mypy_path = "src:scripts:tests/agents:tests/cli:tests/context:tests/core:tests/evalsuite:tests/ext:tests/mcp:tests/obs:tests/persistence:tests/providers:tests/repo:tests/retainer:tests/safety:tests/scripts:tests/telemetry:tests/tools:tests/ui:tests/verify"
 
 # pytest's @parametrize is an untyped decorator as far as mypy is concerned;
 # that is a property of pytest, not a hole in our typing. Enumerated rather
@@ -193,6 +188,7 @@ module = [
     "mcp_harness",
     "persistence_harness",
     "replay",
+    "retainer_harness",
     "safety_harness",
     "stream_harness",
     "telemetry_harness",
@@ -221,6 +217,7 @@ module = [
     "test_context_retention_reach",
     "test_context_scan_repo",
     "test_core_demo",
+    "test_core_fanout",
     "test_definitions",
     "test_definitions_edges",
     "test_fetcher",
@@ -251,8 +248,22 @@ module = [
     "test_providers_capability",
     "test_providers_demo",
     "test_registry",
+    "test_release_manifest",
     "test_repo_analyze",
+    "test_repo_complexity",
     "test_resilience",
+    "test_retainer_adapters_github",
+    "test_retainer_adapters_slack",
+    "test_retainer_adapters_telegram",
+    "test_retainer_ask",
+    "test_retainer_ledger",
+    "test_retainer_model",
+    "test_retainer_orders",
+    "test_retainer_outbound",
+    "test_retainer_posts",
+    "test_retainer_registry",
+    "test_retainer_routines",
+    "test_retainer_threads",
     "test_ronin_agents_hook_normalize",
     "test_ronin_cli_acp",
     "test_ronin_cli_approve",
@@ -269,11 +280,18 @@ module = [
     "test_ronin_cli_integration",
     "test_ronin_cli_interactive",
     "test_ronin_cli_main",
+    "test_ronin_cli_mcp_list",
     "test_ronin_cli_mcp_login",
     "test_ronin_cli_read_dedup",
     "test_ronin_cli_read_fidelity",
+    "test_ronin_cli_read_gate",
     "test_ronin_cli_repo",
     "test_ronin_cli_repo_render",
+    "test_ronin_cli_restricted",
+    "test_ronin_cli_retain",
+    "test_ronin_cli_retain_cmd",
+    "test_ronin_cli_retainer_run",
+    "test_ronin_cli_scan",
     "test_ronin_cli_sdk",
     "test_ronin_cli_serve",
     "test_ronin_cli_skills",
@@ -282,6 +300,8 @@ module = [
     "test_ronin_cli_status",
     "test_ronin_cli_stream",
     "test_ronin_cli_telemetry",
+    "test_ronin_cli_typo",
+    "test_ronin_cli_watch",
     "test_ronin_cli_wire",
     "test_ronin_cli_wizard",
     "test_ronin_cli_wizard_detect",
@@ -323,6 +343,7 @@ module = [
     "test_ronin_ui_approvals",
     "test_router",
     "test_safety_command",
+    "test_safety_credentials",
     "test_safety_demo",
     "test_safety_denylist",
     "test_safety_edges",
@@ -333,6 +354,8 @@ module = [
     "test_safety_sandbox",
     "test_safety_settings",
     "test_safety_suites",
+    "test_safety_symlink_paths",
+    "test_safety_unattended",
     "test_search",
     "test_search_edges",
     "test_searcher",
@@ -408,6 +431,7 @@ include = [
     "tests/persistence/**/*.py",
     "tests/providers/**/*.py",
     "tests/repo/**/*.py",
+    "tests/retainer/**/*.py",
     "tests/safety/**/*.py",
     "tests/scripts/**/*.py",
     "tests/telemetry/**/*.py",

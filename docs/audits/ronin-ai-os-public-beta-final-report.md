@@ -3,6 +3,14 @@
 Branch `feat/ronin-ai-os-public-beta` (from `main` after #85 + #86 merged).
 Honesty labels per the program's scheme. Evidence = code that ran here.
 
+> **Superseded in part.** The platform packages itemised below — among them
+> `ronin-identity`, `ronin-jobs`, `ronin-observability`, `ronin-platform`,
+> `ronin-support`, `ronin-tasks` and `ronin-research` — were later removed from
+> the repository. This report is a dated record of what was built and tested at
+> the time, and it is accurate as that; it is not a description of the tree as it
+> stands. The packages were deleted because each had zero importers.
+
+
 ## Executive summary
 
 This branch implements the **cost, abuse, access, and environment controls** a

@@ -391,6 +391,22 @@ def result_record(result: HeadlessResult) -> dict[str, Any]:
     }
 
 
+def failed_before_start(message: str, *, kind: str = "provider") -> str:
+    """A closing ``result`` record for a run whose stream never opened.
+
+    ``run_headless`` reports a failure that happens *during* the stream, because it
+    sees it as an event. A failure before then — an unreadable ``models.toml``, a
+    model the router cannot build — happens while the agent is still being assembled,
+    so there is no stream to fold it into and nothing was written at all: a caller
+    who asked for JSON got zero bytes and had to read English off stderr to find out
+    why.
+
+    One record, the same shape as any other run's, so a consumer parses one thing.
+    """
+    state = reduce_event(ViewState(), Error(message=message, kind=kind))
+    return to_line(result_record(HeadlessResult(exit_code=EXIT_ERROR, text="", state=state)))
+
+
 async def run_headless(
     events: AsyncIterator[Event],
     *,
@@ -526,6 +542,7 @@ __all__ = [
     "OutputFormat",
     "event_to_json",
     "exit_code_for",
+    "failed_before_start",
     "result_record",
     "run_headless",
     "to_line",

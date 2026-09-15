@@ -6,6 +6,21 @@
 # the test process. The generic-password detector matches them because they sit
 # on a JSON "password" key; we exclude the test paths rather than weaken the
 # scan for real source.
+#
+# `tests/**` is the v2 tree, and its absence here was an omission rather than a
+# decision: the list was written when `packages/**/tests/**` was every test suite
+# in the repository. `tests/safety/test_safety_credentials.py` makes the case
+# unarguable — it tests a credential scanner, so it must contain values that a
+# credential scanner matches, and no amount of care changes that.
+#
+# This does not leave those files unscanned. `ronin scan` covers the whole tree
+# including `tests/`, and `packages/cli/tests/test_cov_secrets.py` asserts the
+# repository contains no literal credential anywhere — which is the gate that
+# caught the samples that prompted this, and which is deliberately NOT relaxed
+# here. The samples are assembled at run time so no key-shaped token exists in
+# any file; this entry stops one superseded commit in a pull request from being
+# re-reported forever, and stops the next legitimate fixture from being a false
+# positive somebody has to triage.
 version: 2
 
 secret:
@@ -13,3 +28,4 @@ secret:
     - "apps/api/tests/**"
     - "packages/**/tests/**"
     - "training/tests/**"
+    - "tests/**"

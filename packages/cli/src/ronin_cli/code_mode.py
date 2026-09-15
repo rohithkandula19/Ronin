@@ -1978,9 +1978,6 @@ or claim ronin lacks a feature you're unsure of):
 - ronin is a masterless, terminal-native, provider-agnostic coding agent
   (Claude-Code-style). It runs FREE on Gemini / Groq / Cerebras / OpenRouter /
   Ollama, or paid on Claude / OpenAI. The binary is `ronin` (alias `ro`).
-- YES, ronin has games: `ronin play` opens a built-in arcade of 31 free terminal
-  games (snake, tetris, wordle, 2048, sudoku, blackjack, minesweeper, and more);
-  `ronin play <name>` launches one directly.
 - Headline commands: bare `ronin` (this agent), `ronin consensus` (multi-model
   answer), `ronin map` (repo map), `ronin image` / `ronin video` (media), MCP tools.
 

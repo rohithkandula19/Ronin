@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Single-source the README's headline numbers from the repo itself.
 
-The README used to hand-maintain "3,355 tests", "seven … packages" and a game
-count that disagreed with itself (31 vs 26). Hand-maintained numbers drift, and
+The README used to hand-maintain "3,355 tests" and "seven … packages", plus a
+game count that disagreed with itself (31 vs 26) until the arcade it counted was
+removed from the repository. Hand-maintained numbers drift, and
 for a project whose brand is honesty-about-evidence a stale number is a
 credibility bomb. This script computes the real numbers and either rewrites the
 README (default) or verifies it is current (``--check``, wired into CI so a
@@ -11,7 +12,6 @@ stale number fails the build).
 Numbers owned here:
   * test count      — ``pytest --collect-only`` across packages + apps + training + tests
   * total packages  — directories under ``packages/``
-  * arcade games    — entries in ``ronin_arcade.games.GAMES``
 
 Prose (which packages, what they do) stays human-authored; only the digits are
 generated, via idempotent, anchored substitutions.
@@ -56,28 +56,15 @@ def package_count() -> int:
     return sum(1 for p in (ROOT / "packages").iterdir() if p.is_dir())
 
 
-def game_count() -> int:
-    sys.path.insert(0, str(ROOT / "packages" / "cli" / "src"))
-    # No `noqa: E402` needed — the rule is about module-level imports, and this one is
-    # inside a function, so ruff flags the suppression itself as unused (RUF100).
-    from ronin_arcade.games import GAMES
-
-    return len(GAMES)
-
-
 def _grouped(n: int) -> str:
     return f"{n:,}"
 
 
-def apply(text: str, tests: int, pkgs: int, games: int) -> str:
+def apply(text: str, tests: int, pkgs: int) -> str:
     # test badge: tests-<n>%20passing
     text = re.sub(r"tests-\d[\d,]*%20passing", f"tests-{tests}%20passing", text)
     # "3,355 tests" / "3355 tests" -> "<n> tests" (any grouped/plain digits)
     text = re.sub(r"\b\d[\d,]*\s+tests\b", f"{_grouped(tests)} tests", text)
-    # "N games" (arcade) -> "<games> games"
-    text = re.sub(r"\b\d+\s+games\b", f"{games} games", text)
-    # "N-game arcade" -> "<games>-game arcade"
-    text = re.sub(r"\b\d+-game arcade\b", f"{games}-game arcade", text)
     # "N-package workspace" -> "<pkgs>-package workspace"
     text = re.sub(r"\b\d+-package workspace\b", f"{pkgs}-package workspace", text)
     # "the other N are platform packages" -> total minus the 7 core
@@ -94,23 +81,23 @@ def main() -> int:
     )
     args = ap.parse_args()
 
-    tests, pkgs, games = test_count(), package_count(), game_count()
+    tests, pkgs = test_count(), package_count()
     current = README.read_text()
-    updated = apply(current, tests, pkgs, games)
+    updated = apply(current, tests, pkgs)
 
     if args.check:
         if current != updated:
             sys.stderr.write(
                 f"README stats are stale. Expected tests={tests}, "
-                f"packages={pkgs}, games={games}. Run: "
+                f"packages={pkgs}. Run: "
                 f"python scripts/generate_readme_stats.py\n"
             )
             return 1
-        print(f"README stats current: tests={tests}, packages={pkgs}, games={games}")
+        print(f"README stats current: tests={tests}, packages={pkgs}")
         return 0
 
     README.write_text(updated)
-    print(f"README updated: tests={tests}, packages={pkgs}, games={games}")
+    print(f"README updated: tests={tests}, packages={pkgs}")
     return 0
 
 

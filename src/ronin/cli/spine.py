@@ -412,8 +412,15 @@ def notes_from_settings(settings: Settings) -> tuple[Note, ...]:
         Note(
             subject=f"settings layer {error.layer!r}",
             detail=(
-                f"{error.message} — the layer was skipped, so its rules are not in "
-                f"effect ({error.path if error.path is not None else 'no path'})"
+                f"{error.message} — "
+                + (
+                    "the layer was skipped, so its rules are not in effect"
+                    if error.skipped
+                    # A refused escalation drops one scalar, not the file. Saying
+                    # "skipped" here would report rules as gone while they still apply.
+                    else "the rest of the layer still applies"
+                )
+                + f" ({error.path if error.path is not None else 'no path'})"
             ),
         )
         for error in settings.errors
