@@ -182,7 +182,7 @@ Three rules carry the weight:
 
 The server side exposes read/grep/glob/edit/bash plus one high-level
 `ronin_task(prompt)` that runs a full nested agent loop and returns the summary. It is
-launched by `ronin2 mcp-serve`, which is `cli/serve.py` — the whole of that module is
+launched by `ronin mcp-serve`, which is `cli/serve.py` — the whole of that module is
 consequences of one fact, that **over stdio there is no human**, because stdin carries the
 frames:
 
@@ -244,7 +244,7 @@ would slip past it.
 
 The agentic loop now has four ways in besides the terminal, and every one of them reuses a
 part rather than re-implementing it. `ronin acp` (Zed, JetBrains, any Agent Client Protocol
-editor) and `ronin2 mcp-serve` speak JSON-RPC over the *same* `mcp.transport` framing, and
+editor) and `ronin mcp-serve` speak JSON-RPC over the *same* `mcp.transport` framing, and
 both refuse the stdout writer that would corrupt the wire at parse time, because over stdio
 the protocol *is* stdin and stdout. `ronin api` puts an OpenAI-shaped `/v1/chat/completions`
 and an Anthropic-shaped `/v1/messages` in front of the loop on the standard-library
@@ -323,11 +323,7 @@ The URL policy unwraps the IPv4-in-IPv6 forms — 6to4, Teredo, NAT64, `::a.b.c.
 reachable before that — but **6rd** hides its IPv4 at a provider-chosen offset inside a
 provider-chosen prefix and cannot be recognised from the address alone.
 
-**Named gaps, elsewhere.** `esc esc` (rewind to an earlier turn) is bound, reaches
-`ui.reduce.press_escape`, and is **not wired to anything** — the callback is deliberately
-left unset rather than pointed at an approximation, because restoring a conversation to a
-state it has already left needs a decision about where snapshots live and what "undo"
-means next to `/undo`'s checkpoints. Both web tools now have real backends. `tools/fetcher.py`
+**Named gaps, elsewhere.** Both web tools now have real backends. `tools/fetcher.py`
 resolves, vets every address the name answers with, connects to the vetted address rather
 than the name, and re-vets every redirect hop. `tools/searcher.py` carries three search
 providers (brave, tavily, self-hosted searxng) as a table, on the same pinned transport;
@@ -339,9 +335,31 @@ basename and two directories cannot share one; `scripts/sync_typecheck_paths.py`
 fails loudly on a collision, and `test_ronin_*` is the one prefix that cannot
 collide with the ~280 generically-named modules in `packages/cli/tests/`.
 
-**Decided since.** The v2 CLI *does* take over the `ronin` console script — `ronin` and
-`ronin2` both point here, and v1's entry point is renamed `ronin1` (explicitly, not
-removed, so an existing user still has something to type). Console scripts are not
-namespaced, so the two-letter `ro` alias is gone and a test asserts no two distributions
-in this workspace claim one command, because the next collision would be silent — whichever
-distribution installed second wins.
+**Decided since, `esc esc`.** The rewind is wired, and the decision the gap entry was
+waiting on went to `/undo`'s checkpoints rather than to a second snapshot store:
+`Conversation.rewind` truncates the transcript back to the mark taken at the turn's
+start and restores the checkpoint taken before that turn's first mutating call. Both
+name the same instant, so the conversation and the work tree move together instead of
+the files rewinding under a transcript that still describes the turn that touched them.
+
+One turn per call, and no redo. It degrades honestly rather than silently: a read-only
+turn has no checkpoint and needs none; a mutating turn on a tree with no `git` has none
+either, and there the outcome says the files remain, so the user is never told a restore
+happened that did not. Spend is not refunded — `budget` counts tokens actually billed.
+
+The non-obvious half is the file state, which moves in **both** directions.
+Truncating drops reads out of the transcript, so `sync_file_state` runs afterwards for
+the same reason it runs after a compaction — otherwise the stale-edit guard calls those
+files safe to edit against content that is gone, and a repeat read is answered with
+"scroll back for the contents" pointing at messages that no longer exist. A successful
+restore moves the *tree* instead, putting files back to a commit the records know
+nothing about, so every digest is forgotten (`forget_file_state`) and the next edit is
+told to read first.
+
+**Decided since.** The v2 CLI *does* take over the `ronin` console script, and it is the
+only one this tree declares: the `ronin2` alias that shipped alongside it is gone, because
+two words for one program read as two programs. v1's entry point is renamed `ronin1`
+(explicitly, not removed, so an existing user still has something to type) and the
+two-letter `ro` alias is gone with it. Console scripts are not namespaced, so a test
+asserts no two distributions in this workspace claim one command — the next collision
+would be silent, whichever distribution installed second winning.

@@ -50,6 +50,8 @@ from ronin.core.types import (
     VerifyResult,
 )
 
+from .mentions import NO_COMPLETION, Completion
+
 # --------------------------------------------------------------------------- #
 # Rendering constants (glyphs only — colour is the renderer's business)
 # --------------------------------------------------------------------------- #
@@ -282,10 +284,16 @@ class ViewState:
     #: the number that answers "is it stuck?", and it is supplied rather than derived:
     #: the reducer has no clock, and giving it one would make every fold untestable.
     waiting_seconds: float = 0.0
-    #: Messages the user typed while a turn was running. They run as the next turn — the
-    #: queue is how you redirect without killing what is in flight — but until this field
-    #: existed nothing on screen said they had been received, so a correction looked lost.
+    #: Messages the user typed while a turn was running and that have not been delivered
+    #: yet. They join the *running* conversation at the loop's next iteration boundary
+    #: (see :mod:`ronin.core.steering`) — redirecting without killing what is in flight —
+    #: but until this field existed nothing on screen said they had been received, so a
+    #: correction looked lost.
     queued: tuple[str, ...] = ()
+    #: The ``@file`` paths currently on offer, and which one ``tab`` would take. Lives
+    #: here rather than only on the keyboard controller because it has to be rendered,
+    #: and everything on screen comes from one folded state.
+    completion: Completion = NO_COMPLETION
     #: Output from things that are not the model: a slash command's answer, a rewind's
     #: outcome. Kept out of the transcript on purpose — the transcript is what the model
     #: said, and folding `/help` into it would make the conversation a record of two
@@ -348,10 +356,27 @@ class ViewState:
         """Record a message typed mid-turn, so the user can see it landed."""
         return self if not text.strip() else replace(self, queued=(*self.queued, text))
 
+    def with_queue(self, items: Sequence[str]) -> ViewState:
+        """Replace the pending list wholesale, from whoever actually owns it.
+
+        The append-one door above is for a view that keeps its own book. Once the
+        orchestrator holds the real queue — it is the side that knows when the loop took
+        a message — the screen has to be able to *follow* that list down as well as up,
+        which one-at-a-time appends cannot do. Identity is preserved when nothing moved,
+        because this is pulled on every event of a long turn.
+        """
+        pending = tuple(items)
+        return self if pending == self.queued else replace(self, queued=pending)
+
     def cleared_queued(self) -> ViewState:
         """Drop the queue. Called when a turn starts: whatever was waiting is now running,
         and showing it as still-pending would be a lie about which turn is in flight."""
         return self if not self.queued else replace(self, queued=())
+
+    def with_completion(self, completion: Completion) -> ViewState:
+        """Offer these paths, or none. Identity-preserving when nothing changed, because
+        this is recomputed on every keystroke of a mention."""
+        return self if completion == self.completion else replace(self, completion=completion)
 
     def cleared_notices(self) -> ViewState:
         """Drop the notices. Called when a new turn starts: a command's answer belongs
@@ -504,7 +529,13 @@ def reduce_event(state: ViewState, event: Event) -> ViewState:
             turn_state=event.state,
             stop_reason=event.stop_reason,
             pending_approval=None,
-            todos=agent.todos if agent is not None else state.todos,
+            # `or state.todos`, not a bare read: `AgentState.todos` is empty on every
+            # live turn (nothing populates it outside a resumed session), so taking it
+            # unconditionally would wipe a plan pushed in mid-turn the instant the turn
+            # ended. An empty list is never a deliberate clear — `parse_todos` refuses
+            # one and tells the model to mark items done instead — so falling back to
+            # what is already on screen cannot swallow a real "clear the list".
+            todos=(agent.todos or state.todos) if agent is not None else state.todos,
             # Spend and mode come from the state the turn actually ended with, so
             # the status line reports what ran rather than what the UI hoped ran.
             cost_usd=agent.budget.spent_usd if agent is not None else state.cost_usd,
@@ -695,6 +726,96 @@ def press_escape(
 
 
 # --------------------------------------------------------------------------- #
+# Prompt history — pure, so walking it needs no terminal
+# --------------------------------------------------------------------------- #
+
+#: How many prompts back the input line remembers. Generous enough that a session's
+#: worth of retyping is covered, bounded because this is held in memory for the life
+#: of the process and an unbounded list of every prompt is a slow leak.
+HISTORY_LIMIT = 200
+
+
+@dataclass(frozen=True, slots=True)
+class History:
+    """Submitted prompts, plus where in them the input line currently is.
+
+    ``cursor is None`` means "not browsing": the box holds live text the user is
+    typing, and that text is theirs, not ours. ``draft`` is where it goes the moment
+    they first press up, so that walking back and then forward returns what they had
+    rather than an empty line. Losing a half-written prompt to a stray keypress is the
+    thing that makes history feel unsafe to use at all, and it is the whole reason this
+    type carries state instead of being a bare list plus an index.
+
+    Frozen, and every operation hands back a new one, so browsing can never mutate
+    what was submitted: recalling a prompt, editing it, and pressing up again walks
+    the original entries, not the edit.
+    """
+
+    entries: tuple[str, ...] = ()
+    cursor: int | None = None
+    draft: str = ""
+
+    @property
+    def browsing(self) -> bool:
+        return self.cursor is not None
+
+
+def remember(history: History, text: str) -> History:
+    """Record a submitted prompt and leave browsing.
+
+    Blank submissions are not prompts and are dropped. A prompt identical to the most
+    recent one is dropped too — holding a command down or re-sending the same thing
+    twice should not make ``up`` walk through duplicates — but the same prompt *does*
+    record again once something else has intervened, because then it is a real step in
+    what the user did.
+
+    Submitting always ends browsing and clears the draft: the text is on its way, so
+    there is nothing left to restore.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return History(entries=history.entries)
+    if history.entries and history.entries[-1] == stripped:
+        return History(entries=history.entries)
+    entries = (*history.entries, stripped)[-HISTORY_LIMIT:]
+    return History(entries=entries)
+
+
+def walk_back(history: History, current: str) -> tuple[History, str | None]:
+    """One step toward older prompts. ``None`` means nothing moved.
+
+    ``current`` is what the box holds right now, and on the *first* step it is stashed
+    as the draft. Later steps must not overwrite it: after up-up-down-down the user
+    expects their own half-written line back, not the recalled prompt they passed
+    through on the way.
+    """
+    if not history.entries:
+        return history, None
+    if history.cursor is None:
+        index = len(history.entries) - 1
+        return replace(history, cursor=index, draft=current), history.entries[index]
+    if history.cursor == 0:
+        return history, None  # already at the oldest; hold rather than wrap
+    index = history.cursor - 1
+    return replace(history, cursor=index), history.entries[index]
+
+
+def walk_forward(history: History) -> tuple[History, str | None]:
+    """One step toward newer prompts, ending on the draft. ``None`` means nothing moved.
+
+    Stepping past the newest entry restores the draft rather than clearing the line or
+    wrapping to the oldest. Wrapping would be actively hostile: the user pressed down
+    to get back to what they were writing.
+    """
+    if history.cursor is None:
+        return history, None
+    if history.cursor >= len(history.entries) - 1:
+        return replace(history, cursor=None, draft=""), history.draft
+    index = history.cursor + 1
+    return replace(history, cursor=index), history.entries[index]
+
+
+# --------------------------------------------------------------------------- #
 # Answering an approval — pure, so the modal has no decision of its own to make
 # --------------------------------------------------------------------------- #
 
@@ -714,18 +835,40 @@ APPROVAL_KEYS: Mapping[str, bool] = {
     "escape": False,
 }
 
+#: The key that denies *and* opens a line to say why. Absent from
+#: :data:`APPROVAL_KEYS` on purpose: on its own it answers nothing, so
+#: :func:`decision_for` must keep returning ``None`` for it and leave the request
+#: standing until the human either supplies a reason or backs out. The widget reads
+#: this name rather than the letter, for the same reason the renderer reads
+#: :data:`ronin.ui.render.APPROVAL_PROMPT`: two spellings of one keymap is how they
+#: drift.
+REASON_KEY = "s"
+
 #: The key that approves *and* asks for the decision to be remembered. The prompt the
 #: human reads is :data:`ronin.ui.render.APPROVAL_PROMPT`, which already names these
 #: three keys — one spelling of the keymap for the renderer and another for the widget
 #: is how the two drift, so this module owns the meaning and that one owns the words.
 REMEMBER_KEY = "a"
 
-#: Why a denial happened, in the words the model is shown. A refusal the model cannot
-#: read as deliberate reads as a malfunction, and it retries.
-DENIED_BY_HUMAN = "the user declined this action"
-
 #: What a remembered approval asks for, in the model's words.
 APPROVED_AND_REMEMBERED = "approved, and remembered for the rest of this session"
+
+
+def deny_with(reason: str) -> ApprovalDecision:
+    """A denial carrying the human's own words, or the bare one if they gave none.
+
+    The words travel as ``ApprovalDecision.reason``, which ``cli.approve.answer_for``
+    already turns into ``Answer.feedback`` and the engine reproduces verbatim to the
+    model. Nothing below this function needed building — the only thing missing was a
+    way for a person to type the sentence.
+
+    A blank reason is passed on as blank, never as a placeholder. The engine already
+    branches on an empty feedback and says something better than this layer could —
+    "declined this action and gave no reason. Do not retry it. Propose an alternative" —
+    whereas a placeholder here comes back doubled. Saying nothing is what lets the layer
+    that owns the wording own it.
+    """
+    return ApprovalDecision(approved=False, reason=reason.strip())
 
 
 def decision_for(key: str) -> ApprovalDecision | None:
@@ -740,7 +883,15 @@ def decision_for(key: str) -> ApprovalDecision | None:
     if approved is None:
         return None
     if not approved:
-        return ApprovalDecision(approved=False, reason=DENIED_BY_HUMAN)
+        # Blank, deliberately, and for the same reason `deny_with` leaves an empty
+        # reason empty: `reason` travels to the engine as `Answer.feedback`, which the
+        # engine reproduces as *the human's own words*. A placeholder here was quoted
+        # back as if it were something they said — "the user declined and said: the user
+        # declined this action" — and, worse, took the branch that appends "Take that as
+        # a correction, not a dead end: adjust the plan and continue", inviting the
+        # retry a bare `n` exists to stop. Blank takes the engine's other branch, which
+        # says "Do not retry it".
+        return ApprovalDecision(approved=False, reason="")
     remember = key == REMEMBER_KEY
     return ApprovalDecision(
         approved=True,
@@ -753,16 +904,17 @@ __all__ = [
     "APPROVAL_KEYS",
     "APPROVED_AND_REMEMBERED",
     "ARGUMENT_SUMMARY_LIMIT",
-    "DENIED_BY_HUMAN",
     "DOUBLE_ESCAPE_WINDOW_SECONDS",
     "ELLIPSIS",
     "ERROR_PREFIX",
     "FINISHED_STATES",
+    "HISTORY_LIMIT",
     "MODE_CYCLE",
     "MODE_LABELS",
     "NOTICE_HISTORY",
     "OK_SUMMARY",
     "PRIMARY_ARGUMENT_KEYS",
+    "REASON_KEY",
     "REMEMBER_KEY",
     "REPEAT_GLYPH",
     "RESULT_ARROW",
@@ -778,18 +930,23 @@ __all__ = [
     "WAITING_LABEL",
     "EscapeAction",
     "EscapeState",
+    "History",
     "ToolLine",
     "ViewState",
     "activity_label",
     "advance_activity",
     "decision_for",
+    "deny_with",
     "mode_label",
     "next_mode",
     "press_escape",
     "reduce_all",
     "reduce_event",
     "reduce_stream",
+    "remember",
     "spinner_frame",
     "summarize_arguments",
     "summarize_result",
+    "walk_back",
+    "walk_forward",
 ]

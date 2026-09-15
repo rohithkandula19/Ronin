@@ -317,7 +317,11 @@ async def main() -> int:
             scope = "and remembered for this session" if decision.remember else "once"
             print(f"  {key:<8} → APPROVED {scope}")
         else:
-            print(f"  {key:<8} → denied ({decision.reason})")
+            # A denial carries no words of its own — the policy engine composes them,
+            # so that the human's reason (when they gave one) and the "no reason given"
+            # wording have a single author. Printing `decision.reason` here would show
+            # an empty pair of brackets.
+            print(f"  {key:<8} → denied; the engine words it for the model")
     print("\n`enter` and `space` are deliberately absent: a held-down key or a stray")
     print("newline arriving while an approval is on screen must not be able to approve.")
     print("\nthe same keys reach the policy engine through cli.approve, which turns a")

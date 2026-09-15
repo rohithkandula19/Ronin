@@ -26,7 +26,7 @@ def test_help_lists_subcommands() -> None:
     assert result.exit_code == 0
     # the wedge front page: ~10 verbs + the dev/util groups, one screen
     for cmd in ["init", "ask", "chat", "code", "config", "update", "memory",
-                "play", "dev", "util", "eval", "mcp"]:
+                "dev", "util", "eval", "mcp"]:
         assert cmd in result.stdout
     # collapsed commands must NOT be on the front page
     for cmd in ["doctor", "duel", "briefing"]:

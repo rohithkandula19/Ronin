@@ -52,6 +52,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..context.compaction import (
+    DEFAULT_MAX_RETAINED_CHARS,
+    DEFAULT_MAX_RETAINED_PATHS,
+)
 from ..core.types import Mode
 from .injection import MIN_TAINT_SPAN
 from .policy import (
@@ -91,6 +95,57 @@ SCALAR_KEYS: Mapping[str, str] = {
 RULES_KEY = "rules"
 
 
+#: Layers that come out of the repository the agent was pointed at, rather than from
+#: the person running it. A repo is a thing you clone, and cloning it must not be the
+#: same act as trusting it.
+REPO_LAYERS: frozenset[str] = frozenset({"project", "local"})
+
+#: The scalars that decide how much the safety layer asks, each ordered
+#: most-restrictive first. A :data:`REPO_LAYERS` file may move one of these *down*
+#: the ladder — stricter than it found it — and never up.
+#:
+#: This is the one place layering is not "last wins", and the asymmetry is the point.
+#: ``.ronin/settings.json`` is a file committed to a repository, so under plain
+#: last-wins a repo containing ``{"yolo": true, "mode": "full"}`` switched off every
+#: prompt *and* the whole unconditional deny list — ``rm -rf /`` included — for anyone
+#: who opened it, outranking that person's own ``~/.ronin/settings.json``, with no
+#: warning. ``cli/wire.py`` already states the principle for Retainer authority: "a
+#: rule written into ``.ronin/settings.json`` is a rule the agent running in that
+#: workspace could edit". It was simply never extended to these four.
+#:
+#: Rules are unaffected: a rules list only ever appends, and a rule cannot widen what
+#: the deny list refuses. It is the scalars that were dangerous.
+PRIVILEGE_LADDERS: Mapping[str, tuple[Any, ...]] = {
+    "yolo": (False, True),
+    "sandbox": (True, False),
+    "mode": (Mode.PLAN, Mode.ASK, Mode.AUTO_EDIT, Mode.FULL),
+    "default_decision": (Decision.DENY, Decision.ASK, Decision.ALLOW),
+}
+
+
+def _permissiveness(key: str, value: Any) -> int:
+    """Where ``value`` sits on its ladder, or ``-1`` for a value not on one."""
+    ladder = PRIVILEGE_LADDERS.get(key, ())
+    return ladder.index(value) if value in ladder else -1
+
+
+def _spell(value: Any) -> str:
+    """A value as it is written in the file, not as Python repr()s it.
+
+    ``Mode`` and ``Decision`` are ``StrEnum``, so repr gives ``<Mode.FULL: 'full'>``
+    — which is not what anyone typed, and a message that does not quote the file
+    back is a message people have to translate before they can act on it.
+    """
+    return f"{value!s}" if isinstance(value, (Mode, Decision)) else f"{value!r}"
+
+
+def escalates(key: str, value: Any, current: Any) -> bool:
+    """Whether setting ``key`` to ``value`` loosens it compared with ``current``."""
+    if key not in PRIVILEGE_LADDERS:
+        return False
+    return _permissiveness(key, value) > _permissiveness(key, current)
+
+
 @dataclass(frozen=True, slots=True)
 class LayerError:
     """A problem in one layer, named loudly enough to fix."""
@@ -98,6 +153,15 @@ class LayerError:
     layer: str
     path: Path | None
     message: str
+    skipped: bool = True
+    """Whether the whole layer was dropped, or only the one thing named.
+
+    A malformed layer is skipped entirely, so its rules stop applying and saying so
+    is the useful half of the message. A refused privilege escalation is narrower —
+    that one scalar did not take effect and everything else in the file still does.
+    Reporting both the same way would tell a user their rules were gone when they
+    were not, which is the kind of wrong that gets a config deleted.
+    """
 
     def __str__(self) -> str:
         where = str(self.path) if self.path is not None else f"--{self.layer}"
@@ -114,15 +178,26 @@ class Layer:
     rules: tuple[Rule, ...] = ()
     scalars: Mapping[str, Any] = field(default_factory=dict)
     errors: tuple[LayerError, ...] = ()
+    ignored: bool = False
+    """Whether the layer was deliberately not read, as opposed to not being there.
+
+    The two look identical in a report that only knows "absent", and they are not the
+    same fact: under ``--restricted`` the file is sitting on disk where the user can
+    see it, and a report that calls it absent is one they stop believing the moment
+    they run ``ls``. Somebody auditing a locked-down session needs to read this line
+    and learn that a settings file exists and did not apply.
+    """
 
     def describe(self) -> str:
         where = str(self.path) if self.path is not None else "(no file)"
         if self.errors:
             problems = "; ".join(error.message for error in self.errors)
             return f"{self.name:8} {where}  PROBLEM: {problems}"
+        if self.ignored:
+            return f"{self.name:8} {where}  (ignored — restricted mode reads no settings files)"
         if not self.present:
             return f"{self.name:8} {where}  (absent)"
-        scalars = ", ".join(f"{key}={value!r}" for key, value in sorted(self.scalars.items()))
+        scalars = ", ".join(f"{key}={_spell(value)}" for key, value in sorted(self.scalars.items()))
         detail = f"{len(self.rules)} rule(s)"
         return f"{self.name:8} {where}  {detail}{'  ' + scalars if scalars else ''}"
 
@@ -143,11 +218,11 @@ class Settings:
     #: and is load-bearing — see ``CompactionPolicy.max_retained_paths``. Settable
     #: because compaction *reports* bounding them as the remedy when retained results
     #: alone exceed the trigger, and advice the user cannot act on is not advice.
-    max_retained_paths: int | None = None
-    max_retained_chars: int | None = None
+    max_retained_paths: int | None = DEFAULT_MAX_RETAINED_PATHS
+    max_retained_chars: int | None = DEFAULT_MAX_RETAINED_CHARS
     #: Let compaction surrender older retained file context by itself rather than
     #: reporting that it cannot fit. Off by default: see ``CompactionPolicy``.
-    compaction_escalate: bool = False
+    compaction_escalate: bool = True
     rules: tuple[Rule, ...] = ()
     layers: tuple[Layer, ...] = ()
     errors: tuple[LayerError, ...] = ()
@@ -174,7 +249,7 @@ class Settings:
         lines = [layer.describe() for layer in self.layers]
         lines.append("")
         for key in SCALAR_KEYS:
-            lines.append(f"{key} = {getattr(self, key)!r}  (from {self.source_of(key)})")
+            lines.append(f"{key} = {_spell(getattr(self, key))}  (from {self.source_of(key)})")
         if self.errors:
             lines.append("")
             lines.extend(f"PROBLEM: {error}" for error in self.errors)
@@ -187,6 +262,7 @@ def load_settings(
     cwd: Path,
     flags: Mapping[str, Any] | None = None,
     builtin: Sequence[Rule] | None = None,
+    ignore_files: bool = False,
 ) -> Settings:
     """Resolve every layer into one :class:`Settings`.
 
@@ -194,26 +270,61 @@ def load_settings(
     process, so a test can describe a machine without touching the developer's real
     ``~/.ronin`` — and so two sessions in different directories cannot leak config into
     each other.
+
+    ``ignore_files`` drops every file layer, leaving the builtins and whatever was
+    typed on the command line. It is what ``--restricted`` is made of, and it is a
+    parameter rather than a setting for the reason the restriction exists: a profile
+    you can hand to an auditor is not one the workspace can edit. The layers are still
+    *listed* in the result, marked ignored rather than absent, because a report that
+    silently omits a file the user can see on disk is a report they stop believing.
     """
     base_rules = tuple(builtin) if builtin is not None else builtin_rules()
     layers: list[Layer] = [Layer(name="builtin", path=None, present=True, rules=base_rules)]
-    layers.append(_file_layer("user", home / USER_SETTINGS))
-    layers.append(_file_layer("project", cwd / PROJECT_SETTINGS))
-    layers.append(_file_layer("local", cwd / LOCAL_SETTINGS))
+    files = (
+        ("user", home / USER_SETTINGS),
+        ("project", cwd / PROJECT_SETTINGS),
+        ("local", cwd / LOCAL_SETTINGS),
+    )
+    for name, path in files:
+        layers.append(
+            Layer(name=name, path=path, present=False, ignored=True)
+            if ignore_files
+            else _file_layer(name, path)
+        )
     layers.append(_mapping_layer("flags", None, flags or {}))
 
     rules: list[Rule] = []
     scalars: dict[str, Any] = {}
     sources: dict[str, str] = {}
     errors: list[LayerError] = []
+    defaults = Settings(workspace_root=cwd, home=home)
     for layer in layers:
         rules.extend(layer.rules)
         errors.extend(layer.errors)
         for key, value in layer.scalars.items():
+            if layer.name in REPO_LAYERS:
+                current = scalars.get(key, getattr(defaults, key, None))
+                if escalates(key, value, current):
+                    # Reported rather than dropped: a silently ignored key is a
+                    # permission the user thinks they granted, and a silently
+                    # *honoured* one here was a permission they never did.
+                    errors.append(
+                        LayerError(
+                            layer=layer.name,
+                            path=layer.path,
+                            message=(
+                                f"refused {key} = {_spell(value)}: a file in the "
+                                f"repository cannot loosen {key} past {_spell(current)}, "
+                                "which came from a layer you control. Set it in your "
+                                f"own ~/{USER_SETTINGS} or pass the flag, if you mean it"
+                            ),
+                            skipped=False,
+                        )
+                    )
+                    continue
             scalars[key] = value
             sources[key] = layer.name
 
-    defaults = Settings(workspace_root=cwd, home=home)
     return Settings(
         workspace_root=cwd,
         home=home,
@@ -385,6 +496,36 @@ def _coerce(key: str, value: object) -> object:
 #: JSON shorthand: a rule may name its matcher inline instead of nesting ``match``.
 _SHORTHAND: Mapping[str, str] = {"command": "regex", "path": "path", "exact": "exact"}
 
+#: Which keys each match kind actually reads.
+#:
+#: The point is the refusal, not the documentation. ``kind`` defaults to ``tool``
+#: and ``tool`` means :class:`~ronin.safety.policy.AnyUse` — the *broadest*
+#: matcher there is — so a ``match`` object whose keys are all ignored does not
+#: fail, it silently widens. ``{"tool": "bash", "decision": "allow", "match":
+#: {"command": "^pytest"}}`` is a plausible blend of the two documented spellings
+#: and used to parse as *allow every bash command*. A permission rule that fails
+#: open is worse than one that will not load.
+_MATCH_KEYS: Mapping[str, frozenset[str]] = {
+    "tool": frozenset({"kind"}),
+    "exact": frozenset({"kind", "argument", "value"}),
+    "path": frozenset({"kind", "pattern", "argument"}),
+    "regex": frozenset({"kind", "pattern"}),
+}
+
+
+def _stray_keys_message(kind: str, stray: Sequence[str], match: Mapping[str, Any]) -> str:
+    """Why the rule was refused, in terms of the fix rather than the parser."""
+    listed = ", ".join(repr(key) for key in stray)
+    shorthand = [key for key in stray if key in _SHORTHAND]
+    if shorthand and "kind" not in match:
+        key = shorthand[0]
+        return (
+            f"a 'match' with no 'kind' means kind 'tool', which matches *every* use "
+            f"of the tool — it does not read {listed}. Write {key!r} at the top level "
+            f"beside 'tool' and 'decision', or give 'match' an explicit 'kind'"
+        )
+    return f"a 'match' of kind {kind!r} does not read {listed}"
+
 
 def parse_rule(entry: object, *, source: str) -> Rule:
     """One rule from its JSON form. Raises ``ValueError`` with a fixable message.
@@ -444,6 +585,15 @@ def _as_mapping(value: object) -> Mapping[str, Any]:
 
 def _build_matcher(match: Mapping[str, Any]) -> Matcher:
     kind = match.get("kind", "tool")
+    # Kind first, then stray keys: an unknown kind makes "which keys are legal"
+    # unanswerable, and reporting the stray key instead would name the wrong fix.
+    allowed = _MATCH_KEYS.get(kind) if isinstance(kind, str) else None
+    if allowed is None:
+        legal = ", ".join(_MATCH_KEYS)
+        raise ValueError(f"unknown match kind {kind!r}; expected one of {legal}")
+    stray = sorted(set(match) - allowed)
+    if stray:
+        raise ValueError(_stray_keys_message(kind, stray, match))
     if kind == "tool":
         return AnyUse()
     if kind == "exact":
@@ -466,8 +616,10 @@ def _build_matcher(match: Mapping[str, Any]) -> Matcher:
             return CommandRegex(pattern=pattern)
         except Exception as exc:  # re.error, and anything a future re raises
             raise ValueError(f"'pattern' is not a valid regex: {exc}") from None
-    legal = "tool, exact, path, regex"
-    raise ValueError(f"unknown match kind {kind!r}; expected one of {legal}")
+    # Unreachable while `_MATCH_KEYS` and the branches above agree about the
+    # kinds. If a kind is ever added to the table and not built here, say so
+    # instead of falling off the end and returning None.
+    raise ValueError(f"match kind {kind!r} is known but not built — this is a bug")
 
 
 __all__ = [

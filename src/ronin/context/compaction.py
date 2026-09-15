@@ -38,10 +38,11 @@ per provider would be worse than being explicit about the approximation.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Awaitable, Callable, Container, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from ..core.types import (
     Message,
@@ -132,6 +133,16 @@ PATH_ARGUMENT_KEYS: tuple[str, ...] = (
 )
 
 
+#: Ceiling on one retained tool result. Roughly a thousand tokens: enough to read
+#: what a file holds, and small enough that a full retained set is a fraction of the
+#: window rather than most of it.
+DEFAULT_MAX_RETAINED_CHARS: Final = 4_000
+
+#: How many paths keep a verbatim result. Twenty covers the working set of an
+#: ordinary session; past that, the oldest are surrendered and named.
+DEFAULT_MAX_RETAINED_PATHS: Final = 20
+
+
 @dataclass(frozen=True, slots=True)
 class CompactionPolicy:
     """When to compact and what is untouchable when it happens."""
@@ -142,24 +153,34 @@ class CompactionPolicy:
     #: Keep the most recent tool result per unique file path, in full.
     retain_tool_results_per_path: bool = True
     #: Ceiling on one retained result, in characters; ``None`` for no ceiling.
-    #: Defaults to no ceiling because the point of retention is *full* text; a
-    #: caller whose files are enormous can bound it and get a marked truncation.
-    max_retained_chars: int | None = None
+    #:
+    #: Bounded by default. Retention re-emits the latest result per path through
+    #: *every* fold, so one oversized result is not paid for once — it is paid for
+    #: on every turn for the rest of the session, and the per-tool ceiling above it
+    #: is 60_000 characters. :data:`DEFAULT_MAX_RETAINED_CHARS` is an excerpt large
+    #: enough to answer "what is in this file" and small enough that twenty of them
+    #: are not the context window. A clamped result is marked, never silently cut.
+    max_retained_chars: int | None = DEFAULT_MAX_RETAINED_CHARS
     #: Ceiling on how many paths are retained at all; ``None`` for no ceiling.
-    #: Unbounded by default, and that default is load-bearing: it is what makes a
-    #: file edited in turn 3 still answerable in turn 200. Setting it keeps the
-    #: most recently touched paths and **gives that guarantee up** — a session
-    #: that touches more unique files than the window can hold their results is
-    #: the case where compaction alone cannot get under the trigger, and the
-    #: caller has to choose which property to keep.
-    max_retained_paths: int | None = None
+    #:
+    #: This was unbounded, and that was a deliberate trade: it is what made a file
+    #: edited in turn 3 still readable in turn 200. It is now bounded, which gives
+    #: that guarantee up in its absolute form and keeps it in a weaker one — the
+    #: most recently touched :data:`DEFAULT_MAX_RETAINED_PATHS` paths stay readable,
+    #: and a path that falls out is **named** in
+    #: :attr:`CompactionResult.surrendered_paths` rather than vanishing. "Lost, and
+    #: you were told which" is a different thing from "lost".
+    max_retained_paths: int | None = DEFAULT_MAX_RETAINED_PATHS
     #: Whether compaction may surrender older retained paths on its own when the
-    #: folded transcript still would not fit the window. Off by default, and that
-    #: default is the same decision as the unbounded ceilings above: an over-budget
-    #: transcript is a *reported* problem the caller can act on, while a dropped file
-    #: is a silent, permanent loss. Turn it on for long unattended runs, where fitting
-    #: matters more than remembering and nobody is reading the notes.
-    escalate_to_fit: bool = False
+    #: folded transcript still would not fit the window.
+    #:
+    #: On by default. The argument for leaving it off was that a dropped file is a
+    #: silent, permanent loss — and that argument no longer holds, because the drop
+    #: is not silent: every surrendered path is returned by name and the CLI prints
+    #: them. What is left is the real choice between a session that keeps every file
+    #: and does not fit, and one that fits and says which files it let go of. A
+    #: transcript that cannot fit its own window does not run at all.
+    escalate_to_fit: bool = True
 
     def __post_init__(self) -> None:
         if self.context_window <= 0:
@@ -274,6 +295,141 @@ def render_message(message: Message) -> str:
 
 def _render_arguments(arguments: Mapping[str, Any]) -> str:
     return ", ".join(f"{key}={arguments[key]!r}" for key in sorted(arguments))
+
+
+#: The categories a context window divides into, in the order ``/cost`` prints them.
+#: Ordered by what a user acts on first: the two pinned costs they can configure away,
+#: then the transcript's own weight, heaviest contributor first.
+BREAKDOWN_CATEGORIES: tuple[str, ...] = (
+    "memory",
+    "repo map",
+    "tool results",
+    "tool calls",
+    "assistant",
+    "user",
+    "system",
+    "framing",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ContextBreakdown:
+    """Where the tokens in the window actually are, by category.
+
+    Answers a different question from the cost ledger, and the difference is the point.
+    The ledger says *which model* spent money and whether the cache hit — cumulative,
+    historical, denominated in dollars. This says *what is in the window right now*,
+    denominated in tokens. On a 32k local model "the repo map is 8k of your 32k" is the
+    number that tells you what to change; "main spent 80%" is not.
+
+    Characters are accumulated per category and converted once at the end, because
+    :func:`estimate_tokens` rounds up per call: summing rounded parts drifts above the
+    whole. Accumulating characters and dividing once means the parts sum to the total by
+    construction rather than by luck, which is what makes the percentages trustworthy.
+
+    ``framing`` is the role tags and newline joins :func:`render_message` adds. It is
+    named rather than hidden because a transcript of many tiny messages really does
+    spend tokens on it, and an unexplained residual invites the reader to assume the
+    breakdown is lossy.
+    """
+
+    chars: Mapping[str, int]
+    context_window: int = 0
+
+    @property
+    def total_chars(self) -> int:
+        return sum(self.chars.values())
+
+    @property
+    def total_tokens(self) -> int:
+        return estimate_tokens_from_chars(self.total_chars)
+
+    def tokens(self, category: str) -> int:
+        return estimate_tokens_from_chars(self.chars.get(category, 0))
+
+    def share(self, category: str) -> float:
+        """This category as a fraction of the window, or of the total if no window."""
+        denominator = self.context_window if self.context_window > 0 else self.total_chars
+        if denominator <= 0:
+            return 0.0
+        if self.context_window > 0:
+            return min(self.tokens(category) / self.context_window, 1.0)
+        return self.chars.get(category, 0) / denominator
+
+    def ranked(self) -> tuple[tuple[str, int], ...]:
+        """Non-empty categories as ``(name, tokens)``, heaviest first.
+
+        Ties break on :data:`BREAKDOWN_CATEGORIES` order rather than on the name, so a
+        session where two categories happen to match prints the same way twice.
+        """
+        order = {name: index for index, name in enumerate(BREAKDOWN_CATEGORIES)}
+        rows = [(name, self.tokens(name)) for name in self.chars if self.chars.get(name, 0) > 0]
+        rows.sort(key=lambda row: (-row[1], order.get(row[0], len(order))))
+        return tuple(rows)
+
+
+def estimate_tokens_from_chars(chars: int) -> int:
+    """``estimate_tokens`` for a length already counted. One rounding rule, one place."""
+    return math.ceil(chars / CHARS_PER_TOKEN) if chars > 0 else 0
+
+
+def context_breakdown(
+    messages: Sequence[Message],
+    *,
+    memory_chars: int = 0,
+    repo_map_tokens: int = 0,
+    context_window: int = 0,
+) -> ContextBreakdown:
+    """Attribute the window's tokens to categories, mirroring :func:`render_message`.
+
+    Every character :func:`render_message` produces lands in exactly one bucket, which
+    is the invariant the tests pin: add a block type there and forget it here and the
+    sum stops matching, rather than a category silently under-reporting. That is why
+    this lives next to ``render_message`` instead of in a module of its own.
+
+    The two pinned figures come in as arguments because they are not in ``messages`` at
+    all — the repo map and RONIN.md live in the provider's stable prefix, and a
+    breakdown that omitted them would report a small window as mostly empty while
+    compaction was already firing. ``repo_map_tokens`` arrives as tokens because the
+    map was *budgeted* in tokens; it is converted back to characters here so one
+    rounding rule applies to every row.
+    """
+    chars: dict[str, int] = {name: 0 for name in BREAKDOWN_CATEGORIES}
+    chars["memory"] = memory_chars
+    chars["repo map"] = repo_map_tokens * CHARS_PER_TOKEN
+    for message in messages:
+        rendered = _render_parts(message)
+        # The role tag and the newlines between parts, exactly as `render_message` joins.
+        chars["framing"] += len(f"[{message.role.value}]") + len(rendered)
+        for category, text in rendered:
+            chars[category] += len(text)
+    return ContextBreakdown(chars=chars, context_window=context_window)
+
+
+def _render_parts(message: Message) -> list[tuple[str, str]]:
+    """Each rendered block of ``message`` as ``(category, text)``.
+
+    Kept in lockstep with :func:`render_message` — the strings here are that function's
+    strings, so the two cannot disagree about what a block costs.
+    """
+    speaker = {
+        Role.USER: "user",
+        Role.ASSISTANT: "assistant",
+        Role.SYSTEM: "system",
+        Role.TOOL: "tool results",
+    }.get(message.role, "system")
+    parts: list[tuple[str, str]] = []
+    for block in message.content_blocks:
+        if isinstance(block, Text):
+            parts.append((speaker, block.text))
+        elif isinstance(block, ToolUse):
+            parts.append(("tool calls", f"call {block.name}({_render_arguments(block.arguments)})"))
+        elif isinstance(block, ToolResultBlock):
+            prefix = "error" if block.is_error else "result"
+            parts.append(("tool results", f"{prefix} {block.tool_use_id}: {block.content}"))
+        else:
+            parts.append((speaker, block.text))
+    return parts
 
 
 def message_tokens(message: Message) -> int:
@@ -558,7 +714,9 @@ async def compact(
     ]
 
     summary, error = await _summarize(foldable, summarizer)
-    retained = _retained_couples(foldable, policy) if policy.retain_tool_results_per_path else []
+    retained, cut_by_ceiling = (
+        _retained_couples(foldable, policy) if policy.retain_tool_results_per_path else ([], ())
+    )
     retained, surrendered = _fit_retention(
         retained,
         policy=policy,
@@ -621,7 +779,10 @@ async def compact(
         summarizer_error=error,
         missing_sections=missing_sections(summary),
         dropped_blocks=repaired,
-        surrendered_paths=surrendered,
+        # Both ways a path can be lost, reported through one field: the static
+        # ceiling and the fit-to-window escalation. A caller asking "what did
+        # this fold give up" wants one answer, not two half-answers.
+        surrendered_paths=(*cut_by_ceiling, *surrendered),
         trigger_tokens=policy.trigger_tokens,
     )
 
@@ -801,11 +962,17 @@ def _provisional_tokens(
 
 def _retained_couples(
     messages: Sequence[Message], policy: CompactionPolicy
-) -> list[tuple[str, tuple[Message, Message]]]:
+) -> tuple[list[tuple[str, tuple[Message, Message]]], tuple[str, ...]]:
     """One synthesized call/result couple per unique path, in first-call order.
 
     Synthesized rather than reused: the original assistant message usually carries
     several calls, and keeping it whole to save one result orphans the others.
+
+    Returns the couples *and the paths the ceiling cut*. Reporting them is not a
+    nicety: ``max_retained_paths`` used to drop the oldest silently, so only paths
+    lost to :func:`_fit_retention` were ever named and a path lost to the static
+    ceiling simply stopped existing. "Lost, and you were told which" is the whole
+    difference between a ceiling and a leak.
     """
     latest = latest_tool_result_per_path(messages)
     order: dict[str, int] = {}
@@ -817,9 +984,11 @@ def _retained_couples(
             if path is not None and path in latest:
                 order[path] = index
     selected = sorted(latest, key=lambda p: order.get(p, 0))
+    cut: tuple[str, ...] = ()
     if policy.max_retained_paths is not None and len(selected) > policy.max_retained_paths:
         # Keep the most recently touched. See the field's docstring for what this
         # costs: an early-turn file can fall out of the retained set entirely.
+        cut = tuple(selected[: -policy.max_retained_paths])
         selected = selected[-policy.max_retained_paths :]
     couples: list[tuple[str, tuple[Message, Message]]] = []
     for path in selected:
@@ -857,7 +1026,7 @@ def _retained_couples(
                 ),
             )
         )
-    return couples
+    return couples, cut
 
 
 def repair_pairing(messages: Sequence[Message]) -> tuple[list[Message], int]:

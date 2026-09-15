@@ -6199,12 +6199,6 @@ def commit(
     if r.returncode == 0:
         short = _git(["rev-parse", "--short", "HEAD"]).stdout.strip()
         console.print(f"[green]✓ committed[/green] [bold]{short}[/bold]")
-        try:  # auto-earn XP for a real unit of progress (best-effort, never blocks;
-            # gamification lives in the optional ronin-arcade extra)
-            from ronin_arcade.gamify import record
-            record("commit")
-        except Exception:  # noqa: BLE001
-            pass
     else:
         console.print(f"[red]commit failed:[/red] {(r.stderr or r.stdout).strip()[:300]}")
         raise typer.Exit(1)
@@ -6803,57 +6797,12 @@ def deadcode(
                           f"[bold]{d.name}[/bold]{tag}")
 
 
-# ---------- release (bump + changelog + tag) ----------
-
-@dev_app.command()
-def release(
-    kind: str = typer.Argument("patch", help="major | minor | patch."),
-    tag: bool = typer.Option(False, "--tag", help="Create a git tag for the new version."),
-    write_changelog: bool = typer.Option(True, "--changelog/--no-changelog", help="Prepend a CHANGELOG section."),
-    root: Path = typer.Option(Path("."), "--root", help="Repo root."),
-) -> None:
-    """Prepare a synchronized Ronin release and optionally create its git tag."""
-    from .release import bump_version, current_version, prepare_release, release_version_files, validate_release
-
-    files = list(release_version_files(root))
-    cur = current_version(files)
-    if not cur:
-        console.print("[yellow]couldn't find the Ronin release version.[/yellow]")
-        raise typer.Exit(1)
-    try:
-        new = bump_version(cur, kind)
-    except ValueError as e:
-        console.print(f"[red]{e}[/red]")
-        raise typer.Exit(2)
-    console.print(f"[#7aa2f7]🚀 release[/#7aa2f7] [bold]{cur} → {new}[/bold]")
-    try:
-        changed = prepare_release(root, new)
-        validate_release(root, f"v{new}")
-    except ValueError as e:
-        console.print(f"[red]{e}[/red]")
-        raise typer.Exit(2)
-    console.print(f"  [green]✓[/green] synchronized {len(changed)} release version source(s)")
-
-    if write_changelog:
-        from .changelog import render_changelog
-        from .git_helper import _git
-        since = _git(root, "describe", "--tags", "--abbrev=0").stdout.strip() or None
-        rng = f"{since}..HEAD" if since else "HEAD"
-        log = _git(root, "log", rng, "--pretty=%s", "--no-merges").stdout
-        subjects = [ln for ln in log.splitlines() if ln.strip()]
-        if subjects:
-            section = render_changelog(subjects, version=new)
-            cl = Path(root) / "CHANGELOG.md"
-            existing = cl.read_text(encoding="utf-8") if cl.is_file() else "# Changelog\n"
-            head, _, rest = existing.partition("\n")
-            cl.write_text(f"{head}\n\n{section}\n{rest.lstrip()}", encoding="utf-8")
-            console.print(f"  [green]✓[/green] CHANGELOG updated ({len(subjects)} commit(s))")
-    if tag:
-        from .git_helper import _git
-        r = _git(root, "tag", f"v{new}")
-        console.print(f"  [green]✓ tagged v{new}[/green]" if r.returncode == 0
-                      else f"[yellow]couldn't tag: {r.stderr.strip()[:80]}[/yellow]")
-    console.print("[dim]review the changes, then commit + push (and the tag).[/dim]")
+# ---------- release ----------
+#
+# `dev release` lived here and was a second entry point onto the same version
+# maths that `scripts/release.sh` already drove directly. The module moved to
+# `scripts/release_manifest.py` — release tooling is build tooling, not part of
+# the shipped CLI — and one release path is the point of moving it.
 
 
 # ---------- docstring (find + write missing docstrings) ----------
@@ -9334,65 +9283,6 @@ from .relay import relay_app
 util_app.add_typer(relay_app, name="relay")
 
 
-@app.command()
-def play(
-    game: str = typer.Argument(
-        "", help="Game key to launch directly (e.g. 2048, snake, ttt). Omit for the menu."),
-) -> None:
-    """Take a break — play a free terminal game in ronin's arcade. 🎮"""
-    try:
-        from ronin_arcade.games import GAMES, find
-    except ImportError:
-        console.print("🐼 the arcade isn't installed — get 30+ free terminal games with: "
-                      "[bold]pip install 'ronin-cli\\[arcade]'[/bold]")
-        return
-    from .picker import Choice, ask_choice
-    from .theme import gradient_text
-
-    # Jump straight into a game by key: `ronin play snake`.
-    if game:
-        g = find(game)
-        if g is None:
-            keys = ", ".join(sorted(x.key for x in GAMES))
-            console.print(f"[yellow]No game called[/yellow] '{game}'.\n"
-                          f"[dim]Available:[/dim] {keys}\n"
-                          f"[dim]or run[/dim] [bold]ronin play[/bold] [dim]for the menu.[/dim]")
-            raise typer.Exit(1)
-        g.play(console)
-        try:
-            from ronin_arcade.gamify import record
-            record("game_played")
-        except Exception:  # noqa: BLE001
-            pass
-        return
-
-    # Otherwise: pick from the menu, play, and return to the menu until you quit.
-    console.print()
-    console.print(gradient_text("  🐼  ronin arcade"))
-    console.print(f"  [dim]{len(GAMES)} free games · pick one to play[/dim]")
-    while True:
-        choices = [Choice(label=f"{g.emoji}  {g.name}", value=g.key, description=g.desc)
-                   for g in GAMES]
-        choices.append(Choice(label="🚪  Quit", value="__quit__"))
-        pick = ask_choice("Pick a game:", choices, console=console)
-        if not pick or pick == "__quit__":
-            console.print("  [dim]gg — come back soon! 🐼[/dim]")
-            return
-        g = find(pick)
-        if g is not None:
-            try:
-                g.play(console)
-            except (EOFError, KeyboardInterrupt):
-                console.print("\n  [dim]back to the menu…[/dim]")
-            else:
-                try:
-                    from ronin_arcade.gamify import record
-                    record("game_played")
-                except Exception:  # noqa: BLE001
-                    pass
-            console.print()
-
-
 @util_app.command()
 def route(
     task: list[str] = typer.Argument(..., help="The task to run on the auto-chosen blade."),
@@ -9416,43 +9306,6 @@ def swebench(
     pass-rate / cost / time leaderboard. Local proxy — real SWE-bench needs Docker."""
     from .swebench import run as run_swebench
     run_swebench([s.strip() for s in models.split(",") if s.strip()], console=console)
-
-
-@util_app.command()
-def profile() -> None:
-    """Your coding profile: XP, level, daily streak, and unlocked achievements —
-    earned for real actions (tests passing, bugs fixed, commits, PRs)."""
-    try:
-        from ronin_arcade.gamify import render_profile
-    except ImportError:
-        console.print("🐼 profiles live in the arcade extra — "
-                      "[bold]pip install 'ronin-cli\\[arcade]'[/bold]")
-        return
-    render_profile(console)
-
-
-@util_app.command()
-def xp(
-    event: str = typer.Argument(..., help="The action to award XP for: test_passed, bug_fixed, commit, pr_opened, …"),
-    n: int = typer.Option(1, "--n", help="How many of this event to record."),
-) -> None:
-    """Award XP for a coding action and show what changed (level-ups, streak, new badges).
-    Hooks call this automatically; also handy to log a win by hand."""
-    try:
-        from ronin_arcade.gamify import record
-    except ImportError:
-        console.print("🐼 XP tracking lives in the arcade extra — "
-                      "[bold]pip install 'ronin-cli\\[arcade]'[/bold]")
-        return
-    res = record(event, n=n)
-    line = f"[#2dd4bf]✦ +{res['xp_gained']} XP[/#2dd4bf] · [bold]LV {res['level']}[/bold] {res['title']}"
-    if res.get("streak"):
-        line += f" · [#e0af68]🔥 {res['streak']}d[/#e0af68]"
-    console.print(line)
-    if res.get("leveled_up"):
-        console.print(f"  [#9ece6a]⬆ level up![/#9ece6a]")
-    for a in res.get("unlocked", []):
-        console.print(f"  [#9ece6a]🏅 {a['name']}[/#9ece6a] — [dim]{a['desc']}[/dim]")
 
 
 # ---------- index · scalable repo context for big codebases ----------

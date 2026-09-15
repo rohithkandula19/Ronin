@@ -277,6 +277,162 @@ async def test_a_complete_small_read_is_still_deduplicated(tmp_path: Path) -> No
 
 
 # --------------------------------------------------------------------------- #
+# what the gate declines to answer, the tool has to answer for real
+# --------------------------------------------------------------------------- #
+
+
+async def test_the_tool_really_does_report_a_malformed_offset(tmp_path: Path) -> None:
+    """The half the dedup suite asserts by omission.
+
+    Over there the reasoning is "a bad offset must not be read as *no* offset, or the
+    gate stubs a call that asked for something else — the tool owns that error." The
+    tool is a fake in that suite, so the second clause was never checked: had ``read``
+    quietly ignored the bad value, the gate would have been right to stand aside and
+    the model would still have got a whole file it did not ask for.
+    """
+    target = tmp_path / "long.py"
+    target.write_text("\n".join(f"line {i}" for i in range(1, 400)))
+    _files, gate = real_gate(tmp_path)
+
+    result = await gate.execute(use("read", call_id="r1", path=str(target), offset="banana"))
+
+    assert not result.ok
+    assert "offset" in (result.error or "")
+    assert "banana" in (result.error or "")
+
+
+async def test_a_read_that_failed_is_not_recorded_as_one_that_happened(
+    tmp_path: Path,
+) -> None:
+    """One line in the gate stands between a refusal and the worst stub in the system.
+
+    ``_record_read`` runs under ``if result.ok``. Without it a *failed* read still
+    resolves the path, re-reads the file to digest it, and files a whole-file record
+    marked complete — for a call that returned no content whatsoever. The second read
+    is then satisfied, and the model is told:
+
+        report.pdf is unchanged since you read it, and the whole file is already in
+        this conversation above … Scroll back for the contents.
+
+    about a file it was explicitly refused. The refusal it needed to see is gone, and
+    the answer arrives as ``ok=True``.
+
+    A PDF is the sharp case because the tool refuses it every time, so there is no
+    path by which the model could ever come to hold it. The whole suite passes with
+    that guard deleted; this test is the one that does not.
+    """
+    target = tmp_path / "report.pdf"
+    target.write_bytes(b"%PDF-1.7\n" + bytes(range(256)) * 8)
+    files, gate = real_gate(tmp_path)
+
+    first = await gate.execute(use("read", call_id="r1", path=str(target)))
+    second = await gate.execute(use("read", call_id="r2", path=str(target)))
+
+    assert not first.ok
+    assert files.recorded(target) is None
+    # The second call must get the same refusal, not a stub standing in for it.
+    assert not second.ok
+    assert second.error == first.error
+
+
+async def test_a_read_that_fails_after_a_good_one_leaves_the_first_record_alone(
+    tmp_path: Path,
+) -> None:
+    """Deleting the file is the case where forgetting would be the wrong repair.
+
+    ``check`` answers ``DELETED`` — "the file you read is gone" — only while the
+    record survives. Dropping it on the failed read would downgrade that to
+    ``NEVER_READ``, which reads as *you have not looked at this yet* and is a strictly
+    less useful thing to tell a model about a file it did look at.
+    """
+    target = tmp_path / "config.py"
+    target.write_text("x = 1\n")
+    files, gate = real_gate(tmp_path)
+
+    await read(gate, target)
+    target.unlink()
+    second = await gate.execute(use("read", call_id="r2", path=str(target)))
+
+    assert not second.ok
+    assert "does not exist" in (second.error or "")
+    assert files.recorded(target) is not None
+    assert files.check(target).status is FileStatus.DELETED
+
+
+# --------------------------------------------------------------------------- #
+# an empty file has nothing to scroll back to
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_second_read_of_an_empty_file_is_answered_with_the_file(
+    tmp_path: Path,
+) -> None:
+    """The dedup spent more context than it saved, and lied while doing it.
+
+    ``read`` of an empty file returns a *description* — "notes.txt exists but is
+    empty (0 bytes)" — and used to record it as though it were the contents. So the
+    second read was answered with the stub: 282 characters telling the model to
+    scroll back for contents that are 40 characters of "there are none". Seven times
+    the cost, in the mechanism whose only justification is cost, pointing the model
+    at something it cannot find.
+    """
+    target = tmp_path / "notes.txt"
+    target.write_text("")
+    _files, gate = real_gate(tmp_path)
+
+    first = await read(gate, target)
+    second = await gate.execute(use("read", call_id="r2", path=str(target)))
+
+    assert first.content == second.content
+    assert "0 bytes" in second.content
+    assert "scroll back" not in second.content.lower()
+    assert len(second.content) <= len(first.content)
+
+
+async def test_an_empty_read_still_records_enough_to_check_a_later_write(
+    tmp_path: Path,
+) -> None:
+    """Withholding the handoff must not cost the guard.
+
+    ``complete`` gates the dedup and nothing else — the digest is still recorded, so
+    a write after reading an empty file is still a write the model has looked at.
+    Getting this wrong would trade a cosmetic waste for a refused legitimate write.
+    """
+    target = tmp_path / "notes.txt"
+    target.write_text("")
+    files, gate = real_gate(tmp_path, ReadTool(), WriteTool())
+
+    await read(gate, target)
+    written = await gate.execute(
+        use("write", call_id="w1", path=str(target), content="first line\n")
+    )
+
+    assert written.ok, written.error
+    assert target.read_text() == "first line\n"
+    assert files.recorded(target) is not None
+
+
+async def test_a_file_that_becomes_empty_is_read_again_not_stubbed(tmp_path: Path) -> None:
+    """The path that gets there by truncation, not by starting out that way.
+
+    The first read is a real, complete copy of the contents. Emptying the file makes
+    the stub actively wrong — and the record must not survive the change in a form
+    that still satisfies the dedup.
+    """
+    target = tmp_path / "notes.txt"
+    target.write_text("x = 1\n")
+    files, gate = real_gate(tmp_path)
+
+    await read(gate, target)
+    assert files.satisfies(target, WHOLE_FILE)  # the ordinary case still holds
+    target.write_text("")
+    second = await gate.execute(use("read", call_id="r2", path=str(target)))
+
+    assert "0 bytes" in second.content
+    assert not files.satisfies(target, WHOLE_FILE)
+
+
+# --------------------------------------------------------------------------- #
 # the model's own edits are not the user's
 # --------------------------------------------------------------------------- #
 

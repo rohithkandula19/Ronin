@@ -9,8 +9,8 @@ produces a new :class:`AgentState`; nothing else in this module rebinds it, and
 there are no module-level mutables. The final state rides out on ``TurnEnd`` so a
 consumer can resume from it without reaching into the loop.
 
-Three decisions were made here rather than guessed silently — they are recorded in
-``docs/ARCHITECTURE.md`` §8 with their alternatives:
+Four decisions were made here rather than guessed silently — they are recorded in
+``docs/ARCHITECTURE.md`` §8 and §9 with their alternatives:
 
 1. **Approval is answered by the injected policy**, not by the consumer through
    the stream, because the work order injects ``policy`` and types the return as
@@ -26,6 +26,10 @@ Three decisions were made here rather than guessed silently — they are recorde
    transcript before the ``CancelledError`` propagates. Both are required by the
    spec ("cancellable at any await point" *and* "conversation stays well-formed"),
    so this is one design meeting two constraints, not two competing designs.
+4. **Steering lands at the top of an iteration**, never mid-tool-chain. A user
+   message between a ``tool_use`` and its ``tool_result`` is a transcript providers
+   reject, and "it takes effect at the model's next decision" is a promise that can
+   be kept, where "within a second or two" is not. See :mod:`ronin.core.steering`.
 """
 
 from __future__ import annotations
@@ -59,6 +63,7 @@ from .types import (
     StreamReset,
     Text,
     TextDelta,
+    Todo,
     ToolEnd,
     ToolOutput,
     ToolResult,
@@ -69,6 +74,11 @@ from .types import (
     TurnStart,
     TurnState,
 )
+
+#: What a steered message is marked with in the transcript. A user message either way —
+#: this only says *how* it arrived, so a reader (and a future rewind) can tell a
+#: correction typed mid-turn from the prompt that opened the turn.
+STEER_KIND = "steer"
 
 DEFAULT_MAX_ITERATIONS = 100
 DEFAULT_MAX_TOOL_RESULT_CHARS = 16_000
@@ -201,12 +211,20 @@ def _advance(
     *,
     messages: Sequence[Message] | None = None,
     budget: Budget | None = None,
+    todos: Callable[[], Sequence[Todo]] | None = None,
 ) -> AgentState:
-    """The single place a new :class:`AgentState` is produced."""
+    """The single place a new :class:`AgentState` is produced.
+
+    ``todos`` is a callable rather than a value because the plan lives outside the loop
+    — in the tool context ``todo_write`` writes to — and is read at the moment the state
+    is produced, not at the moment the turn started. Passing a value would snapshot it
+    before the tools that change it have run.
+    """
     return replace(
         state,
         messages=tuple(messages) if messages is not None else state.messages,
         budget=budget if budget is not None else state.budget,
+        todos=tuple(todos()) if todos is not None else state.todos,
     )
 
 
@@ -244,6 +262,9 @@ async def run_turn(
     system: str = "",
     max_iterations: int = DEFAULT_MAX_ITERATIONS,
     max_tool_result_chars: int = DEFAULT_MAX_TOOL_RESULT_CHARS,
+    steering: Callable[[], Sequence[str]] | None = None,
+    todos: Callable[[], Sequence[Todo]] | None = None,
+    preview: Callable[[ToolUse], str | None] | None = None,
 ) -> AsyncIterator[Event]:
     """Run one turn to completion, yielding every observable step.
 
@@ -251,6 +272,19 @@ async def run_turn(
     Raises only :class:`StalledError` (a repeat after a nudge) and
     ``asyncio.CancelledError`` (a hard cancel) — everything else, including a tool
     that raises, becomes a value.
+
+    ``steering`` is the mid-turn correction channel: a callable the loop *pulls*, at
+    the top of each iteration, for messages the user typed while this turn was
+    running (see :mod:`ronin.core.steering`). It is pulled rather than pushed for the
+    same reason ``policy.cancelled()`` is — the loop stays a generator over injected
+    values, with nothing to receive and no second task to coordinate with. Unset, the
+    loop behaves exactly as it did before there was such a thing as steering.
+
+    ``todos`` is the model's plan, pulled the same way and for the same reason: it lives
+    in the tool context that ``todo_write`` writes to, which the loop cannot see through
+    the ``ToolRegistry`` protocol. Without it ``AgentState.todos`` was empty on every
+    live turn — so the plan never reached the transcript, and a resumed session came
+    back with an empty checklist and a model that had been told nothing was in progress.
     """
     specs = list(tools.specs())
     messages: list[Message] = list(state.messages)
@@ -263,7 +297,7 @@ async def run_turn(
         yield TurnStart(turn_index=index)
 
         if policy.cancelled():
-            state = _advance(state, messages=messages, budget=budget)
+            state = _advance(state, messages=messages, budget=budget, todos=todos)
             yield TurnEnd(
                 turn_index=index,
                 state=TurnState.INTERRUPTED,
@@ -273,7 +307,7 @@ async def run_turn(
             return
 
         if (reason := policy.check_budget(budget)) is not None:
-            state = _advance(state, messages=messages, budget=budget)
+            state = _advance(state, messages=messages, budget=budget, todos=todos)
             yield TurnEnd(
                 turn_index=index,
                 state=TurnState.DONE,
@@ -281,6 +315,32 @@ async def run_turn(
                 agent_state=state,
             )
             return
+
+        # ------------------------------------------------------------ steering
+        # The one safe seam for a mid-turn correction, and the reason it is here
+        # rather than wherever the keystroke landed: every `tool_use` from the
+        # previous assistant message has already been answered by the
+        # `_results_message` at the bottom of the last iteration, and the next model
+        # call has not been made yet. Anywhere inside the tool run would put a user
+        # message between a `tool_use` and its `tool_result`, which every provider
+        # rejects — and would also make "when does my correction take effect?"
+        # depend on which tool happened to be running.
+        #
+        # After the cancellation check on purpose. An interrupted turn must not
+        # swallow the message: leaving it in the holder is what lets the orchestrator
+        # deliver it as the next turn instead of losing it to a turn that is ending.
+        if steering is not None:
+            for correction in steering():
+                # USER, not SYSTEM: this is the human talking, and calling it
+                # anything else would misreport who said it to compaction, to a
+                # rewind, and to anyone reading the transcript back.
+                messages.append(
+                    Message(
+                        role=Role.USER,
+                        content_blocks=(Text(correction),),
+                        metadata={"kind": STEER_KIND},
+                    )
+                )
 
         # ------------------------------------------------------ model streaming
         final: FinalMessage | None = None
@@ -293,7 +353,7 @@ async def run_turn(
                 final = chunk
 
         if final is None:
-            state = _advance(state, messages=messages, budget=budget)
+            state = _advance(state, messages=messages, budget=budget, todos=todos)
             yield Error(
                 message="model stream ended without a final message",
                 kind="protocol",
@@ -320,7 +380,7 @@ async def run_turn(
             # below would end with `DONE`.
             yield Error(message=final.error, kind="provider", recoverable=bool(calls))
             if not calls:
-                state = _advance(state, messages=messages, budget=budget)
+                state = _advance(state, messages=messages, budget=budget, todos=todos)
                 yield TurnEnd(
                     turn_index=index,
                     state=TurnState.ERROR,
@@ -333,7 +393,7 @@ async def run_turn(
 
         # -------------------------------------------------- (a) no tool calls
         if not calls:
-            state = _advance(state, messages=messages, budget=budget)
+            state = _advance(state, messages=messages, budget=budget, todos=todos)
             yield TurnEnd(
                 turn_index=index,
                 state=TurnState.DONE,
@@ -361,7 +421,9 @@ async def run_turn(
                         )
                     )
                     raise StalledError(
-                        mark, repeats, _advance(state, messages=messages, budget=budget)
+                        mark,
+                        repeats,
+                        _advance(state, messages=messages, budget=budget, todos=todos),
                     )
                 nudge_for = mark
         if nudge_for is not None:
@@ -395,8 +457,25 @@ async def run_turn(
                 yield ToolEnd(tool_use_id=use.id, name=use.name, result=pairs[-1][1])
                 continue
 
+            # A diff when one can be built, the call and its arguments otherwise.
+            # One value either way: what the event carries, what the policy is asked
+            # with and what the human reads are the same string by construction, and
+            # that is the property the gate rests on.
+            rendered = (preview(use) if preview is not None else None) or _render(use)
+
+            # The **event** is what `requires_approval` gates, not the consult. Those
+            # were one branch, and the consequence was that `read`, `grep`, `glob` and
+            # `ls` — every tool that inherits `requires_approval = False` — never
+            # reached the policy engine at all. Not the user's deny rules, not the
+            # *unconditional* deny list, not the taint floor. A settings file saying
+            # `{"tool": "read", "decision": "deny", "path": "**/.env"}` parsed, matched
+            # and resolved to DENY, and the secret was still returned; so was key
+            # material, which `docs/SUBSYSTEMS.md` promises is refused "both ways".
+            #
+            # Consulting always costs nothing for the ordinary case: `PolicyEngine`
+            # relaxes an unconfigured read-only tool to ALLOW without asking anyone —
+            # a branch that only makes sense if reads were always meant to arrive here.
             if spec.requires_approval:
-                rendered = _render(use)
                 yield ApprovalRequest(
                     tool_use_id=use.id,
                     name=use.name,
@@ -404,12 +483,12 @@ async def run_turn(
                     rendered=rendered,
                     reason=spec.danger_level.name.lower(),
                 )
-                decision = await policy.approve(spec, use, rendered=rendered)
-                if not decision.approved:
-                    detail = decision.reason or "the user declined this action"
-                    pairs.append((use, ToolResult(ok=False, error=f"DENIED: {detail}")))
-                    yield ToolEnd(tool_use_id=use.id, name=use.name, result=pairs[-1][1])
-                    continue
+            decision = await policy.approve(spec, use, rendered=rendered)
+            if not decision.approved:
+                detail = decision.reason or "the user declined this action"
+                pairs.append((use, ToolResult(ok=False, error=f"DENIED: {detail}")))
+                yield ToolEnd(tool_use_id=use.id, name=use.name, result=pairs[-1][1])
+                continue
 
             approved.append((use, spec))
 
@@ -444,7 +523,7 @@ async def run_turn(
 
         # ------------------------------------------------------- (e) interrupt
         if policy.cancelled():
-            state = _advance(state, messages=messages, budget=budget)
+            state = _advance(state, messages=messages, budget=budget, todos=todos)
             yield TurnEnd(
                 turn_index=index,
                 state=TurnState.INTERRUPTED,
@@ -454,7 +533,7 @@ async def run_turn(
             return
 
     # ------------------------------------------------------ (b) max iterations
-    state = _advance(state, messages=messages, budget=budget)
+    state = _advance(state, messages=messages, budget=budget, todos=todos)
     yield TurnEnd(
         turn_index=index,
         state=TurnState.ERROR,
@@ -574,6 +653,7 @@ __all__ = [
     "STALL_ABORTED",
     "STALL_REPEATS",
     "STALL_WINDOW",
+    "STEER_KIND",
     "TRUNCATE_HEAD_SHARE",
     "StalledError",
     "StopReason",

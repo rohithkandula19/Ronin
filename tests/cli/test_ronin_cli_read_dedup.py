@@ -134,7 +134,7 @@ async def test_a_file_that_changed_on_disk_is_read_again(tmp_path: Path) -> None
     assert inner.called == ("read", "read")
 
 
-async def test_a_deleted_file_is_read_again_so_the_tool_reports_the_error(tmp_path: Path) -> None:
+async def test_a_deleted_file_is_read_again_rather_than_stubbed(tmp_path: Path) -> None:
     target = tmp_path / "config.py"
     target.write_bytes(BODY)
     inner = reader()
@@ -146,6 +146,7 @@ async def test_a_deleted_file_is_read_again_so_the_tool_reports_the_error(tmp_pa
 
     # Answering "unchanged" for a file that is gone would be the worst stub of all.
     assert inner.called == ("read", "read")
+    assert GateStage.DEDUP not in gate.log[-1].stages
 
 
 async def test_only_read_tools_are_deduplicated(tmp_path: Path) -> None:
@@ -261,7 +262,7 @@ async def test_the_gate_reads_the_window_off_the_call(tmp_path: Path) -> None:
     assert len(inner.called) == 2  # whole file: not what was seen
 
 
-async def test_a_malformed_offset_is_left_for_the_tool_to_report(tmp_path: Path) -> None:
+async def test_a_malformed_offset_is_not_treated_as_no_offset(tmp_path: Path) -> None:
     target = tmp_path / "long.py"
     target.write_text("\n".join(f"line {i}" for i in range(1, 400)))
     inner = reader()
@@ -271,8 +272,10 @@ async def test_a_malformed_offset_is_left_for_the_tool_to_report(tmp_path: Path)
     await gate.execute(use("read", call_id="call_2", path=str(target), offset="banana"))
 
     # Treating a bad offset as "absent" would silently stub a call that asked for
-    # something else. The tool owns that error message.
+    # something else. The tool owns that error message — see the fidelity suite,
+    # which drives the real tool and checks it actually produces one.
     assert inner.called == ("read", "read")
+    assert GateStage.DEDUP not in gate.log[-1].stages
 
 
 # --------------------------------------------------------------------------- #
@@ -309,7 +312,25 @@ async def _folded(tmp_path: Path, *, grep_the_same_path: bool) -> tuple[Path, li
     messages += [Message(role=Role.USER, content_blocks=(Text("now edit a.py"),))]
 
     result = await compact(
-        messages, policy=CompactionPolicy(context_window=4000), summarizer=summarize
+        messages,
+        # Retention unbounded *and* escalation off: this test is about whether a
+        # *grep* costs a read its place in the fold, and either mechanism would evict
+        # the target for an unrelated reason — the ceiling behind the test's own
+        # filler files, escalation because the transcript did not fit.
+        #
+        # Escalation is the one that bites without looking like it. Whether the fold
+        # fits depends on the length of the paths in it, so this passed on Linux
+        # (`/tmp/pytest-of-root/...`) and failed on macOS
+        # (`/private/var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/...`) — a
+        # platform split that is really a string-length split. Reproducible anywhere
+        # with `--basetemp` set to a long path.
+        policy=CompactionPolicy(
+            context_window=4000,
+            max_retained_paths=None,
+            max_retained_chars=None,
+            escalate_to_fit=False,
+        ),
+        summarizer=summarize,
     )
     assert result.compacted
     return target, list(result.messages)
@@ -434,6 +455,62 @@ async def test_sync_keeps_everything_when_no_path_resolves(tmp_path: Path) -> No
     with pytest.raises(RuntimeError, match="not one path"):
         gate.sync_file_state(messages)
     assert files.recorded(target) is not None  # nothing forgotten
+
+
+async def test_sync_keeps_a_path_that_will_not_resolve_while_others_do(tmp_path: Path) -> None:
+    """The invariant the docstring states and nothing checked.
+
+    ``sync_file_state`` says: *"A path that will not resolve is kept under both
+    spellings rather than dropped. Forgetting on a resolution failure would quietly
+    weaken the stale-edit check."* The line that implements it is one ``visible.add``
+    of the raw spelling, before the resolve that may throw.
+
+    The neighbouring test covers the *tripwire* — when not one path resolves, the
+    resolver is broken and nothing is forgotten. This is the other branch, and the
+    dangerous one: when some paths resolve, the tripwire stays silent, so a dropped
+    raw spelling means that one file is quietly forgotten while the compaction is
+    reported as routine. The next edit of it is then checked against nothing.
+    """
+    good = tmp_path / "good.py"
+    bad = tmp_path / "bad.py"
+    for path in (good, bad):
+        path.write_bytes(BODY)
+    files = FileStateTracker()
+    files.record_read(good)
+    files.record_read(bad)
+
+    def resolve_except_bad(raw: str) -> Path:
+        if raw == str(bad):
+            raise RuntimeError("this spelling cannot be resolved")
+        return Path(raw)
+
+    taint = TaintTracker()
+    gate = gated(
+        reader(),
+        PolicyEngine(builtin_ruleset(), taint=taint),
+        files=files,
+        taint=taint,
+        resolve=resolve_except_bad,
+    )
+    messages: list[Message] = []
+    for i, path in enumerate((good, bad)):
+        call = ToolUse(id=f"t{i}", name="read", arguments={"path": str(path)})
+        messages.append(Message(role=Role.ASSISTANT, content_blocks=(call,)))
+        messages.append(
+            Message(
+                role=Role.TOOL,
+                content_blocks=(ToolResultBlock(tool_use_id=f"t{i}", content=BODY.decode()),),
+            )
+        )
+
+    dropped = gate.sync_file_state(messages)
+
+    assert dropped == ()  # neither file left the transcript, so neither may be forgotten
+    assert files.recorded(good) is not None
+    assert files.recorded(bad) is not None, (
+        "the unresolvable path was forgotten, so the stale-edit guard no longer "
+        "covers it — and the compaction reported nothing unusual"
+    )
 
 
 # --------------------------------------------------------------------------- #

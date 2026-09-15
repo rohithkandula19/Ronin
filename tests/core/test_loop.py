@@ -502,13 +502,46 @@ async def test_a_denied_tool_is_never_executed_and_comes_back_as_a_denied_error(
     assert tools.executions == [], "a denied tool must not run at all"
 
 
-async def test_an_ungated_tool_never_reaches_the_policy() -> None:
+async def test_an_ungated_tool_still_reaches_the_policy() -> None:
+    """Every call is consulted. ``requires_approval`` decides who is *shown* it.
+
+    This test used to assert the opposite, and the opposite was a hole you could
+    drive a secret through: with the consult gated on ``requires_approval``, the
+    read family — ``read``, ``grep``, ``glob``, ``ls`` — never reached the engine, so
+    a settings file denying ``**/.env`` parsed, matched, resolved to DENY, and the
+    file was read anyway. The unconditional deny list went with it, which is why
+    ``read("certs/tls.key")`` returned a private key against a documented promise
+    that key material is refused both ways.
+
+    Consulting costs an ungated tool nothing: the engine relaxes an unconfigured
+    read-only tool to ALLOW without asking anybody.
+    """
     tools = one_reader()
     model = FakeModel([tool_turn(call("u1", "read_file", path="a.py")), text_turn("done")])
     policy = FakePolicy()
     await run_events(model, tools, policy)
-    assert policy.approvals == []
+    assert [ask.use.name for ask in policy.approvals] == ["read_file"]
     assert tools.executed_names == ("read_file",)
+
+
+async def test_an_ungated_tool_raises_no_approval_request_event() -> None:
+    """The other half: consulted, but no human is interrupted for a file read."""
+    tools = one_reader()
+    model = FakeModel([tool_turn(call("u1", "read_file", path="a.py")), text_turn("done")])
+    events = await run_events(model, tools, FakePolicy())
+    assert of_type(events, ApprovalRequest) == []
+
+
+async def test_a_policy_that_denies_an_ungated_tool_is_obeyed() -> None:
+    """The point of consulting: a deny rule on ``read`` has to be able to stop a read."""
+    tools = one_reader()
+    model = FakeModel([tool_turn(call("u1", "read_file", path=".env")), text_turn("done")])
+    events = await run_events(
+        model, tools, FakePolicy(approve_all=False, deny_reason="secrets stay out")
+    )
+    result = of_type(events, ToolEnd)[0].result
+    assert (result.ok, result.error) == (False, "DENIED: secrets stay out")
+    assert tools.executions == [], "a denied read must not run at all"
 
 
 async def test_a_denial_still_leaves_a_paired_transcript() -> None:
@@ -1174,3 +1207,41 @@ async def test_an_interrupt_during_the_approval_pass_answers_the_remaining_calls
     assert [b.tool_use_id for b in blocks] == ["t1", "t2"]
     assert all(b.is_error and "interrupted" in b.content for b in blocks)
     assert only_turn_end(events).stop_reason == StopReason.INTERRUPTED.value
+
+
+async def test_an_injected_preview_is_what_the_human_is_shown_and_the_policy_is_asked() -> None:
+    """The seam that puts a diff in front of an edit.
+
+    One string, still: the event, the policy call and the human's screen all carry the
+    same `rendered`. That the two cannot diverge is the property the gate rests on, and
+    it is why the preview is folded into `rendered` rather than added beside it.
+    """
+    tools = FakeTools({"deploy": (GATED, succeeds("deployed"))})
+    model = FakeModel([tool_turn(call("u1", "deploy", env="prod")), text_turn("done")])
+    policy = FakePolicy()
+    events = await run_events(
+        model, tools, policy, preview=lambda use: f"--- a/x\n+++ b/x\n+{use.name}"
+    )
+    request = of_type(events, ApprovalRequest)[0]
+    assert request.rendered == "--- a/x\n+++ b/x\n+deploy"
+    assert policy.approvals[0].rendered == request.rendered
+
+
+async def test_a_preview_that_declines_falls_back_to_the_call_and_its_arguments() -> None:
+    # A file that moved, an `old_string` that stopped matching, a tool that is not an
+    # edit at all. The prompt still has to say something, and the JSON line is what it
+    # said before there was ever a diff.
+    tools = FakeTools({"deploy": (GATED, succeeds("deployed"))})
+    model = FakeModel([tool_turn(call("u1", "deploy", env="prod")), text_turn("done")])
+    events = await run_events(model, tools, FakePolicy(), preview=lambda _use: None)
+    assert of_type(events, ApprovalRequest)[0].rendered == 'deploy({"env": "prod"})'
+
+
+async def test_an_empty_preview_falls_back_rather_than_showing_a_blank_prompt() -> None:
+    # `render_diff` returns a note rather than "" for two identical texts, but a future
+    # one might not, and an approval prompt with nothing in it is the worst outcome
+    # here: it asks a human to agree to something it declined to describe.
+    tools = FakeTools({"deploy": (GATED, succeeds("deployed"))})
+    model = FakeModel([tool_turn(call("u1", "deploy", env="prod")), text_turn("done")])
+    events = await run_events(model, tools, FakePolicy(), preview=lambda _use: "")
+    assert of_type(events, ApprovalRequest)[0].rendered == 'deploy({"env": "prod"})'

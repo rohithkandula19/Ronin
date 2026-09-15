@@ -39,7 +39,8 @@ from ..context.repomap import GitIgnore
 from ..mcp.config import TransportKind
 from ..providers.capability import PricingTier, capability_matrix, fallback_concerns
 from ..providers.router import Role as ModelRole
-from ..providers.router import Router
+from ..providers.router import Router, load_config
+from ..providers.types import ProviderError
 from ..safety.settings import LOCAL_SETTINGS
 from ..verify.checkpoints import CheckpointReason, CheckpointStore
 from .detect import Detection
@@ -337,6 +338,25 @@ def _config_check(paths: Paths, environ: Mapping[str, str] | None) -> Check:
     """
     found = _resolve_config(paths, environ)
     if found is not None:
+        # Parsed, not just stat'd. Reporting OK for a file nobody read is the one
+        # answer this check must never give: it exists to say whether the config
+        # works, and a `models.toml` that is not valid TOML passed as fine while
+        # every actual run died on it. `load_config` is the function the run uses,
+        # so agreement here is agreement by construction rather than by a second
+        # parser kept in step.
+        try:
+            load_config(found)
+        except ProviderError as exc:
+            return Check(
+                name="config",
+                status=CheckStatus.FAIL,
+                detail=f"{found} cannot be loaded: {exc}",
+                remedy=(
+                    "fix the file, or copy examples/models.toml over it and put your "
+                    "own model back — a config Ronin cannot read stops every run, "
+                    "whatever else is configured"
+                ),
+            )
         return Check(name="config", status=CheckStatus.OK, detail=f"models config at {found}")
     return Check(
         name="config",

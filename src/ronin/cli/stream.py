@@ -80,6 +80,7 @@ from ..core.types import (
     Message,
     Role,
     Text,
+    Todo,
     ToolEnd,
     ToolResult,
     ToolStart,
@@ -112,6 +113,7 @@ from ..verify.runner import (
     run_plan,
     should_verify,
 )
+from .gate import live_preview, live_todos, seed_todos
 from .spine import Runtime
 
 #: Matches ``core.loop.DEFAULT_MAX_ITERATIONS``. Restated because it is part of
@@ -193,7 +195,7 @@ def summarizer_for(router: Router, *, max_tokens: int = SUMMARY_MAX_TOKENS) -> S
     configured still runs.
     """
     spec = router.spec_for(ModelRole.FAST)
-    client = LoopClient(router.for_compaction(), model=spec.model, max_tokens=max_tokens)
+    client = LoopClient(router.for_compaction(), model=spec.model, max_tokens=max_tokens, spec=spec)
 
     async def summarize(prompt: str) -> str:
         parts: list[str] = []
@@ -242,7 +244,10 @@ def extractor_for(router: Router, *, max_tokens: int = EXTRACT_MAX_TOKENS) -> Ex
         if client is None:
             spec = router.spec_for(ModelRole.FAST)
             client = LoopClient(
-                router.client_for(ModelRole.FAST), model=spec.model, max_tokens=max_tokens
+                router.client_for(ModelRole.FAST),
+                model=spec.model,
+                max_tokens=max_tokens,
+                spec=spec,
             )
         prompt = (
             f"Answer this question about the page below, using only what the page says:\n\n"
@@ -447,6 +452,10 @@ class Conversation:
     #: cannot rewind into turns it never ran, and pretending it could is worse than
     #: saying there is nothing to rewind.
     _turn_marks: list[TurnMark] = field(default_factory=list)
+    #: The model's plan as of the last turn. Kept beside ``messages`` and ``budget``
+    #: because it is the same kind of thing: part of what "resume this session" means.
+    #: The live copy lives in the tool context; this is the value that travels.
+    todos: tuple[Todo, ...] = ()
 
     # ------------------------------------------------------------------ state
 
@@ -460,12 +469,21 @@ class Conversation:
         """
         self.messages = state.messages
         self.budget = state.budget
+        # Held here rather than applied, because the place the plan is *read* from is
+        # the tool context, which belongs to a runtime this method has no handle on.
+        # `_turn` hands it over on the next turn — see `_adopt_plan`.
+        self.todos = state.todos
         return self
 
     @property
     def state(self) -> AgentState:
-        """The conversation as a resumable value."""
-        return AgentState(messages=self.messages, budget=self.budget)
+        """The conversation as a resumable value.
+
+        Carries the plan as well as the transcript and the spend: this is what
+        ``sdk.Agent.state`` hands out for a later resume, and a resumed session that
+        forgets what it was working on restarts a checklist the model already wrote.
+        """
+        return AgentState(messages=self.messages, budget=self.budget, todos=self.todos)
 
     # -------------------------------------------------------------- the turn
 
@@ -767,6 +785,13 @@ class Conversation:
 
     async def _turn(self, runtime: Runtime, *, max_iterations: int) -> AsyncIterator[Event]:
         """One ``run_turn``, with the checkpoint slipped in before the first edit."""
+        # A previous turn's interrupt must not end the session. `PolicyEngine.cancel`
+        # latches deliberately (see `PolicyEngine.resume`), and this is the boundary
+        # that clears it: by the time a new turn is starting, the turn the interrupt
+        # belonged to is over. Without this, one `esc` made every later prompt come
+        # back `interrupted` at iteration 0 without reaching the model.
+        runtime.policy.resume()
+        self._adopt_plan(runtime)
         self._checkpointed = False
         state = AgentState(
             messages=self.messages,
@@ -784,6 +809,16 @@ class Conversation:
                 runtime.policy,
                 system=runtime.system,
                 max_iterations=max_iterations,
+                # Session-scoped, so a correction typed during turn n-1 that arrived
+                # too late for it is delivered by turn n rather than dropped.
+                steering=runtime.steering.drain,
+                # Pulled at every state advance rather than snapshotted, so the plan on
+                # `TurnEnd.agent_state` is the one the tools left behind, not the one
+                # the turn started with.
+                todos=lambda: live_todos(runtime.registry),
+                # What the human reads before approving an edit. Falls back to the
+                # call and its arguments whenever a diff cannot be built.
+                preview=live_preview(runtime.registry),
             )
             async for event in stream:
                 if isinstance(event, ToolStart) and self._mutating(runtime, event.name):
@@ -815,6 +850,23 @@ class Conversation:
             )
         self.messages = final.messages
         self.budget = final.budget
+        self.todos = final.todos
+
+    def _adopt_plan(self, runtime: Runtime) -> None:
+        """Hand a resumed plan to the live tool context, once, at the turn boundary.
+
+        A resumed session gets its plan back inside the ``AgentState``, but the copy the
+        checklist and ``todo_write`` both read is the one in the tool context — which
+        belongs to a freshly assembled runtime and starts empty. So the first turn after
+        a resume hands it over.
+
+        Guarded on the live context being empty, which is what makes this safe to call
+        on every turn: once the model has written a plan of its own, that copy is the
+        authority and this must not overwrite it with a stale one.
+        """
+        if not self.todos or live_todos(runtime.registry):
+            return
+        seed_todos(runtime.registry, self.todos)
 
     def _elapsed_budget(self) -> Budget:
         """The budget with wall time folded in at the turn boundary.

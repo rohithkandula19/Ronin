@@ -1,4 +1,4 @@
-"""``ronin2 mcp-serve`` — Ronin as an MCP server that something else can launch.
+"""``ronin mcp-serve`` — Ronin as an MCP server that something else can launch.
 
 :mod:`ronin.mcp.server` has always been able to do this. What it could not do was
 *happen*: nothing outside the tests and the demo ever constructed an
@@ -19,9 +19,9 @@ dependency. The dependency here is a permission mode that does not need a human,
 :meth:`ronin.safety.policy.PolicyEngine.relaxes` is asked the question rather than this
 module re-deriving the answer. So::
 
-    ronin2 mcp-serve                 read, grep, glob
-    ronin2 mcp-serve --mode auto_edit  … and edit
-    ronin2 mcp-serve --mode full       … and bash, and ronin_task
+    ronin mcp-serve                 read, grep, glob
+    ronin mcp-serve --mode auto_edit  … and edit
+    ronin mcp-serve --mode full       … and bash, and ronin_task
 
 and what is withheld is named on stderr, with the flag that would expose it, rather
 than being silently absent.
@@ -152,15 +152,18 @@ class ExposedTool(Tool):
             name=self._spec.name,
             arguments=args,
         )
-        if self._spec.requires_approval:
-            decision = await self._policy.approve(
-                self._spec, use, rendered=render_call(self._spec.name, args)
-            )
-            if not decision.approved:
-                # The same `DENIED:` shape `core.loop` produces, so a refusal reads the
-                # same whether it reached the model through a turn or over the wire.
-                detail = decision.reason or "the policy declined this action"
-                return ToolResult(ok=False, error=f"DENIED: {detail}")
+        # Unconditional, exactly as in `core.loop`: `requires_approval` says whether a
+        # *human* is shown the call, not whether the policy is asked about it. Gating
+        # the consult on it meant a published `read` over MCP ignored every deny rule
+        # and the unconditional deny list — and over stdio there is no human to notice.
+        decision = await self._policy.approve(
+            self._spec, use, rendered=render_call(self._spec.name, args)
+        )
+        if not decision.approved:
+            # The same `DENIED:` shape `core.loop` produces, so a refusal reads the
+            # same whether it reached the model through a turn or over the wire.
+            detail = decision.reason or "the policy declined this action"
+            return ToolResult(ok=False, error=f"DENIED: {detail}")
         return await self._registry.execute(use)
 
 

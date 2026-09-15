@@ -19,8 +19,16 @@ Keys, and where their logic lives:
 ``esc esc``   rewind to an earlier turn, within
               :data:`ronin.ui.reduce.DOUBLE_ESCAPE_WINDOW_SECONDS`
 ``shift+tab`` cycle normal → auto-accept → plan — :func:`ronin.ui.reduce.next_mode`
+``up``/``down`` choose an offered ``@file`` path, else walk the prompt history —
+              :mod:`ronin.ui.mentions` and :func:`ronin.ui.reduce.walk_back`
+``tab``       insert the chosen ``@file`` path — :func:`ronin.ui.mentions.accept`
 ``ctrl+c``    quit
 ============= ===============================================================
+
+``@`` is the only key with a shared meaning, and the sharing is deliberate: the picker
+takes the arrows only while it is open, which is a transient state directly under the
+cursor, and the history has them back the moment it closes. ``esc`` is *not* a
+dismissal — it interrupts the turn, which is the most important key on the screen.
 
 The app never approves anything by itself. An :class:`~ronin.core.types.ApprovalRequest`
 takes the whole screen as a modal that renders ``request.rendered`` verbatim, and the
@@ -41,23 +49,39 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
-from ronin.core.types import ApprovalDecision, ApprovalRequest, Event, Mode, TurnEnd, TurnStart
+from ronin.core.types import (
+    ApprovalDecision,
+    ApprovalRequest,
+    Event,
+    Mode,
+    Todo,
+    TurnEnd,
+    TurnStart,
+)
 
 from .commands import is_command
+from .mentions import NO_COMPLETION, Completion, accept, active_mention, rank
+from .paste import NO_PASTES, PasteBook, expand, stash
 from .reduce import (
+    REASON_KEY,
     SPINNER_INTERVAL_SECONDS,
     EscapeAction,
     EscapeState,
+    History,
     ViewState,
     advance_activity,
     decision_for,
+    deny_with,
     next_mode,
     press_escape,
     reduce_event,
+    remember,
+    walk_back,
+    walk_forward,
 )
 from .render import MARKUP, Panels, Styles, render_approval, render_panels
 
@@ -68,12 +92,13 @@ TEXTUAL_MISSING = (
     "a scripted run, `python -m ronin.ui.demo` for an offline walkthrough."
 )
 
-#: What a modal popped from outside — never in normal use — is reported as. Refusing is
-#: the only safe reading of a dialog that vanished without an answer.
-DISMISSED = "the approval was dismissed without an answer, so the action was refused"
-
 #: Region ids, so the tests and the CSS agree on one spelling.
 MODAL_ID = "approval-modal"
+#: The reason line inside the approval modal. Hidden in phase one.
+REASON_ID = "approval-reason"
+#: What the reason line says before anything is typed. Phrased as the correction
+#: itself, because the useful sentence is "use staging", not "I refuse".
+REASON_PLACEHOLDER = "what should it do instead?"
 TRANSCRIPT_ID = "transcript"
 TOOLS_ID = "tools"
 TODOS_ID = "todos"
@@ -84,10 +109,12 @@ INPUT_ID = "prompt-input"
 ACTIVITY_ID = "activity"
 NOTICES_ID = "notices"
 QUEUED_ID = "queued"
+#: The ``@file`` picker, docked directly above the input it completes.
+MENTIONS_ID = "mentions"
 BANNER_ID = "banner"
 
 #: Placeholder shown in the empty input line.
-INPUT_PLACEHOLDER = "type a message, Enter to send — esc interrupt, shift+tab mode, ctrl+c quit"
+INPUT_PLACEHOLDER = "Enter sends, alt+enter newline — esc interrupt, shift+tab mode, ctrl+c quit"
 
 APP_CSS = """
 Screen { layout: vertical; }
@@ -98,8 +125,9 @@ Screen { layout: vertical; }
 #errors { height: auto; padding: 0 1; }
 #notices { height: auto; max-height: 40%; overflow-y: auto; padding: 0 1; }
 #queued { height: auto; padding: 0 1; }
+#mentions { height: auto; padding: 0 1; }
 #banner { height: auto; padding: 1 1 0 1; }
-#prompt-input { dock: bottom; height: 3; margin: 0 1; }
+#prompt-input { dock: bottom; height: auto; max-height: 12; min-height: 3; margin: 0 1; }
 #status { height: 1; dock: bottom; padding: 0 1; }
 """
 
@@ -109,6 +137,10 @@ Screen { layout: vertical; }
 #: own tail in another agent's UI. Taking the screen means what is shown is all there is.
 MODAL_CSS = """
 ApprovalModal { align: center middle; background: $background 85%; }
+/* Hidden *and* disabled until the reason key is pressed. Disabled is the load-bearing
+   half: Textual focuses the first focusable widget when a screen mounts, so a merely
+   hidden Input would still take the focus and swallow the `y` that approves. */
+#approval-reason { display: none; margin: 1 2 0 2; }
 #approval-modal { width: 90%; height: auto; max-height: 90%; overflow-y: auto;
                   border: round $warning; padding: 1 2; }
 """
@@ -153,6 +185,12 @@ class Session:
     not the same number as how full the window is, and printing one under the other's
     label would be a lie the status line tells every second — so the orchestrator, the
     only layer that can see the live transcript, is asked instead.
+
+    ``on_todos`` is the same shape for the plan, and asked on *every* event rather than
+    once per turn: a checklist that only moves when the turn ends is a checklist during
+    exactly the stretch where nobody needs one. The stream cannot carry it — the model's
+    plan lives in ``ToolContext.todos``, written by ``todo_write`` — so again the
+    orchestrator is asked.
     """
 
     events: AsyncIterator[Event]
@@ -174,12 +212,38 @@ class Session:
     on_approval: Callable[[ApprovalRequest], None] | None = None
     on_attach: Callable[[Asking], None] | None = None
     on_status: Callable[[], float] | None = None
+    #: The model's current plan, asked for once per event so the checklist moves while
+    #: the turn runs. Unset (demo, replay) leaves the panel driven by the stream alone.
+    on_todos: Callable[[], Sequence[Todo]] | None = None
     #: The multi-turn seam. When set, the input line is live: a submitted, non-empty
     #: message is handed here, and the orchestrator turns it into the next turn (whose
     #: events arrive on the same ``events`` iterator — see :func:`multi_turn_events`).
     #: Unset (demo, a replayed recording) leaves the input inert: nothing consumes a
     #: prompt, so there is no path from a keystroke to a turn that never runs.
     on_submit: Callable[[str], None] | None = None
+    #: The steering seam: where a message typed *while a turn is running* goes. Set, a
+    #: mid-turn message joins the conversation in flight at the loop's next step instead
+    #: of waiting for the whole turn to end — which is the difference between correcting
+    #: the agent and correcting the transcript of what it already did wrong. Unset (demo,
+    #: replay, and any consumer that has no live loop), a mid-turn message falls back to
+    #: ``on_submit`` and runs as the next turn, exactly as before.
+    #:
+    #: Separate from ``on_submit`` rather than a flag on it, because the two land in
+    #: genuinely different places — one continues the running turn, the other starts a
+    #: new one — and the app must not have to know which by inspecting a return value.
+    on_steer: Callable[[str], None] | None = None
+    #: What is still waiting to be delivered, pulled on every event. The orchestrator
+    #: owns the real queue (the loop takes from it, and the app cannot see when), so the
+    #: screen has to *follow* that list rather than keep its own — the same reason
+    #: ``on_status`` and ``on_todos`` are pulls. Unset leaves the display driven by the
+    #: app's own bookkeeping, which is right when ``on_steer`` is unset too.
+    on_steering: Callable[[], Sequence[str]] | None = None
+    #: The repo's files, as repo-relative posix paths, for ``@file`` completion. Pulled
+    #: only while a mention is actually being typed, never on ordinary keystrokes — the
+    #: orchestrator's implementation is a cached tree walk and this is a keystroke
+    #: handler. Unset leaves ``@`` as ordinary text, which is right for the demo and for
+    #: a replayed recording: there is no repo behind either.
+    on_files: Callable[[], Sequence[str]] | None = None
     #: Runs a slash command and returns what to show for it. Set, the input line routes
     #: anything :func:`~ronin.ui.commands.is_command` recognises here instead of to the
     #: model — which is what makes ``/help`` in the TUI run the command rather than
@@ -236,6 +300,8 @@ async def multi_turn_events(
     first: str | None,
     submissions: asyncio.Queue[str | None],
     run_turn: TurnRunner,
+    *,
+    leftover: Callable[[], Sequence[str]] | None = None,
 ) -> AsyncIterator[Event]:
     """The app's event source for a multi-turn session: run a turn, then wait for the next.
 
@@ -243,6 +309,11 @@ async def multi_turn_events(
     the next prompt (the input line puts one there via ``Session.on_submit``) and runs it,
     repeating until ``None`` is queued. One ``Agent`` is one conversation and ``run_turn``
     continues it, so turn *n* sees the history of turns before it.
+
+    ``leftover`` is the steering channel's safety net, drained after every turn. A
+    correction typed as a turn ended — or one held back because the turn was interrupted
+    — has nothing left to steer, so it becomes the next turn instead of sitting in the
+    holder forever.
 
     This is the whole multi-turn orchestration, and it is pure over an injected
     ``run_turn``: tested with scripted turns and a hand-fed queue — no model, no Textual.
@@ -256,6 +327,17 @@ async def multi_turn_events(
     while prompt is not None:
         async for event in run_turn(prompt):
             yield event
+        # A steer can miss its turn two ways, and both end here rather than in a
+        # message that is never delivered: the turn ended between the keystroke and the
+        # loop's next iteration, or the turn was interrupted (the loop deliberately
+        # leaves the holder untouched when it stops). Whatever is still waiting becomes
+        # the next turn — which is also what "esc to stop now and send it" promises.
+        if leftover is not None and (waiting := tuple(leftover())):
+            # One turn, not one each: they were typed as one thought about the same
+            # work, and delivering them as separate turns would let the model answer
+            # the first before it could see the second.
+            prompt = "\n\n".join(waiting)
+            continue
         prompt = await submissions.get()
 
 
@@ -270,6 +352,13 @@ class KeyController:
 
     mode: Mode = Mode.ASK
     escape: EscapeState = field(default_factory=EscapeState)
+    history: History = field(default_factory=History)
+    #: The ``@file`` paths on offer. Here beside the history because both are what the
+    #: arrow keys mean, and which one they mean depends on whether this is open.
+    completion: Completion = NO_COMPLETION
+    #: Multi-line pastes held aside for the line currently being typed. Here rather
+    #: than on the app so it can be tested without a terminal, like the history above.
+    pastes: PasteBook = NO_PASTES
     clock: Callable[[], float] = time.monotonic
 
     def press_escape(self) -> EscapeAction:
@@ -279,6 +368,59 @@ class KeyController:
     def cycle_mode(self) -> Mode:
         self.mode = next_mode(self.mode)
         return self.mode
+
+    def submitted(self, text: str) -> None:
+        """Record a prompt that was sent, and stop browsing."""
+        self.history = remember(self.history, text)
+        self.completion = NO_COMPLETION
+
+    def offer(self, text: str, cursor: int, paths: Callable[[], Sequence[str]]) -> Completion:
+        """Recompute what ``@`` is offering for the token under the cursor.
+
+        ``paths`` is a callable and is invoked *only* once the token is known to be a
+        mention. That laziness is the whole reason it is not a ``Sequence``: the
+        orchestrator's implementation is a cached tree walk, and calling it on every
+        keystroke of ordinary prose would make every session pay for a feature it is
+        not using. Passing the list in eagerly reads identically at the call site and
+        quietly loses this.
+
+        Selection resets to the top on every recomputation, deliberately: another
+        character narrows the list to a *different* list, and carrying an index across
+        that would leave ``tab`` inserting whatever happened to land in that slot.
+        """
+        mention = active_mention(text, cursor)
+        if mention is None:
+            self.completion = NO_COMPLETION
+            return self.completion
+        self.completion = Completion(candidates=rank(mention.query, paths()))
+        return self.completion
+
+    def move_completion(self, delta: int) -> Completion:
+        self.completion = self.completion.moved(delta)
+        return self.completion
+
+    def take_completion(self, text: str, cursor: int) -> tuple[str, int]:
+        """What ``tab`` does: the line with the mention replaced, and where to put the
+        cursor. Returns the line unchanged when nothing is on offer."""
+        if not self.completion.open:
+            return text, cursor
+        replaced = accept(text, cursor, self.completion.choice)
+        self.completion = NO_COMPLETION
+        return replaced
+
+    def recall_older(self, current: str) -> str | None:
+        """The previous prompt, or ``None`` if there is nothing older to show.
+
+        ``current`` is handed in rather than read from a widget so this stays testable
+        without a terminal: the caller owns the box, this owns where in history it is.
+        """
+        self.history, text = walk_back(self.history, current)
+        return text
+
+    def recall_newer(self) -> str | None:
+        """The next prompt, ending on the user's own draft. ``None`` if not browsing."""
+        self.history, text = walk_forward(self.history)
+        return text
 
 
 async def run_app(session: Session) -> int:
@@ -318,6 +460,108 @@ def _build_app(session: Session) -> Any:
     modal_base: Any = textual_screen.ModalScreen
     static: Any = textual_widgets.Static
     input_widget: Any = textual_widgets.Input
+    text_area_widget: Any = textual_widgets.TextArea
+
+    class PromptArea(text_area_widget):  # type: ignore[misc]  # base is Any: lazy import
+        """The prompt line: a real editor, so a newline can be typed as well as pasted.
+
+        Was a single-line ``Input``. Pasting a traceback already survived -- a multi-line
+        paste is stashed and a marker stands in for it -- but *typing* the second line of
+        a commit message or a shell snippet was simply impossible, and the workaround was
+        to paste text you had to compose somewhere else first.
+
+        `Enter` still sends, because sending is what the key is for and every prompt in
+        this program is one line more often than not. A newline is `alt+enter`, `ctrl+j`
+        or `shift+enter` -- three keys for one job because terminals disagree about which
+        of them they can even report: `shift+enter` needs the Kitty keyboard protocol,
+        and `ctrl+j` is what a plain terminal sends for a linefeed.
+
+        The rest of the program speaks flat text and a flat cursor offset, which is what
+        `mentions.py` was built around. `TextArea` speaks `(row, column)`. That
+        conversion lives here, in :attr:`cursor_position`, rather than at each call site:
+        one adapter at the boundary beats four of them inland.
+        """
+
+        #: Set by the app after construction. Plain attributes rather than constructor
+        #: arguments because Textual owns the signature.
+        keys: Any = None
+        on_stashed: Any = None
+        #: Called with the submitted text. The widget decides *when* a line is sent; what
+        #: happens to it afterwards is entirely the app's business.
+        on_send: Any = None
+        #: Consulted first for `up`, `down` and `tab`. Returns True if the app took the
+        #: key -- the `@` picker is open, or history moved -- and False to let it mean
+        #: what it means in any editor. Without this the base bindings would claim both
+        #: arrows and history would be unreachable.
+        on_nav: Any = None
+
+        #: Keys that put a newline in the text instead of sending it.
+        NEWLINE_KEYS = ("alt+enter", "ctrl+j", "shift+enter")
+
+        @property
+        def cursor_position(self) -> int:
+            """The cursor as an offset into :attr:`text`, counting the newlines."""
+            # `int(...)` because the base class is a lazy `Any`, so `cursor_location`
+            # carries no type of its own and the sum would silently become `Any` too.
+            row, column = self.cursor_location
+            lines = str(self.text).split("\n")
+            return sum(len(line) + 1 for line in lines[:row]) + int(column)
+
+        @cursor_position.setter
+        def cursor_position(self, offset: int) -> None:
+            remaining = max(offset, 0)
+            for row, line in enumerate(self.text.split("\n")):
+                if remaining <= len(line):
+                    self.move_cursor((row, remaining))
+                    return
+                remaining -= len(line) + 1
+            self.move_cursor(self.document.end)
+
+        def _on_key(self, event: Any) -> None:
+            """Runs ahead of the base handler and of the bindings, so this decides first.
+
+            `prevent_default` is what actually suppresses them: Textual walks the whole
+            MRO and runs every matching handler, so returning early is not enough --
+            the base `_on_key` would still insert a newline for `enter`.
+            """
+            if event.key in self.NEWLINE_KEYS:
+                event.stop()
+                event.prevent_default()
+                self.insert("\n")
+                return
+            if event.key in ("up", "down", "tab") and self.on_nav is not None:
+                if self.on_nav(event):
+                    event.stop()
+                    event.prevent_default()
+                return
+            if event.key == "enter":
+                event.stop()
+                event.prevent_default()
+                if self.on_send is not None:
+                    self.on_send(self.text)
+                return
+
+        def _on_paste(self, event: Any) -> None:
+            """A multi-line paste is stashed and a marker stands in for it.
+
+            Kept exactly as it was when the line could not render a newline at all. It
+            is still the right behaviour: forty lines of traceback dropped into the box
+            would bury the sentence being written, and a marker naming what was captured
+            reads better than the wall it replaces. What changed is that this is now a
+            choice rather than the only option.
+            """
+            if not event.text or self.keys is None:
+                return
+            self.keys.pastes, inserted = stash(self.keys.pastes, event.text)
+            selection = self.selection
+            if selection.is_empty:
+                self.insert(inserted)
+            else:
+                self.replace(inserted, *selection)
+            event.prevent_default()
+            event.stop()
+            if self.on_stashed is not None:
+                self.on_stashed()
 
     class ApprovalModal(modal_base):  # type: ignore[misc]  # base is Any: lazy import
         """One approval, taking the whole screen until the human answers it.
@@ -326,6 +570,14 @@ def _build_app(session: Session) -> Any:
         :func:`~ronin.ui.reduce.decision_for`, so the set of keys that can approve an
         edit is a table in a pure module and not a list of widget handlers. A key that
         means nothing is swallowed rather than treated as either answer.
+
+        Two phases, and the second one is why this screen has state at all.
+        :data:`~ronin.ui.reduce.REASON_KEY` denies *and* asks why, which cannot be
+        answered by one keystroke — so that key opens a line to type in and the screen
+        waits again. The invariant across both phases: ``dismiss`` is called only with a
+        complete :class:`ApprovalDecision`. There is no path that leaves the request
+        answered-but-empty, because a half-resolved approval would either hang the turn
+        or send the model a correction nobody wrote.
         """
 
         CSS = MODAL_CSS
@@ -333,11 +585,60 @@ def _build_app(session: Session) -> Any:
         def __init__(self, request: ApprovalRequest) -> None:
             super().__init__()
             self.request = request
+            #: Phase two. Guards every key handler, because in phase two `escape` must
+            #: back out to phase one rather than deny, and `y`/`n`/`a` are just letters
+            #: someone is typing into a sentence.
+            self._collecting = False
 
         def compose(self) -> Any:
             yield static(render_approval(self.request, styles=session.styles), id=MODAL_ID)
+            # `disabled` keeps it out of the focus order, which is what makes phase one
+            # behave exactly as it did before this line existed: a focused Input would
+            # consume the very keystrokes that answer the request.
+            yield input_widget(placeholder=REASON_PLACEHOLDER, id=REASON_ID, disabled=True)
+
+        def _repaint(self) -> None:
+            body = render_approval(self.request, styles=session.styles, collecting=self._collecting)
+            self.query_one(f"#{MODAL_ID}", static).update(body)
+
+        def _begin_collecting(self) -> None:
+            self._collecting = True
+            line = self.query_one(f"#{REASON_ID}")
+            line.disabled = False
+            line.display = True
+            line.value = ""
+            self._repaint()
+            line.focus()
+
+        def _cancel_collecting(self) -> None:
+            """Back to phase one with the request still standing, not denied.
+
+            The one thing this must not do is resolve. Someone who pressed the reason
+            key and thought better of it has not decided anything yet, and turning that
+            into a refusal would punish a keystroke they took back.
+            """
+            self._collecting = False
+            line = self.query_one(f"#{REASON_ID}")
+            line.value = ""
+            line.display = False
+            line.disabled = True
+            self._repaint()
+            self.set_focus(None)
 
         def on_key(self, event: Any) -> None:
+            if self._collecting:
+                # Only `escape` is ours in phase two; every printable key belongs to the
+                # input line, and `enter` arrives as `Input.Submitted` below.
+                if event.key == "escape":
+                    event.stop()
+                    event.prevent_default()
+                    self._cancel_collecting()
+                return
+            if event.key == REASON_KEY:
+                event.stop()
+                event.prevent_default()
+                self._begin_collecting()
+                return
             decision = decision_for(event.key)
             if decision is None:
                 return
@@ -346,6 +647,18 @@ def _build_app(session: Session) -> Any:
             event.stop()
             event.prevent_default()
             self.dismiss(decision)
+
+        def on_input_submitted(self, event: Any) -> None:
+            """Enter in the reason line: send the denial, with whatever was typed.
+
+            ``deny_with`` owns the empty case — a blank reason becomes the ordinary
+            denial rather than an empty correction, so pressing the reason key and then
+            Enter is never worse than pressing `n`.
+            """
+            if not self._collecting:
+                return
+            event.stop()
+            self.dismiss(deny_with(event.value))
 
     class RoninApp(app_base):  # type: ignore[misc]  # base is Any: lazy import, no stubs
         CSS = APP_CSS
@@ -382,38 +695,127 @@ def _build_app(session: Session) -> Any:
             # Directly above the input, so "what is it doing" sits where the eye already
             # is between turns rather than at the far edge of the screen.
             yield static("", id=ACTIVITY_ID)
+            # Directly above the input, so the paths on offer and the text being
+            # completed are adjacent rather than at opposite ends of the screen.
+            yield static("", id=MENTIONS_ID)
             # The multi-turn affordance. Docked above the status line so streaming text
             # fills the space between. Present even when `on_submit` is unset (demo /
             # replay); the submit handler simply has nothing to hand a prompt to then.
-            yield input_widget(placeholder=INPUT_PLACEHOLDER, id=INPUT_ID)
+            # `soft_wrap` so a long line folds instead of scrolling sideways, and no
+            # line numbers: this is a prompt, not a file being edited.
+            line = PromptArea(
+                placeholder=INPUT_PLACEHOLDER, id=INPUT_ID, soft_wrap=True, show_line_numbers=False
+            )
+            line.keys = self.keys
+            # Repaint when a paste is stashed, so the notice saying what was captured
+            # appears at the moment it happens rather than on the next keystroke.
+            line.on_stashed = self._paint
+            line.on_send = self._send_prompt
+            line.on_nav = self._take_nav_key
+            yield line
             yield static("", id=STATUS_ID)
 
-        def on_input_submitted(self, event: Any) -> None:
+        def on_text_area_changed(self, event: Any) -> None:
+            """Every edit of the prompt line: recompute what ``@`` is offering.
+
+            Guarded on the widget id even though the approval modal's reason line is an
+            ``Input`` and no longer sends this message at all: the guard costs one
+            comparison and is what stops a second text area, added later, from silently
+            completing file paths into somewhere they make no sense.
+
+            ``on_files`` is consulted only once the token under the cursor is actually a
+            mention, so ordinary typing never reaches the orchestrator's tree walk.
+            """
+            line = event.text_area
+            if self.session.on_files is None or line.id != INPUT_ID:
+                return
+            before = self.keys.completion
+            offered = self.keys.offer(line.text, line.cursor_position, self.session.on_files)
+            if offered != before:
+                self.state = self.state.with_completion(offered)
+                self._paint()
+
+        def _send_prompt(self, raw: str) -> None:
             """Enter in the prompt line: hand a non-empty message to ``on_submit``, clear.
 
-            Textual dispatches ``Input.Submitted`` here by name. The line is cleared
-            unconditionally (so trailing whitespace never lingers) but a blank submit is
-            dropped — an empty prompt is not a turn. Whether a submitted prompt becomes a
-            turn is the orchestrator's business, reached only through the injected
-            ``on_submit``; the app itself starts nothing.
+            Called by :class:`PromptArea` rather than dispatched by Textual: a text area
+            has no ``Submitted`` message, because in every other program Enter is a
+            newline there. Here it sends, and the widget says so by calling this.
+
+            The line is cleared unconditionally (so trailing whitespace never lingers)
+            but a blank submit is dropped — an empty prompt is not a turn. Whether a
+            submitted prompt becomes a turn is the orchestrator's business, reached only
+            through the injected ``on_submit``; the app itself starts nothing.
             """
-            text = event.value
-            event.input.value = ""
+            # Expanded before anything else looks at it, so every path below — the
+            # history, a slash command, a steer, the model — sees the text that was
+            # actually pasted rather than the marker standing in for it. The book is
+            # cleared with the line it belonged to; a marker recalled from history
+            # after that would name a paste nobody is holding.
+            text = expand(raw, self.keys.pastes)
+            self.keys.pastes = NO_PASTES
+            self.query_one(f"#{INPUT_ID}", text_area_widget).text = ""
             if not text.strip():
                 return
+            # Recorded before dispatch, so a slash command is recalled too: `/model
+            # sonnet` is exactly the sort of line someone retypes. Also drops any open
+            # `@` picker: the line it was completing has been sent.
+            self.keys.submitted(text)
+            # Painted here rather than in the branches below, because only some of them
+            # repaint and the picker has to come down on all of them: the line it was
+            # completing has been sent. Clearing the state without painting left the
+            # stale list on screen — the `Input.Changed` from emptying the line does not
+            # cover it, since the state it would compare against is already clear.
+            self.state = self.state.with_completion(self.keys.completion)
+            self._paint()
             if is_command(text) and self.session.on_command is not None:
                 # A slash command is answered locally, not sent to the model. Run it on a
                 # worker: `/diff` and `/undo` shell out to git, and blocking the message
                 # pump here would freeze the very screen that shows the answer.
                 self.run_worker(self._run_command(text))
                 return
+            if self.state.busy and self.session.on_steer is not None:
+                # Mid-turn: steer the running conversation rather than queueing a new
+                # turn behind it. `busy` is the right test and not `pending_approval`:
+                # a session parked on an approval modal is waiting on the human, and
+                # there is no running turn to steer.
+                self.session.on_steer(text)
+                self._refresh_steering()
+                self._paint()
+                return
             if self.session.on_submit is not None:
                 self.session.on_submit(text)
                 if self.state.busy:
-                    # Mid-turn: it will run as the next turn. Say so, rather than letting
-                    # the keystroke look swallowed.
+                    # Mid-turn with no steering seam wired (demo, replay): it will run as
+                    # the next turn. Say so, rather than letting the keystroke look
+                    # swallowed.
                     self.state = self.state.with_queued(text)
                     self._paint()
+
+        def _refresh_todos(self) -> None:
+            """Pull the model's plan, if the orchestrator offered a way to.
+
+            Compared before assigning: the checklist is asked for on every event and a
+            long turn is mostly events that change nothing about it, so this keeps the
+            state object identical rather than rebuilding it hundreds of times per turn.
+            """
+            if self.session.on_todos is None:
+                return
+            todos = tuple(self.session.on_todos())
+            if todos != self.state.todos:
+                self.state = self.state.with_todos(todos)
+
+        def _refresh_steering(self) -> None:
+            """Follow the orchestrator's pending list, if it offered one.
+
+            Pulled on every event for the same reason the checklist is: the loop takes
+            corrections at its own moments, and a screen that only cleared them at
+            ``TurnEnd`` would keep showing a message that was delivered two minutes ago
+            as though it were still waiting.
+            """
+            if self.session.on_steering is None:
+                return
+            self.state = self.state.with_queue(self.session.on_steering())
 
         async def _run_command(self, text: str) -> None:
             """Run one slash command and show what it said."""
@@ -461,8 +863,13 @@ def _build_app(session: Session) -> Any:
             if isinstance(decision, ApprovalDecision):
                 return decision
             # Dismissed without an answer — only reachable if the screen is popped from
-            # outside. Refusing is the only safe reading of "no answer".
-            return ApprovalDecision(approved=False, reason=DISMISSED)
+            # outside. Refusing is the only safe reading of "no answer", and the refusal
+            # carries no words: `reason` reaches the policy engine as the *human's own
+            # words*, and nobody said anything here. A sentence invented at this layer
+            # was quoted back to the model as though a person had typed it, and took the
+            # branch that says "adjust the plan and continue" — the same mistake a bare
+            # `n` used to make. Blank takes the engine's "do not retry it" branch.
+            return ApprovalDecision(approved=False, reason="")
 
         async def _consume(self) -> None:
             # Painting inside the loop, per event, is the no-buffering guarantee:
@@ -483,6 +890,8 @@ def _build_app(session: Session) -> Any:
                     self.session.on_approval(event)
                 elif isinstance(event, TurnEnd) and self.session.on_status is not None:
                     self.state = self.state.with_status(context_used=self.session.on_status())
+                self._refresh_todos()
+                self._refresh_steering()
                 self._paint()
 
         def _paint(self) -> None:
@@ -500,9 +909,62 @@ def _build_app(session: Session) -> Any:
                 (ACTIVITY_ID, panels.activity),
                 (NOTICES_ID, panels.notices),
                 (QUEUED_ID, panels.queued),
+                (MENTIONS_ID, panels.completion),
                 (STATUS_ID, panels.status),
             ):
                 self.query_one(f"#{region}", static).update(text)
+
+        def _take_nav_key(self, event: Any) -> bool:
+            """``tab`` takes an offered path; ``up``/``down`` choose one, else walk history.
+
+            Returns True when the app claims the key. Called *by the prompt widget*
+            rather than reached as an app ``on_key``, because a text area binds both
+            arrows to cursor movement and consumes them before the app ever sees them.
+            Asking first is what keeps history reachable.
+
+            The `@` picker wins while it is open: it is transient and directly under the
+            cursor, where the history is not, and it closes the moment the token stops
+            being a mention. `escape` is deliberately *not* a dismissal — it interrupts
+            the turn, which is the most important key on the screen, and a picker is not
+            worth overloading it. `enter` still sends: if it took the selection instead,
+            a message containing an `@` word could never be sent in one keystroke.
+
+            History yields to the editor once the prompt has more than one line. `up` in
+            the middle of a three-line message means "the line above", not "throw this
+            away and show me something older" — so history is offered only from the top
+            line (and `down` from the bottom), which is where it costs nothing and is
+            what every shell with a multi-line editor does.
+            """
+            line = self.query_one(f"#{INPUT_ID}", text_area_widget)
+            if self.focused is not line:
+                return False
+            if self.keys.completion.open:
+                if event.key == "tab":
+                    line.text, cursor = self.keys.take_completion(line.text, line.cursor_position)
+                    line.cursor_position = cursor
+                else:
+                    self.keys.move_completion(-1 if event.key == "up" else 1)
+                self.state = self.state.with_completion(self.keys.completion)
+                self._paint()
+                return True
+            if event.key == "tab":
+                # Nothing on offer: leave tab to whatever it means elsewhere (focus).
+                return False
+            row, _column = line.cursor_location
+            last = line.text.count("\n")
+            if (event.key == "up" and row > 0) or (event.key == "down" and row < last):
+                return False
+            recalled = (
+                self.keys.recall_older(line.text) if event.key == "up" else self.keys.recall_newer()
+            )
+            if recalled is None:
+                # Nothing older, or not browsing: hold the line as it is rather than
+                # clearing it. A history key that empties the box loses work.
+                return True
+            line.text = recalled
+            # End of the text, so editing a recalled prompt starts where you would type.
+            line.cursor_position = len(recalled)
+            return True
 
         def action_escape(self) -> None:
             action = self.keys.press_escape()
@@ -544,7 +1006,6 @@ __all__ = [
     "ACTIVITY_ID",
     "APPROVAL_ID",
     "APP_CSS",
-    "DISMISSED",
     "ERRORS_ID",
     "INPUT_ID",
     "INPUT_PLACEHOLDER",
