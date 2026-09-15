@@ -951,9 +951,9 @@ def test_main_with_no_model_configuration_returns_one(tmp_path: Path) -> None:
 
 
 def test_every_declared_entry_point_resolves_to_a_callable() -> None:
-    """`ronin` and `ronin2` must both name something importable.
+    """`ronin` must name something importable.
 
-    A typo in either string is invisible until somebody installs the wheel — `uv run`
+    A typo in the string is invisible until somebody installs the wheel — `uv run`
     and `python -m ronin` both work regardless, so the whole local development loop
     passes while the published artifact has a broken command. Resolved here the same
     way importlib.metadata resolves it at install time.
@@ -965,7 +965,7 @@ def test_every_declared_entry_point_resolves_to_a_callable() -> None:
     config = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
     scripts = config["project"]["scripts"]
 
-    assert {"ronin", "ronin2"} <= set(scripts), "both console scripts must stay declared"
+    assert "ronin" in scripts, "the console script must stay declared"
     for name, target in scripts.items():
         module_path, _, attribute = target.partition(":")
         resolved = getattr(import_module(module_path), attribute)
@@ -973,8 +973,28 @@ def test_every_declared_entry_point_resolves_to_a_callable() -> None:
         assert resolved is main, f"{name} must point at the same main() tested above"
 
 
+def test_this_tree_declares_exactly_one_console_script() -> None:
+    """One program, one word for it.
+
+    `ronin2` shipped alongside `ronin` for as long as v1 held the short name, and then
+    outlived the reason: the two resolved to the same `main`, so the only thing the
+    second name carried was the impression that there were two Ronins to choose
+    between. That impression is what this asserts against — not a packaging fault, a
+    naming one, which is why the check is on the *count* rather than on any spelling.
+
+    A future alias is a decision to make deliberately, not one to make by adding a line
+    to `[project.scripts]` and noticing later.
+    """
+    import tomllib
+
+    root = Path(__file__).resolve().parents[2]
+    config = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert set(config["project"]["scripts"]) == {"ronin"}
+
+
 def test_no_two_distributions_in_this_workspace_claim_one_command_name() -> None:
-    """The invariant behind the `ronin` / `ronin1` / `ronin2` naming, as a gate.
+    """The invariant behind the `ronin` / `ronin1` naming, as a gate.
 
     Console scripts are not namespaced. When two installed distributions declare the same
     name, whichever was installed second overwrites the other's launcher — silently, with

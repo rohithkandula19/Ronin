@@ -386,7 +386,7 @@ the workspace for the code the Retainer is running to edit.
 
 ## 8. Build order
 
-**All nine are built, and so is the seam.** Each landed as its own change, green
+**All nine are built, and so are the seam and the front door.** Each landed as its own change, green
 before the next, as with the safety campaign. `cli/retainer_run.py` closes the
 gap between the plane and the engine: `build_runtime` and `Agent.open` gained
 `extra_rules`/`rules` and `allow_tools`, so a compiled `Authority` becomes a real
@@ -415,6 +415,44 @@ deliberately not packages and every module shares one flat namespace.
 | 7c | `retainer/adapters/telegram.py` | Third adapter. Not the v1 `packages/cli` bot, which is v1 code. |
 | 8 | `retainer/posts.py` — repo → workspace | Clone or worktree. Decision 4 is answered here, not before. |
 | 9 | `retainer/routines.py` — the scheduler | Emits the same `Summons`. Last, because it multiplies whatever is already wrong. |
+| 10 | `cli/retain_cmd.py` — `ronin retain` | The front door, and not on the original list because the list was about the plane. Everything above it existed and none of it was reachable. |
+
+### 10 — the front door
+
+`retain check` reads the registry and reports what the deployment holds.
+`retain serve` binds the receiver and acts on deliveries. `retain tick` fires
+every routine that is due, once, and exits — for cron, or for a deployment that
+would rather not hold a process open.
+
+`check` earns its place before either of the others. The registry parser's
+messages name the exact position in the file — `registry.retainers[2]
+.orders.grants[1]` — and until there was a command to invoke it, an operator's
+only way to see one was to start a daemon that did not exist. It also prints the
+capabilities a Retainer **asked for and did not get**: `StandingOrders.granted`
+intersects rather than validates, deliberately, so moving a Retainer to a hosted
+deployment narrows what it can do instead of refusing to start — and the cost of
+that choice is a capability silently dropped unless something says so.
+
+**Routing** uses what the records already carry rather than adding a field.
+GitHub routes on the repository, because a mention arrives with `owner/name` and
+each Retainer's `post.repo` is exactly that. Slack and Telegram carry no
+repository, so they serve the single Retainer reachable on that channel, and two
+of them is refused at startup with `--retainer` named as the fix rather than
+resolved by picking one. A per-Retainer handle in the registry would make the
+Slack case route as cleanly as GitHub's; adding one to make a command shorter is
+the wrong order, and §Why a file and not a command says the file is the schema.
+
+One receiver serves one channel, because one receiver verifies one signing
+scheme: an endpoint that accepted three signature formats would have to decide
+which to demand from an unsigned request, and the honest answer to that is a
+second port.
+
+Three environment variables, because the three platforms mean different things by
+"what it is called": `RONIN_RETAINER_HANDLE` is a GitHub login,
+`TELEGRAM_BOT_HANDLE` a Telegram `@username`, and `SLACK_BOT_USER` a Slack **user
+id** — a Slack mention is a link, `<@U024BE7LH>`, and the display name never
+appears in the message text. `RONIN_RETAINER_SECRET` is the shared signing
+secret, and a receiver starts without one over this design's dead body.
 
 The egress proxy (§6.7) is deliberately outside this list. It is a separate
 process and quite possibly not Python in this repository; it should not block the

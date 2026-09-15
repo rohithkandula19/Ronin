@@ -1,4 +1,4 @@
-"""``ronin2 mcp-serve`` — Ronin as an MCP server that something else can launch.
+"""``ronin mcp-serve`` — Ronin as an MCP server that something else can launch.
 
 :mod:`ronin.mcp.server` has always been able to do this. What it could not do was
 *happen*: nothing outside the tests and the demo ever constructed an
@@ -19,9 +19,9 @@ dependency. The dependency here is a permission mode that does not need a human,
 :meth:`ronin.safety.policy.PolicyEngine.relaxes` is asked the question rather than this
 module re-deriving the answer. So::
 
-    ronin2 mcp-serve                 read, grep, glob
-    ronin2 mcp-serve --mode auto_edit  … and edit
-    ronin2 mcp-serve --mode full       … and bash, and ronin_task
+    ronin mcp-serve                 read, grep, glob
+    ronin mcp-serve --mode auto_edit  … and edit
+    ronin mcp-serve --mode full       … and bash, and ronin_task
 
 and what is withheld is named on stderr, with the flag that would expose it, rather
 than being silently absent.

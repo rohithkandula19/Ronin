@@ -4,6 +4,14 @@ Classifies every item from the private-alpha final report
 (`docs/audits/ronin-ai-os-private-alpha-final-report.md`) for public-beta
 purposes. Evidence-based; blockers labeled honestly.
 
+> **Superseded in part.** The platform packages itemised below — among them
+> `ronin-identity`, `ronin-jobs`, `ronin-observability`, `ronin-platform`,
+> `ronin-support`, `ronin-tasks` and `ronin-research` — were later removed from
+> the repository. This report is a dated record of what was built and tested at
+> the time, and it is accurate as that; it is not a description of the tree as it
+> stands. The packages were deleted because each had zero importers.
+
+
 ## Classification
 
 | Alpha item | Class | Action taken this branch |

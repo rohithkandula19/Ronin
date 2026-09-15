@@ -72,13 +72,11 @@ def _scripted_console(answers: list[str]) -> tuple[_ScriptedConsole, io.StringIO
 # Surfaces this harness drives end-to-end (asserted by the roll-up test). Keep
 # this list in sync with the tests below.
 COVERED_SURFACES = {
-    "games_registry",
     "route",
     "approvals",
     "act",
     "swebench",
     "mcp_server",
-    "gamify",
     "stats",
     "vault",
     "gateway",
@@ -86,25 +84,6 @@ COVERED_SURFACES = {
     "session_search",
     "backends",
 }
-
-
-# =========================================================================== #
-# 1. games — registry integrity (interactive smoke already exists separately)
-# =========================================================================== #
-class TestGamesRegistry:
-    def test_registry_has_at_least_26_games_all_playable(self) -> None:
-        from ronin_arcade.games import GAMES, GAMES_BY_KEY, find
-
-        assert len(GAMES) >= 26, f"expected >= 26 games, found {len(GAMES)}"
-        # registry integrity: unique keys, every game fully described + playable.
-        assert len(GAMES) == len(GAMES_BY_KEY), "duplicate game key in registry"
-        for g in GAMES:
-            assert g.key and g.name and g.emoji, f"game {g!r} missing metadata"
-            assert callable(g.play), f"game {g.key} has no callable play()"
-            assert find(g.key) is g, f"find({g.key!r}) did not round-trip"
-        # a known game resolves; an unknown one is None (no crash on miss).
-        assert find("2048") is not None
-        assert find("does-not-exist") is None
 
 
 # =========================================================================== #
@@ -415,42 +394,6 @@ class TestMcpServer:
         resp = mcp_server.handle_tools_call(req, run=boom)
         assert resp["result"]["isError"] is True
         assert "provider exploded" in resp["result"]["content"][0]["text"]
-
-
-# =========================================================================== #
-# 7. gamify — record() against a temp HOME + level_for + render_profile
-# =========================================================================== #
-class TestGamify:
-    def test_level_for_curve(self) -> None:
-        from ronin_arcade.gamify import level_for
-
-        assert level_for(0) == (1, "Ronin Initiate")
-        assert level_for(50)[0] == 2
-        assert level_for(200)[0] == 3
-
-    def test_record_into_temp_home_then_render(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        import json
-
-        from ronin_arcade import gamify
-
-        monkeypatch.setenv("RONIN_HOME", str(tmp_path))
-
-        r = gamify.record("test_passed", today="2026-06-18")
-        assert r["xp_gained"] == 10
-        assert r["streak"] == 1
-        assert any(u["id"] == "green_thumb" for u in r["unlocked"])
-        # actually persisted under the temp HOME (no real ~/.ronin touched)
-        saved = tmp_path / "gamify.json"
-        assert saved.is_file()
-        assert json.loads(saved.read_text())["xp"] == 10
-
-        # the dashboard renders headless without raising
-        console, buf = _sink_console()
-        gamify.render_profile(console)
-        out = buf.getvalue()
-        assert "LV" in out and "Badges" in out
 
 
 # =========================================================================== #
@@ -838,4 +781,8 @@ def test_all_new_surfaces_covered() -> None:
         f"{len(test_classes)} test classes vs {len(COVERED_SURFACES)} declared "
         f"surfaces — keep COVERED_SURFACES in sync"
     )
-    assert len(COVERED_SURFACES) >= 13
+    # A floor, not a target: it stops a surface losing its smoke class quietly.
+    # Lowered from 13 to 11 when the arcade was removed — `games_registry` and
+    # `gamify` did not lose coverage, they stopped existing, and a floor that can
+    # only ever be raised turns every deliberate deletion into a failing test.
+    assert len(COVERED_SURFACES) >= 11

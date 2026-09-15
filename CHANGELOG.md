@@ -5,6 +5,49 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Changed
+- **The arcade is gone (`packages/arcade`, 44 modules, 31 games).** It was reachable from
+  exactly one place — v1's `main.py` — so it could not survive `packages/cli`, and the two
+  ways to keep it both cost more than it was worth: rewriting 56 Rich call sites against
+  stdlib, or v2 taking a Rich dependency and breaking the zero-dependency promise the
+  clean-install gate now enforces. Removed on the owner's explicit instruction.
+  The deletion is not just the directory. `ronin1 play`, `util profile` and `util xp` are
+  removed, along with the best-effort XP hook in `dev commit`; the `arcade` extra and its
+  workspace source are out of `packages/cli/pyproject.toml`; `generate_readme_stats.py` no
+  longer computes a game count; and the README's pitch line, arcade section, command-table
+  row and package description are gone.
+  **The v1 system prompt claimed the arcade too**, and that was the half most worth
+  catching: `UNIFIED_SYSTEM` told the model "YES, ronin has games: `ronin play` opens a
+  built-in arcade of 31 free terminal games". `test_self_knowledge.py` existed to stop the
+  model *denying* the arcade; left alone it would have kept the opposite bug — a confident
+  model sending users to a command that no longer exists. The claim is removed and the
+  test now pins its absence.
+  `COVERED_SURFACES` lost `games_registry` and `gamify`, and the `>= 13` floor beneath it
+  became `>= 11`: a floor that can only ever be raised turns every deliberate deletion into
+  a failing test.
+- **Seven packages with no importers are gone**: `identity`, `jobs`, `observability`,
+  `platform`, `support`, `tasks`, `research` — 51 modules. Each was verified to have zero
+  importers anywhere in the repository before deletion (the `ronin_research` matches that
+  looked like imports were MCP tool-name strings in `ronin_cli.mcp_server`, not imports),
+  and none was in `RELEASE_PACKAGE_DIRS`. Nothing that runs today lost a capability.
+  They were the "Ronin AI OS" control-plane layers, and `docs/beta/` and three reports in
+  `docs/audits/` describe them — several with VERIFIED labels. Those documents now carry a
+  note saying the packages were removed and why. The runbooks are kept as design intent
+  rather than rewritten: they always described an undeployed control plane, and silently
+  deleting the record would be worse than marking it superseded.
+  `packages/` is 23 directories down to 15.
+- **One command, not two: `ronin2` is gone (`pyproject.toml`).** There were two names
+  for one program, and the second one read like a second product — which is how it was
+  read. `ronin` and `ronin2` resolved to the same `ronin.cli.main:main`; nothing behind
+  them differed. The alias existed because v1 (`packages/cli`) held the short name and
+  two distributions declaring one console script means whichever installs second
+  silently wins, so this tree shipped as `ronin2` rather than contest the word. v1's
+  entry point was renamed `ronin1` and `ronin` came here — at which point the alias was
+  kept "so nothing that already typed it breaks", and that is the decision now reversed.
+  The docs, the CI smoke step, the telemetry disclosure and every docstring that spelled
+  it now say `ronin`. The clean-install gate had an assertion that `ronin2` is *present*;
+  it now asserts the wheel declares `ronin` alone, alongside `ronin1` and `ro`, and a
+  unit test pins the count rather than any spelling, so a future alias is a decision
+  someone makes on purpose instead of a line nobody notices.
 - **A bare `ronin` now opens the TUI, and slash commands work there
   (`cli/main.py`, `ui/`).** The session audit's second-biggest friction, and one that
   was not on any list: the default start landed in the line REPL, while the richer
@@ -24,6 +67,115 @@ All notable changes to this project will be documented here. Format follows [Kee
   without the `tui` extra, and `--no-tui`.
 
 ### Added
+- **`ronin repo complexity` — the signal `repo health` could not carry
+  (`repo/complexity.py`).** Cyclomatic complexity per function, worst first. `health`
+  states as an invariant that every signal comes from the scan with no second read of the
+  tree, and `RepoScan` keeps signatures rather than bodies, so this is its own subcommand
+  rather than a fifth health signal — and it skips building the import graph entirely,
+  because the graph says nothing about how many ways there are through a function.
+  **Two counting bugs in v1's version are fixed, both confirmed against the shipped code
+  first and both pinned by tests.** v1 counted `with` as a decision point, so
+  `with open(p) as f: return f.read()` scored 2 where the same logic without a context
+  manager scored 1 — a `with` binds and unbinds, it does not choose, and counting it
+  inflates every function that touches a file, a lock or a transaction. And v1 walked each
+  function with `ast.walk`, which descends into nested `def`s: a factory whose inner
+  function had one `if` scored 2 despite containing no branch, the inner function was
+  reported at 2 as well, and the reader was sent to simplify a function that was already
+  as simple as a function gets. Neither bug crashes anything; both quietly make the
+  ranking wrong, which is the kind that survives.
+  `_as_json` gained a sequence case while wiring it up — `complexity` returns a ranked
+  list rather than one report object, and the single-object version raised
+  `Object of type Complexity is not JSON serializable` the first time it was asked.
+  v1's `dev review` / `dev commit` / `dev pr` are deliberately **not** ported: v2 does
+  those agentically through the `review`, `eng-review`, `design-review` and `ship` role
+  skills, and the verbs would be procedural re-implementations of work the agent already
+  does with tools.
+- **`ronin mcp list` — the other strict hand-edited config had no way to be read either
+  (`cli/mcp_auth.py`).** `ronin.mcp.config`'s own docstring says a config error "must be
+  loud at load time or it is invisible forever", because a typo produces a server that
+  silently contributes no tools and, from inside a running session, that is
+  indistinguishable from a model choosing not to use them. The only way to make it loud was
+  to start a session and read a note. Exit 2 for a config that cannot be read — which is
+  deliberately not the 0 an empty config gets, since "could not look" and "nothing there"
+  are different answers.
+  It reports the **effective** gate, not the declared one, and names the difference where
+  there is one. An undeclared server is gated because undeclared means unknown; a
+  `DESTRUCTIVE` server is gated whatever `requires_approval` says. The config keeps the
+  waiver either way, so reading the file suggests it took effect — and staying quiet about
+  that is how somebody comes to believe it. `--output-format json` carries declared and
+  effective separately, for the same reason the dataclass does.
+  v1's `mcp trust` / `mcp untrust` are deliberately **not** ported: v2 replaced a mutable
+  trust list with a declarative fail-closed model in the config, and bringing the verbs
+  across would be importing the weaker design.
+- **`ronin retain check | serve | tick` — the Retainer plane had no front door
+  (`cli/retain_cmd.py`).** Every piece existed and none of it was reachable. The
+  registry parser had positional error messages (`registry.retainers[2].orders.grants[1]`)
+  that nothing could invoke; the receiver could be bound and nothing bound it;
+  `run_summons` could act on a summons and nothing produced one from a webhook. An
+  operator's only way to find out their `retainers.json` was wrong was to start a daemon
+  that did not exist.
+  `check` reads the registry and reports what the deployment holds — including the
+  capabilities a Retainer **asked for and did not get**, which `granted()` drops in
+  silence by design (it intersects rather than validates, so moving a Retainer to a
+  hosted deployment narrows it instead of refusing to start). `serve` binds the receiver
+  and acts on deliveries. `tick` fires every due routine once and exits, for cron.
+  **Routing adds no schema.** GitHub routes on the repository, because a mention carries
+  `owner/name` and each Retainer's `post.repo` is exactly that. Slack and Telegram carry
+  no repository, so they serve the single Retainer on that channel and refuse two at
+  startup with `--retainer` named as the fix — picking the first is not a routing rule,
+  it is an accident that looks like one. One receiver per channel, because one receiver
+  verifies one signing scheme.
+  Refused before anything binds: no signing secret (an unconfigured receiver that
+  accepts everything is a public endpoint that runs an agent), no handle (without one a
+  Retainer cannot tell its own posts from anyone else's, so it answers itself), a channel
+  nobody serves, a Retainer not in the registry, a Retainer whose record does not list the
+  channel. One bad summons becomes a logged line rather than an exception: a daemon that
+  dies on one stops serving every other Retainer, and a 500 tells the platform to
+  redeliver the same failing request.
+  **A bug found by typing the command.** `run_retain` was synchronous and called
+  `asyncio.run`, which raised `cannot be called from a running event loop` the first time
+  `tick` ran for real — `dispatch` already holds a loop. It runs on the caller's loop now;
+  the receiver's threads still open a fresh loop per delivery, which is unaffected.
+  Tested end to end offline: real webhook bytes, a real HMAC signature, through the real
+  `route`, out to an injected poster.
+- **The new scanner's own test fixtures tripped it, and the fixtures were wrong.**
+  `ronin scan` reported six findings in this repository — its own samples. Every value is
+  synthetic, but a scanner cannot know that, and a key-*shaped* literal in a tracked file
+  is a false positive somebody triages forever, in `ronin scan`, in GitHub's secret
+  scanning, and in whatever else is pointed at the tree. A security tool people learn to
+  ignore has stopped working. The samples are now assembled at run time from two pieces
+  split where the pattern needs to be contiguous, so the key exists only in memory and no
+  pragma is needed — `\bAKIA[0-9A-Z]{16}\b` cannot match `"AKIA", "Q7…"` because what
+  follows `AKIA` in the source is a quote. The allow-pragma would also have worked and is
+  deliberately not used: a pragma asks every reader to trust an annotation, and a value
+  that is never in the file needs no trust. The literals remain in the commit that
+  introduced them, which `ronin scan --history` will say — correctly, and with nothing to
+  rotate.
+- **`ronin scan` — sweep for leaked credentials, report `file:line + kind`, never the
+  value (`safety/credentials.py`, `cli/scan.py`).** The first feature carried across
+  from v1 by the consolidation, and the one that most obviously should not have been
+  reachable only through a binary that is being deleted. v1 had it as `ronin1 dev scan`
+  on top of `ronin_hardening.secret_scanner`; this tree imports no `packages/`
+  distribution, so the pattern set came with it — seventeen provider-prefixed patterns
+  plus a PEM `BEGIN` line, which the v1 set omitted because it was written for inline
+  keys and which is the highest-bleed leak there is.
+  **The safety gate is now real.** v1 documented "the raw matched value is asserted
+  absent from every emitted hint before returning" and implemented it as
+  `if match in hint` — a condition that cannot fire, because a hint always contains an
+  ellipsis and a match never does. It was decorative. The replacement, `revealing()`,
+  is checkable and fires: at most four characters from each end, and only when that
+  leaves half the value elided; a hint that fails degrades to the bare kind. The
+  shortest thing the pattern set matches is an AWS key id, so four of its sixteen
+  variable characters are the disclosed floor — the same fragment AWS's own console
+  prints.
+  **`--history` is the half that catches what a working-tree scan cannot**: deleting a
+  key and committing the deletion leaves the blob in the pack, so a clean tree can sit
+  on a leaking repository. **Exit 1 when it finds something**, which with `--quiet`
+  makes it a pre-commit hook; **exit 2 when it could not look** — no git, not a
+  repository — because a scanner that reports clean because it never ran is worse than
+  no scanner. `--staged` scans the index, `--output-format json` is new so a CI step
+  can act on the result, and the renderer is plain text rather than Rich because the
+  one command whose absence is a security problem must work on a bare install.
 - **The rest of the session-audit queue: steering, error surfacing, cost visibility.**
   Frictions 3–5 from the X0 audit, closing it out.
   **`esc` now stops a command that is already running.** The cooperative cancel flag is
