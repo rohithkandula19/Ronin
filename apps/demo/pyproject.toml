@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.141.1",
-    "uvicorn>=0.30",
+    "uvicorn>=0.52.4",
     "ronin-agent-patterns",
     "ronin-hardening",
 ]

@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Ronin AI OS Industry Pack SDK: declarative, fail-closed industry world definitions."
 requires-python = ">=3.11"
 dependencies = [
-  "pydantic>=2.5",
+  "pydantic>=2.13.5",
   "pyyaml>=6.0",
 ]
 
