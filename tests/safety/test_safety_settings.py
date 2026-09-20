@@ -9,6 +9,7 @@ give the same answer on every machine.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,7 @@ from ronin.safety.settings import (
     LOCAL_SETTINGS,
     PRIVILEGE_LADDERS,
     PROJECT_SETTINGS,
+    RULE_LINE_WIDTH,
     SCALAR_KEYS,
     USER_SETTINGS,
     Settings,
@@ -49,6 +51,10 @@ def write(path: Path, data: object) -> None:
 
 def allow(pattern: str) -> dict[str, Any]:
     return {"tool": "bash", "decision": "allow", "command": pattern}
+
+
+def deny(pattern: str) -> dict[str, Any]:
+    return {"tool": "bash", "decision": "deny", "command": pattern}
 
 
 # --------------------------------------------------------------------------- #
@@ -121,6 +127,72 @@ def test_the_provenance_report_names_every_file_and_every_scalar(home: Path, cwd
     assert str(cwd / PROJECT_SETTINGS) in report
     assert "1 rule(s)" in report
     assert "yolo = False  (from project)" in report
+
+
+def test_the_report_names_the_file_behind_each_effective_rule(home: Path, cwd: Path) -> None:
+    """The claim `.ronin/README.md` makes, now enforced.
+
+    That file says ``ronin doctor`` "prints which file each effective rule came
+    from — a permission you cannot trace is a permission you cannot revoke". For a
+    long time the report gave a per-*layer* count (``project /path 6 rule(s)``),
+    which says how many permissions a file granted without saying which one is
+    which. ``Rule.source`` held the answer the whole time; nothing printed it.
+    """
+    write(cwd / PROJECT_SETTINGS, {"rules": [allow("^docker ps"), deny("^shutdown")]})
+    settings = load_settings(home=home, cwd=cwd)
+    report = "\n".join(settings.rule_provenance())
+
+    assert str(cwd / PROJECT_SETTINGS) in report
+    assert "docker ps" in report
+    assert "shutdown" in report
+
+
+def test_no_effective_rule_is_missing_from_the_report(home: Path, cwd: Path) -> None:
+    """A count and a listing that disagree would be worse than the count alone."""
+    write(cwd / PROJECT_SETTINGS, {"rules": [allow("^docker ps")]})
+    settings = load_settings(home=home, cwd=cwd)
+    report = "\n".join(settings.rule_provenance())
+
+    assert f"rules ({len(settings.rules)} effective)" in report
+    listed = sum(1 for line in settings.rule_provenance() if line.startswith("    "))
+    assert listed == len(settings.rules)
+
+
+def test_a_rule_from_an_unrecognised_layer_is_still_listed(home: Path, cwd: Path) -> None:
+    """Silently dropping it would be the original bug moved somewhere new.
+
+    A permission in force and absent from the report that exists to show permissions
+    is precisely the failure this report was added to prevent, so an unplaceable
+    source is labelled rather than skipped.
+    """
+    settings = load_settings(home=home, cwd=cwd)
+    stray = Rule(tool="bash", matcher=CommandRegex("^curl"), decision=Decision.DENY, source="ghost")
+    widened = replace(settings, rules=(*settings.rules, stray))
+    report = "\n".join(widened.rule_provenance())
+
+    assert "ghost" in report
+    assert "unknown layer" in report
+    assert "curl" in report
+
+
+def test_a_long_matcher_is_elided_rather_than_dropped(home: Path, cwd: Path) -> None:
+    """The builtin allowlists are single regexes hundreds of characters wide."""
+    settings = load_settings(home=home, cwd=cwd)
+    lines = [line for line in settings.rule_provenance() if line.startswith("    ")]
+
+    assert lines, "no rules listed"
+    assert all(len(line) <= RULE_LINE_WIDTH + 4 for line in lines)
+    assert any(line.endswith("\u2026") for line in lines), "expected at least one elision"
+
+
+def test_the_rules_section_reaches_the_doctor_report(home: Path, cwd: Path) -> None:
+    """`provenance()` is what `Loaded.render()` prints, so this is the wiring test."""
+    write(cwd / PROJECT_SETTINGS, {"rules": [allow("^docker ps")]})
+    report = "\n".join(load_settings(home=home, cwd=cwd).provenance())
+
+    assert "rules (" in report
+    assert "docker ps" in report
+    assert str(cwd / PROJECT_SETTINGS) in report
 
 
 def test_a_layer_that_exists_but_is_empty_is_reported_as_absent(home: Path, cwd: Path) -> None:
