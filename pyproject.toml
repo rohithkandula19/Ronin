@@ -251,6 +251,7 @@ module = [
     "test_release_manifest",
     "test_repo_analyze",
     "test_repo_complexity",
+    "test_repository_credentials",
     "test_resilience",
     "test_retainer_adapters_github",
     "test_retainer_adapters_slack",
