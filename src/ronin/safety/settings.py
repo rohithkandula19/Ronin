@@ -146,6 +146,18 @@ def escalates(key: str, value: Any, current: Any) -> bool:
     return _permissiveness(key, value) > _permissiveness(key, current)
 
 
+#: How much of a rule's description survives into the provenance report. The builtin
+#: command allowlists are single regexes several hundred characters long; printed in
+#: full they bury the fifteen lines a reader came for. Eliding keeps the report
+#: scannable, and the rule's own file — now named on the line above it — is where the
+#: untruncated text lives.
+RULE_LINE_WIDTH: int = 108
+
+
+def _elide(text: str, limit: int = RULE_LINE_WIDTH) -> str:
+    return text if len(text) <= limit else text[: limit - 1] + "\u2026"
+
+
 @dataclass(frozen=True, slots=True)
 class LayerError:
     """A problem in one layer, named loudly enough to fix."""
@@ -244,9 +256,50 @@ class Settings:
         """Which layer set a scalar. ``"builtin"`` when nothing overrode it."""
         return self.scalar_sources.get(key, "builtin")
 
+    def rule_provenance(self) -> tuple[str, ...]:
+        """Every effective rule, listed under the file that granted it.
+
+        ``.ronin/README.md`` promises that ``ronin doctor`` "prints which file each
+        effective rule came from — a permission you cannot trace is a permission you
+        cannot revoke", and for a long time it did not: the report gave a per-*layer*
+        count (``project /path 6 rule(s)``), which says how many permissions a file
+        granted without saying which. :attr:`Rule.source` carried the answer the whole
+        time and nothing printed it.
+
+        Grouped by layer so the path appears once rather than fifteen times, and in
+        layer order, so the file that wins a tie is the one further down.
+
+        A rule whose ``source`` matches no known layer is still listed, under
+        ``(unknown)``. Dropping it would be the original bug in a new place — a
+        permission in force and absent from the report that exists to show it.
+        """
+        if not self.rules:
+            return ()
+        owned: dict[str, list[Rule]] = {}
+        for rule in self.rules:
+            owned.setdefault(rule.source, []).append(rule)
+
+        lines = [f"rules ({len(self.rules)} effective)"]
+        for layer in self.layers:
+            group = owned.pop(layer.name, [])
+            if not group:
+                continue
+            lines.append(
+                f"  {layer.name:8} {layer.path if layer.path is not None else '(no file)'}"
+            )
+            lines.extend(f"    {_elide(rule.describe())}" for rule in group)
+        for source, group in sorted(owned.items()):
+            lines.append(f"  {source:8} (unknown layer)")
+            lines.extend(f"    {_elide(rule.describe())}" for rule in group)
+        return tuple(lines)
+
     def provenance(self) -> tuple[str, ...]:
-        """The report ``/doctor`` prints: every layer, then every scalar's origin."""
+        """The report ``/doctor`` prints: every layer, every rule, every scalar."""
         lines = [layer.describe() for layer in self.layers]
+        rules = self.rule_provenance()
+        if rules:
+            lines.append("")
+            lines.extend(rules)
         lines.append("")
         for key in SCALAR_KEYS:
             lines.append(f"{key} = {_spell(getattr(self, key))}  (from {self.source_of(key)})")
