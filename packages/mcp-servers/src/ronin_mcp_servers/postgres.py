@@ -13,8 +13,10 @@ back it up with a Postgres role that has SELECT-only privileges in production.
 """
 from __future__ import annotations
 
+import importlib
 import os
 import re
+from collections.abc import Callable
 from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -104,20 +106,64 @@ class PostgresQueryTool(BaseModel):
 
     def serve(self) -> None:  # pragma: no cover — requires mcp extra
         """Run an MCP server over stdio. Requires ``pip install ronin-mcp-servers[mcp]``."""
-        try:
-            from mcp.server.fastmcp import FastMCP
-        except ImportError as exc:
-            raise RuntimeError(
-                "mcp SDK not installed. Run `pip install ronin-mcp-servers[mcp]`."
-            ) from exc
-
-        server = FastMCP(self.name)
+        server = load_server_class()(self.name)
 
         @server.tool(description=self.description)
         def query(sql: str) -> list[dict[str, Any]]:  # noqa: ARG001
             return self.query(sql)
 
         server.run()
+
+
+# The server class the `mcp` SDK exposes, newest spelling first. mcp 2.0 renamed
+# FastMCP to MCPServer and moved it; for this module the two are shape-compatible
+# — both take the server name positionally, both carry `.tool(description=...)`
+# and a `.run()` that defaults to stdio — so supporting the pair costs a lookup
+# table rather than a branch at every call site.
+SERVER_CLASSES: tuple[tuple[str, str], ...] = (
+    ("mcp.server.mcpserver", "MCPServer"),  # mcp >= 2
+    ("mcp.server.fastmcp", "FastMCP"),  # mcp < 2
+)
+
+
+def load_server_class(
+    import_module: Callable[[str], Any] = importlib.import_module,
+) -> Any:
+    """Return the MCP server class, or say precisely why there isn't one.
+
+    Split out of ``serve()`` and given an injectable importer because the version
+    handling is the part that breaks, and an import inside a ``# pragma: no cover``
+    method is a thing no test can reach. The original spelling caught
+    ``ImportError`` around ``mcp.server.fastmcp`` and reported "mcp SDK not
+    installed" — but ``ModuleNotFoundError`` subclasses ``ImportError``, so on
+    mcp 2.x, where that module is gone, it sent the reader to install a package
+    they already had.
+
+    The two failures are therefore reported separately: absent, and present but
+    exposing neither entry point.
+    """
+    try:
+        import_module("mcp")
+    except ImportError as exc:
+        raise RuntimeError(
+            "mcp SDK not installed. Run `pip install ronin-mcp-servers[mcp]`."
+        ) from exc
+
+    for module_name, attribute in SERVER_CLASSES:
+        try:
+            module = import_module(module_name)
+        except ImportError:
+            continue
+        server_class = getattr(module, attribute, None)
+        if server_class is not None:
+            return server_class
+
+    expected = ", ".join(f"{module}.{attr}" for module, attr in SERVER_CLASSES)
+    raise RuntimeError(
+        f"The installed mcp SDK exposes none of: {expected}. It is installed but "
+        f"not a version this server supports — reinstall with "
+        f"`pip install 'ronin-mcp-servers[mcp]'`."
+    )
 
 
 def _connect_from_env() -> Any:  # pragma: no cover — needs psycopg2 + a DB
