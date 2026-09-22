@@ -47,7 +47,27 @@ def decompose(task: str) -> Plan:
         seen.add(key)
         steps.append(f"[{role_for(part)}/{risk_for(part)}] {part}")
     goal = text if len(text) <= 160 else text[:157] + "..."
-    return Plan(goal=goal, steps=steps)
+    return with_verification(Plan(goal=goal, steps=steps))
+
+
+def with_verification(plan: Plan) -> Plan:
+    """Append one review step when the plan contains a high-risk step."""
+    if any("/high]" in step for step in plan.steps):
+        if not any(step.startswith("[review/") and "high-risk" in step for step in plan.steps):
+            plan = Plan(
+                goal=plan.goal,
+                steps=[*plan.steps, "[review/low] Verify the high-risk steps before finishing"],
+            )
+    return plan
+
+
+def repair(plan: Plan, failure: str) -> Plan:
+    """Add one implement step that names the failure, without calling a model."""
+    reason = " ".join(failure.split()) or "the previous step failed"
+    if len(reason) > 180:
+        reason = reason[:177] + "..."
+    step = f"[implement/low] Repair after failure: {reason}"
+    return Plan(goal=plan.goal, steps=[*plan.steps, step])
 
 
 def pack(steps: list[str], budget: int) -> list[str]:

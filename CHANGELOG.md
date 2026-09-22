@@ -5,6 +5,7 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Added
+- **Planner, memory, and MCP.** A high-risk plan gets a verification step. If a replan fails, Ronin appends a local repair step instead of stopping. `replace_memory` swaps one fact and will not drop the old fact when the replacement looks like a secret. MCP server entries are rejected when the name or URL is invalid, and `enabled: false` servers are not spawned.
 - **Offline task engine.** If the model planner errors or returns no plan, Ronin splits the task locally into labeled steps (implement, test, review, docs, and high-risk) and keeps going. No provider call.
 - **Coding-agent behaviors in the file and shell tools.** Plan mode blocks writes until it is turned off. `.env` and key files are refused. `.ronin/permissions.txt` globs refuse extra paths. A write budget stops a runaway session. Each write keeps the previous text so `rewind_edit` can restore it. Destructive shell commands (`rm -rf /`, pipe-to-shell, `mkfs`, `dd` onto a device) are refused. The agent can keep a todo list and load `RONIN.md` / `CLAUDE.md` / `AGENTS.md`.
 - **`ronin kit`** — 100 local coding-agent commands (`status`, `diffstat`, `todos`, `syntax`, `worktree-count`, and the rest). They only read the repo. No model call, no network, and secret-shaped lines are counted rather than printed.

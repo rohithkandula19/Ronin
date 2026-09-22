@@ -103,7 +103,29 @@ def add_memory(text: str) -> bool:
     return True
 
 
-def forget_all() -> int:
+def replace_memory(old: str, new: str) -> bool:
+    """Replace one stored fact. Refuses a secret and refuses an unknown old fact.
+
+    The previous text is removed only after the new text is accepted, so a
+    rejected secret cannot wipe the memory it was meant to replace.
+    """
+    old_clean = " ".join(old.split()).strip()
+    new_clean = " ".join(new.split()).strip()
+    if not old_clean or not new_clean:
+        return False
+    if secret_labels(new_clean):
+        return False
+    memories = load_memories()
+    index = next((i for i, item in enumerate(memories) if item.get("text", "").lower() == old_clean.lower()), None)
+    if index is None:
+        return False
+    if any(i != index and item.get("text", "").lower() == new_clean.lower() for i, item in enumerate(memories)):
+        memories.pop(index)
+        _save(memories)
+        return True
+    memories[index] = {"text": new_clean, "ts": time.time(), "replaced": old_clean}
+    _save(memories)
+    return True
     n = len(load_memories())
     _save([])
     return n
