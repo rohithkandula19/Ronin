@@ -44,10 +44,12 @@ console = Console()
 # lives under `ronin dev …` (repo/code workflows) and `ronin util …` (the rest).
 from .dev_cmds import dev_app
 from .util_cmds import util_app
+from .coding_kit import kit_app
 from . import telegram_cmds  # noqa: F401 — registers `ronin util telegram`
 
 app.add_typer(dev_app, name="dev")
 app.add_typer(util_app, name="util")
+app.add_typer(kit_app, name="kit")
 
 
 # The panda mascot (dancing / running / playing / playing football / sleeping)

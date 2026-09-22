@@ -5,6 +5,7 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Added
+- **`ronin kit`** — 100 local coding-agent commands (`status`, `diffstat`, `todos`, `syntax`, `worktree-count`, and the rest). They only read the repo. No model call, no network, and secret-shaped lines are counted rather than printed.
 - **`ronin util worktrees`** lists every linked checkout and can `--add` or `--remove` a detached worktree, so a second agent can edit without touching the primary tree.
 
 ### Changed
