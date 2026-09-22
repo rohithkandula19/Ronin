@@ -5,6 +5,7 @@ All notable changes to this project will be documented here. Format follows [Kee
 ## [Unreleased]
 
 ### Added
+- **Coding-agent behaviors in the file and shell tools.** Plan mode blocks writes until it is turned off. `.env` and key files are refused. `.ronin/permissions.txt` globs refuse extra paths. A write budget stops a runaway session. Each write keeps the previous text so `rewind_edit` can restore it. Destructive shell commands (`rm -rf /`, pipe-to-shell, `mkfs`, `dd` onto a device) are refused. The agent can keep a todo list and load `RONIN.md` / `CLAUDE.md` / `AGENTS.md`.
 - **`ronin kit`** — 100 local coding-agent commands (`status`, `diffstat`, `todos`, `syntax`, `worktree-count`, and the rest). They only read the repo. No model call, no network, and secret-shaped lines are counted rather than printed.
 - **`ronin util worktrees`** lists every linked checkout and can `--add` or `--remove` a detached worktree, so a second agent can edit without touching the primary tree.
 
