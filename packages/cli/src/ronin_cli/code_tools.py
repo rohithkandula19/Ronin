@@ -180,6 +180,9 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None,
     """
     root_path = Path(root).resolve()
     from .patch_verify import verify_patch
+    from .session_features import SessionFeatures
+
+    features = SessionFeatures(root_path)
 
     def _denied(p: Path) -> bool:
         if deny is None:
@@ -294,12 +297,17 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None,
         target = _resolve_path(path)
         if _write_denied(target):
             return "refused: that path is protected by the repository constitution"
+        blocked = features.gate_write(target)
+        if blocked:
+            return blocked
         verified, verification = _preflight(path, target, "", content)
         if not verified:
             return verification or "ERROR: patch verification failed. No changes written."
         _record_undo(target)
+        prior = target.read_text(encoding="utf-8") if target.is_file() else None
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
+        features.note_write(target, prior)
         suffix = f" ({verification})" if verification else ""
         return f"wrote {len(content)} chars to {path}{suffix}"
 
@@ -308,6 +316,9 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None,
         target = _resolve_path(path)
         if _write_denied(target):
             return "refused: that path is protected by the repository constitution"
+        blocked = features.gate_write(target)
+        if blocked:
+            return blocked
         if not target.is_file():
             return f"ERROR: {path} does not exist (use write_file to create it)"
         content = target.read_text(encoding="utf-8")
@@ -328,6 +339,7 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None,
             return verification or "ERROR: patch verification failed. No changes written."
         _record_undo(target)
         target.write_text(after, encoding="utf-8")
+        features.note_write(target, content)
         suffix = f" ({verification})" if verification else ""
         return f"edited {path}: replaced 1 occurrence ({len(old_string)}→{len(new_string)} chars){suffix}"
 
@@ -354,6 +366,9 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None,
         target = _resolve_path(path)
         if _write_denied(target):
             return "refused: that path is protected by the repository constitution"
+        blocked = features.gate_write(target)
+        if blocked:
+            return blocked
         if not target.is_file():
             return f"ERROR: {path} does not exist (use write_file to create it)"
         content = target.read_text(encoding="utf-8")
@@ -372,6 +387,7 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None,
             return verification or "ERROR: patch verification failed. No changes written."
         _record_undo(target)
         target.write_text(working, encoding="utf-8")
+        features.note_write(target, content)
         suffix = f" ({verification})" if verification else ""
         return f"applied {len(edits)} edit(s) to {path}{suffix}"
 
@@ -381,6 +397,9 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None,
     _out_cap, _err_cap = (40000, 20000) if not sandbox else (8000, 4000)
 
     def run_command(command: str) -> str:
+        blocked = features.gate_shell(command)
+        if blocked:
+            return blocked
         # Opt-in sandboxed execution: set RONIN_BACKEND=docker:<container> or
         # ssh:<user@host[:port]> to run the agent's shell INSIDE an isolated
         # backend instead of on the host. Unset/"local" → run on the host.
@@ -463,4 +482,22 @@ def build_code_tools(root: Path | str = ".", *, undo_stack: list | None = None,
         _tool("run_command", "Run a shell command in the project root. SENSITIVE — gated by approval.",
               {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]},
               run_command),
+        _tool("set_plan_mode", "Turn plan mode on or off. Plan mode blocks file writes until you set default.",
+              {"type": "object", "properties": {"mode": {"type": "string", "enum": ["plan", "default"]}}, "required": ["mode"]},
+              lambda mode: features.set_mode(mode)),
+        _tool("add_todo", "Add a task the agent is working through.",
+              {"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]},
+              lambda title: features.add_todo(title)),
+        _tool("complete_todo", "Mark a todo done by its 1-based index.",
+              {"type": "object", "properties": {"index": {"type": "integer"}}, "required": ["index"]},
+              lambda index: features.complete_todo(int(index))),
+        _tool("list_todos", "Show the current todo list.",
+              {"type": "object", "properties": {}},
+              lambda: features.todo_lines()),
+        _tool("rewind_edit", "Restore the file contents from before the last write or edit.",
+              {"type": "object", "properties": {}},
+              lambda: features.rewind()),
+        _tool("project_instructions", "Load RONIN.md, CLAUDE.md, and AGENTS.md, truncated.",
+              {"type": "object", "properties": {}},
+              lambda: features.instructions() or "none"),
     ]
