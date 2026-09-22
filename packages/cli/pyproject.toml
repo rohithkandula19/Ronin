@@ -27,7 +27,7 @@ classifiers = [
 ]
 # Caps match the versions actually tested in uv.lock — bump deliberately.
 dependencies = [
-    "anthropic>=0.117.1,<1.0",
+    "anthropic>=1.6.0,<2.0",
     "pydantic>=2.13.5,<3",
     "typer>=0.12,<1",
     "rich>=13.7,<16",
@@ -64,7 +64,7 @@ postgres = ["psycopg2-binary>=2.9"]
 # Optional web computer-use via Playwright. NOT a core dependency: imported
 # lazily, mocked in tests. Enable with:
 #   pip install 'ronin-cli[browser]' && playwright install chromium
-browser = ["playwright>=1.40,<2"]
+browser = ["playwright>=1.63.0,<2"]
 # Optional HTTP API mode (`ronin serve`, `ronin dashboard`). NOT a core
 # dependency: the serve command guards `uvicorn` at runtime, and `ronin_cli.server`
 # imports `fastapi` at module top. Enable with:
