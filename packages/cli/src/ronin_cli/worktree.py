@@ -147,3 +147,70 @@ def git_worktree_pool(
             for label in normalized
         }
         yield leases
+
+
+def list_worktrees(root: Path | str) -> list[tuple[Path, str]]:
+    """Every linked checkout of ``root`` as ``(path, HEAD sha)``.
+
+    Uses ``git worktree list --porcelain`` so paths with spaces stay intact.
+    The first entry is always the primary checkout.
+    """
+    root_path = Path(root).resolve()
+    if not is_git_repo(root_path):
+        raise NotAGitRepo(f"{root_path} is not a git repository")
+    out = _git(root_path, "worktree", "list", "--porcelain", check=False)
+    if out.returncode != 0:
+        raise RuntimeError(out.stderr.strip() or "git worktree list failed")
+    rows: list[tuple[Path, str]] = []
+    path: Path | None = None
+    head = ""
+    for line in out.stdout.splitlines():
+        if line.startswith("worktree "):
+            if path is not None:
+                rows.append((path, head))
+            path = Path(line[len("worktree "):])
+            head = ""
+        elif line.startswith("HEAD "):
+            head = line[len("HEAD "):]
+        elif line == "" and path is not None:
+            rows.append((path, head))
+            path = None
+            head = ""
+    if path is not None:
+        rows.append((path, head))
+    return rows
+
+
+def add_detached_worktree(root: Path | str, dest: Path | str) -> Path:
+    """Create a persistent detached worktree at ``dest`` off HEAD.
+
+    ``dest`` must not already exist. Unlike :func:`git_worktree`, this checkout
+    stays until :func:`remove_linked_worktree` — it is the durable slot for a
+    second agent, not a temporary lease.
+    """
+    root_path = Path(root).resolve()
+    target = Path(dest)
+    if not is_git_repo(root_path):
+        raise NotAGitRepo(f"{root_path} is not a git repository")
+    if target.exists():
+        raise FileExistsError(f"{target} already exists")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with _WT_LOCK:
+        proc = _git(root_path, "worktree", "add", "--detach", str(target), "HEAD", check=False)
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip() or "git worktree add failed")
+    return target.resolve()
+
+
+def remove_linked_worktree(root: Path | str, dest: Path | str) -> None:
+    """Remove a linked worktree. Refuses to remove the primary checkout."""
+    root_path = Path(root).resolve()
+    target = Path(dest).resolve()
+    if target == root_path:
+        raise ValueError("refusing to remove the primary checkout")
+    with _WT_LOCK:
+        proc = _git(root_path, "worktree", "remove", "--force", str(target), check=False)
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip() or "git worktree remove failed")
+    _git(root_path, "worktree", "prune", check=False)
+

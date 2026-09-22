@@ -4895,6 +4895,43 @@ def provider_health(
     console.print(table)
 
 
+@util_app.command("worktrees")
+def worktrees_cmd(
+    root: Path = typer.Option(Path("."), "--root", help="Repository to inspect."),
+    add: Path | None = typer.Option(None, "--add", help="Create a detached worktree at this path."),
+    remove: Path | None = typer.Option(None, "--remove", help="Remove a linked worktree at this path."),
+) -> None:
+    """List git worktrees, or add/remove a detached one for a parallel agent."""
+    from .worktree import (
+        NotAGitRepo,
+        add_detached_worktree,
+        list_worktrees,
+        remove_linked_worktree,
+    )
+
+    if add is not None and remove is not None:
+        console.print("[red]pass only one of --add or --remove[/red]")
+        raise typer.Exit(2)
+    try:
+        if add is not None:
+            created = add_detached_worktree(root, add)
+            console.print(f"[green]added[/green] {created}")
+        elif remove is not None:
+            remove_linked_worktree(root, remove)
+            console.print(f"[green]removed[/green] {remove}")
+        rows = list_worktrees(root)
+    except NotAGitRepo as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    except (FileExistsError, ValueError, RuntimeError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    if add is None and remove is None:
+        for path, head in rows:
+            short = head[:7] if head else "unknown"
+            console.print(f"{short}  {path}")
+
+
 @util_app.command("agent-ops")
 def agent_operations(
     root: Path = typer.Option(Path("."), "--root", help="Project directory."),

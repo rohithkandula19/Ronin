@@ -23,6 +23,24 @@ def _init_repo(path: Path) -> None:
     git("commit", "-q", "-m", "init")
 
 
+def test_persistent_worktree_add_list_remove(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    dest = tmp_path / "slots" / "agent-a"
+    created = worktree.add_detached_worktree(tmp_path, dest)
+    assert created == dest.resolve()
+    assert (created / "main.py").read_text(encoding="utf-8") == "print('hello')\n"
+    listed = worktree.list_worktrees(tmp_path)
+    assert any(path == created for path, _head in listed)
+    # an edit in the side checkout does not touch the primary file
+    (created / "main.py").write_text("print('side')\n", encoding="utf-8")
+    assert (tmp_path / "main.py").read_text(encoding="utf-8") == "print('hello')\n"
+    with pytest.raises(ValueError):
+        worktree.remove_linked_worktree(tmp_path, tmp_path)
+    worktree.remove_linked_worktree(tmp_path, created)
+    assert not created.exists()
+    assert all(path != created for path, _head in worktree.list_worktrees(tmp_path))
+
+
 def test_is_git_repo(tmp_path) -> None:
     assert worktree.is_git_repo(tmp_path) is False
     _init_repo(tmp_path)

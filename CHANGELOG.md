@@ -4,6 +4,9 @@ All notable changes to this project will be documented here. Format follows [Kee
 
 ## [Unreleased]
 
+### Added
+- **`ronin util worktrees`** lists every linked checkout and can `--add` or `--remove` a detached worktree, so a second agent can edit without touching the primary tree.
+
 ### Changed
 - **The arcade is gone (`packages/arcade`, 44 modules, 31 games).** It was reachable from
   exactly one place — v1's `main.py` — so it could not survive `packages/cli`, and the two
