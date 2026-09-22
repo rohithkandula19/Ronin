@@ -251,6 +251,9 @@ def add_mcp_server(name: str, command: str, args: list[str], root: str | Path = 
         # Parent env-var names this server may inherit (resolved at spawn, so a key
         # exported after install is still picked up — without leaking every secret).
         spec["passEnv"] = list(pass_env)
+    error = validate_mcp_server(name, spec)
+    if error:
+        raise ValueError(error)
     data["mcpServers"][name] = spec
     p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     _trust_config(p)   # the user adding a server via the CLI IS the consent
@@ -272,6 +275,9 @@ def add_remote_mcp_server(name: str, url: str, root: str | Path = ".",
     spec: dict = {"url": url}
     if headers:
         spec["headers"] = headers
+    error = validate_mcp_server(name, spec)
+    if error:
+        raise ValueError(error)
     data["mcpServers"][name] = spec
     p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     _trust_config(p)   # the user adding a server via the CLI IS the consent
@@ -315,6 +321,41 @@ def split_env_spec(pairs: list[str]) -> tuple[dict[str, str], list[str]]:
             if k:
                 pass_env.append(k)
     return env_map, pass_env
+
+
+def validate_mcp_server(name: str, spec: dict) -> str | None:
+    """Return an error string when a server entry must not be saved or started."""
+    if not name or any(ch.isspace() for ch in name) or "/" in name:
+        return "server name must be one word without spaces or slashes"
+    if spec.get("enabled") is False:
+        return None
+    url = spec.get("url")
+    command = spec.get("command")
+    if url:
+        if not isinstance(url, str) or not url.startswith(("https://", "http://")):
+            return "remote MCP url must start with http:// or https://"
+        return None
+    if not isinstance(command, str) or not command.strip():
+        return "local MCP server needs a command"
+    return None
+
+
+def set_mcp_enabled(name: str, enabled: bool, root: str | Path = ".") -> bool:
+    """Turn a configured server on or off without spawning it."""
+    p = mcp_config_path(root)
+    if not p.is_file():
+        return False
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except ValueError:
+        return False
+    servers = data.get("mcpServers", {})
+    if name not in servers:
+        return False
+    servers[name]["enabled"] = enabled
+    p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    _trust_config(p)
+    return True
 
 
 def remove_mcp_server(name: str, root: str | Path = ".") -> bool:
@@ -387,6 +428,13 @@ def build_mcp_tools(root: str | Path = ".", *, console=None) -> list:
 
     tools: list = []
     for name, spec in servers.items():
+        if spec.get("enabled") is False:
+            continue
+        problem = validate_mcp_server(name, spec)
+        if problem:
+            if console:
+                console.print(f"[yellow]⚠ MCP '{name}' skipped: {problem}[/yellow]")
+            continue
         # Remote (hosted) servers carry a "url"; local ones carry a "command".
         if spec.get("url"):
             from .mcp_remote import MCPRemoteClient

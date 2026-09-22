@@ -4,10 +4,12 @@ from ronin_agent_patterns.task_engine import decompose, pack, risk_for, role_for
 def test_decompose_labels_and_dedupes() -> None:
     plan = decompose("Add the parser. Add the parser\nThen test the parser\nThen delete the old table")
     assert plan.goal.startswith("Add the parser")
-    assert len(plan.steps) == 3
+    assert len(plan.steps) == 4
     assert plan.steps[0].startswith("[implement/low]")
     assert plan.steps[1].startswith("[test/low]")
     assert plan.steps[2].startswith("[implement/high]")
+    assert plan.steps[3].startswith("[review/low]")
+    assert "high-risk" in plan.steps[3]
     assert role_for("review the diff") == "review"
     assert risk_for("deploy to production") == "high"
 

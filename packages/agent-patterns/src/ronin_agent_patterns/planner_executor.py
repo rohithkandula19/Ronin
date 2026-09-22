@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from .plan_cache import Plan, PlanCache
 from .providers import AnthropicProvider, LLMProvider, Message
 from .react import ReActAgent
-from .task_engine import decompose
+from .task_engine import decompose, repair
 from .types import AgentResult, Step, Tool
 
 
@@ -63,18 +63,18 @@ class PlannerExecutorAgent(BaseModel):
             )
         except Exception:
             if prior_failure:
-                raise
+                return repair(decompose(task), prior_failure), "offline-repair"
             return decompose(task), "offline"
         match = re.search(r"<plan>(.*?)</plan>", response.text, re.DOTALL)
         if not match:
             if prior_failure:
-                raise ValueError(f"Planner did not emit <plan></plan>: {response.text[:200]}")
+                return repair(decompose(task), prior_failure), "offline-repair"
             return decompose(task), "offline"
         try:
             plan = Plan.model_validate_json(match.group(1).strip())
         except ValidationError as exc:
             if prior_failure:
-                raise ValueError(f"Planner emitted invalid plan JSON: {exc}") from exc
+                return repair(decompose(task), str(exc)), "offline-repair"
             return decompose(task), "offline"
         if prior_failure is None and self.plan_cache is not None:
             self.plan_cache.store(task, plan)
