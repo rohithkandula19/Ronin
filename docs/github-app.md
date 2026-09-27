@@ -15,4 +15,8 @@ Registering the app also qualifies the owner for the **GitHub Developer Program*
 3. Leave the webhook **inactive** until you have a public HTTPS endpoint.
 4. Install the app on `rohithkandula19/Ronin` only. Permissions are read-only.
 
+### Install-scope note
+
+Keep the installation limited to this repository while the webhook remains inactive. Expanding the install to other repos is safe only after the webhook endpoint is live and verified; otherwise delivery retries can accumulate without a handler.
+
 Do not commit client secrets. Store `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, and the private key outside the repo.
