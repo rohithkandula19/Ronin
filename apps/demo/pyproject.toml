@@ -5,7 +5,7 @@ description = "AgentLab — interactive demo for Ronin."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi>=0.141.1",
+    "fastapi>=0.143.1",
     "uvicorn>=0.53.0",
     "ronin-agent-patterns",
     "ronin-hardening",
