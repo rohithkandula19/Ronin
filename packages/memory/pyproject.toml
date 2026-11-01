@@ -19,7 +19,7 @@ classifiers = [
 ]
 dependencies = [
     "anthropic>=1.6.0",
-    "pydantic>=2.13.5",
+    "pydantic>=2.14.1",
 ]
 
 [project.urls]
