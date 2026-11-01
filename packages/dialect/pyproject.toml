@@ -9,7 +9,7 @@ authors = [{ name = "Rohith Kandula", email = "rohithkandula937@gmail.com" }]
 dependencies = []
 
 [dependency-groups]
-dev = ["pytest>=7.0"]
+dev = ["pytest>=9.2.0"]
 
 [build-system]
 requires = ["hatchling>=1.32.0"]
